@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root,[data-theme="light"]{--bg:#f6f6f4;--sf:#ffffff;--sf2:#f1f1ee;--sf3:#e8e8e4;--bd:#e3e3de;--bd2:#cfcfc9;--tx:#17171a;--tx2:#55555c;--tx3:#85858c;--ac:#0b7d62;--ac-sf:#e2f3ec;--ac-tx:#086650;--on-ac:#ffffff;--ok:#16794a;--ok-sf:#e2f4ea;--warn:#985a00;--warn-sf:#fbefd8;--bad:#c22f2f;--bad-sf:#fbe5e3;--info:#2457c5;--info-sf:#e5edfb;--code-bg:#16171a;--code-tx:#e4e4e1;--sh:0 1px 2px rgba(20,20,20,.05),0 10px 30px rgba(20,20,20,.08)}
+[data-theme="dark"]{--bg:#0d0e10;--sf:#141518;--sf2:#1a1b1f;--sf3:#222328;--bd:#25262b;--bd2:#34353b;--tx:#ededef;--tx2:#a3a3aa;--tx3:#6f6f78;--ac:#2ec29a;--ac-sf:#0e2a21;--ac-tx:#5fd8b3;--on-ac:#03130e;--ok:#4cc38a;--ok-sf:#0f261a;--warn:#e5a63a;--warn-sf:#2a1f0b;--bad:#f16a6a;--bad-sf:#2c1213;--info:#7ca3ff;--info-sf:#141d33;--code-bg:#0a0b0c;--code-tx:#e4e4e1;--sh:0 1px 2px rgba(0,0,0,.4),0 10px 30px rgba(0,0,0,.5)}
+body{margin:0;background:#f6f6f4;font-family:Geist,system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+a{color:var(--ac-tx);text-decoration:none}a:hover{text-decoration:underline}
+*{box-sizing:border-box}
+</style>
+</helmet>
+<div data-theme="light" style="background:var(--bg);color:var(--tx);min-height:100vh;font-size:13px;line-height:1.5">
+<div style="max-width:1440px;margin:0 auto;padding:56px 48px 96px;display:flex;flex-direction:column;gap:72px">
+
+<header style="display:flex;flex-direction:column;gap:20px;border-bottom:1px solid var(--bd);padding-bottom:40px">
+  <div style="display:flex;align-items:center;gap:10px">
+    <div style="width:26px;height:26px;border-radius:6px;background:var(--tx);display:flex;align-items:center;justify-content:center;gap:3px"><span style="width:3px;height:13px;background:var(--bg);border-radius:1px"></span><span style="width:3px;height:13px;background:var(--ac);border-radius:1px"></span></div>
+    <span style="font-weight:600;font-size:17px;letter-spacing:-0.02em">gatekeep</span>
+    <span style="font-family:'Geist Mono',monospace;font-size:11px;color:var(--tx3);margin-left:8px;text-transform:uppercase;letter-spacing:.08em">Design System · v1.0</span>
+  </div>
+  <h1 style="margin:0;font-size:44px;font-weight:600;letter-spacing:-0.035em;line-height:1.05;max-width:900px;text-wrap:pretty">Quiet, dense, exact. An interface for people who read JWTs for fun.</h1>
+  <p style="margin:0;max-width:720px;color:var(--tx2);font-size:15px;text-wrap:pretty">Neutral warm-grey canvas, one signal colour — <span style="color:var(--ac-tx);font-weight:500">Gate jade</span> — reserved for primary actions, "allowed" states and focus. Status colours only ever describe state. Mono is used for identifiers, codes and anything a developer might copy.</p>
+  <div style="display:flex;gap:8px;flex-wrap:wrap">
+    <a href="Gatekeep Admin.dc.html" style="display:inline-flex;align-items:center;height:32px;padding:0 14px;border-radius:7px;background:var(--ac);color:var(--on-ac);font-weight:500">Open Admin Dashboard →</a>
+    <a href="Gatekeep Hosted Login.dc.html" style="display:inline-flex;align-items:center;height:32px;padding:0 14px;border-radius:7px;border:1px solid var(--bd2);background:var(--sf);color:var(--tx);font-weight:500">Open Hosted Login screens →</a>
+  </div>
+</header>
+
+<section style="display:flex;flex-direction:column;gap:20px">
+  <div style="display:flex;align-items:baseline;gap:14px"><span style="font-family:'Geist Mono',monospace;font-size:11px;color:var(--tx3)">01</span><h2 style="margin:0;font-size:22px;font-weight:600;letter-spacing:-0.02em">Colour tokens</h2><span style="color:var(--tx3)">Light / dark pairs. Reference by token, never by hex.</span></div>
+  <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:10px">
+    <sc-for list="{{ tokens }}" as="t" hint-placeholder-count="12">
+      <div style="border:1px solid var(--bd);border-radius:10px;background:var(--sf);overflow:hidden">
+        <div style="display:grid;grid-template-columns:1fr 1fr;height:56px">
+          <div style="background:{{ t.light }};border-right:1px solid var(--bd)"></div>
+          <div style="background:{{ t.dark }}"></div>
+        </div>
+        <div style="padding:10px 12px;display:flex;flex-direction:column;gap:2px">
+          <div style="display:flex;justify-content:space-between"><span style="font-family:'Geist Mono',monospace;font-size:12px;font-weight:500">--{{ t.name }}</span><span style="font-family:'Geist Mono',monospace;font-size:11px;color:var(--tx3)">{{ t.light }} · {{ t.dark }}</span></div>
+          <span style="color:var(--tx2);font-size:12px">{{ t.use }}</span>
+        </div>
+      </div>
+    </sc-for>
+  </div>
+</section>
+
+<section style="display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1fr);gap:40px">
+  <div style="display:flex;flex-direction:column;gap:20px">
+    <div style="display:flex;align-items:baseline;gap:14px"><span style="font-family:'Geist Mono',monospace;font-size:11px;color:var(--tx3)">02</span><h2 style="margin:0;font-size:22px;font-weight:600;letter-spacing:-0.02em">Type scale</h2><span style="color:var(--tx3)">Geist + Geist Mono</span></div>
+    <div style="border:1px solid var(--bd);border-radius:10px;background:var(--sf)">
+      <div style="display:grid;grid-template-columns:120px 1fr 120px;align-items:baseline;padding:16px 18px;border-bottom:1px solid var(--bd);gap:16px"><span style="font-family:'Geist Mono',monospace;font-size:11px;color:var(--tx3)">display</span><span style="font-size:32px;font-weight:600;letter-spacing:-0.03em">Secure every login</span><span style="font-family:'Geist Mono',monospace;font-size:11px;color:var(--tx3)">32/36 · 600</span></div>
+      <div style="display:grid;grid-template-columns:120px 1fr 120px;align-items:baseline;padding:16px 18px;border-bottom:1px solid var(--bd);gap:16px"><span style="font-family:'Geist Mono',monospace;font-size:11px;color:var(--tx3)">page-title</span><span style="font-size:22px;font-weight:600;letter-spacing:-0.02em">Applications</span><span style="font-family:'Geist Mono',monospace;font-size:11px;color:var(--tx3)">22/28 · 600</span></div>
+      <div style="display:grid;grid-template-columns:120px 1fr 120px;align-items:baseline;padding:16px 18px;border-bottom:1px solid var(--bd);gap:16px"><span style="font-family:'Geist Mono',monospace;font-size:11px;color:var(--tx3)">section</span><span style="font-size:15px;font-weight:600">Token settings</span><span style="font-family:'Geist Mono',monospace;font-size:11px;color:var(--tx3)">15/22 · 600</span></div>
+      <div style="display:grid;grid-template-columns:120px 1fr 120px;align-items:baseline;padding:16px 18px;border-bottom:1px solid var(--bd);gap:16px"><span style="font-family:'Geist Mono',monospace;font-size:11px;color:var(--tx3)">body</span><span style="font-size:13px">Refresh tokens rotate on every use; reuse revokes the family.</span><span style="font-family:'Geist Mono',monospace;font-size:11px;color:var(--tx3)">13/20 · 400</span></div>
+      <div style="display:grid;grid-template-columns:120px 1fr 120px;align-items:baseline;padding:16px 18px;border-bottom:1px solid var(--bd);gap:16px"><span style="font-family:'Geist Mono',monospace;font-size:11px;color:var(--tx3)">small</span><span style="font-size:12px;color:var(--tx2)">Applies to all applications in this tenant.</span><span style="font-family:'Geist Mono',monospace;font-size:11px;color:var(--tx3)">12/18 · 400</span></div>
+      <div style="display:grid;grid-template-columns:120px 1fr 120px;align-items:baseline;padding:16px 18px;border-bottom:1px solid var(--bd);gap:16px"><span style="font-family:'Geist Mono',monospace;font-size:11px;color:var(--tx3)">label</span><span style="font-family:'Geist Mono',monospace;font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--tx3)">Security</span><span style="font-family:'Geist Mono',monospace;font-size:11px;color:var(--tx3)">11 mono · caps</span></div>
+      <div style="display:grid;grid-template-columns:120px 1fr 120px;align-items:baseline;padding:16px 18px;gap:16px"><span style="font-family:'Geist Mono',monospace;font-size:11px;color:var(--tx3)">code</span><span style="font-family:'Geist Mono',monospace;font-size:12.5px">client_id: gk_9fT2xQm7Lr</span><span style="font-family:'Geist Mono',monospace;font-size:11px;color:var(--tx3)">12.5/19 · 400</span></div>
+    </div>
+  </div>
+  <div style="display:flex;flex-direction:column;gap:20px">
+    <div style="display:flex;align-items:baseline;gap:14px"><span style="font-family:'Geist Mono',monospace;font-size:11px;color:var(--tx3)">03</span><h2 style="margin:0;font-size:22px;font-weight:600;letter-spacing:-0.02em">Space, radius, elevation</h2></div>
+    <div style="border:1px solid var(--bd);border-radius:10px;background:var(--sf);padding:18px;display:flex;flex-direction:column;gap:18px">
+      <div style="display:flex;align-items:flex-end;gap:14px">
+        <sc-for list="{{ spaces }}" as="s" hint-placeholder-count="8"><div style="display:flex;flex-direction:column;align-items:center;gap:6px"><div style="width:{{ s.px }};height:{{ s.px }};background:var(--ac-sf);border:1px solid var(--ac)"></div><span style="font-family:'Geist Mono',monospace;font-size:10px;color:var(--tx3)">{{ s.v }}</span></div></sc-for>
+      </div>
+      <div style="display:flex;gap:14px;align-items:center">
+        <div style="width:56px;height:40px;border:1px solid var(--bd2);border-radius:4px;display:flex;align-items:center;justify-content:center;font-family:'Geist Mono',monospace;font-size:10px;color:var(--tx3)">4 · tag</div>
+        <div style="width:56px;height:40px;border:1px solid var(--bd2);border-radius:7px;display:flex;align-items:center;justify-content:center;font-family:'Geist Mono',monospace;font-size:10px;color:var(--tx3)">7 · ctl</div>
+        <div style="width:56px;height:40px;border:1px solid var(--bd2);border-radius:10px;display:flex;align-items:center;justify-content:center;font-family:'Geist Mono',monospace;font-size:10px;color:var(--tx3)">10 · card</div>
+        <div style="width:56px;height:40px;border:1px solid var(--bd2);border-radius:14px;display:flex;align-items:center;justify-content:center;font-family:'Geist Mono',monospace;font-size:10px;color:var(--tx3)">14 · modal</div>
+      </div>
+      <div style="display:flex;gap:14px">
+        <div style="flex:1;height:56px;border:1px solid var(--bd);border-radius:10px;display:flex;align-items:center;justify-content:center;color:var(--tx3);font-size:12px">flat · border</div>
+        <div style="flex:1;height:56px;border:1px solid var(--bd);border-radius:10px;box-shadow:var(--sh);display:flex;align-items:center;justify-content:center;color:var(--tx3);font-size:12px">raised · menus, modals</div>
+      </div>
+      <p style="margin:0;color:var(--tx2);font-size:12px">4px base grid. Controls 30px (sm 26, lg 36). Table rows 38px. Content gutters 24px; page padding 28px.</p>
+    </div>
+  </div>
+</section>
+
+<section style="display:flex;flex-direction:column;gap:20px">
+  <div style="display:flex;align-items:baseline;gap:14px"><span style="font-family:'Geist Mono',monospace;font-size:11px;color:var(--tx3)">04</span><h2 style="margin:0;font-size:22px;font-weight:600;letter-spacing:-0.02em">Components</h2><span style="color:var(--tx3)">Same markup, both themes.</span></div>
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(560px,1fr));gap:20px">
+  <sc-for list="{{ themes }}" as="th" hint-placeholder-count="2">
+  <div data-theme="{{ th.id }}" style="background:var(--bg);color:var(--tx);border:1px solid var(--bd);border-radius:14px;padding:24px;display:flex;flex-direction:column;gap:22px">
+    <div style="font-family:'Geist Mono',monospace;font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--tx3)">{{ th.label }}</div>
+
+    <div style="display:flex;flex-direction:column;gap:8px"><span style="font-family:'Geist Mono',monospace;font-size:11px;color:var(--tx3)">Buttons</span>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <button style="height:30px;padding:0 12px;border-radius:7px;border:0;background:var(--ac);color:var(--on-ac);font:500 13px Geist,sans-serif;cursor:pointer">Create application</button>
+        <button style="height:30px;padding:0 12px;border-radius:7px;border:1px solid var(--bd2);background:var(--sf);color:var(--tx);font:500 13px Geist,sans-serif;cursor:pointer">Secondary</button>
+        <button style="height:30px;padding:0 12px;border-radius:7px;border:0;background:transparent;color:var(--tx2);font:500 13px Geist,sans-serif;cursor:pointer">Ghost</button>
+        <button style="height:30px;padding:0 12px;border-radius:7px;border:1px solid var(--bad);background:var(--bad-sf);color:var(--bad);font:500 13px Geist,sans-serif;cursor:pointer">Delete user</button>
+        <button style="height:30px;padding:0 12px;border-radius:7px;border:1px solid var(--bd);background:var(--sf2);color:var(--tx3);font:500 13px Geist,sans-serif">Disabled</button>
+        <button style="height:26px;padding:0 9px;border-radius:6px;border:1px solid var(--bd2);background:var(--sf);color:var(--tx);font:500 12px Geist,sans-serif">Small</button>
+      </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <label style="display:flex;flex-direction:column;gap:5px"><span style="font-size:12px;font-weight:500">Domain</span><input value="northwind.gatekeep.dev" style="height:30px;border:1px solid var(--bd2);border-radius:7px;background:var(--sf);color:var(--tx);padding:0 10px;font:12.5px 'Geist Mono',monospace;outline:none"><span style="font-size:11.5px;color:var(--tx3)">Used for hosted login and token issuer.</span></label>
+      <label style="display:flex;flex-direction:column;gap:5px"><span style="font-size:12px;font-weight:500">Callback URL</span><input value="htp:/localhost:3000" style="height:30px;border:1px solid var(--bad);border-radius:7px;background:var(--sf);color:var(--tx);padding:0 10px;font:12.5px 'Geist Mono',monospace;outline:none;box-shadow:0 0 0 3px var(--bad-sf)"><span style="font-size:11.5px;color:var(--bad)">Must be an absolute URL.</span></label>
+      <label style="display:flex;flex-direction:column;gap:5px"><span style="font-size:12px;font-weight:500">Signing algorithm</span><div style="height:30px;border:1px solid var(--bd2);border-radius:7px;background:var(--sf);padding:0 10px;display:flex;align-items:center;justify-content:space-between"><span>RS256</span><span style="color:var(--tx3);font-size:10px">▼</span></div></label>
+      <label style="display:flex;flex-direction:column;gap:5px"><span style="font-size:12px;font-weight:500">Search (focused)</span><div style="height:30px;border:1px solid var(--ac);box-shadow:0 0 0 3px var(--ac-sf);border-radius:7px;background:var(--sf);padding:0 10px;display:flex;align-items:center;gap:8px;font-family:'Geist Mono',monospace;font-size:12px"><span style="color:var(--info)">email:</span><span>*@acme.com</span></div></label>
+    </div>
+
+    <div style="display:flex;gap:28px;flex-wrap:wrap;align-items:center">
+      <div style="display:flex;gap:8px;align-items:center"><span style="width:28px;height:16px;border-radius:99px;background:var(--ac);position:relative"><span style="position:absolute;top:2px;left:14px;width:12px;height:12px;border-radius:50%;background:#fff"></span></span><span>On</span></div>
+      <div style="display:flex;gap:8px;align-items:center"><span style="width:28px;height:16px;border-radius:99px;background:var(--bd2);position:relative"><span style="position:absolute;top:2px;left:2px;width:12px;height:12px;border-radius:50%;background:#fff"></span></span><span>Off</span></div>
+      <div style="display:flex;gap:8px;align-items:center"><span style="width:15px;height:15px;border-radius:4px;background:var(--ac);color:var(--on-ac);display:flex;align-items:center;justify-content:center;font-size:10px">✓</span><span>Checkbox</span></div>
+      <div style="display:flex;gap:8px;align-items:center"><span style="width:15px;height:15px;border-radius:50%;border:4.5px solid var(--ac)"></span><span>Radio</span></div>
+      <div style="display:flex;padding:2px;background:var(--sf2);border:1px solid var(--bd);border-radius:7px"><span style="padding:3px 10px;border-radius:5px;background:var(--sf);box-shadow:0 1px 2px rgba(0,0,0,.08);font-weight:500">Never</span><span style="padding:3px 10px;color:var(--tx2)">Always</span><span style="padding:3px 10px;color:var(--tx2)">Adaptive</span></div>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:8px"><span style="font-family:'Geist Mono',monospace;font-size:11px;color:var(--tx3)">Status badges</span>
+      <div style="display:flex;gap:6px;flex-wrap:wrap">
+        <span style="display:inline-flex;align-items:center;gap:5px;height:20px;padding:0 7px;border-radius:4px;background:var(--ok-sf);color:var(--ok);font-size:11.5px;font-weight:500"><span style="width:6px;height:6px;border-radius:50%;background:var(--ok)"></span>Active</span>
+        <span style="display:inline-flex;align-items:center;gap:5px;height:20px;padding:0 7px;border-radius:4px;background:var(--warn-sf);color:var(--warn);font-size:11.5px;font-weight:500"><span style="width:6px;height:6px;border-radius:50%;background:var(--warn)"></span>Pending</span>
+        <span style="display:inline-flex;align-items:center;gap:5px;height:20px;padding:0 7px;border-radius:4px;background:var(--bad-sf);color:var(--bad);font-size:11.5px;font-weight:500"><span style="width:6px;height:6px;border-radius:50%;background:var(--bad)"></span>Blocked</span>
+        <span style="display:inline-flex;align-items:center;gap:5px;height:20px;padding:0 7px;border-radius:4px;background:var(--info-sf);color:var(--info);font-size:11.5px;font-weight:500">SAML</span>
+        <span style="display:inline-flex;align-items:center;height:20px;padding:0 7px;border-radius:4px;border:1px solid var(--bd2);color:var(--tx2);font-size:11.5px">Draft</span>
+        <span style="display:inline-flex;align-items:center;height:20px;padding:0 7px;border-radius:4px;background:var(--ac-sf);color:var(--ac-tx);font-family:'Geist Mono',monospace;font-size:11px;font-weight:500">PROD</span>
+        <span style="display:inline-flex;align-items:center;height:20px;padding:0 7px;border-radius:4px;background:var(--sf2);color:var(--tx2);font-family:'Geist Mono',monospace;font-size:11px">s</span>
+        <span style="display:inline-flex;align-items:center;height:20px;padding:0 7px;border-radius:4px;background:var(--bad-sf);color:var(--bad);font-family:'Geist Mono',monospace;font-size:11px">fp</span>
+      </div>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:0"><div style="display:flex;gap:20px;border-bottom:1px solid var(--bd)"><span style="padding:8px 0;border-bottom:2px solid var(--tx);font-weight:500;margin-bottom:-1px">Settings</span><span style="padding:8px 0;color:var(--tx2)">Credentials</span><span style="padding:8px 0;color:var(--tx2)">Connections</span><span style="padding:8px 0;color:var(--tx2)">Quickstart</span></div></div>
+
+    <div style="border:1px solid var(--bd);border-radius:10px;background:var(--sf);overflow:hidden">
+      <div style="display:grid;grid-template-columns:2fr 1.2fr 1fr 80px;padding:0 12px;height:32px;align-items:center;background:var(--sf2);border-bottom:1px solid var(--bd);font-size:11.5px;color:var(--tx3);font-weight:500"><span>User</span><span>Connection</span><span>Last login</span><span style="text-align:right">Logins</span></div>
+      <div style="display:grid;grid-template-columns:2fr 1.2fr 1fr 80px;padding:0 12px;height:38px;align-items:center;border-bottom:1px solid var(--bd)"><span style="display:flex;gap:8px;align-items:center"><span style="width:22px;height:22px;border-radius:50%;background:var(--info-sf);color:var(--info);font-size:10px;display:flex;align-items:center;justify-content:center;font-weight:600">MO</span>maya@acme.com</span><span style="color:var(--tx2)">acme-saml</span><span style="color:var(--tx2)">2m ago</span><span style="text-align:right;font-family:'Geist Mono',monospace">412</span></div>
+      <div style="display:grid;grid-template-columns:2fr 1.2fr 1fr 80px;padding:0 12px;height:38px;align-items:center;background:var(--ac-sf)"><span style="display:flex;gap:8px;align-items:center"><span style="width:22px;height:22px;border-radius:50%;background:var(--warn-sf);color:var(--warn);font-size:10px;display:flex;align-items:center;justify-content:center;font-weight:600">JK</span>jonas@kestrel.io</span><span style="color:var(--tx2)">google-oauth2</span><span style="color:var(--tx2)">1h ago</span><span style="text-align:right;font-family:'Geist Mono',monospace">38</span></div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div style="background:var(--code-bg);color:var(--code-tx);border-radius:10px;overflow:hidden;font-family:'Geist Mono',monospace;font-size:12px">
+        <div style="display:flex;justify-content:space-between;padding:7px 12px;border-bottom:1px solid rgba(255,255,255,.08);color:#8b8b92;font-size:11px"><span>npm</span><span>Copy</span></div>
+        <div style="padding:12px;line-height:1.7"><span style="color:#8b8b92">$</span> npm i <span style="color:#7fe0bd">@gatekeep/react</span></div>
+      </div>
+      <div style="background:var(--sf);border:1px solid var(--bd);border-radius:10px;font-family:'Geist Mono',monospace;font-size:12px;line-height:1.75;display:grid;grid-template-columns:28px 1fr">
+        <div style="color:var(--tx3);text-align:right;padding:8px 6px;border-right:1px solid var(--bd);background:var(--sf2);border-radius:10px 0 0 10px">1<br>2<br>3<br>4</div>
+        <div style="padding:8px 10px">{<br>&nbsp;&nbsp;<span style="color:var(--info)">"plan"</span>: <span style="color:var(--ac-tx)">"enterprise"</span>,<br>&nbsp;&nbsp;<span style="color:var(--info)">"seats"</span>: <span style="color:var(--warn)">250</span><br>}</div>
+      </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;align-items:start">
+      <div style="border:1px dashed var(--bd2);border-radius:10px;padding:22px;display:flex;flex-direction:column;align-items:center;gap:8px;text-align:center">
+        <div style="width:32px;height:32px;border-radius:8px;background:var(--sf2);border:1px solid var(--bd);display:flex;align-items:center;justify-content:center;color:var(--tx3);font-family:'Geist Mono',monospace">{ }</div>
+        <span style="font-weight:600">No log streams yet</span><span style="color:var(--tx2);font-size:12px">Send events to Datadog, Splunk or any webhook.</span>
+        <button style="height:26px;padding:0 10px;border-radius:6px;border:1px solid var(--bd2);background:var(--sf);color:var(--tx);font:500 12px Geist,sans-serif">Create stream</button>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:8px">
+        <div style="display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border-radius:10px;background:var(--tx);color:var(--bg);box-shadow:var(--sh)"><span style="width:16px;height:16px;border-radius:50%;background:var(--ac);color:var(--on-ac);font-size:10px;display:flex;align-items:center;justify-content:center;flex:none;margin-top:1px">✓</span><div style="display:flex;flex-direction:column"><span style="font-weight:500">Secret rotated</span><span style="opacity:.7;font-size:12px">Old secret valid for 24h.</span></div></div>
+        <div style="display:flex;gap:10px;padding:10px 12px;border-radius:10px;background:var(--warn-sf);color:var(--warn);font-size:12px"><span style="font-weight:600">!</span><span>Signing key expires in 6 days. Rotate before 7 Nov.</span></div>
+      </div>
+    </div>
+
+    <div style="position:relative;border-radius:10px;background:var(--sf3);padding:22px;display:flex;justify-content:center">
+      <div style="width:100%;max-width:400px;background:var(--sf);border:1px solid var(--bd);border-radius:14px;box-shadow:var(--sh);overflow:hidden">
+        <div style="padding:16px 18px 6px;display:flex;flex-direction:column;gap:6px"><span style="font-size:15px;font-weight:600">Impersonate maya@acme.com?</span><span style="color:var(--tx2);font-size:12.5px">You'll act as this user for 15 minutes. This is recorded in the admin audit log.</span></div>
+        <div style="display:flex;justify-content:flex-end;gap:8px;padding:14px 18px;margin-top:10px;border-top:1px solid var(--bd);background:var(--sf2)"><button style="height:30px;padding:0 12px;border-radius:7px;border:1px solid var(--bd2);background:var(--sf);color:var(--tx);font:500 13px Geist,sans-serif">Cancel</button><button style="height:30px;padding:0 12px;border-radius:7px;border:0;background:var(--warn);color:#fff;font:500 13px Geist,sans-serif">Impersonate</button></div>
+      </div>
+    </div>
+  </div>
+  </sc-for>
+  </div>
+</section>
+
+<section style="display:flex;flex-direction:column;gap:20px">
+  <div style="display:flex;align-items:baseline;gap:14px"><span style="font-family:'Geist Mono',monospace;font-size:11px;color:var(--tx3)">05</span><h2 style="margin:0;font-size:22px;font-weight:600;letter-spacing:-0.02em">Sidebar information architecture</h2><span style="color:var(--tx3)">12 groups · task-ordered: build → users → secure → extend → brand → observe → operate</span></div>
+  <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:10px">
+    <sc-for list="{{ nav }}" as="g" hint-placeholder-count="12">
+      <div style="border:1px solid var(--bd);border-radius:10px;background:var(--sf);padding:14px;display:flex;flex-direction:column;gap:8px">
+        <div style="display:flex;justify-content:space-between"><span style="font-family:'Geist Mono',monospace;font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--tx3)">{{ g.label }}</span><span style="font-family:'Geist Mono',monospace;font-size:11px;color:var(--tx3)">{{ g.n }}</span></div>
+        <div style="display:flex;flex-direction:column;gap:3px">
+          <sc-for list="{{ g.items }}" as="it" hint-placeholder-count="4"><span style="font-size:13px">{{ it.label }}</span></sc-for>
+        </div>
+      </div>
+    </sc-for>
+  </div>
+</section>
+
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+class Component extends DCLogic {
+  renderVals() {
+    const tokens = [
+      ['bg','#f6f6f4','#0d0e10','App canvas'],['sf','#ffffff','#141518','Cards, tables, inputs'],['sf2','#f1f1ee','#1a1b1f','Table heads, wells'],['sf3','#e8e8e4','#222328','Hover, overlays'],
+      ['bd','#e3e3de','#25262b','Dividers'],['bd2','#cfcfc9','#34353b','Control borders'],['tx','#17171a','#ededef','Primary text'],['tx2','#55555c','#a3a3aa','Secondary text'],
+      ['tx3','#85858c','#6f6f78','Meta, placeholders'],['ac','#0b7d62','#2ec29a','Gate jade — primary action, focus'],['ac-sf','#e2f3ec','#0e2a21','Selected rows, accent wash'],['ok','#16794a','#4cc38a','Success / active'],
+      ['warn','#985a00','#e5a63a','Pending / caution'],['bad','#c22f2f','#f16a6a','Error / blocked / destructive'],['info','#2457c5','#7ca3ff','Info, protocol tags'],['code-bg','#16171a','#0a0b0c','Code surfaces']
+    ].map(([name,light,dark,use])=>({name,light,dark,use}));
+    const spaces = [4,8,12,16,20,24,32,48].map(v=>({v,px:v+'px'}));
+    const nav = window.GK_NAV || [
+      {label:'Overview',items:['Get started','Home']},
+      {label:'Build',items:['Applications','APIs','Quickstarts']},
+      {label:'Authentication',items:['Database','Social','Enterprise','Passwordless','Passkeys','Self-service SSO','SCIM provisioning']},
+      {label:'User management',items:['Users','Roles','Organizations','Import jobs']},
+      {label:'Authorization',items:['RBAC','Fine-grained (FGA)']},
+      {label:'Security',items:['Multi-factor auth','Attack protection','Security center','Tenant security','Signing keys']},
+      {label:'Actions',items:['Library','Flows','Forms','Marketplace','Token exchange','Rules & Hooks (legacy)']},
+      {label:'AI agents',items:['Agents','Token vault','Async authorization','RAG authorization','MCP servers']},
+      {label:'Branding',items:['Universal Login','Custom domains','Email templates','Providers']},
+      {label:'Monitoring',items:['Logs','Log streams','Analytics','Health & limits']},
+      {label:'Settings',items:['Tenant','Environments','Team','API keys','Billing','Compliance','Config as code']},
+      {label:'Developers',items:['API explorer','JWT & OIDC tools','Support']}
+    ];
+    return {
+      tokens, spaces,
+      themes:[{id:'light',label:'Light'},{id:'dark',label:'Dark'}],
+      nav: nav.map(g=>({label:g.label,n:String(g.items.length).padStart(2,'0'),items:g.items.map(l=>({label:l}))}))
+    };
+  }
+}
+</script>
+</body>
+</html>

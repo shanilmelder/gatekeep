@@ -1,0 +1,264 @@
+# STATUS DEFINITIONS:
+# ==================
+# Epic Status:
+#   - backlog: Epic not yet started
+#   - in-progress: Epic actively being worked on
+#   - done: All stories in epic completed
+
+# Story Status:
+#   - backlog: Story only exists in epic file
+#   - ready-for-dev: Story file created, ready for development
+#   - in-progress: Developer actively working on implementation
+#   - review: Implementation complete, ready for review
+#   - done: Story completed
+
+# Retrospective Status:
+#   - optional: Can be completed but not required
+#   - done: Retrospective has been completed
+
+# Action Item Status:
+#   - open: Committed during a retrospective, not yet addressed
+#   - in-progress: Actively being worked on
+#   - done: Completed
+
+# WORKFLOW NOTES:
+# ===============
+# - Epic transitions to 'in-progress' automatically when its first story starts (via build's sprint sync)
+# - Stories can be worked in parallel if team capacity allows
+# - Developer typically creates the next story after the previous one is 'done' to incorporate learnings
+# - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
+# - Retrospective appends its action items to action_items; the status view surfaces open ones
+generated: 11-02-2026 02:20
+last_updated: 11-02-2026 02:20
+project: gatekeep
+project_key: NOKEY
+tracking_system: file-system
+story_location: _bmad-output/implementation-artifacts
+development_status:
+  epic-1: backlog
+  1-1-scaffold-the-monorepo-and-enforce-module-boundaries: backlog
+  1-2-prove-key-custody-on-the-target-host: backlog
+  1-3-write-the-threat-model: backlog
+  1-4-enforce-tenant-isolation-in-the-database: backlog
+  1-5-write-an-audit-event-with-every-state-change: backlog
+  1-6-scrub-logs-and-scan-for-canaries: backlog
+  1-7-hold-keys-in-openbao-behind-ikeycustody: backlog
+  1-8-run-tenant-scoped-jobs: backlog
+  1-9-track-long-running-operations: backlog
+  1-10-run-the-stack-under-compose-with-safe-secrets: backlog
+  1-11-route-traffic-through-caddy-and-default-deny-networks: backlog
+  1-12-document-installation: backlog
+  1-13-generate-design-tokens-and-bundle-fonts: backlog
+  1-14-build-shared-form-and-action-components: backlog
+  1-15-build-data-display-components: backlog
+  1-16-build-overlay-and-feedback-components: backlog
+  1-17-build-the-drawer-and-menu: backlog
+  1-18-build-the-hosted-component-entry-and-screen-package: backlog
+  1-19-initialise-a-deployment: backlog
+  1-20-add-the-rate-limiter-and-admin-csp: backlog
+  1-21-claim-bootstrap-and-create-the-first-admin: backlog
+  1-22-register-admin-webauthn-credentials: backlog
+  1-23-sign-in-as-an-admin-with-webauthn: backlog
+  1-24-enforce-capabilities-and-tenant-scoped-routes: backlog
+  1-25-open-the-admin-shell: backlog
+  1-26-confirm-sensitive-actions-and-manage-admin-credentials: backlog
+  1-27-create-tenants-with-permanent-subdomains: backlog
+  1-28-switch-tenants-and-set-the-environment-label: backlog
+  1-29-delete-a-tenant-without-touching-others: backlog
+  1-30-connect-the-alert-channel-and-off-server-store: backlog
+  1-31-run-the-cross-tenant-suite-on-every-build: backlog
+  1-32-recover-admin-access-from-the-host: backlog
+  epic-1-retrospective: optional
+
+  epic-2: backlog
+  2-1-prove-per-tenant-options-and-transit-signing: backlog
+  2-2-prove-custom-stores-and-revocation-commit: backlog
+  2-3-publish-discovery-and-jwks-per-tenant: backlog
+  2-4-rotate-signing-keys-automatically: backlog
+  2-5-issue-a-token-by-client-credentials: backlog
+  2-6-add-session-and-transaction-tables: backlog
+  2-7-build-the-one-revocation-path: backlog
+  2-8-add-the-system-application: backlog
+  2-9-run-the-authorization-code-flow-with-pkce: backlog
+  2-10-rotate-refresh-tokens-and-detect-reuse: backlog
+  2-11-offer-userinfo-and-revocation: backlog
+  epic-2-retrospective: optional
+
+  epic-3: backlog
+  3-1-list-and-create-applications: backlog
+  3-2-configure-application-urls-and-grants: backlog
+  3-3-create-rotate-and-revoke-client-secrets: backlog
+  3-4-set-token-lifetimes: backlog
+  3-5-delete-an-application: backlog
+  3-6-define-apis-and-permissions: backlog
+  3-7-authorize-a-machine-to-machine-application: backlog
+  epic-3-retrospective: optional
+
+  epic-4: backlog
+  4-1-serve-hosted-login-step-screens: backlog
+  4-2-bind-sign-in-transactions-and-issue-sessions: backlog
+  4-3-purge-expired-sign-in-state: backlog
+  4-4-configure-a-tenant-s-email-provider: backlog
+  4-5-send-email-through-the-job-pipeline: backlog
+  4-6-configure-the-database-connection: backlog
+  4-7-sign-up-and-verify-an-email-address: backlog
+  4-8-keep-sign-up-neutral-and-limited: backlog
+  4-9-sign-in-with-a-password: backlog
+  4-10-revoke-access-through-one-path: backlog
+  4-11-reset-a-forgotten-password: backlog
+  4-12-choose-connections-per-application: backlog
+  4-13-log-out: backlog
+  4-14-run-openid-conformance-on-real-sign-in: backlog
+  epic-4-retrospective: optional
+
+  epic-5: backlog
+  5-1-search-users-by-field: backlog
+  5-2-view-a-user-s-profile-and-sessions: backlog
+  5-3-create-a-user-and-send-verification: backlog
+  5-4-block-unblock-and-revoke-a-user: backlog
+  5-5-delete-a-user: backlog
+  5-6-manage-roles: backlog
+  5-7-assign-roles-and-put-permissions-in-tokens: backlog
+  5-8-export-a-user-s-data: backlog
+  5-9-erase-a-user-s-data: backlog
+  epic-5-retrospective: optional
+
+  epic-6: backlog
+  6-1-create-a-passkey: backlog
+  6-2-show-recovery-codes-at-first-enrolment: backlog
+  6-3-sign-in-with-a-passkey: backlog
+  6-4-set-mfa-policy: backlog
+  6-5-enrol-an-authenticator-app: backlog
+  6-6-enrol-a-security-key: backlog
+  6-7-pass-an-mfa-challenge: backlog
+  6-8-recover-with-a-recovery-code: backlog
+  6-9-recover-a-passkey-only-account-by-email: backlog
+  6-10-reset-a-user-s-factors-and-passkeys: backlog
+  6-11-recover-a-passkey-only-user-with-an-enrolment-link: backlog
+  6-12-prove-the-fr-25-matrix: backlog
+  epic-6-retrospective: optional
+
+  epic-7: backlog
+  7-1-seal-audit-events-into-hash-chains: backlog
+  7-2-copy-evidence-off-the-server: backlog
+  7-3-verify-chains-and-apply-retention: backlog
+  7-4-search-a-tenant-s-logs: backlog
+  7-5-open-an-event-s-raw-detail: backlog
+  7-6-view-a-user-s-history: backlog
+  7-7-search-the-deployment-log: backlog
+  7-8-plant-canaries-and-publish-the-event-catalogue: backlog
+  epic-7-retrospective: optional
+
+  epic-8: backlog
+  8-1-configure-the-deployment-email-provider: backlog
+  8-2-invite-an-admin: backlog
+  8-3-accept-an-invite-and-set-up-credentials: backlog
+  8-4-manage-tenant-roles-and-remove-admins: backlog
+  8-5-configure-tenant-settings: backlog
+  8-6-export-tenant-configuration: backlog
+  epic-8-retrospective: optional
+
+  epic-9: backlog
+  9-1-view-signing-keys: backlog
+  9-2-rotate-a-signing-key-on-demand: backlog
+  9-3-revoke-a-signing-key: backlog
+  epic-9-retrospective: optional
+
+  epic-10: backlog
+  10-1-back-off-repeated-failures-per-step: backlog
+  10-2-configure-attack-protection: backlog
+  10-3-show-lockout-states-honestly: backlog
+  10-4-protect-the-hashing-budget: backlog
+  10-5-refuse-breached-passwords: backlog
+  10-6-stop-sign-in-with-a-breached-password: backlog
+  10-7-prove-identifiers-can-t-be-enumerated: backlog
+  10-8-replace-a-flagged-credential-at-sign-in: backlog
+  epic-10-retrospective: optional
+
+  epic-11: backlog
+  11-1-derive-security-alerts-from-audit-events: backlog
+  11-2-raise-threshold-and-device-alerts: backlog
+  11-3-detect-a-silent-deployment: backlog
+  11-4-collect-health-and-rate-limit-usage: backlog
+  11-5-show-health-rate-limits: backlog
+  epic-11-retrospective: optional
+
+  epic-12: backlog
+  12-1-back-up-the-deployment: backlog
+  12-2-restore-a-deployment-onto-clean-hardware: backlog
+  12-3-reconcile-keys-and-end-stale-access-after-restore: backlog
+  12-4-replay-revocations-after-restore: backlog
+  12-5-sign-release-images: backlog
+  12-6-upgrade-between-releases: backlog
+  12-7-rotate-the-master-key: backlog
+  epic-12-retrospective: optional
+
+  epic-13: backlog
+  13-1-revoke-all-access-in-a-tenant: backlog
+  13-2-send-a-security-notice: backlog
+  13-3-respond-across-every-tenant: backlog
+  13-4-replace-every-key-and-secret-with-gatekeep-rekey: backlog
+  13-5-write-and-test-the-security-runbooks: backlog
+  13-6-rehearse-emergency-certificate-replacement: backlog
+  epic-13-retrospective: optional
+
+  epic-14: backlog
+  14-1-configure-social-providers: backlog
+  14-2-sign-in-with-google-or-microsoft: backlog
+  14-3-sign-in-with-github: backlog
+  14-4-handle-social-email-conflicts: backlog
+  14-5-configure-the-email-code-connection: backlog
+  14-6-sign-in-with-an-email-code: backlog
+  epic-14-retrospective: optional
+
+  epic-15: backlog
+  15-1-validate-and-publish-a-tenant-theme: backlog
+  15-2-preview-a-theme-on-real-screens: backlog
+  15-3-upload-a-logo-safely: backlog
+  15-4-edit-email-templates: backlog
+  15-5-test-delivery-and-guarantee-security-notifications: backlog
+  epic-15-retrospective: optional
+
+  epic-16: backlog
+  16-1-build-hosted-overlays-and-portal-feedback: backlog
+  16-2-open-the-account-portal-and-edit-a-profile: backlog
+  16-3-re-prove-identity-for-sensitive-changes: backlog
+  16-4-change-a-password: backlog
+  16-5-add-and-remove-passkeys-and-factors: backlog
+  16-6-regenerate-recovery-codes: backlog
+  16-7-review-and-end-sessions: backlog
+  16-8-change-an-email-address-safely: backlog
+  16-9-delete-my-account: backlog
+  16-10-prove-mandatory-notifications: backlog
+  epic-16-retrospective: optional
+
+  epic-17: backlog
+  17-1-issue-isolated-management-api-tokens: backlog
+  17-2-grant-and-review-management-api-access: backlog
+  17-3-prove-machine-clients-cannot-escalate: backlog
+  17-4-list-an-admin-s-clients-on-removal: backlog
+  17-5-publish-the-api-reference-and-version-contract: backlog
+  17-6-publish-the-node-quickstart: backlog
+  17-7-publish-the-net-quickstart: backlog
+  17-8-publish-the-python-quickstart: backlog
+  17-9-publish-browser-quickstarts: backlog
+  17-10-run-the-negative-token-pack: backlog
+  epic-17-retrospective: optional
+
+  epic-18: backlog
+  18-1-enforce-release-gates: backlog
+  18-2-pass-openid-conformance: backlog
+  18-3-audit-hosted-login-accessibility-and-browsers: backlog
+  18-4-check-every-design-delta-row: backlog
+  18-5-load-test-sign-in: backlog
+  18-6-assess-input-web-api-and-file-chapters: backlog
+  18-7-assess-authentication-session-and-token-chapters: backlog
+  18-8-assess-crypto-data-code-and-logging-chapters: backlog
+  18-9-pass-the-security-gate: backlog
+  18-10-rehearse-keys-and-alerts: backlog
+  18-11-rehearse-install-upgrade-and-restore: backlog
+  18-12-run-the-uj-6-tabletop-and-set-the-schedule: backlog
+  18-13-move-the-first-production-app: backlog
+  18-14-write-the-protocol-walkthroughs: backlog
+  18-15-review-the-first-90-days: backlog
+  epic-18-retrospective: optional

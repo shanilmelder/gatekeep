@@ -1,0 +1,481 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="design_doc_mode" content="canvas">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;600;700&family=Instrument+Serif&display=swap" rel="stylesheet">
+<style>
+[data-v="default"]{--page:#f3f3f0;--card:#ffffff;--tx:#17171a;--tx2:#5d5d63;--tx3:#85858c;--bd:#d6d6d0;--field:#ffffff;--sf:#f3f3f0;--p:#0b7d62;--on:#ffffff;--pl:#0b7d62;--psf:#e2f3ec;--rc:14px;--rs:8px;--ff:Geist,system-ui,sans-serif;--fh:Geist,system-ui,sans-serif;--hs:22px;--hw:600;--hl:-0.02em;--bad:#c22f2f;--badsf:#fbe5e3;--warn:#985a00;--warnsf:#fbefd8;--ok:#16794a;--oksf:#e2f4ea;--sh:0 1px 2px rgba(0,0,0,.04),0 14px 40px rgba(0,0,0,.08)}
+[data-v="brand"]{--page:#0b1524;--card:#12213a;--tx:#f3efe6;--tx2:#bdb7aa;--tx3:#8a93a4;--bd:#2c3d5a;--field:#0d1a2e;--sf:#0f1c31;--p:#e8b04b;--on:#1a1306;--pl:#f0c36d;--psf:#2b2412;--rc:4px;--rs:2px;--ff:'Space Grotesk',system-ui,sans-serif;--fh:'Instrument Serif',Georgia,serif;--hs:31px;--hw:400;--hl:-0.01em;--bad:#ff8a80;--badsf:#3a1a1c;--warn:#f0c36d;--warnsf:#2b2412;--ok:#7fd8a8;--oksf:#13301f;--sh:0 30px 80px rgba(0,0,0,.45)}
+body{margin:0;background:#e9e9e5;-webkit-font-smoothing:antialiased;font-family:Geist,system-ui,sans-serif}
+*{box-sizing:border-box}
+a{color:#0b7d62;text-decoration:none}a:hover{text-decoration:underline}
+@keyframes gkPulse{0%,100%{transform:scale(1);opacity:.5}50%{transform:scale(1.25);opacity:0}}
+</style>
+</helmet>
+<div style="padding:56px 56px 120px;display:flex;flex-direction:column;gap:80px;background:#e9e9e5;width:2120px">
+<header style="display:flex;justify-content:space-between;align-items:flex-end;gap:24px;color:#17171a">
+  <div style="display:flex;flex-direction:column;gap:10px">
+    <div style="display:flex;align-items:center;gap:10px"><div style="width:24px;height:24px;border-radius:6px;background:#17171a;display:flex;align-items:center;justify-content:center;gap:2.5px"><span style="width:2.5px;height:12px;background:#e9e9e5;border-radius:1px"></span><span style="width:2.5px;height:12px;background:#0b7d62;border-radius:1px"></span></div><span style="font-weight:600;font-size:16px;letter-spacing:-0.02em">gatekeep</span><span style="font-family:'Geist Mono',monospace;font-size:11px;color:#85858c;text-transform:uppercase;letter-spacing:.08em;margin-left:6px">Hosted login · end-user screens</span></div>
+    <h1 style="margin:0;font-size:40px;font-weight:600;letter-spacing:-0.035em;line-height:1.05">Universal Login, every state.</h1>
+    <p style="margin:0;color:#55555c;font-size:15px;max-width:760px">33 screens, each shown in the Gatekeep default theme and a custom-branded tenant (Halcyon Bank: dark navy, gold, serif display, sharp corners). Same markup — only theme tokens differ.</p>
+  </div>
+  <div style="display:flex;gap:8px"><a href="Gatekeep Admin.dc.html" style="padding:8px 14px;border-radius:8px;border:1px solid #cfcfc9;background:#fff;color:#17171a;font-weight:500;font-size:13px;white-space:nowrap">Admin dashboard →</a><a href="Gatekeep Design System.dc.html" style="padding:8px 14px;border-radius:8px;border:1px solid #cfcfc9;background:#fff;color:#17171a;font-weight:500;font-size:13px;white-space:nowrap">Design system →</a></div>
+</header>
+
+<sc-for list="{{ variants }}" as="v" hint-placeholder-count="2">
+<section data-v="{{ v.id }}" data-screen-label="{{ v.label }}" style="display:flex;flex-direction:column;gap:44px;padding:40px;border-radius:24px;background:{{ v.stage }}">
+  <div style="display:flex;justify-content:space-between;align-items:center;color:{{ v.stageTx }}"><div style="display:flex;flex-direction:column;gap:4px"><span style="font-family:'Geist Mono',monospace;font-size:11px;text-transform:uppercase;letter-spacing:.1em;opacity:.6">{{ v.kicker }}</span><span style="font-size:26px;font-weight:600;letter-spacing:-0.02em">{{ v.label }}</span></div><div style="display:flex;gap:6px"><span style="width:22px;height:22px;border-radius:5px;background:var(--p)"></span><span style="width:22px;height:22px;border-radius:5px;background:var(--card);border:1px solid var(--bd)"></span><span style="width:22px;height:22px;border-radius:5px;background:var(--page);border:1px solid var(--bd)"></span></div></div>
+
+  <div style="display:flex;flex-direction:column;gap:16px"><span style="font-family:'Geist Mono',monospace;font-size:12px;color:{{ v.stageTx }};opacity:.7">01 — SIGN IN</span>
+  <div style="display:flex;flex-wrap:wrap;gap:24px">
+    <div style="display:flex;flex-direction:column;gap:8px"><span style="font-size:12px;color:{{ v.stageTx }};opacity:.75">Login · identifier first</span>
+      <div style="width:440px;height:660px;background:var(--page);border-radius:16px;display:flex;align-items:center;justify-content:center;padding:28px;font-family:var(--ff);color:var(--tx)">
+        <div style="width:100%;background:var(--card);border-radius:var(--rc);box-shadow:var(--sh);padding:34px 32px;display:flex;flex-direction:column;gap:14px;border:1px solid var(--bd)">
+          <div style="display:flex;flex-direction:column;align-items:center;gap:12px;text-align:center"><div style="width:42px;height:42px;border-radius:var(--rs);background:var(--p);color:var(--on);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:17px">{{ v.mono }}</div><div style="font-family:var(--fh);font-size:var(--hs);font-weight:var(--hw);letter-spacing:var(--hl);line-height:1.15">Welcome back</div><div style="font-size:14px;color:var(--tx2);margin-top:-6px">Log in to {{ v.name }} to continue</div></div>
+          <div style="display:flex;flex-direction:column;gap:6px"><span style="font-size:12.5px;font-weight:500">Email address</span><div style="height:44px;border:1.5px solid var(--p);border-radius:var(--rs);background:var(--field);display:flex;align-items:center;padding:0 14px;font-size:14px">maya@acme.com</div></div>
+          <div style="height:44px;border-radius:var(--rs);background:var(--p);color:var(--on);display:flex;align-items:center;justify-content:center;font-weight:600;font-size:14px">Continue</div>
+          <div style="display:flex;align-items:center;gap:10px;color:var(--tx3);font-size:12px"><span style="flex:1;height:1px;background:var(--bd)"></span>OR<span style="flex:1;height:1px;background:var(--bd)"></span></div>
+          <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px"><div style="height:42px;border:1px solid var(--bd);border-radius:var(--rs);display:flex;align-items:center;justify-content:center;font-weight:700">G</div><div style="height:42px;border:1px solid var(--bd);border-radius:var(--rs);display:flex;align-items:center;justify-content:center;font-weight:700">A</div><div style="height:42px;border:1px solid var(--bd);border-radius:var(--rs);display:flex;align-items:center;justify-content:center;font-weight:700">MS</div></div>
+          <div style="height:44px;border:1px solid var(--bd);border-radius:var(--rs);display:flex;align-items:center;justify-content:center;gap:8px;font-size:14px;font-weight:500"><span style="width:16px;height:16px;border:1.5px solid currentColor;border-radius:50% 50% 4px 4px"></span>Sign in with a passkey</div>
+          <div style="height:44px;border:1px solid var(--bd);border-radius:var(--rs);display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:500">Continue with company SSO</div>
+          <div style="text-align:center;font-size:13.5px;color:var(--tx2)">Don't have an account? <span style="color:var(--pl);font-weight:500">Sign up</span></div>
+        </div>
+      </div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:8px"><span style="font-size:12px;color:{{ v.stageTx }};opacity:.75">Login · password step</span>
+      <div style="width:440px;height:660px;background:var(--page);border-radius:16px;display:flex;align-items:center;justify-content:center;padding:28px;font-family:var(--ff);color:var(--tx)">
+        <div style="width:100%;background:var(--card);border-radius:var(--rc);box-shadow:var(--sh);padding:34px 32px;display:flex;flex-direction:column;gap:14px;border:1px solid var(--bd)">
+          <div style="display:flex;flex-direction:column;align-items:center;gap:12px;text-align:center"><div style="width:42px;height:42px;border-radius:var(--rs);background:var(--p);color:var(--on);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:17px">{{ v.mono }}</div><div style="font-family:var(--fh);font-size:var(--hs);font-weight:var(--hw);letter-spacing:var(--hl);line-height:1.15">Enter your password</div></div>
+          <div style="height:40px;border:1px solid var(--bd);border-radius:99px;display:flex;align-items:center;gap:10px;padding:0 6px 0 14px;font-size:13.5px;align-self:center"><span>maya@acme.com</span><span style="color:var(--pl);font-weight:500;padding:4px 10px">Edit</span></div>
+          <div style="display:flex;flex-direction:column;gap:6px"><div style="display:flex;justify-content:space-between"><span style="font-size:12.5px;font-weight:500">Password</span><span style="font-size:12.5px;color:var(--pl)">Forgot password?</span></div><div style="height:44px;border:1.5px solid var(--p);border-radius:var(--rs);background:var(--field);display:flex;align-items:center;justify-content:space-between;padding:0 14px;font-size:14px;letter-spacing:.2em"><span>••••••••••••</span><span style="letter-spacing:0;font-size:12px;color:var(--tx3)">Show</span></div></div>
+          <div style="height:44px;border-radius:var(--rs);background:var(--p);color:var(--on);display:flex;align-items:center;justify-content:center;font-weight:600;font-size:14px">Log in</div>
+          <div style="padding:10px 12px;border-radius:var(--rs);background:var(--psf);font-size:12.5px;color:var(--tx);display:flex;gap:10px;align-items:center"><span style="width:16px;height:16px;border:1.5px solid var(--pl);border-radius:50% 50% 4px 4px;flex:none"></span>Skip the password next time — <span style="color:var(--pl);font-weight:500">add a passkey</span></div>
+        </div>
+      </div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:8px"><span style="font-size:12px;color:{{ v.stageTx }};opacity:.75">Passkey sign-in prompt</span>
+      <div style="width:440px;height:660px;background:var(--page);border-radius:16px;display:flex;align-items:center;justify-content:center;padding:28px;font-family:var(--ff);color:var(--tx);position:relative">
+        <div style="width:100%;background:var(--card);border-radius:var(--rc);box-shadow:var(--sh);padding:34px 32px;display:flex;flex-direction:column;gap:14px;border:1px solid var(--bd);opacity:.45">
+          <div style="font-family:var(--fh);font-size:var(--hs);font-weight:var(--hw);text-align:center">Welcome back</div><div style="height:44px;border:1px solid var(--bd);border-radius:var(--rs)"></div><div style="height:44px;border-radius:var(--rs);background:var(--p)"></div>
+        </div>
+        <div style="position:absolute;left:50%;bottom:44px;transform:translateX(-50%);width:330px;background:#fbfbfa;color:#17171a;border-radius:16px;box-shadow:0 24px 60px rgba(0,0,0,.3);padding:20px;display:flex;flex-direction:column;gap:12px;font-family:Geist,system-ui,sans-serif">
+          <div style="display:flex;gap:12px;align-items:center"><span style="width:36px;height:36px;border-radius:9px;background:#e8e8e4;display:flex;align-items:center;justify-content:center;font-size:18px">◉</span><div><div style="font-weight:600;font-size:14px">Sign in with your passkey</div><div style="font-size:12px;color:#5d5d63">{{ v.domain }}</div></div></div>
+          <div style="display:flex;gap:10px;align-items:center;padding:10px;border-radius:10px;background:#efefec"><span style="width:28px;height:28px;border-radius:50%;background:#d6d6d0;font-size:11px;font-weight:600;display:flex;align-items:center;justify-content:center">MO</span><div style="font-size:13px"><div style="font-weight:500">maya@acme.com</div><div style="color:#85858c;font-size:11.5px">iCloud Keychain</div></div></div>
+          <div style="height:38px;border-radius:9px;background:#17171a;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:500;font-size:13.5px">Continue with Touch ID</div>
+        </div>
+      </div>
+    </div>
+  </div></div>
+
+  <div style="display:flex;flex-direction:column;gap:16px"><span style="font-family:'Geist Mono',monospace;font-size:12px;color:{{ v.stageTx }};opacity:.7">02 — SIGN UP</span>
+  <div style="display:flex;flex-wrap:wrap;gap:24px">
+    <div style="display:flex;flex-direction:column;gap:8px"><span style="font-size:12px;color:{{ v.stageTx }};opacity:.75">Signup · password strength</span>
+      <div style="width:440px;height:660px;background:var(--page);border-radius:16px;display:flex;align-items:center;justify-content:center;padding:28px;font-family:var(--ff);color:var(--tx)">
+        <div style="width:100%;background:var(--card);border-radius:var(--rc);box-shadow:var(--sh);padding:34px 32px;display:flex;flex-direction:column;gap:13px;border:1px solid var(--bd)">
+          <div style="display:flex;flex-direction:column;align-items:center;gap:12px;text-align:center"><div style="width:42px;height:42px;border-radius:var(--rs);background:var(--p);color:var(--on);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:17px">{{ v.mono }}</div><div style="font-family:var(--fh);font-size:var(--hs);font-weight:var(--hw);letter-spacing:var(--hl);line-height:1.15">Create your account</div></div>
+          <div style="display:flex;flex-direction:column;gap:6px"><span style="font-size:12.5px;font-weight:500">Email address</span><div style="height:44px;border:1px solid var(--bd);border-radius:var(--rs);background:var(--field);display:flex;align-items:center;padding:0 14px;font-size:14px">felix@brandt.dev</div></div>
+          <div style="display:flex;flex-direction:column;gap:6px"><span style="font-size:12.5px;font-weight:500">Password</span><div style="height:44px;border:1.5px solid var(--p);border-radius:var(--rs);background:var(--field);display:flex;align-items:center;padding:0 14px;font-size:14px">Tide-lantern-42</div>
+            <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:4px;margin-top:4px"><span style="height:4px;border-radius:9px;background:var(--ok)"></span><span style="height:4px;border-radius:9px;background:var(--ok)"></span><span style="height:4px;border-radius:9px;background:var(--ok)"></span><span style="height:4px;border-radius:9px;background:var(--bd)"></span></div>
+            <div style="display:flex;justify-content:space-between;font-size:12px"><span style="color:var(--ok);font-weight:500">Good</span><span style="color:var(--tx3)">Add a symbol for Excellent</span></div>
+            <div style="display:flex;flex-direction:column;gap:3px;font-size:12px;color:var(--tx2)"><span style="color:var(--ok)">✓ At least 12 characters</span><span style="color:var(--ok)">✓ Upper, lower &amp; number</span><span style="color:var(--ok)">✓ Not found in known breaches</span></div></div>
+          <div style="display:flex;gap:10px;font-size:12.5px;color:var(--tx2);align-items:flex-start"><span style="width:16px;height:16px;border-radius:4px;background:var(--p);color:var(--on);font-size:10px;display:flex;align-items:center;justify-content:center;flex:none;margin-top:1px">✓</span><span>I agree to the <span style="color:var(--pl)">Terms of Service</span> and <span style="color:var(--pl)">Privacy Policy</span></span></div>
+          <div style="height:44px;border-radius:var(--rs);background:var(--p);color:var(--on);display:flex;align-items:center;justify-content:center;font-weight:600;font-size:14px">Create account</div>
+          <div style="text-align:center;font-size:13.5px;color:var(--tx2)">Already have an account? <span style="color:var(--pl);font-weight:500">Log in</span></div>
+        </div>
+      </div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:8px"><span style="font-size:12px;color:{{ v.stageTx }};opacity:.75">Progressive profiling (Form)</span>
+      <div style="width:440px;height:660px;background:var(--page);border-radius:16px;display:flex;align-items:center;justify-content:center;padding:28px;font-family:var(--ff);color:var(--tx)">
+        <div style="width:100%;background:var(--card);border-radius:var(--rc);box-shadow:var(--sh);padding:34px 32px;display:flex;flex-direction:column;gap:14px;border:1px solid var(--bd)">
+          <div style="display:flex;gap:4px"><span style="flex:1;height:3px;border-radius:9px;background:var(--p)"></span><span style="flex:1;height:3px;border-radius:9px;background:var(--p)"></span><span style="flex:1;height:3px;border-radius:9px;background:var(--bd)"></span></div>
+          <div style="font-family:var(--fh);font-size:var(--hs);font-weight:var(--hw);letter-spacing:var(--hl);line-height:1.15">Tell us about your work</div><div style="font-size:14px;color:var(--tx2);margin-top:-6px">Helps us set up {{ v.name }} for your team.</div>
+          <div style="display:flex;flex-direction:column;gap:6px"><span style="font-size:12.5px;font-weight:500">Job title</span><div style="height:44px;border:1px solid var(--bd);border-radius:var(--rs);background:var(--field);display:flex;align-items:center;padding:0 14px;font-size:14px">Finance lead</div></div>
+          <div style="display:flex;flex-direction:column;gap:6px"><span style="font-size:12.5px;font-weight:500">Company size</span><div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:13.5px"><span style="height:40px;border:1px solid var(--bd);border-radius:var(--rs);display:flex;align-items:center;justify-content:center">1–10</span><span style="height:40px;border:1.5px solid var(--p);background:var(--psf);border-radius:var(--rs);display:flex;align-items:center;justify-content:center;font-weight:500">11–50</span><span style="height:40px;border:1px solid var(--bd);border-radius:var(--rs);display:flex;align-items:center;justify-content:center">51–200</span><span style="height:40px;border:1px solid var(--bd);border-radius:var(--rs);display:flex;align-items:center;justify-content:center">200+</span></div></div>
+          <div style="height:44px;border-radius:var(--rs);background:var(--p);color:var(--on);display:flex;align-items:center;justify-content:center;font-weight:600;font-size:14px;margin-top:6px">Continue</div>
+          <div style="text-align:center;font-size:13px;color:var(--tx3)">Skip for now</div>
+        </div>
+      </div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:8px"><span style="font-size:12px;color:{{ v.stageTx }};opacity:.75">Passkey create</span>
+      <div style="width:440px;height:660px;background:var(--page);border-radius:16px;display:flex;align-items:center;justify-content:center;padding:28px;font-family:var(--ff);color:var(--tx)">
+        <div style="width:100%;background:var(--card);border-radius:var(--rc);box-shadow:var(--sh);padding:34px 32px;display:flex;flex-direction:column;gap:16px;border:1px solid var(--bd);text-align:center;align-items:center">
+          <div style="width:64px;height:64px;border-radius:50%;background:var(--psf);display:flex;align-items:center;justify-content:center"><span style="width:26px;height:30px;border:2.5px solid var(--pl);border-radius:50% 50% 6px 6px"></span></div>
+          <div style="font-family:var(--fh);font-size:var(--hs);font-weight:var(--hw);letter-spacing:var(--hl);line-height:1.15">Create a passkey</div>
+          <div style="font-size:14px;color:var(--tx2);text-wrap:pretty">Sign in with your fingerprint, face or screen lock. No password to remember or leak.</div>
+          <div style="display:flex;flex-direction:column;gap:8px;text-align:left;width:100%;font-size:13px;color:var(--tx2)"><span>✓ Works across your synced devices</span><span>✓ Can't be phished or reused</span></div>
+          <div style="width:100%;height:44px;border-radius:var(--rs);background:var(--p);color:var(--on);display:flex;align-items:center;justify-content:center;font-weight:600;font-size:14px">Create passkey</div>
+          <div style="font-size:13px;color:var(--tx3)">Not now</div>
+        </div>
+      </div>
+    </div>
+  </div></div>
+
+  <div style="display:flex;flex-direction:column;gap:16px"><span style="font-family:'Geist Mono',monospace;font-size:12px;color:{{ v.stageTx }};opacity:.7">03 — PASSWORDLESS</span>
+  <div style="display:flex;flex-wrap:wrap;gap:24px">
+    <div style="display:flex;flex-direction:column;gap:8px"><span style="font-size:12px;color:{{ v.stageTx }};opacity:.75">Email / SMS code entry</span>
+      <div style="width:440px;height:560px;background:var(--page);border-radius:16px;display:flex;align-items:center;justify-content:center;padding:28px;font-family:var(--ff);color:var(--tx)">
+        <div style="width:100%;background:var(--card);border-radius:var(--rc);box-shadow:var(--sh);padding:34px 32px;display:flex;flex-direction:column;gap:14px;border:1px solid var(--bd);text-align:center">
+          <div style="font-family:var(--fh);font-size:var(--hs);font-weight:var(--hw);letter-spacing:var(--hl);line-height:1.15">Check your phone</div><div style="font-size:14px;color:var(--tx2)">We texted a code to <b style="color:var(--tx)">+44 •• •••• 0142</b></div>
+          <div style="display:grid;grid-template-columns:repeat(6,1fr);gap:8px"><span style="height:52px;border:1.5px solid var(--p);border-radius:var(--rs);display:flex;align-items:center;justify-content:center;font-size:22px;font-weight:600">4</span><span style="height:52px;border:1.5px solid var(--p);border-radius:var(--rs);display:flex;align-items:center;justify-content:center;font-size:22px;font-weight:600">8</span><span style="height:52px;border:1.5px solid var(--p);border-radius:var(--rs);display:flex;align-items:center;justify-content:center;font-size:22px;font-weight:600">2</span><span style="height:52px;border:1.5px solid var(--p);border-radius:var(--rs);box-shadow:0 0 0 3px var(--psf);display:flex;align-items:center;justify-content:center;font-size:22px;font-weight:600">9</span><span style="height:52px;border:1px solid var(--bd);border-radius:var(--rs);background:var(--field)"></span><span style="height:52px;border:1px solid var(--bd);border-radius:var(--rs);background:var(--field)"></span></div>
+          <div style="height:44px;border-radius:var(--rs);background:var(--p);color:var(--on);display:flex;align-items:center;justify-content:center;font-weight:600;font-size:14px">Continue</div>
+          <div style="font-size:13px;color:var(--tx2)">Didn't get it? <span style="color:var(--tx3)">Resend in 0:24</span> · <span style="color:var(--pl)">Use email instead</span></div>
+        </div>
+      </div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:8px"><span style="font-size:12px;color:{{ v.stageTx }};opacity:.75">Magic link sent</span>
+      <div style="width:440px;height:560px;background:var(--page);border-radius:16px;display:flex;align-items:center;justify-content:center;padding:28px;font-family:var(--ff);color:var(--tx)">
+        <div style="width:100%;background:var(--card);border-radius:var(--rc);box-shadow:var(--sh);padding:34px 32px;display:flex;flex-direction:column;gap:14px;border:1px solid var(--bd);text-align:center;align-items:center">
+          <div style="width:60px;height:46px;border:2px solid var(--pl);border-radius:var(--rs);position:relative;overflow:hidden"><span style="position:absolute;left:-6px;right:-6px;top:-24px;height:46px;border:2px solid var(--pl);transform:rotate(45deg) translate(9px,9px);width:40px;margin:auto"></span></div>
+          <div style="font-family:var(--fh);font-size:var(--hs);font-weight:var(--hw);letter-spacing:var(--hl);line-height:1.15">Check your inbox</div>
+          <div style="font-size:14px;color:var(--tx2);text-wrap:pretty">We sent a sign-in link to <b style="color:var(--tx)">felix@brandt.dev</b>. It expires in 15 minutes and works once.</div>
+          <div style="width:100%;height:44px;border:1px solid var(--bd);border-radius:var(--rs);display:flex;align-items:center;justify-content:center;font-weight:500;font-size:14px">Open email app</div>
+          <div style="font-size:13px;color:var(--tx2)">Wrong address? <span style="color:var(--pl)">Go back</span></div>
+        </div>
+      </div>
+    </div>
+  </div></div>
+
+  <div style="display:flex;flex-direction:column;gap:16px"><span style="font-family:'Geist Mono',monospace;font-size:12px;color:{{ v.stageTx }};opacity:.7">04 — MULTI-FACTOR</span>
+  <div style="display:flex;flex-wrap:wrap;gap:24px">
+    <div style="display:flex;flex-direction:column;gap:8px"><span style="font-size:12px;color:{{ v.stageTx }};opacity:.75">Enroll · choose a factor</span>
+      <div style="width:440px;height:620px;background:var(--page);border-radius:16px;display:flex;align-items:center;justify-content:center;padding:28px;font-family:var(--ff);color:var(--tx)">
+        <div style="width:100%;background:var(--card);border-radius:var(--rc);box-shadow:var(--sh);padding:30px 28px;display:flex;flex-direction:column;gap:12px;border:1px solid var(--bd)">
+          <div style="font-family:var(--fh);font-size:var(--hs);font-weight:var(--hw);letter-spacing:var(--hl);line-height:1.15">Secure your account</div><div style="font-size:14px;color:var(--tx2);margin-top:-4px">{{ v.name }} requires a second step at sign-in.</div>
+          <div style="display:flex;gap:12px;align-items:center;padding:12px;border:1.5px solid var(--p);background:var(--psf);border-radius:var(--rs)"><span style="font-family:'Geist Mono',monospace;font-size:10px;font-weight:600;width:34px">KEY</span><div style="flex:1"><div style="font-weight:600;font-size:14px">Passkey or security key</div><div style="font-size:12px;color:var(--tx2)">Recommended · phishing-resistant</div></div><span>›</span></div>
+          <div style="display:flex;gap:12px;align-items:center;padding:12px;border:1px solid var(--bd);border-radius:var(--rs)"><span style="font-family:'Geist Mono',monospace;font-size:10px;font-weight:600;width:34px">PSH</span><div style="flex:1"><div style="font-weight:600;font-size:14px">Gatekeep Verify app</div><div style="font-size:12px;color:var(--tx2)">Approve with a tap</div></div><span>›</span></div>
+          <div style="display:flex;gap:12px;align-items:center;padding:12px;border:1px solid var(--bd);border-radius:var(--rs)"><span style="font-family:'Geist Mono',monospace;font-size:10px;font-weight:600;width:34px">OTP</span><div style="flex:1"><div style="font-weight:600;font-size:14px">Authenticator app</div><div style="font-size:12px;color:var(--tx2)">6-digit codes</div></div><span>›</span></div>
+          <div style="display:flex;gap:12px;align-items:center;padding:12px;border:1px solid var(--bd);border-radius:var(--rs)"><span style="font-family:'Geist Mono',monospace;font-size:10px;font-weight:600;width:34px">SMS</span><div style="flex:1"><div style="font-weight:600;font-size:14px">Text message</div><div style="font-size:12px;color:var(--tx2)">Less secure</div></div><span>›</span></div>
+        </div>
+      </div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:8px"><span style="font-size:12px;color:{{ v.stageTx }};opacity:.75">TOTP · scan QR</span>
+      <div style="width:440px;height:620px;background:var(--page);border-radius:16px;display:flex;align-items:center;justify-content:center;padding:28px;font-family:var(--ff);color:var(--tx)">
+        <div style="width:100%;background:var(--card);border-radius:var(--rc);box-shadow:var(--sh);padding:30px 28px;display:flex;flex-direction:column;gap:14px;border:1px solid var(--bd);align-items:center;text-align:center">
+          <div style="font-family:var(--fh);font-size:var(--hs);font-weight:var(--hw);letter-spacing:var(--hl);line-height:1.15">Scan with your app</div><div style="font-size:13.5px;color:var(--tx2);margin-top:-4px">Use any authenticator app, then enter the code.</div>
+          <div style="padding:10px;background:#fff;border-radius:var(--rs);border:1px solid var(--bd)"><div style="display:grid;grid-template-columns:repeat(21,7px);grid-auto-rows:7px"><sc-for list="{{ qr }}" as="q" hint-placeholder-count="0"><span style="background:{{ q.c }}"></span></sc-for></div></div>
+          <div style="font-family:'Geist Mono',monospace;font-size:11.5px;color:var(--tx2);background:var(--sf);padding:6px 10px;border-radius:var(--rs);letter-spacing:.06em">JBSW Y3DP EHPK 3PXP</div>
+          <div style="width:100%;height:44px;border:1.5px solid var(--p);border-radius:var(--rs);background:var(--field);display:flex;align-items:center;justify-content:center;font-size:18px;letter-spacing:.35em;font-weight:600">731 0__</div>
+          <div style="width:100%;height:44px;border-radius:var(--rs);background:var(--p);color:var(--on);display:flex;align-items:center;justify-content:center;font-weight:600;font-size:14px">Verify &amp; continue</div>
+        </div>
+      </div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:8px"><span style="font-size:12px;color:{{ v.stageTx }};opacity:.75">Push · check your phone</span>
+      <div style="width:440px;height:620px;background:var(--page);border-radius:16px;display:flex;align-items:center;justify-content:center;padding:28px;font-family:var(--ff);color:var(--tx)">
+        <div style="width:100%;background:var(--card);border-radius:var(--rc);box-shadow:var(--sh);padding:34px 28px;display:flex;flex-direction:column;gap:16px;border:1px solid var(--bd);align-items:center;text-align:center">
+          <div style="position:relative;width:76px;height:76px;display:flex;align-items:center;justify-content:center"><span style="position:absolute;inset:0;border-radius:50%;background:var(--p);opacity:.3;animation:gkPulse 1.8s ease-out infinite"></span><span style="width:38px;height:62px;border:2.5px solid var(--pl);border-radius:9px;background:var(--card);position:relative"></span></div>
+          <div style="font-family:var(--fh);font-size:var(--hs);font-weight:var(--hw);letter-spacing:var(--hl);line-height:1.15">Check your phone</div>
+          <div style="font-size:14px;color:var(--tx2);text-wrap:pretty">We sent a notification to <b style="color:var(--tx)">iPhone 15</b>. Tap the number below to approve.</div>
+          <div style="font-family:var(--fh);font-size:52px;font-weight:600;letter-spacing:.04em;line-height:1">47</div>
+          <div style="width:100%;padding:10px;border-radius:var(--rs);background:var(--sf);font-size:12.5px;color:var(--tx2)">Waiting for approval… <span style="color:var(--tx3)">expires in 1:52</span></div>
+          <div style="font-size:13px;color:var(--pl)">Try another method</div>
+        </div>
+      </div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:8px"><span style="font-size:12px;color:{{ v.stageTx }};opacity:.75">SMS code</span>
+      <div style="width:440px;height:620px;background:var(--page);border-radius:16px;display:flex;align-items:center;justify-content:center;padding:28px;font-family:var(--ff);color:var(--tx)">
+        <div style="width:100%;background:var(--card);border-radius:var(--rc);box-shadow:var(--sh);padding:34px 28px;display:flex;flex-direction:column;gap:14px;border:1px solid var(--bd);text-align:center">
+          <div style="font-family:var(--fh);font-size:var(--hs);font-weight:var(--hw);letter-spacing:var(--hl);line-height:1.15">Verify your identity</div><div style="font-size:14px;color:var(--tx2)">Enter the code sent to +44 •• •••• 0142</div>
+          <div style="height:48px;border:1.5px solid var(--bad);border-radius:var(--rs);background:var(--field);display:flex;align-items:center;justify-content:center;font-size:20px;letter-spacing:.35em;font-weight:600">558 102</div>
+          <div style="font-size:12.5px;color:var(--bad);text-align:left;margin-top:-6px">That code is incorrect. 2 attempts left.</div>
+          <div style="display:flex;gap:10px;font-size:12.5px;color:var(--tx2);align-items:center"><span style="width:16px;height:16px;border-radius:4px;border:1px solid var(--bd)"></span>Remember this device for 30 days</div>
+          <div style="height:44px;border-radius:var(--rs);background:var(--p);color:var(--on);display:flex;align-items:center;justify-content:center;font-weight:600;font-size:14px">Verify</div>
+          <div style="font-size:13px;color:var(--pl)">Resend code · Call me instead</div>
+        </div>
+      </div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:8px"><span style="font-size:12px;color:{{ v.stageTx }};opacity:.75">WebAuthn security key</span>
+      <div style="width:440px;height:620px;background:var(--page);border-radius:16px;display:flex;align-items:center;justify-content:center;padding:28px;font-family:var(--ff);color:var(--tx)">
+        <div style="width:100%;background:var(--card);border-radius:var(--rc);box-shadow:var(--sh);padding:34px 28px;display:flex;flex-direction:column;gap:16px;border:1px solid var(--bd);align-items:center;text-align:center">
+          <div style="width:44px;height:80px;border:2.5px solid var(--pl);border-radius:10px 10px 6px 6px;display:flex;flex-direction:column;align-items:center;justify-content:space-between;padding:8px 0"><span style="width:18px;height:18px;border-radius:50%;background:var(--p)"></span><span style="width:16px;height:14px;border:2px solid var(--pl);border-radius:2px"></span></div>
+          <div style="font-family:var(--fh);font-size:var(--hs);font-weight:var(--hw);letter-spacing:var(--hl);line-height:1.15">Use your security key</div>
+          <div style="font-size:14px;color:var(--tx2);text-wrap:pretty">Insert your key and touch the gold contact when it flashes.</div>
+          <div style="width:100%;height:44px;border-radius:var(--rs);background:var(--p);color:var(--on);display:flex;align-items:center;justify-content:center;font-weight:600;font-size:14px">Use security key</div>
+          <div style="font-size:13px;color:var(--pl)">Try another method</div>
+        </div>
+      </div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:8px"><span style="font-size:12px;color:{{ v.stageTx }};opacity:.75">Recovery codes</span>
+      <div style="width:440px;height:620px;background:var(--page);border-radius:16px;display:flex;align-items:center;justify-content:center;padding:28px;font-family:var(--ff);color:var(--tx)">
+        <div style="width:100%;background:var(--card);border-radius:var(--rc);box-shadow:var(--sh);padding:30px 28px;display:flex;flex-direction:column;gap:14px;border:1px solid var(--bd)">
+          <div style="font-family:var(--fh);font-size:var(--hs);font-weight:var(--hw);letter-spacing:var(--hl);line-height:1.15">Save your recovery codes</div><div style="font-size:13.5px;color:var(--tx2);margin-top:-4px;text-wrap:pretty">If you lose your device, each code signs you in once. We won't show them again.</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px 16px;padding:14px;border:1px dashed var(--bd);border-radius:var(--rs);font-family:'Geist Mono',monospace;font-size:13.5px;background:var(--sf)"><span>7KQ2-M9XV</span><span>P4TZ-8HNC</span><span>W1RB-6JDL</span><span>Q0FE-3YSA</span><span>N5GU-2KMT</span><span>D8VP-4LCX</span><span>H3QW-9RZB</span><span>T6MJ-1ENF</span></div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px"><div style="height:40px;border:1px solid var(--bd);border-radius:var(--rs);display:flex;align-items:center;justify-content:center;font-size:13.5px;font-weight:500">Copy</div><div style="height:40px;border:1px solid var(--bd);border-radius:var(--rs);display:flex;align-items:center;justify-content:center;font-size:13.5px;font-weight:500">Download .txt</div></div>
+          <div style="display:flex;gap:10px;font-size:12.5px;color:var(--tx2);align-items:center"><span style="width:16px;height:16px;border-radius:4px;background:var(--p);color:var(--on);font-size:10px;display:flex;align-items:center;justify-content:center">✓</span>I've saved these codes somewhere safe</div>
+          <div style="height:44px;border-radius:var(--rs);background:var(--p);color:var(--on);display:flex;align-items:center;justify-content:center;font-weight:600;font-size:14px">Continue</div>
+        </div>
+      </div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:8px"><span style="font-size:12px;color:{{ v.stageTx }};opacity:.75">Step-up challenge</span>
+      <div style="width:440px;height:620px;background:var(--page);border-radius:16px;display:flex;align-items:center;justify-content:center;padding:28px;font-family:var(--ff);color:var(--tx)">
+        <div style="width:100%;background:var(--card);border-radius:var(--rc);box-shadow:var(--sh);padding:30px 28px;display:flex;flex-direction:column;gap:14px;border:1px solid var(--bd)">
+          <span style="align-self:flex-start;font-size:11.5px;font-weight:600;padding:3px 8px;border-radius:var(--rs);background:var(--warnsf);color:var(--warn)">Extra verification required</span>
+          <div style="font-family:var(--fh);font-size:var(--hs);font-weight:var(--hw);letter-spacing:var(--hl);line-height:1.15">Confirm it's you to send this payment</div>
+          <div style="padding:12px;border:1px solid var(--bd);border-radius:var(--rs);display:grid;grid-template-columns:auto 1fr;gap:6px 14px;font-size:13px"><span style="color:var(--tx3)">To</span><span>Kestrel Supplies Ltd</span><span style="color:var(--tx3)">Amount</span><span style="font-weight:600">€18,420.00</span><span style="color:var(--tx3)">From</span><span>Operating ••4410</span></div>
+          <div style="height:44px;border-radius:var(--rs);background:var(--p);color:var(--on);display:flex;align-items:center;justify-content:center;gap:8px;font-weight:600;font-size:14px">Verify with passkey</div>
+          <div style="height:44px;border:1px solid var(--bd);border-radius:var(--rs);display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:500">Send push to iPhone 15</div>
+          <div style="text-align:center;font-size:13px;color:var(--tx3)">Cancel payment</div>
+        </div>
+      </div>
+    </div>
+  </div></div>
+
+  <div style="display:flex;flex-direction:column;gap:16px"><span style="font-family:'Geist Mono',monospace;font-size:12px;color:{{ v.stageTx }};opacity:.7">05 — PASSWORD RECOVERY &amp; VERIFICATION</span>
+  <div style="display:flex;flex-wrap:wrap;gap:24px">
+    <div style="display:flex;flex-direction:column;gap:8px"><span style="font-size:12px;color:{{ v.stageTx }};opacity:.75">Forgot password</span>
+      <div style="width:440px;height:520px;background:var(--page);border-radius:16px;display:flex;align-items:center;justify-content:center;padding:28px;font-family:var(--ff);color:var(--tx)">
+        <div style="width:100%;background:var(--card);border-radius:var(--rc);box-shadow:var(--sh);padding:34px 32px;display:flex;flex-direction:column;gap:14px;border:1px solid var(--bd)">
+          <div style="font-family:var(--fh);font-size:var(--hs);font-weight:var(--hw);letter-spacing:var(--hl);line-height:1.15">Forgot your password?</div><div style="font-size:14px;color:var(--tx2);margin-top:-4px">Enter your email and we'll send a reset link.</div>
+          <div style="height:44px;border:1.5px solid var(--p);border-radius:var(--rs);background:var(--field);display:flex;align-items:center;padding:0 14px;font-size:14px">maya@acme.com</div>
+          <div style="height:44px;border-radius:var(--rs);background:var(--p);color:var(--on);display:flex;align-items:center;justify-content:center;font-weight:600;font-size:14px">Send reset link</div>
+          <div style="text-align:center;font-size:13px;color:var(--pl)">← Back to {{ v.name }}</div>
+        </div>
+      </div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:8px"><span style="font-size:12px;color:{{ v.stageTx }};opacity:.75">Reset password</span>
+      <div style="width:440px;height:520px;background:var(--page);border-radius:16px;display:flex;align-items:center;justify-content:center;padding:28px;font-family:var(--ff);color:var(--tx)">
+        <div style="width:100%;background:var(--card);border-radius:var(--rc);box-shadow:var(--sh);padding:34px 32px;display:flex;flex-direction:column;gap:13px;border:1px solid var(--bd)">
+          <div style="font-family:var(--fh);font-size:var(--hs);font-weight:var(--hw);letter-spacing:var(--hl);line-height:1.15">Choose a new password</div>
+          <div style="display:flex;flex-direction:column;gap:6px"><span style="font-size:12.5px;font-weight:500">New password</span><div style="height:44px;border:1.5px solid var(--p);border-radius:var(--rs);background:var(--field);display:flex;align-items:center;padding:0 14px;letter-spacing:.2em">••••••••••••••</div><div style="display:grid;grid-template-columns:repeat(4,1fr);gap:4px"><span style="height:4px;border-radius:9px;background:var(--ok)"></span><span style="height:4px;border-radius:9px;background:var(--ok)"></span><span style="height:4px;border-radius:9px;background:var(--ok)"></span><span style="height:4px;border-radius:9px;background:var(--ok)"></span></div></div>
+          <div style="display:flex;flex-direction:column;gap:6px"><span style="font-size:12.5px;font-weight:500">Confirm password</span><div style="height:44px;border:1px solid var(--bd);border-radius:var(--rs);background:var(--field);display:flex;align-items:center;padding:0 14px;letter-spacing:.2em">••••••••••••••</div></div>
+          <div style="height:44px;border-radius:var(--rs);background:var(--p);color:var(--on);display:flex;align-items:center;justify-content:center;font-weight:600;font-size:14px">Reset password</div>
+        </div>
+      </div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:8px"><span style="font-size:12px;color:{{ v.stageTx }};opacity:.75">Password changed</span>
+      <div style="width:440px;height:520px;background:var(--page);border-radius:16px;display:flex;align-items:center;justify-content:center;padding:28px;font-family:var(--ff);color:var(--tx)">
+        <div style="width:100%;background:var(--card);border-radius:var(--rc);box-shadow:var(--sh);padding:34px 32px;display:flex;flex-direction:column;gap:14px;border:1px solid var(--bd);align-items:center;text-align:center">
+          <span style="width:52px;height:52px;border-radius:50%;background:var(--oksf);color:var(--ok);font-size:24px;display:flex;align-items:center;justify-content:center">✓</span>
+          <div style="font-family:var(--fh);font-size:var(--hs);font-weight:var(--hw);letter-spacing:var(--hl);line-height:1.15">Password changed</div><div style="font-size:14px;color:var(--tx2);text-wrap:pretty">You've been signed out of other devices for your security.</div>
+          <div style="width:100%;height:44px;border-radius:var(--rs);background:var(--p);color:var(--on);display:flex;align-items:center;justify-content:center;font-weight:600;font-size:14px">Back to {{ v.name }}</div>
+        </div>
+      </div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:8px"><span style="font-size:12px;color:{{ v.stageTx }};opacity:.75">Email verification required</span>
+      <div style="width:440px;height:520px;background:var(--page);border-radius:16px;display:flex;align-items:center;justify-content:center;padding:28px;font-family:var(--ff);color:var(--tx)">
+        <div style="width:100%;background:var(--card);border-radius:var(--rc);box-shadow:var(--sh);padding:34px 32px;display:flex;flex-direction:column;gap:14px;border:1px solid var(--bd);align-items:center;text-align:center">
+          <span style="width:52px;height:52px;border-radius:50%;background:var(--warnsf);color:var(--warn);font-size:22px;font-weight:700;display:flex;align-items:center;justify-content:center">@</span>
+          <div style="font-family:var(--fh);font-size:var(--hs);font-weight:var(--hw);letter-spacing:var(--hl);line-height:1.15">Verify your email to continue</div><div style="font-size:14px;color:var(--tx2);text-wrap:pretty">We sent a link to <b style="color:var(--tx)">truiz@outlook.com</b>. Click it, then come back here.</div>
+          <div style="width:100%;height:44px;border-radius:var(--rs);background:var(--p);color:var(--on);display:flex;align-items:center;justify-content:center;font-weight:600;font-size:14px">I've verified — continue</div>
+          <div style="font-size:13px;color:var(--pl)">Resend email</div>
+        </div>
+      </div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:8px"><span style="font-size:12px;color:{{ v.stageTx }};opacity:.75">Email verified</span>
+      <div style="width:440px;height:520px;background:var(--page);border-radius:16px;display:flex;align-items:center;justify-content:center;padding:28px;font-family:var(--ff);color:var(--tx)">
+        <div style="width:100%;background:var(--card);border-radius:var(--rc);box-shadow:var(--sh);padding:34px 32px;display:flex;flex-direction:column;gap:14px;border:1px solid var(--bd);align-items:center;text-align:center">
+          <span style="width:52px;height:52px;border-radius:50%;background:var(--oksf);color:var(--ok);font-size:24px;display:flex;align-items:center;justify-content:center">✓</span>
+          <div style="font-family:var(--fh);font-size:var(--hs);font-weight:var(--hw);letter-spacing:var(--hl);line-height:1.15">Email verified</div><div style="font-size:14px;color:var(--tx2)">Thanks, Tomás. You're all set.</div>
+          <div style="width:100%;height:44px;border-radius:var(--rs);background:var(--p);color:var(--on);display:flex;align-items:center;justify-content:center;font-weight:600;font-size:14px">Continue to {{ v.name }}</div>
+        </div>
+      </div>
+    </div>
+  </div></div>
+
+  <div style="display:flex;flex-direction:column;gap:16px"><span style="font-family:'Geist Mono',monospace;font-size:12px;color:{{ v.stageTx }};opacity:.7">06 — ORGANIZATIONS, CONSENT &amp; LINKING</span>
+  <div style="display:flex;flex-wrap:wrap;gap:24px">
+    <div style="display:flex;flex-direction:column;gap:8px"><span style="font-size:12px;color:{{ v.stageTx }};opacity:.75">Organization picker</span>
+      <div style="width:440px;height:580px;background:var(--page);border-radius:16px;display:flex;align-items:center;justify-content:center;padding:28px;font-family:var(--ff);color:var(--tx)">
+        <div style="width:100%;background:var(--card);border-radius:var(--rc);box-shadow:var(--sh);padding:30px 28px;display:flex;flex-direction:column;gap:10px;border:1px solid var(--bd)">
+          <div style="font-family:var(--fh);font-size:var(--hs);font-weight:var(--hw);letter-spacing:var(--hl);line-height:1.15">Choose an organization</div><div style="font-size:13.5px;color:var(--tx2);margin:-2px 0 4px">Signed in as maya@acme.com</div>
+          <div style="display:flex;gap:12px;align-items:center;padding:12px;border:1.5px solid var(--p);border-radius:var(--rs);background:var(--psf)"><span style="width:30px;height:30px;border-radius:var(--rs);background:#d9480f;color:#fff;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center">AC</span><div style="flex:1"><div style="font-weight:600">Acme Corp</div><div style="font-size:12px;color:var(--tx2)">Org Admin</div></div><span>›</span></div>
+          <div style="display:flex;gap:12px;align-items:center;padding:12px;border:1px solid var(--bd);border-radius:var(--rs)"><span style="width:30px;height:30px;border-radius:var(--rs);background:#1c7ed6;color:#fff;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center">KL</span><div style="flex:1"><div style="font-weight:600">Kestrel Labs</div><div style="font-size:12px;color:var(--tx2)">Member</div></div><span>›</span></div>
+          <div style="display:flex;gap:12px;align-items:center;padding:12px;border:1px solid var(--bd);border-radius:var(--rs)"><span style="width:30px;height:30px;border-radius:var(--rs);background:#0ca678;color:#fff;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center">BH</span><div style="flex:1"><div style="font-weight:600">Brightline Health</div><div style="font-size:12px;color:var(--tx2)">Billing Manager</div></div><span>›</span></div>
+          <div style="font-size:13px;color:var(--pl);text-align:center;margin-top:4px">Use a different account</div>
+        </div>
+      </div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:8px"><span style="font-size:12px;color:{{ v.stageTx }};opacity:.75">Invitation acceptance</span>
+      <div style="width:440px;height:580px;background:var(--page);border-radius:16px;display:flex;align-items:center;justify-content:center;padding:28px;font-family:var(--ff);color:var(--tx)">
+        <div style="width:100%;background:var(--card);border-radius:var(--rc);box-shadow:var(--sh);padding:34px 30px;display:flex;flex-direction:column;gap:14px;border:1px solid var(--bd);align-items:center;text-align:center">
+          <div style="display:flex;align-items:center"><span style="width:44px;height:44px;border-radius:50%;background:var(--psf);color:var(--pl);font-weight:600;display:flex;align-items:center;justify-content:center;border:3px solid var(--card)">MO</span><span style="width:44px;height:44px;border-radius:var(--rs);background:#d9480f;color:#fff;font-weight:700;display:flex;align-items:center;justify-content:center;margin-left:-10px;border:3px solid var(--card)">AC</span></div>
+          <div style="font-family:var(--fh);font-size:var(--hs);font-weight:var(--hw);letter-spacing:var(--hl);line-height:1.15">Join Acme Corp on {{ v.name }}</div>
+          <div style="font-size:14px;color:var(--tx2);text-wrap:pretty">Maya Okafor invited <b style="color:var(--tx)">dana@acme.com</b> as a <b style="color:var(--tx)">Member</b>.</div>
+          <div style="width:100%;height:44px;border-radius:var(--rs);background:var(--p);color:var(--on);display:flex;align-items:center;justify-content:center;font-weight:600;font-size:14px">Accept with Acme SSO</div>
+          <div style="font-size:12px;color:var(--tx3)">Invitation expires in 5 days</div>
+        </div>
+      </div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:8px"><span style="font-size:12px;color:{{ v.stageTx }};opacity:.75">Consent · third-party app</span>
+      <div style="width:440px;height:580px;background:var(--page);border-radius:16px;display:flex;align-items:center;justify-content:center;padding:28px;font-family:var(--ff);color:var(--tx)">
+        <div style="width:100%;background:var(--card);border-radius:var(--rc);box-shadow:var(--sh);padding:30px 28px;display:flex;flex-direction:column;gap:14px;border:1px solid var(--bd)">
+          <div style="display:flex;align-items:center;gap:10px;justify-content:center"><span style="width:40px;height:40px;border-radius:var(--rs);background:#03363d;color:#fff;font-weight:700;display:flex;align-items:center;justify-content:center">Z</span><span style="color:var(--tx3);letter-spacing:.2em">•••</span><span style="width:40px;height:40px;border-radius:var(--rs);background:var(--p);color:var(--on);font-weight:700;display:flex;align-items:center;justify-content:center">{{ v.mono }}</span></div>
+          <div style="font-family:var(--fh);font-size:var(--hs);font-weight:var(--hw);letter-spacing:var(--hl);line-height:1.15;text-align:center">Zendesk wants access to your {{ v.name }} account</div>
+          <div style="display:flex;flex-direction:column;border:1px solid var(--bd);border-radius:var(--rs);font-size:13px"><div style="padding:10px 12px;border-bottom:1px solid var(--bd);display:flex;gap:10px"><span style="color:var(--ok)">✓</span>View your name, email and profile picture</div><div style="padding:10px 12px;border-bottom:1px solid var(--bd);display:flex;gap:10px"><span style="color:var(--ok)">✓</span>Read your support tickets</div><div style="padding:10px 12px;display:flex;gap:10px"><span style="color:var(--ok)">✓</span>Stay connected when you're offline</div></div>
+          <div style="font-size:12px;color:var(--tx3)">Third-party app · not built by {{ v.name }} · revoke any time in Account settings</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px"><div style="height:44px;border:1px solid var(--bd);border-radius:var(--rs);display:flex;align-items:center;justify-content:center;font-weight:500">Decline</div><div style="height:44px;border-radius:var(--rs);background:var(--p);color:var(--on);display:flex;align-items:center;justify-content:center;font-weight:600">Allow</div></div>
+        </div>
+      </div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:8px"><span style="font-size:12px;color:{{ v.stageTx }};opacity:.75">Account linking prompt</span>
+      <div style="width:440px;height:580px;background:var(--page);border-radius:16px;display:flex;align-items:center;justify-content:center;padding:28px;font-family:var(--ff);color:var(--tx)">
+        <div style="width:100%;background:var(--card);border-radius:var(--rc);box-shadow:var(--sh);padding:30px 28px;display:flex;flex-direction:column;gap:14px;border:1px solid var(--bd)">
+          <div style="font-family:var(--fh);font-size:var(--hs);font-weight:var(--hw);letter-spacing:var(--hl);line-height:1.15">You already have an account</div>
+          <div style="font-size:14px;color:var(--tx2);text-wrap:pretty">An account for <b style="color:var(--tx)">maya@acme.com</b> exists using a password. Link Google to sign in either way.</div>
+          <div style="display:flex;align-items:center;gap:10px;padding:12px;border:1px solid var(--bd);border-radius:var(--rs)"><span style="width:30px;height:30px;border-radius:var(--rs);background:var(--sf);font-weight:700;display:flex;align-items:center;justify-content:center">G</span><span style="flex:1;font-size:13.5px">Google</span><span style="color:var(--tx3)">+</span><span style="width:30px;height:30px;border-radius:var(--rs);background:var(--sf);font-family:'Geist Mono',monospace;font-size:10px;font-weight:600;display:flex;align-items:center;justify-content:center">PW</span><span style="font-size:13.5px">Password</span></div>
+          <div style="height:44px;border-radius:var(--rs);background:var(--p);color:var(--on);display:flex;align-items:center;justify-content:center;font-weight:600;font-size:14px">Verify password &amp; link</div>
+          <div style="height:44px;border:1px solid var(--bd);border-radius:var(--rs);display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:500">Keep accounts separate</div>
+        </div>
+      </div>
+    </div>
+  </div></div>
+
+  <div style="display:flex;flex-direction:column;gap:16px"><span style="font-family:'Geist Mono',monospace;font-size:12px;color:{{ v.stageTx }};opacity:.7">07 — DEVICES &amp; AI AGENTS</span>
+  <div style="display:flex;flex-wrap:wrap;gap:24px">
+    <div style="display:flex;flex-direction:column;gap:8px"><span style="font-size:12px;color:{{ v.stageTx }};opacity:.75">Device activation (TV / CLI)</span>
+      <div style="width:440px;height:560px;background:var(--page);border-radius:16px;display:flex;align-items:center;justify-content:center;padding:28px;font-family:var(--ff);color:var(--tx)">
+        <div style="width:100%;background:var(--card);border-radius:var(--rc);box-shadow:var(--sh);padding:34px 30px;display:flex;flex-direction:column;gap:14px;border:1px solid var(--bd);text-align:center">
+          <div style="font-family:var(--fh);font-size:var(--hs);font-weight:var(--hw);letter-spacing:var(--hl);line-height:1.15">Activate your device</div><div style="font-size:14px;color:var(--tx2)">Enter the code shown on your TV or terminal.</div>
+          <div style="display:flex;gap:8px;justify-content:center;align-items:center;font-family:'Geist Mono',monospace;font-size:22px;font-weight:600"><span style="width:38px;height:50px;border:1.5px solid var(--p);border-radius:var(--rs);display:flex;align-items:center;justify-content:center">B</span><span style="width:38px;height:50px;border:1.5px solid var(--p);border-radius:var(--rs);display:flex;align-items:center;justify-content:center">K</span><span style="width:38px;height:50px;border:1.5px solid var(--p);border-radius:var(--rs);display:flex;align-items:center;justify-content:center">D</span><span style="width:38px;height:50px;border:1.5px solid var(--p);border-radius:var(--rs);display:flex;align-items:center;justify-content:center">Q</span><span style="color:var(--tx3)">–</span><span style="width:38px;height:50px;border:1.5px solid var(--p);border-radius:var(--rs);display:flex;align-items:center;justify-content:center">W</span><span style="width:38px;height:50px;border:1px solid var(--bd);border-radius:var(--rs)"></span><span style="width:38px;height:50px;border:1px solid var(--bd);border-radius:var(--rs)"></span><span style="width:38px;height:50px;border:1px solid var(--bd);border-radius:var(--rs)"></span></div>
+          <div style="height:44px;border-radius:var(--rs);background:var(--p);color:var(--on);display:flex;align-items:center;justify-content:center;font-weight:600;font-size:14px">Continue</div>
+          <div style="font-size:12.5px;color:var(--tx3)">Only enter codes from devices you own.</div>
+        </div>
+      </div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:8px"><span style="font-size:12px;color:{{ v.stageTx }};opacity:.75">Agent approval (CIBA)</span>
+      <div style="width:440px;height:560px;background:var(--page);border-radius:16px;display:flex;align-items:center;justify-content:center;padding:28px;font-family:var(--ff);color:var(--tx)">
+        <div style="width:100%;background:var(--card);border-radius:var(--rc);box-shadow:var(--sh);padding:28px;display:flex;flex-direction:column;gap:14px;border:1px solid var(--bd)">
+          <div style="display:flex;gap:10px;align-items:center"><span style="width:36px;height:36px;border-radius:var(--rs);background:var(--psf);color:var(--pl);font-family:'Geist Mono',monospace;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center">AI</span><div><div style="font-weight:600">Support Copilot</div><div style="font-size:12px;color:var(--tx3)">AI agent · verified by {{ v.name }}</div></div><span style="margin-left:auto;font-size:11.5px;color:var(--tx3)">just now</span></div>
+          <div style="font-family:var(--fh);font-size:var(--hs);font-weight:var(--hw);letter-spacing:var(--hl);line-height:1.15">Approve a refund of $240?</div>
+          <div style="padding:12px;border-radius:var(--rs);background:var(--sf);font-size:13px;display:grid;grid-template-columns:auto 1fr;gap:6px 14px"><span style="color:var(--tx3)">Action</span><span>Refund invoice INV-2207</span><span style="color:var(--tx3)">Permission</span><span style="font-family:'Geist Mono',monospace;font-size:12px">payments:write</span><span style="color:var(--tx3)">On behalf of</span><span>Priya Raman</span><span style="color:var(--tx3)">Valid for</span><span>This request only</span></div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px"><div style="height:44px;border:1px solid var(--bd);border-radius:var(--rs);display:flex;align-items:center;justify-content:center;font-weight:500">Deny</div><div style="height:44px;border-radius:var(--rs);background:var(--p);color:var(--on);display:flex;align-items:center;justify-content:center;font-weight:600">Approve</div></div>
+          <div style="font-size:12px;color:var(--tx3);text-align:center">Didn't ask for this? <span style="color:var(--pl)">Report &amp; revoke agent access</span></div>
+        </div>
+      </div>
+    </div>
+  </div></div>
+
+  <div style="display:flex;flex-direction:column;gap:16px"><span style="font-family:'Geist Mono',monospace;font-size:12px;color:{{ v.stageTx }};opacity:.7">08 — PROTECTION</span>
+  <div style="display:flex;flex-wrap:wrap;gap:24px">
+    <div style="display:flex;flex-direction:column;gap:8px"><span style="font-size:12px;color:{{ v.stageTx }};opacity:.75">Blocked account</span>
+      <div style="width:440px;height:500px;background:var(--page);border-radius:16px;display:flex;align-items:center;justify-content:center;padding:28px;font-family:var(--ff);color:var(--tx)">
+        <div style="width:100%;background:var(--card);border-radius:var(--rc);box-shadow:var(--sh);padding:32px 30px;display:flex;flex-direction:column;gap:14px;border:1px solid var(--bd);align-items:center;text-align:center">
+          <span style="width:52px;height:52px;border-radius:50%;background:var(--badsf);color:var(--bad);font-size:22px;font-weight:700;display:flex;align-items:center;justify-content:center">⊘</span>
+          <div style="font-family:var(--fh);font-size:var(--hs);font-weight:var(--hw);letter-spacing:var(--hl);line-height:1.15">Your account is blocked</div><div style="font-size:14px;color:var(--tx2);text-wrap:pretty">An administrator has suspended access. Contact your {{ v.name }} admin or support for help.</div>
+          <div style="width:100%;height:44px;border:1px solid var(--bd);border-radius:var(--rs);display:flex;align-items:center;justify-content:center;font-weight:500;font-size:14px">Contact support</div>
+        </div>
+      </div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:8px"><span style="font-size:12px;color:{{ v.stageTx }};opacity:.75">Brute-force lockout</span>
+      <div style="width:440px;height:500px;background:var(--page);border-radius:16px;display:flex;align-items:center;justify-content:center;padding:28px;font-family:var(--ff);color:var(--tx)">
+        <div style="width:100%;background:var(--card);border-radius:var(--rc);box-shadow:var(--sh);padding:32px 30px;display:flex;flex-direction:column;gap:14px;border:1px solid var(--bd)">
+          <div style="padding:12px;border-radius:var(--rs);background:var(--badsf);color:var(--bad);font-size:13px;line-height:1.5"><b style="font-weight:600">Too many failed attempts.</b> We've temporarily locked sign-in for this account from your network.</div>
+          <div style="font-family:var(--fh);font-size:var(--hs);font-weight:var(--hw);letter-spacing:var(--hl);line-height:1.15">Account temporarily locked</div>
+          <div style="font-size:14px;color:var(--tx2);text-wrap:pretty">We emailed <b style="color:var(--tx)">g•••@northwind.app</b> a link to unlock it. Or reset your password now.</div>
+          <div style="height:44px;border-radius:var(--rs);background:var(--p);color:var(--on);display:flex;align-items:center;justify-content:center;font-weight:600;font-size:14px">Reset password</div>
+        </div>
+      </div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:8px"><span style="font-size:12px;color:{{ v.stageTx }};opacity:.75">Breached password warning</span>
+      <div style="width:440px;height:500px;background:var(--page);border-radius:16px;display:flex;align-items:center;justify-content:center;padding:28px;font-family:var(--ff);color:var(--tx)">
+        <div style="width:100%;background:var(--card);border-radius:var(--rc);box-shadow:var(--sh);padding:32px 30px;display:flex;flex-direction:column;gap:14px;border:1px solid var(--bd)">
+          <span style="align-self:flex-start;font-size:11.5px;font-weight:600;padding:3px 8px;border-radius:var(--rs);background:var(--warnsf);color:var(--warn)">Security alert</span>
+          <div style="font-family:var(--fh);font-size:var(--hs);font-weight:var(--hw);letter-spacing:var(--hl);line-height:1.15">This password appeared in a data breach</div>
+          <div style="font-size:14px;color:var(--tx2);text-wrap:pretty">It was found in a leak from another website. To protect your account, choose a new password before continuing.</div>
+          <div style="height:44px;border-radius:var(--rs);background:var(--p);color:var(--on);display:flex;align-items:center;justify-content:center;font-weight:600;font-size:14px">Change password</div>
+          <div style="font-size:12.5px;color:var(--tx3);text-align:center">We never saw your password — checked with k-anonymity.</div>
+        </div>
+      </div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:8px"><span style="font-size:12px;color:{{ v.stageTx }};opacity:.75">CAPTCHA challenge</span>
+      <div style="width:440px;height:500px;background:var(--page);border-radius:16px;display:flex;align-items:center;justify-content:center;padding:28px;font-family:var(--ff);color:var(--tx)">
+        <div style="width:100%;background:var(--card);border-radius:var(--rc);box-shadow:var(--sh);padding:32px 30px;display:flex;flex-direction:column;gap:14px;border:1px solid var(--bd)">
+          <div style="font-family:var(--fh);font-size:var(--hs);font-weight:var(--hw);letter-spacing:var(--hl);line-height:1.15">Quick check</div><div style="font-size:14px;color:var(--tx2);margin-top:-4px">We noticed unusual activity from your network.</div>
+          <div style="display:flex;align-items:center;gap:12px;padding:14px;border:1px solid var(--bd);border-radius:var(--rs);background:var(--sf)"><span style="width:24px;height:24px;border-radius:4px;border:2px solid var(--p);background:var(--card);display:flex;align-items:center;justify-content:center;color:var(--pl);font-weight:700">✓</span><span style="flex:1;font-size:14px">Verified human</span><span style="font-family:'Geist Mono',monospace;font-size:9.5px;color:var(--tx3);text-align:right;line-height:1.3">GATEKEEP<br>CHALLENGE</span></div>
+          <div style="height:44px;border:1px solid var(--bd);border-radius:var(--rs);background:var(--field);display:flex;align-items:center;padding:0 14px;letter-spacing:.2em">••••••••••</div>
+          <div style="height:44px;border-radius:var(--rs);background:var(--p);color:var(--on);display:flex;align-items:center;justify-content:center;font-weight:600;font-size:14px">Log in</div>
+        </div>
+      </div>
+    </div>
+  </div></div>
+
+  <div style="display:flex;flex-direction:column;gap:16px"><span style="font-family:'Geist Mono',monospace;font-size:12px;color:{{ v.stageTx }};opacity:.7">09 — EXIT &amp; ERRORS</span>
+  <div style="display:flex;flex-wrap:wrap;gap:24px">
+    <div style="display:flex;flex-direction:column;gap:8px"><span style="font-size:12px;color:{{ v.stageTx }};opacity:.75">Logout confirmation</span>
+      <div style="width:440px;height:440px;background:var(--page);border-radius:16px;display:flex;align-items:center;justify-content:center;padding:28px;font-family:var(--ff);color:var(--tx)">
+        <div style="width:100%;background:var(--card);border-radius:var(--rc);box-shadow:var(--sh);padding:32px 30px;display:flex;flex-direction:column;gap:14px;border:1px solid var(--bd);text-align:center;align-items:center">
+          <div style="font-family:var(--fh);font-size:var(--hs);font-weight:var(--hw);letter-spacing:var(--hl);line-height:1.15">Log out of {{ v.name }}?</div><div style="font-size:14px;color:var(--tx2)">You'll be signed out of all {{ v.name }} apps on this browser.</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;width:100%"><div style="height:44px;border:1px solid var(--bd);border-radius:var(--rs);display:flex;align-items:center;justify-content:center;font-weight:500">Stay signed in</div><div style="height:44px;border-radius:var(--rs);background:var(--p);color:var(--on);display:flex;align-items:center;justify-content:center;font-weight:600">Log out</div></div>
+        </div>
+      </div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:8px"><span style="font-size:12px;color:{{ v.stageTx }};opacity:.75">Generic error</span>
+      <div style="width:440px;height:440px;background:var(--page);border-radius:16px;display:flex;align-items:center;justify-content:center;padding:28px;font-family:var(--ff);color:var(--tx)">
+        <div style="width:100%;background:var(--card);border-radius:var(--rc);box-shadow:var(--sh);padding:32px 30px;display:flex;flex-direction:column;gap:14px;border:1px solid var(--bd);text-align:center;align-items:center">
+          <span style="width:46px;height:46px;border-radius:50%;background:var(--badsf);color:var(--bad);font-size:20px;font-weight:700;display:flex;align-items:center;justify-content:center">!</span>
+          <div style="font-family:var(--fh);font-size:var(--hs);font-weight:var(--hw);letter-spacing:var(--hl);line-height:1.15">Something went wrong</div><div style="font-size:14px;color:var(--tx2)">This link has expired or was already used.</div>
+          <div style="font-family:'Geist Mono',monospace;font-size:11px;color:var(--tx3);padding:6px 10px;background:var(--sf);border-radius:var(--rs)">invalid_request · trace 7f2c9a1e</div>
+          <div style="width:100%;height:44px;border-radius:var(--rs);background:var(--p);color:var(--on);display:flex;align-items:center;justify-content:center;font-weight:600;font-size:14px">Back to {{ v.name }}</div>
+        </div>
+      </div>
+    </div>
+  </div></div>
+
+  <div style="display:flex;flex-direction:column;gap:16px"><span style="font-family:'Geist Mono',monospace;font-size:12px;color:{{ v.stageTx }};opacity:.7">10 — SELF-SERVICE ACCOUNT PORTAL</span>
+    <div style="width:1100px;background:var(--page);border-radius:16px;padding:28px;font-family:var(--ff);color:var(--tx)">
+      <div style="background:var(--card);border-radius:var(--rc);box-shadow:var(--sh);border:1px solid var(--bd);display:grid;grid-template-columns:220px 1fr;overflow:hidden">
+        <div style="border-right:1px solid var(--bd);padding:22px 14px;display:flex;flex-direction:column;gap:2px;font-size:14px">
+          <div style="display:flex;gap:10px;align-items:center;padding:0 8px 18px"><div style="width:30px;height:30px;border-radius:var(--rs);background:var(--p);color:var(--on);display:flex;align-items:center;justify-content:center;font-weight:700">{{ v.mono }}</div><span style="font-weight:600">{{ v.name }} account</span></div>
+          <span style="padding:8px 10px;border-radius:var(--rs);color:var(--tx2)">Profile</span><span style="padding:8px 10px;border-radius:var(--rs);background:var(--psf);font-weight:600">Security</span><span style="padding:8px 10px;color:var(--tx2)">Sessions</span><span style="padding:8px 10px;color:var(--tx2)">Connected apps</span><span style="padding:8px 10px;color:var(--tx2)">Privacy &amp; data</span>
+        </div>
+        <div style="padding:28px 32px;display:flex;flex-direction:column;gap:24px">
+          <div style="display:flex;gap:14px;align-items:center"><span style="width:52px;height:52px;border-radius:50%;background:var(--psf);color:var(--pl);font-weight:600;font-size:17px;display:flex;align-items:center;justify-content:center">MO</span><div><div style="font-family:var(--fh);font-size:var(--hs);font-weight:var(--hw);letter-spacing:var(--hl);line-height:1.15">Maya Okafor</div><div style="font-size:13px;color:var(--tx2)">maya.okafor@acme.com · <span style="color:var(--ok)">verified</span></div></div><div style="margin-left:auto;height:36px;padding:0 14px;border:1px solid var(--bd);border-radius:var(--rs);display:flex;align-items:center;font-size:13px;font-weight:500">Edit profile</div></div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:18px">
+            <div style="border:1px solid var(--bd);border-radius:var(--rs);display:flex;flex-direction:column">
+              <div style="padding:12px 16px;border-bottom:1px solid var(--bd);font-weight:600;font-size:14px">Sign-in methods</div>
+              <div style="padding:12px 16px;border-bottom:1px solid var(--bd);display:flex;justify-content:space-between;font-size:13.5px"><span>Password <span style="color:var(--tx3);font-size:12px">· changed 3 months ago</span></span><span style="color:var(--pl)">Change</span></div>
+              <div style="padding:12px 16px;border-bottom:1px solid var(--bd);display:flex;justify-content:space-between;font-size:13.5px"><span>Passkey · MacBook Pro <span style="color:var(--tx3);font-size:12px">· iCloud</span></span><span style="color:var(--bad)">Remove</span></div>
+              <div style="padding:12px 16px;display:flex;justify-content:space-between;font-size:13.5px"><span style="color:var(--pl)">+ Add a passkey</span></div>
+            </div>
+            <div style="border:1px solid var(--bd);border-radius:var(--rs);display:flex;flex-direction:column">
+              <div style="padding:12px 16px;border-bottom:1px solid var(--bd);font-weight:600;font-size:14px">Two-step verification</div>
+              <div style="padding:12px 16px;border-bottom:1px solid var(--bd);display:flex;justify-content:space-between;font-size:13.5px"><span>Security key · YubiKey 5C</span><span style="color:var(--bad)">Remove</span></div>
+              <div style="padding:12px 16px;border-bottom:1px solid var(--bd);display:flex;justify-content:space-between;font-size:13.5px"><span>Verify app · iPhone 15</span><span style="color:var(--bad)">Remove</span></div>
+              <div style="padding:12px 16px;display:flex;justify-content:space-between;font-size:13.5px"><span>Recovery codes <span style="color:var(--tx3);font-size:12px">· 6 of 8 left</span></span><span style="color:var(--pl)">Regenerate</span></div>
+            </div>
+            <div style="border:1px solid var(--bd);border-radius:var(--rs);display:flex;flex-direction:column">
+              <div style="padding:12px 16px;border-bottom:1px solid var(--bd);display:flex;justify-content:space-between"><span style="font-weight:600;font-size:14px">Active sessions</span><span style="font-size:13px;color:var(--bad)">Sign out all</span></div>
+              <div style="padding:12px 16px;border-bottom:1px solid var(--bd);display:flex;justify-content:space-between;font-size:13.5px"><span>Chrome · macOS · London <span style="color:var(--ok);font-size:12px">· this device</span></span></div>
+              <div style="padding:12px 16px;border-bottom:1px solid var(--bd);display:flex;justify-content:space-between;font-size:13.5px"><span>{{ v.name }} iOS · iPhone 15 <span style="color:var(--tx3);font-size:12px">· 2h ago</span></span><span style="color:var(--pl)">Sign out</span></div>
+              <div style="padding:12px 16px;display:flex;justify-content:space-between;font-size:13.5px"><span>Safari · iPad <span style="color:var(--tx3);font-size:12px">· 6 days ago</span></span><span style="color:var(--pl)">Sign out</span></div>
+            </div>
+            <div style="border:1px solid var(--bd);border-radius:var(--rs);display:flex;flex-direction:column">
+              <div style="padding:12px 16px;border-bottom:1px solid var(--bd);font-weight:600;font-size:14px">Connected apps &amp; agents</div>
+              <div style="padding:12px 16px;border-bottom:1px solid var(--bd);display:flex;justify-content:space-between;font-size:13.5px"><span>Zendesk <span style="color:var(--tx3);font-size:12px">· profile, tickets</span></span><span style="color:var(--bad)">Revoke</span></div>
+              <div style="padding:12px 16px;border-bottom:1px solid var(--bd);display:flex;justify-content:space-between;font-size:13.5px"><span>Support Copilot <span style="color:var(--tx3);font-size:12px">· invoices (read)</span></span><span style="color:var(--bad)">Revoke</span></div>
+              <div style="padding:12px 16px;display:flex;justify-content:space-between;font-size:13.5px"><span>Calendar <span style="color:var(--tx3);font-size:12px">· via token vault</span></span><span style="color:var(--bad)">Disconnect</span></div>
+            </div>
+          </div>
+          <div style="border:1px solid var(--bad);border-radius:var(--rs);padding:14px 16px;display:flex;justify-content:space-between;align-items:center;gap:16px"><div><div style="font-weight:600;color:var(--bad)">Delete account</div><div style="font-size:13px;color:var(--tx2)">Permanently remove your account and data. You'll get a copy of your data by email first.</div></div><div style="height:38px;padding:0 14px;border-radius:var(--rs);border:1px solid var(--bad);color:var(--bad);display:flex;align-items:center;font-weight:500;font-size:13.5px;white-space:nowrap">Delete account</div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+</sc-for>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;variant&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;both&quot;,&quot;default&quot;,&quot;branded&quot;],&quot;default&quot;:&quot;both&quot;,&quot;tsType&quot;:&quot;'both'|'default'|'branded'&quot;}}">class Component extends DCLogic {
+  renderVals() {
+    const all = [
+      {id:'default',label:'Default theme',kicker:'Gatekeep · out of the box',name:'Northwind',mono:'N',domain:'login.northwind.app',stage:'#dcdcd6',stageTx:'#17171a'},
+      {id:'brand',label:'Custom branded · Halcyon Bank',kicker:'Tenant theme · custom domain auth.halcyon.bank',name:'Halcyon',mono:'H',domain:'auth.halcyon.bank',stage:'#05090f',stageTx:'#f3efe6'}
+    ];
+    const pick = this.props.variant || 'both';
+    const variants = pick==='default' ? [all[0]] : pick==='branded' ? [all[1]] : all;
+    const N=21, qr=[];
+    const finder=(r,c,R,C)=>{const y=r-R,x=c-C; if(y<0||x<0||y>6||x>6) return null; return (y===0||y===6||x===0||x===6||(y>=2&&y<=4&&x>=2&&x<=4));};
+    let s=7; const rnd=()=>{s=(s*9301+49297)%233280; return s/233280;};
+    for(let r=0;r<N;r++) for(let c=0;c<N;c++){ let f=finder(r,c,0,0); if(f===null) f=finder(r,c,0,14); if(f===null) f=finder(r,c,14,0); const sep=(r<=7&&c<=7)||(r<=7&&c>=13)||(r>=13&&c<=7); const on = f!==null ? f : (sep?false:rnd()>0.52); qr.push({c:on?'#111':'#fff'}); }
+    return { variants, qr };
+  }
+}</script>
+</body>
+</html>
