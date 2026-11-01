@@ -16,3 +16,9 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-1-2-prove-key-custody-on-the-target-host.md`
   summary: Extend Story 1.10's LUKS criterion to the key volume, and cover the boot passphrase step in the install docs and alerts.
   evidence: Story 1.10 tests only the OpenBao and PostgreSQL volumes, while AD-10 now needs the key volume on LUKS, and a reboot waits for a person against NFR-10.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-3-write-the-threat-model.md`
+  summary: Add acceptance criteria to the stories named in `docs/threat-model.md` Gaps to close (G-1 to G-14), and record Esm's decision on G-15.
+  evidence: The gaps have no criterion in any story, so closing them depends on a reviewer reading the threat model. Editing epics was outside Story 1.3.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-3-write-the-threat-model.md`
+  summary: Point the `ARCHITECTURE-SPINE.md` Deferred entry for the threat model at `docs/threat-model.md`, and amend AD-10, AD-18 and AD-26 for the gaps it raises.
+  evidence: The spine still lists the threat model as pending, and G-9, G-11 and G-12 are spine-level changes.
