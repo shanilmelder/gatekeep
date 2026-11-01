@@ -114,7 +114,7 @@ NFR-21: Tenant Subdomains sit under a dedicated zone. The application process ca
 
 **Spikes that block other work**
 
-- AR-1: Linux custody spike (AD-10, Open Items) proves `LoadCredentialEncrypted`, PCR 7, static seal, Raft, socket access from containers, OpenBao host login and quotas. It blocks Foundation. The fallback is a root-only key file on a separate volume, recorded as a weaker control.
+- AR-1: Linux custody spike (AD-10, Open Items) proves `LoadCredentialEncrypted`, PCR 7, static seal, Raft, socket access from containers, OpenBao host login and quotas. It blocks only the TPM design, because Story 1.2 applied the fallback: a root-only key file on a separate volume, recorded as a weaker control.
 - AR-2: OpenIddict per-Tenant spike (AD-8, Open Items) proves options replacement, `BaseUri`, signing through Transit including the synchronous provider, token protection keys, custom stores, one ad-hoc authorization per flow, and a refused refresh committing its revocation. It blocks Core sign-in. The fallback is per-Tenant options through a keyed provider, which amends AD-8.
 - AR-3: The threat model (NFR-1) is a Foundation story built from AD-2's trust zones, finished before authentication work starts.
 
@@ -148,7 +148,7 @@ NFR-21: Tenant Subdomains sit under a dedicated zone. The application process ca
 
 **Keys, tokens and credentials**
 
-- AR-20: OpenBao Transit runs as a native systemd service with non-exportable keys, per-purpose names and per-host policies. Signing happens in OpenBao. The Master Key is the barrier key, held through `systemd-creds` sealed to TPM2, with offline escrow. Disks use LUKS (AD-10).
+- AR-20: OpenBao Transit runs as a native systemd service with non-exportable keys, per-purpose names and per-host policies. Signing happens in OpenBao. The Master Key is the barrier key, held in a root-only key file on a separate volume as a weaker control (Story 1.2), with offline escrow, until the custody spike passes and `systemd-creds` sealed to TPM2 replaces it. Disks use LUKS (AD-10).
 - AR-21: Signing Key states and the JWKS follow AD-11. RS256 with RSA-3072 is a Deployment-wide constant. Access tokens are `at+jwt`, codes and refresh tokens are references, and opaque artifacts are `{tenantPublicId}.{random}` (AD-9).
 - AR-22: OpenIddict is wrapped per AD-8: per-Tenant options, inert global credentials, custom stores owned by Directory and Sessions, Gatekeep client authentication, entity caching off and pruning off.
 - AR-23: `ISessions.RevokeAccess(context, scope, exceptSessionId)` is the only revocation path. A generated test walks the FR-48 trigger list (AD-13).
@@ -184,7 +184,7 @@ NFR-21: Tenant Subdomains sit under a dedicated zone. The application process ca
 - AR-43: Each Tenant has a hidden system Application, used only to bind Portal sign-in transactions (AD-12).
 - AR-44: `deployment_email_provider` is configured on a Deployment email provider screen (EXPERIENCE), which Admin invites depend on.
 - AR-41: Conformance behaviour for PKCE and logout is unconfirmed. Default is the AD-25 conformance Tenant, with any deviation recorded per FR-23.
-- AR-42: TPM2 and Linux on the host are unconfirmed. Default follows AR-1.
+- AR-42: TPM2 and Linux on the host are unconfirmed. The TPM2 default follows AR-1. Linux has no fallback, and Stories 1.7 and 1.10 need it.
 
 ### UX Design Requirements
 
@@ -464,6 +464,10 @@ So that the Master Key design is settled before anything depends on it.
 **Given** a host with no TPM2 or a failed proof
 **When** the spike ends
 **Then** the recorded fallback is a root-only key file on a separate volume, marked as a weaker control, and AD-10 is amended
+
+**Given** no rehearsal host is available
+**When** Esm decides not to run the spike
+**Then** every proof is recorded `not-run`, and the fallback criterion above applies
 
 **Given** the spike's commands and output
 **When** they're committed to `docs/`
