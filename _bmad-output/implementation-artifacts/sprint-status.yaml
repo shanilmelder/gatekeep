@@ -38,7 +38,7 @@ development_status:
   epic-1: in-progress
   1-1-scaffold-the-monorepo-and-enforce-module-boundaries: review
   1-2-prove-key-custody-on-the-target-host: review
-  1-3-write-the-threat-model: backlog
+  1-3-write-the-threat-model: review
   1-4-enforce-tenant-isolation-in-the-database: backlog
   1-5-write-an-audit-event-with-every-state-change: backlog
   1-6-scrub-logs-and-scan-for-canaries: backlog
