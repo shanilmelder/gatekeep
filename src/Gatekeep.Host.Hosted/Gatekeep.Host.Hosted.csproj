@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../Gatekeep.Kernel/Gatekeep.Kernel.csproj" />
+    <ProjectReference Include="../Modules/Protocol/Gatekeep.Modules.Protocol.csproj" />
+    <ProjectReference Include="../Modules/Authentication/Gatekeep.Modules.Authentication.csproj" />
+    <ProjectReference Include="../Modules/Identity/Gatekeep.Modules.Identity.csproj" />
+    <ProjectReference Include="../Modules/Sessions/Gatekeep.Modules.Sessions.csproj" />
+    <ProjectReference Include="../Modules/Tenancy/Gatekeep.Modules.Tenancy.csproj" />
+  </ItemGroup>
+
+</Project>

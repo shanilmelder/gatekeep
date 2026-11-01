@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../Gatekeep.Kernel/Gatekeep.Kernel.csproj" />
+    <ProjectReference Include="../Modules/Management/Gatekeep.Modules.Management.csproj" />
+    <ProjectReference Include="../Modules/Admins/Gatekeep.Modules.Admins.csproj" />
+  </ItemGroup>
+
+</Project>

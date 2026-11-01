@@ -1,0 +1,61 @@
+# Allowed direct dependencies between Gatekeep projects. Single source of truth for
+# the build check (Directory.Build.targets), the architecture tests and the generated
+# diagram (docs/architecture/module-dependencies.md).
+#
+# Format: <kind> <From> -> <To>
+#   dependency   a normal reference; solid arrow in the diagram.
+#   composition  a host's composition root reaching a module's adapter registration
+#                only to wire ports (AD-1); dashed arrow in the diagram.
+#
+# Any project may reference Kernel without an entry here, as the spine diagram says.
+# Kernel references nothing inside Gatekeep and never appears in this file.
+# After changing this file run: dotnet run --project tests/Architecture/Generator
+
+dependency Host.Hosted -> Protocol
+dependency Host.Hosted -> Authentication
+dependency Host.Hosted -> Identity
+dependency Host.Hosted -> Sessions
+dependency Host.Hosted -> Tenancy
+dependency Host.Admin -> Management
+dependency Host.Admin -> Admins
+dependency Host.Worker -> Operations
+dependency Cli -> Operations
+dependency Cli -> Admins
+dependency Protocol -> Authentication
+dependency Protocol -> Directory
+dependency Protocol -> Identity
+dependency Protocol -> Sessions
+dependency Protocol -> Keys
+dependency Protocol -> Tenancy
+dependency Authentication -> Directory
+dependency Authentication -> Identity
+dependency Authentication -> Sessions
+dependency Authentication -> Notifications
+dependency Authentication -> Tenancy
+dependency Management -> Operations
+dependency Management -> Directory
+dependency Management -> Identity
+dependency Management -> Sessions
+dependency Management -> Keys
+dependency Management -> Notifications
+dependency Management -> Admins
+dependency Management -> Audit
+dependency Management -> Tenancy
+dependency Operations -> Authentication
+dependency Operations -> Directory
+dependency Operations -> Identity
+dependency Operations -> Sessions
+dependency Operations -> Keys
+dependency Operations -> Notifications
+dependency Operations -> Audit
+dependency Operations -> Admins
+dependency Operations -> Tenancy
+dependency Identity -> Sessions
+dependency Identity -> Notifications
+dependency Identity -> Tenancy
+dependency Directory -> Sessions
+dependency Directory -> Tenancy
+dependency Keys -> Tenancy
+dependency Sessions -> Tenancy
+dependency Notifications -> Tenancy
+dependency Admins -> Notifications

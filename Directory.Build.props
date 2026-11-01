@@ -1,0 +1,19 @@
+<Project>
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <!-- One version for every deployable. -->
+    <Version>0.1.0</Version>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <!-- Transitive reach grants nothing: only direct references compile. -->
+    <DisableTransitiveProjectReferences>true</DisableTransitiveProjectReferences>
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+    <NuGetAudit>true</NuGetAudit>
+    <NuGetAuditMode>all</NuGetAuditMode>
+    <!-- With warnings as errors, a critical advisory (NU1904) fails restore. -->
+    <NuGetAuditLevel>critical</NuGetAuditLevel>
+  </PropertyGroup>
+
+</Project>

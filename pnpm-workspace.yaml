@@ -1,0 +1,19 @@
+packages:
+  - apps/*
+  - packages/*
+
+# pnpm 12 ignores ignore-scripts in .npmrc for install; this is the setting it honours.
+ignoreScripts: true
+
+# Install fails on a Node other than the engines pin. A different pnpm hands over to the
+# packageManager pin by itself.
+engineStrict: true
+
+catalog:
+  '@types/react': 19.3.0
+  '@types/react-dom': 19.3.0
+  '@vitejs/plugin-react': 6.1.2
+  react: 19.3.1
+  react-dom: 19.3.1
+  typescript: 7.0.2
+  vite: 8.3.5
