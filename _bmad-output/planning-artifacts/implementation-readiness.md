@@ -85,7 +85,7 @@ Ordered by severity.
 
 These don't affect the verdict, but Epic 1 can't finish without them.
 
-- A Linux host with TPM2, still unconfirmed (AR-42), for Story 1.2.
+- A Linux host, still unconfirmed (AR-42), for Stories 1.7 and 1.10. A TPM2 is needed only to adopt the TPM design, because Story 1.2 applied the fallback.
 - A dedicated DNS zone and a VPN.
 - An Object Lock bucket and an independent alert channel for Story 1.30.
 
