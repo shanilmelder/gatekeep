@@ -1,0 +1,35 @@
+<Project>
+
+  <PropertyGroup>
+    <GatekeepEdgeList>$(MSBuildThisFileDirectory)tests/Architecture/module-edges.txt</GatekeepEdgeList>
+  </PropertyGroup>
+
+  <!--
+    Fails on any ProjectReference with no line in the edge list. It also runs at the
+    start of restore's project walk, so a reference that would form a cycle, such as
+    Kernel to a module, gets this error rather than MSBuild's circular dependency error.
+    Every project may reference Kernel. Kernel itself gets no such allowance.
+  -->
+  <Target Name="GatekeepCheckProjectEdges" BeforeTargets="_GenerateRestoreProjectPathWalk;ResolveProjectReferences">
+    <PropertyGroup>
+      <_GatekeepProject>$(MSBuildProjectName.Replace('Gatekeep.Modules.', '').Replace('Gatekeep.', ''))</_GatekeepProject>
+    </PropertyGroup>
+
+    <ReadLinesFromFile File="$(GatekeepEdgeList)">
+      <Output TaskParameter="Lines" ItemName="_GatekeepEdgeLine" />
+    </ReadLinesFromFile>
+
+    <ItemGroup>
+      <_GatekeepAllowed Include="@(_GatekeepEdgeLine->Replace('dependency ', '')->Replace('composition ', ''))" />
+      <_GatekeepReferenced Include="@(ProjectReference->'%(Filename)'->Replace('Gatekeep.Modules.', '')->Replace('Gatekeep.', ''))" />
+      <_GatekeepReferenced Remove="Kernel" Condition="'$(_GatekeepProject)' != 'Kernel'" />
+      <_GatekeepUnlisted Include="@(_GatekeepReferenced->'$(_GatekeepProject) -&gt; %(Identity)')" Exclude="@(_GatekeepAllowed)" />
+    </ItemGroup>
+
+    <Error Condition="'@(_GatekeepUnlisted)' != ''"
+           Code="GK0001"
+           File="$(MSBuildProjectFullPath)"
+           Text="Unlisted project reference %(_GatekeepUnlisted.Identity). Add the edge to tests/Architecture/module-edges.txt or remove the reference." />
+  </Target>
+
+</Project>

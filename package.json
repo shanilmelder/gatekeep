@@ -1,0 +1,13 @@
+{
+  "name": "gatekeep",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@12.16.1",
+  "engines": {
+    "node": "26.13.0",
+    "pnpm": "12.16.1"
+  },
+  "scripts": {
+    "build": "pnpm -r build"
+  }
+}

@@ -1,0 +1,27 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Gatekeep.Kernel/Gatekeep.Kernel.csproj" />
+    <Project Path="src/Gatekeep.Host.Hosted/Gatekeep.Host.Hosted.csproj" />
+    <Project Path="src/Gatekeep.Host.Admin/Gatekeep.Host.Admin.csproj" />
+    <Project Path="src/Gatekeep.Host.Worker/Gatekeep.Host.Worker.csproj" />
+    <Project Path="src/Gatekeep.Cli/Gatekeep.Cli.csproj" />
+  </Folder>
+  <Folder Name="/src/Modules/">
+    <Project Path="src/Modules/Tenancy/Gatekeep.Modules.Tenancy.csproj" />
+    <Project Path="src/Modules/Admins/Gatekeep.Modules.Admins.csproj" />
+    <Project Path="src/Modules/Identity/Gatekeep.Modules.Identity.csproj" />
+    <Project Path="src/Modules/Authentication/Gatekeep.Modules.Authentication.csproj" />
+    <Project Path="src/Modules/Sessions/Gatekeep.Modules.Sessions.csproj" />
+    <Project Path="src/Modules/Directory/Gatekeep.Modules.Directory.csproj" />
+    <Project Path="src/Modules/Protocol/Gatekeep.Modules.Protocol.csproj" />
+    <Project Path="src/Modules/Keys/Gatekeep.Modules.Keys.csproj" />
+    <Project Path="src/Modules/Audit/Gatekeep.Modules.Audit.csproj" />
+    <Project Path="src/Modules/Notifications/Gatekeep.Modules.Notifications.csproj" />
+    <Project Path="src/Modules/Management/Gatekeep.Modules.Management.csproj" />
+    <Project Path="src/Modules/Operations/Gatekeep.Modules.Operations.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Architecture/Gatekeep.Tests.Architecture.csproj" />
+    <Project Path="tests/Architecture/Generator/Gatekeep.Tests.DiagramGenerator.csproj" />
+  </Folder>
+</Solution>

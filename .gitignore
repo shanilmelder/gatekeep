@@ -5,3 +5,20 @@
 /.claude/pipeline-status.jsonl
 # BMAD install answers scoped to the individual user.
 /_bmad/config.user.toml
+
+# Build output.
+bin/
+obj/
+node_modules/
+dist/
+
+# Secrets.
+.env*
+*.pem
+*.pfx
+
+# Tool output.
+.vs/
+*.user
+TestResults/
+*.tsbuildinfo

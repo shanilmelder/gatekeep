@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="../../Gatekeep.Kernel/Gatekeep.Kernel.csproj" />
+    <ProjectReference Include="../Authentication/Gatekeep.Modules.Authentication.csproj" />
+    <ProjectReference Include="../Directory/Gatekeep.Modules.Directory.csproj" />
+    <ProjectReference Include="../Identity/Gatekeep.Modules.Identity.csproj" />
+    <ProjectReference Include="../Sessions/Gatekeep.Modules.Sessions.csproj" />
+    <ProjectReference Include="../Keys/Gatekeep.Modules.Keys.csproj" />
+    <ProjectReference Include="../Tenancy/Gatekeep.Modules.Tenancy.csproj" />
+  </ItemGroup>
+
+</Project>
