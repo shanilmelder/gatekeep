@@ -47,3 +47,6 @@ jobs:
 
       - name: Test
         run: dotnet test tests/Architecture --no-build
+
+      - name: Test tenant isolation on PostgreSQL
+        run: dotnet test tests/Isolation --no-build

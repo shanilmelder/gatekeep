@@ -18,4 +18,8 @@
     <PackageReference Include="xunit.v3" />
   </ItemGroup>
 
+  <ItemGroup>
+    <ProjectReference Include="../../src/Gatekeep.Kernel/Gatekeep.Kernel.csproj" />
+  </ItemGroup>
+
 </Project>

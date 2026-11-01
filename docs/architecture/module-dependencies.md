@@ -18,10 +18,12 @@ flowchart TD
   HostWorker[Host.Worker]
   Operations[Operations]
   Cli[Cli]
+  AdaptersPostgres[Adapters.Postgres]
   Directory[Directory]
   Keys[Keys]
   Notifications[Notifications]
   Audit[Audit]
+  TestsIsolation[Tests.Isolation]
   HostHosted --> Protocol
   HostHosted --> Authentication
   HostHosted --> Identity
@@ -32,6 +34,7 @@ flowchart TD
   HostWorker --> Operations
   Cli --> Operations
   Cli --> Admins
+  Cli --> AdaptersPostgres
   Protocol --> Authentication
   Protocol --> Directory
   Protocol --> Identity
@@ -70,4 +73,6 @@ flowchart TD
   Sessions --> Tenancy
   Notifications --> Tenancy
   Admins --> Notifications
+  TestsIsolation --> AdaptersPostgres
+  TestsIsolation --> Cli
 ```
