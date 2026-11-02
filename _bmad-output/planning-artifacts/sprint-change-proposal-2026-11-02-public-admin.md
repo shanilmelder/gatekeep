@@ -59,6 +59,7 @@ The Admin panel is reached through a Cloudflare Tunnel, which provides its TLS c
 - **Cloudflare sees the traffic:** Cloudflare terminates Admin TLS, so it sees Admin traffic in plaintext.
 - **Depends on Cloudflare:** Admin access needs Cloudflare, a cloud service outside FR-1's core runtime. Everything else still runs without it, but with no tunnel the Admin panel can't be reached from outside.
 - **Amended:** the AD-26 Caddy line, the deployment diagram, AR-13 and Story 1.11's first criterion.
+- **Tenant zone DNS (Esm, 2026-11-02):** Caddy gets the Tenant wildcard certificate by ACME DNS-01 through Cloudflare DNS. The token is scoped to a validation-only zone that `_acme-challenge` is delegated to, so NFR-21's validation-only credential still holds.
 
 ## 5. Implementation handoff
 
