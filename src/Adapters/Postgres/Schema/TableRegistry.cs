@@ -54,6 +54,10 @@ public static class TableRegistry
             [Sealer] = [new ColumnGrant(Update, ["seq", "prev_hash", "hash"])],
         };
 
+    private static readonly IReadOnlyList<string> OperationStatusColumns = ["status", "updated_at", "finished_at"];
+
+    private static readonly IReadOnlyList<string> StepRetryColumns = ["status", "result_code", "updated_at"];
+
     public static readonly IReadOnlyList<TableEntry> Tables =
     [
         new("tenant", TableClass.Control, "Tenancy", new Dictionary<string, IReadOnlyList<string>>
@@ -170,6 +174,41 @@ public static class TableRegistry
                 // Erasing a dead job's credential.
                 [Worker] = [new ColumnGrant(Update, ["ciphertext"])],
             }),
+        new(
+            "operation",
+            TableClass.Control,
+            "Operations",
+            new Dictionary<string, IReadOnlyList<string>>
+            {
+                [Admin] = [Select, Insert],
+                [Worker] = [Select, Insert],
+                [Cli] = [Select, Insert],
+            },
+            new Dictionary<string, IReadOnlyList<ColumnGrant>>
+            {
+                // Retrying reopens a failed Operation; the Worker sets its final status.
+                [Admin] = [new ColumnGrant(Update, OperationStatusColumns)],
+                [Worker] = [new ColumnGrant(Update, OperationStatusColumns)],
+                [Cli] = [new ColumnGrant(Update, OperationStatusColumns)],
+            }),
+        new(
+            "operation_step",
+            TableClass.Control,
+            "Operations",
+            new Dictionary<string, IReadOnlyList<string>>
+            {
+                [Admin] = [Select, Insert],
+                [Worker] = [Select, Insert],
+                [Cli] = [Select, Insert],
+            },
+            new Dictionary<string, IReadOnlyList<ColumnGrant>>
+            {
+                // Retrying sets failed steps back to pending. Running a step also counts its attempts.
+                [Admin] = [new ColumnGrant(Update, StepRetryColumns)],
+                [Worker] = [new ColumnGrant(Update, [.. StepRetryColumns, "attempts"])],
+                [Cli] = [new ColumnGrant(Update, StepRetryColumns)],
+            },
+            ["operation_step_guard_insert"]),
     ];
 
     private static IReadOnlyList<string> EventTriggers(string table) =>

@@ -71,8 +71,9 @@ internal sealed class JobDatabase
         JobRegistry registry,
         IKeyCustody? custody = null,
         ILogger? logger = null,
-        JobRunnerOptions? options = null) =>
-        OperationsContract.CreateRunner(registry, Databases, options ?? FastOptions, custody, logger);
+        JobRunnerOptions? options = null,
+        OperationRegistry? operations = null) =>
+        OperationsContract.CreateRunner(registry, Databases, options ?? FastOptions, custody, logger, operations);
 
     public Task SuperuserAsync(string sql) => PostgresFixture.ExecuteAsync(_postgres.SuperuserConnection(Name), sql);
 

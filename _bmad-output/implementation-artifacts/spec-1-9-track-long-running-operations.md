@@ -2,15 +2,37 @@
 title: 'Story 1.9: Track long-running Operations'
 type: 'feature'
 created: '2026-11-02'
-status: 'ready-for-dev'
+status: 'done'
+baseline_revision: 'e48e163ca79d88399bc6be8983bed8dd29675223'
 review_loop_iteration: 0
-followup_review_recommended: false
+followup_review_recommended: true
 context:
   - '{project-root}/_bmad-output/planning-artifacts/architecture/architecture-gatekeep-2026-11-02/ARCHITECTURE-SPINE.md'
   - '{project-root}/_bmad-output/implementation-artifacts/spec-1-8-run-tenant-scoped-jobs.md'
   - '{project-root}/docs/threat-model.md'
 warnings: [oversized]
-deferred: []
+deferred:
+  - summary: >-
+      Stages of an Operation run unordered.
+    evidence: |-
+      Tenant deletion will need ordered stages. No production Operation type exists yet.
+    location: >-
+      src/Modules/Operations/Core/OperationJobs.cs
+    severity: medium
+  - summary: >-
+      A dead run or step job leaves its Operation active forever.
+    evidence: |-
+      The step stays running, so retry is refused and new starts of that type and scope are blocked. Needs a dead-job hook.
+    location: >-
+      src/Modules/Operations/Core/OperationJobs.cs
+    severity: medium
+  - summary: >-
+      gk_admin, gk_cli and gk_worker can set any Operation or step status, and add steps to a running Operation.
+    evidence: |-
+      Column grants cannot express transitions. Listed in T-46.
+    location: >-
+      src/Adapters/Postgres/Migrations/Migration20261102030000CreateOperationTables.cs
+    severity: medium
 ---
 
 <intent-contract>
@@ -73,12 +95,12 @@ deferred: []
 ## Tasks & Acceptance
 
 **Execution:**
-- [ ] `src/Modules/Operations/Contracts/` -- `OperationType`, `OperationRegistry` (type to stage handlers), `OperationStepPlan`, `OperationResource`/`OperationStepResource`, `OperationAlreadyActiveException`, and contract factories for an `IOperations` service with `[StateChanging] StartAsync`, `[StateChanging] RetryAsync`, `GetAsync`, `GetForTenantAsync`.
-- [ ] `src/Modules/Operations/Core/` -- the service and the two job handlers; register `operations.operation.run` (Deployment-wide, enqueued by `gk_admin`, `gk_cli`, `gk_worker`, run as `gk_worker`, reviewed) and `operations.operation.step` (Tenant, enqueued by `gk_worker`, run as `gk_worker`) in the production job registry; the job runner looks up Operation types from a registry passed to it.
-- [ ] `src/Adapters/Postgres/Migrations/Migration20261102030000CreateOperationTables.cs`, `TableRegistry.cs` -- tables, CHECKs, partial unique index, grants, and the re-rendered guard block.
-- [ ] `tests/Isolation/Operations/` -- every matrix row with a test Operation registry, plus the cross-Tenant read.
-- [ ] `tests/Architecture/OperationRuleTests.cs` -- the AD-30 edge rule, with a detection test on a made-up registry.
-- [ ] `docs/threat-model.md`, module diagram -- record the tables, grants and tests, and the open Tenant purge and fresh-assertion items.
+- [x] `src/Modules/Operations/Contracts/` -- `OperationType`, `OperationRegistry` (type to stage handlers), `OperationStepPlan`, `OperationResource`/`OperationStepResource`, `OperationAlreadyActiveException`, and contract factories for an `IOperations` service with `[StateChanging] StartAsync`, `[StateChanging] RetryAsync`, `GetAsync`, `GetForTenantAsync`.
+- [x] `src/Modules/Operations/Core/` -- the service and the two job handlers; register `operations.operation.run` (Deployment-wide, enqueued by `gk_admin`, `gk_cli`, `gk_worker`, run as `gk_worker`, reviewed) and `operations.operation.step` (Tenant, enqueued by `gk_worker`, run as `gk_worker`) in the production job registry; the job runner looks up Operation types from a registry passed to it.
+- [x] `src/Adapters/Postgres/Migrations/Migration20261102030000CreateOperationTables.cs`, `TableRegistry.cs` -- tables, CHECKs, partial unique index, grants, and the re-rendered guard block.
+- [x] `tests/Isolation/Operations/` -- every matrix row with a test Operation registry, plus the cross-Tenant read.
+- [x] `tests/Architecture/OperationRuleTests.cs` -- the AD-30 edge rule, with a detection test on a made-up registry.
+- [x] `docs/threat-model.md`, module diagram -- record the tables, grants and tests, and the open Tenant purge and fresh-assertion items.
 
 **Acceptance Criteria:**
 - Given a started Operation, when its jobs run, then each Tenant step runs in that Tenant's own scope through `operations.operation.step`, and the Deployment-wide job touches only `control` tables.
@@ -87,6 +109,48 @@ deferred: []
 ## Spec Change Log
 
 ## Review Triage Log
+
+### 2026-11-02 — Review pass
+- verdicts: 38 findings — high 0, medium 15, low 18, false 5, maybe-false 0
+- findings:
+  - `[medium]` `[patch]` Gap: the step job's re-check of Tenant and status is never reached with a row it should refuse — test enqueues step jobs for another Tenant's step, a finished step and a finished Operation.
+  - `[medium]` `[patch]` Blind: two run jobs for one Operation can both run a Deployment step — steps selected `FOR UPDATE SKIP LOCKED`, `StartStep` requires an open status, concurrent test added.
+  - `[medium]` `[defer]` Blind: stages run unordered, while Tenant deletion will need order — no production Operation type exists; the Tenant deletion story must add stage ordering. Listed in T-46.
+  - `[medium]` `[defer]` Blind: a dead run job leaves its Operation stuck active, blocking retry and new starts — the fix needs a dead-job hook on job types, new public surface; the first story with a production Operation type must close it. Listed in T-46.
+  - `[medium]` `[patch]` Blind: nothing ties a step's Tenant to its Operation's, and roles can inject steps into a running Operation — insert trigger refuses a mismatched Tenant, tested; injection stays a recorded T-46 risk.
+  - `[low]` `[reject]` Blind: no CHECK ties status to `finished_at` or `result_code` — only roles that already set status can write such rows, and T-46 records that they can forge status.
+  - `[low]` `[patch]` Blind: `GetAsync` answers in a Tenant context with every Tenant's steps — refused there.
+  - `[medium]` `[patch]` Blind: start handles only the active-index violation, so an unknown Tenant aborts the caller's transaction — savepoint covers every insert, FK violation maps to `ArgumentException`, tested.
+  - `[low]` `[patch]` Blind: a handler returning null keeps its writes, unlike one that throws — rolled back the same way.
+  - `[low]` `[patch]` Blind: malformed run or step job input finishes `done` — now throws, so the job fails with a fixed code.
+  - `[low]` `[reject]` Blind: Contracts reference Core — the Story 1.8 factories already do by design, and Core types stay internal.
+  - `[medium]` `[patch]` Blind: missing coverage for a Tenant-scoped Operation to completion, a failed Deployment step retried, and the type CHECK — tests added, constraint named.
+  - `[low]` `[reject]` Blind: `OperationRuleTests` can read a stale adapter DLL — CI builds the solution first, and a project reference would add an edge; same call as Story 1.6.
+  - `[low]` `[patch]` Blind: the lock comment gives an unverified mechanism and relies on READ COMMITTED unstated — comment states the observed deadlock and the isolation level.
+  - `[low]` `[patch]` Blind: the missing start and retry audit event has no gap entry — added.
+  - `[false]` `[reject]` Intent: free-text codes reach the CHECK only through raw SQL — the contract refuses earlier with `ArgumentException`, and both layers are tested.
+  - `[low]` `[reject]` Intent: column-level grants are checked only by the catalogue test — that test compares the registry to the database exactly.
+  - `[low]` `[reject]` Intent: a crashed step job rerunning its handler is untested — at-least-once by design, handlers are documented idempotent.
+  - `[false]` `[reject]` Intent: the fan-out isn't atomic with the run job — each Tenant step commits in its own scope by AD-15 design, and dispatch acts only on pending steps.
+  - `[medium]` `[defer]` Intent: a dead step job leaves its step running forever — same as the Blind dead-run row.
+  - `[low]` `[patch]` Intent: `GetAsync` has no context restriction — same fix as the Blind row.
+  - `[low]` `[reject]` Intent: the architecture test loads the adapter by reflection — same as the Blind stale-DLL row.
+  - `[false]` `[reject]` Intent: nothing is reachable through a production host — the intent says so.
+  - `[medium]` `[defer]` Intent: stages run unordered — same as the Blind ordering row.
+  - `[medium]` `[defer]` Intent: `gk_admin` and `gk_cli` can set any status through column grants — grants can't express transitions; a trigger is design work for the first production Operation type. Listed in T-46.
+  - `[medium]` `[patch]` Edge: concurrent run jobs double-run a Deployment step — same fix as the Blind row.
+  - `[low]` `[patch]` Edge: `StartStep` matching no row unboxes null — handled with the same fix.
+  - `[medium]` `[patch]` Edge: an unknown Tenant aborts the caller's transaction — same fix as the Blind start row.
+  - `[low]` `[patch]` Edge: any other PostgresException leaves the savepoint open — same fix.
+  - `[medium]` `[defer]` Edge: a dead run job leaves the Operation stuck — same as the Blind row.
+  - `[low]` `[patch]` Edge: a run job with no `operation_id` finishes `done` — same fix as the Blind input row.
+  - `[low]` `[reject]` Edge: a pool of one connection would deadlock dispatch — Npgsql's default pool is 100 and nothing configures it lower.
+  - `[low]` `[patch]` Edge: cancellation surfacing as another exception is recorded as `handler_failed` — catch only when not cancelled.
+  - `[medium]` `[patch]` Edge: a direct insert gives a step another Tenant than its Operation — same trigger as the Blind row.
+  - `[low]` `[reject]` Edge: stale adapter DLL — same as the Blind row.
+  - `[medium]` `[patch]` Edge: the duplicate run test is sequential — concurrent test added.
+  - `[false]` `[reject]` Edge (claim): the run job writes `job_payload` through dispatch — it does so in each Tenant's own scope, the AD-15 fan-out; its own scope touches only control tables.
+  - `[false]` `[reject]` Edge (claim): the module diagram wasn't updated — no module edge changed, and the generator shows no content change.
 
 ## Design Notes
 
@@ -102,3 +166,19 @@ deferred: []
 - `dotnet test tests/Architecture --no-build` -- expected: all pass.
 - `dotnet test tests/Isolation --no-build` -- expected: all pass, including `Operations`.
 - `dotnet run --project tests/Architecture/Generator` -- expected: no diff after committing the diagram.
+
+## Auto Run Result
+
+Status: done
+
+**Summary:** added `operation` and `operation_step` (control, Operations), a code-owned Operation registry of stage handlers, `IOperations` start, retry and reads, and the `operations.operation.run` and `operations.operation.step` job types, which fan Tenant steps out into each Tenant's own scope.
+
+**Files:** `src/Modules/Operations/Contracts/` (`IOperations`, `OperationRegistry`, `JobRun`, contract factories); `src/Modules/Operations/Core/` (`OperationService`, `OperationJobs`, `OperationStore`, production registries, runner change); the Operation migration and `TableRegistry.cs`; `tests/Isolation/Operations/`; `tests/Architecture/OperationRuleTests.cs`; `docs/threat-model.md`.
+
+**Review:** 38 findings across four layers: 19 patched, 6 deferred, 13 rejected, each with its reason in the triage log.
+
+**Follow-up review:** recommended. The concurrent-run fix and the start savepoint change the paths that keep a step from running twice and a caller's transaction usable; only the new tests exercise them.
+
+**Verification:** see the PR screenshot; restore, build, Architecture, Isolation and the diagram generator all pass on SDK 10.0.403 and Node 26.13.0.
+
+**Residual risks:** a dead run or step job leaves its Operation stuck active. Stages run unordered. Roles that start Operations can set any status or add steps. Starting and retrying write no audit event. No production Operation type exists yet, so none of this is reachable from a host.

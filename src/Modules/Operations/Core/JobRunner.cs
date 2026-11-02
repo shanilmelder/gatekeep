@@ -78,6 +78,7 @@ internal sealed class JobRunner : IJobRunner
     private readonly JobRegistry _registry;
     private readonly JobRunnerOptions _options;
     private readonly IKeyCustody? _custody;
+    private readonly OperationRegistry _operations;
     private readonly ILogger? _logger;
     private readonly IAuditAppender _appender = AuditContract.CreateAppender();
     private readonly NpgsqlDataSource _dispatch;
@@ -90,9 +91,11 @@ internal sealed class JobRunner : IJobRunner
         JobDatabases databases,
         JobRunnerOptions options,
         IKeyCustody? custody,
+        OperationRegistry operations,
         ILogger? logger)
     {
         ArgumentNullException.ThrowIfNull(registry);
+        ArgumentNullException.ThrowIfNull(operations);
         ArgumentNullException.ThrowIfNull(databases);
         ArgumentNullException.ThrowIfNull(options);
 
@@ -106,6 +109,7 @@ internal sealed class JobRunner : IJobRunner
         _registry = registry;
         _options = options;
         _custody = custody;
+        _operations = operations;
         _logger = logger;
 
         _dispatch = Create(databases.Dispatch, nameof(databases.Dispatch));
@@ -294,9 +298,10 @@ internal sealed class JobRunner : IJobRunner
                 : await DeploymentScope.BeginAsync(source, lease.Token);
 
             var context = scope.CreateCommandContext();
+            var services = new JobRunServices(source, _operations);
             var run = claim.TenantId is { } tenant
-                ? await TenantRunAsync(claim, definition, tenant, context, lease.Token)
-                : new JobRun(claim.Id, definition.Type, null, claim.OperationId, claim.Attempt, NoIds, context, null);
+                ? await TenantRunAsync(claim, definition, tenant, context, services, lease.Token)
+                : new JobRun(claim.Id, definition.Type, null, claim.OperationId, claim.Attempt, NoIds, context, null, services);
 
             await definition.Handler(run, lease.Token);
             await scope.CommitAsync(lease.Token);
@@ -329,6 +334,7 @@ internal sealed class JobRunner : IJobRunner
         JobDefinition definition,
         Guid tenantId,
         CommandContext context,
+        JobRunServices services,
         CancellationToken cancellationToken)
     {
         var ids = NoIds;
@@ -358,7 +364,7 @@ internal sealed class JobRunner : IJobRunner
                 : _custody.DecryptAsync(key, tenantId, new KeyCiphertext(ciphertext), token);
         }
 
-        return new JobRun(claim.Id, definition.Type, tenantId, claim.OperationId, claim.Attempt, ids, context, decrypt);
+        return new JobRun(claim.Id, definition.Type, tenantId, claim.OperationId, claim.Attempt, ids, context, decrypt, services);
     }
 
     private async Task FailAsync(Claim claim, JobDefinition? definition, string failureCode, CancellationToken cancellationToken)
