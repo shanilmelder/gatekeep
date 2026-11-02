@@ -6,6 +6,7 @@ status: 'ready-for-dev'
 review_loop_iteration: 0
 followup_review_recommended: false
 context:
+  - '{project-root}/_bmad-output/planning-artifacts/sprint-change-proposal-2026-11-02-docker-only.md'
   - '{project-root}/_bmad-output/planning-artifacts/architecture/architecture-gatekeep-2026-11-02/ARCHITECTURE-SPINE.md'
   - '{project-root}/docs/threat-model.md'
   - '{project-root}/docs/key-custody.md'
@@ -17,92 +18,87 @@ deferred: []
 
 ## Intent
 
-**Problem:** Nothing runs Gatekeep as a stack. AD-26 needs every host but OpenBao under Compose from locally built images, with `/healthz` on a private port, startup that refuses missing or default secrets, no cloud egress, and OpenBao, PostgreSQL and key data on LUKS.
+**Problem:** Nothing runs Gatekeep as a stack, and Esm decided on 2026-11-02 that nothing related to Gatekeep may run outside Docker (`sprint-change-proposal-2026-11-02-docker-only.md`). Story 1.7's OpenBao packaging (systemd unit, host paths) and the host-run CLI, scripts and tests break that rule.
 
-**Approach:** Esm's decisions, 2026-11-02: (1) there is still no Linux host, so build and test everything against Docker on this machine as a stand-in, check LUKS with a command tested against sample device output, and leave the real-host runs open under G-10; (2) the LUKS passphrase is entered at boot over SSH from the initramfs (dropbear), a new trust boundary. Add Dockerfiles, `deploy/compose.yaml`, shared host startup code, a `gatekeep check-volumes` command, initramfs SSH config, install docs and a CI job that brings the stack up.
+**Approach:** One Compose definition runs PostgreSQL, OpenBao, `Host.Hosted`, `Host.Admin` and `Host.Worker`, with the CLI, OpenBao setup, Master Key generation and the test suite as Compose services. Hosts get shared startup code (secrets from files, refusal of missing or default secrets, `/healthz` on an unpublished port, key custody wiring). `deploy/openbao` is reworked for a container, and the docs give no command to run outside Docker.
 
 ## Boundaries & Constraints
 
 **Always:**
-- One `deploy/compose.yaml` runs PostgreSQL 18.6, `Host.Hosted`, `Host.Admin` and `Host.Worker` from images built locally from `deploy/docker/*.Dockerfile`. Each app container runs as a non-root user with a read-only root filesystem, `cap_drop: [ALL]`, `no-new-privileges`, and no Docker socket (closes G-4 for these services). App networks are `internal: true`: the stack needs no egress.
-- Each host serves `/healthz` on a private port, separate from any public endpoint and not published to the host. It answers 200 only when the host's database role connects and, when key custody is configured, OpenBao answers on its socket; otherwise 503 with a fixed body naming the failed check, never a value.
-- Every host refuses to start when a required setting is missing, empty, or a known default (a fixed list including `changeme`, `password`, `postgres`, `gatekeep` and the isolation test password, plus anything under 16 characters for a password). It logs the setting's name only and exits non-zero.
-- Secrets reach containers only as Compose secrets mounted under `/run/secrets`, read through a file-based configuration source. No secret in an environment variable, image, `compose.yaml` value or log.
-- Hosts wire `IKeyCustody` (the Story 1.7 OpenBao adapter) from the socket path and their AppRole role ID and secret ID files. OpenBao stays native: containers reach its socket through a bind mount of `/run/openbao`, with the `gatekeep-custody` group. `Host.Worker` passes custody to its job runner.
-- `gatekeep check-volumes` (Cli) reads `lsblk --json` output and fails, naming the mount, unless each required mount point (OpenBao data, PostgreSQL data, key volume) sits on a `crypt` device. It's tested against recorded sample output, including an unencrypted mount.
-- `deploy/luks/` holds the dropbear-initramfs setup: a dedicated host key and authorized key separate from normal SSH, the key restricted to `cryptroot-unlock` with no forwarding or PTY, a non-default port. `docs/install.md` covers the whole install, the boot passphrase step and its alert, and says what has not run on a real host.
-- Update `docs/threat-model.md`: a new trust boundary and key rows for initramfs SSH, G-4, G-9, G-14 (entry method decided; separate disk and measured boot stay open), G-10, and the tests.
+- `deploy/compose.yaml` holds every runtime service; images are built locally from `deploy/docker/*.Dockerfile` with base images pinned by digest. Each app container (the three hosts and `cli`) runs non-root, with a read-only root filesystem, `cap_drop: [ALL]`, `no-new-privileges`, and no Docker socket.
+- OpenBao runs from `openbao/openbao:2.7.2` with `network_mode: none`, Raft data on its own named volume, its unix socket on a shared named volume that only hosts needing custody and `cli` mount, and the Master Key as a read-only Compose secret. Story 1.7's adapter, policies and setup logic stay; `openbao.service` is removed and `openbao.hcl` points at the secret path and socket volume.
+- The Master Key is never in an image, environment variable, data volume, log or the repository. It's generated by a one-shot Compose service that writes it, mode `0400`, into a host secrets directory that is not a Docker volume. `setup.sh` also runs as a one-shot Compose service and writes recovery keys and AppRole IDs only into that secrets directory.
+- Secrets reach containers only as Compose secrets under `/run/secrets`, read through a file-based configuration source. Every host refuses to start when a required setting is missing, empty, or a known default (one shared, case-insensitive list including `changeme`, `password`, `postgres`, `gatekeep` and the isolation test password; passwords under 16 characters also count), logging the setting's name only and exiting non-zero.
+- Each host serves `/healthz` on a port that `compose.yaml` doesn't publish: 200 when its database role connects and, where custody is wired, OpenBao answers on its socket; otherwise 503 with a fixed body naming the failed check. App networks are `internal: true`.
+- Hosts wire `IKeyCustody` from the socket path and their role and secret ID files; `Host.Worker` passes custody to its job runner.
+- `cli` is a Compose service running `Gatekeep.Cli` (`docker compose run --rm cli migrate`), with its own role and no published port.
+- A `tests` Compose service (in a separate `deploy/compose.test.yaml`) builds the solution and runs `tests/Architecture` and `tests/Isolation` inside a container with the .NET SDK, Node and pnpm; it alone mounts the Docker socket so Testcontainers can start PostgreSQL and OpenBao. CI runs the build and tests through it, plus a job that brings the stack up and checks every service healthy.
+- `docs/install.md` gives the whole install as Docker commands, states the host requirements (encrypted disks for volumes and the secrets directory, a firewall allowing only published ports, Docker access equals full control), and contains no command run outside Docker except `docker` and `git`. `docs/key-custody.md` is rewritten for Compose; `docs/spikes/1-2-key-custody.md` gets a "Superseded by Docker only" note.
+- `docs/threat-model.md`: T-29, T-30, TB-7 and the custody rows follow the amended AD-10; G-2 reopened for the Compose secret handoff and closed by this story's tests; G-9, G-10 and G-14 closed as host requirements; new rows for the Master Key file on the Docker host and the test-only Docker socket; G-4 closed for these services.
 
 **Never:**
+- No systemd unit, LUKS check, initramfs or dropbear config, host path such as `/srv/gatekeep` or `/etc/gatekeep` in a script Gatekeep runs, or doc step run outside Docker.
 - No Caddy, public routes or firewall rules (Story 1.11). No signed images (Story 12.5).
-- No OpenBao container in `deploy/compose.yaml`; a CI-only override may run one as the stand-in for the native service.
-- No claim that a real host, LUKS, initramfs SSH or systemd ran.
+- No Docker socket in any runtime service.
 
 ## I/O & Edge-Case Matrix
 
 | Scenario | Input / State | Expected Output / Behavior | Error Handling |
 |----------|--------------|---------------------------|----------------|
-| Stack up | `docker compose up --wait` with all secrets set, CI override running OpenBao | Every service healthy; each `/healthz` 200 | No error expected |
-| No egress | Same, app networks internal | Every `/healthz` 200; an outbound request from a host container fails | No error expected |
+| Stack up | Key generated, setup run, secrets set, `docker compose up --wait` | Every service healthy, OpenBao included; each `/healthz` 200 | No error expected |
+| No egress | Same | Every `/healthz` 200; an outbound request from a host container fails | No error expected |
 | Missing secret | Host started without one required setting | Exits non-zero; log names the setting | No value in the log |
-| Default secret | A password set to `changeme` or under 16 characters | Same as missing | No value in the log |
+| Default secret | A password `changeme` or under 16 characters | Same as missing | No value in the log |
 | Database down | PostgreSQL stopped | `/healthz` 503 naming `database` | Fixed body |
-| Custody down | OpenBao socket gone | `/healthz` 503 naming `custody` | Fixed body |
-| Private port | Compose config | `/healthz` port not published to the host | Architecture or config test fails if published |
-| Hardening | Compose config | Each app service non-root, read-only, all caps dropped, no Docker socket | Config test fails otherwise |
-| Encrypted mounts | Sample `lsblk` with all three on `crypt` | `check-volumes` exits 0 | No error expected |
-| Unencrypted mount | Sample with PostgreSQL data on a plain partition | Exits non-zero naming that mount | — |
-| Missing mount | Sample without the key volume | Exits non-zero naming it | — |
+| Custody down | OpenBao stopped | `/healthz` 503 naming `custody` | Fixed body |
+| Master Key handoff | Compose config and running OpenBao | Key only as a read-only secret file; absent from image layers, environment and every volume | Config test fails otherwise |
+| Missing Master Key | Secret file absent | OpenBao fails to start; stack not healthy | Start failure observed |
+| Hardening | Compose config | App services non-root, read-only, no caps, no Docker socket; OpenBao `network_mode: none`; health ports unpublished | Config test fails otherwise |
+| Tests in Docker | `docker compose -f deploy/compose.test.yaml run --rm tests` | Build, Architecture and Isolation all pass | No error expected |
+| Nothing outside Docker | Architecture test over `docs/`, `deploy/` | No systemd unit, host path or non-Docker command | Test fails otherwise |
 
 </intent-contract>
 
 ## Code Map
 
-- `src/Gatekeep.Host.Hosted/Program.cs`, `Gatekeep.Host.Admin/Program.cs` -- three lines each; `Host.Worker/Program.cs` and `WorkerJobs.cs` already refuse missing connection settings (Story 1.8) — move that onto the shared check, keep its tests passing.
-- `src/Adapters/OpenBao/OpenBaoServiceCollectionExtensions.cs`, `OpenBaoOptions.cs` -- `AddOpenBaoKeyCustody(services, options)`; socket path and role/secret ID file paths.
+- **Partial work already in the tree (from the first attempt, uncommitted):** `src/Adapters/Hosting/` (shared startup), `src/Adapters/OpenBao/OpenBaoHealth.cs`, the three host `Program.cs` files and project files, `deploy/docker/`, `deploy/postgres/initdb/`, `deploy/postgres/migrator.connection`, `.dockerignore`, `tests/Isolation/Hosting/`, edits to `WorkerStartupTests`, `MigrateCommandTests`, `PostgresFixture`, `module-edges.txt`, `Gatekeep.slnx`. Keep what fits this spec; remove `src/Gatekeep.Cli/VolumeCheck.cs`, `tests/Isolation/Cli/` LUKS tests and anything else that checks LUKS.
+- `deploy/openbao/` -- Story 1.7: `openbao.hcl`, `openbao.service`, `generate-master-key.sh`, `setup.sh`, `policies/`. `tests/Isolation/Custody/OpenBaoFixture.cs`, `start-openbao.sh`, `test-listener.hcl` run it in a container today; `tests/Architecture/KeyCustodyRuleTests.cs` checks the systemd unit and `PrivateNetwork=yes` — rewrite those rules for the Compose service.
+- `src/Adapters/OpenBao/OpenBaoServiceCollectionExtensions.cs`, `OpenBaoOptions.cs` -- custody wiring.
 - `src/Modules/Operations/Contracts/OperationsContract.cs` -- `CreateRunner(..., custody, ...)`.
-- `src/Gatekeep.Cli/` -- existing `gatekeep migrate` command pattern for adding `check-volumes`.
-- `deploy/postgres/roles.sql` -- roles have no passwords; the install sets them from the secret files.
-- `docs/key-custody.md` -- OpenBao install steps the install doc links to; `/etc/gatekeep/openbao/{role}/` holds role and secret IDs.
-- `tests/Architecture/module-edges.txt` -- a new shared project (for example `Adapters.Hosting`) needs edges from each host, and to `Adapters.OpenBao` if it checks custody; regenerate the diagram.
-- `tests/Isolation/Jobs/WorkerStartupTests.cs` -- pattern for running a host process and reading its output.
-- `.github/workflows/ci.yml` -- add a job that builds the images and runs the stack test; pin actions by SHA as the file does.
-- `global.json` -- SDK 10.0.403 at `%LOCALAPPDATA%\Programs\dotnet-10.0.403` and Node 26.13.0 at `%LOCALAPPDATA%\Programs\node-v26.13.0-win-x64` first on `PATH` (pnpm shim in `C:\Users\esm\AppData\Local\Temp\claude\D--Projects-Personal-gatekeep\94ff8bc2-4a0e-49fa-a28e-6d3d0ecd048d\scratchpad\shims`), or `BuildEnforcementTests` fail. Docker Desktop runs Linux containers here.
+- `.github/workflows/ci.yml` -- replace the SDK steps with the `tests` service; add the stack job; pin actions by SHA.
+- `tests/Architecture/BuildEnforcementTests.cs` -- needs Node 26.13.0 and pnpm, so the test image provides them.
+- `global.json` -- SDK 10.0.403; the test image uses that exact SDK.
+- Docker Desktop runs Linux containers on this machine.
 
 ## Tasks & Acceptance
 
 **Execution:**
-- [ ] Shared host startup project -- file-based secret configuration from `/run/secrets`, required-setting and default-value check, `/healthz` on a private port with database and custody checks, custody wiring.
-- [ ] The three host `Program.cs` files -- use it; `Host.Worker` hands custody to its runner.
-- [ ] `src/Gatekeep.Cli/` -- `check-volumes` with an `lsblk --json` parser.
-- [ ] `deploy/docker/` -- one Dockerfile per host, multi-stage, non-root, pinned base images by digest.
-- [ ] `deploy/compose.yaml`, `deploy/compose.ci.yaml` -- the stack and the CI stand-in override (OpenBao container sharing a socket volume, generated test secrets).
-- [ ] `deploy/luks/` -- dropbear-initramfs config, authorized key options, crypttab notes.
-- [ ] `docs/install.md` -- the install, the boot passphrase step and its alert.
-- [ ] Tests: startup refusal per host for missing and default values; `/healthz` 200 and 503 cases; `check-volumes` against sample output; a config test over `compose.yaml` for hardening, internal networks, unpublished health ports and no secret values; a stack test the CI job runs.
-- [ ] `.github/workflows/ci.yml` -- the stack job.
-- [ ] `docs/threat-model.md`, edges, diagram.
+- [ ] Shared host startup, host `Program.cs` files, custody wiring -- per the Always list.
+- [ ] `deploy/docker/` -- Dockerfiles for the three hosts, `cli` and `tests`.
+- [ ] `deploy/compose.yaml`, `deploy/compose.test.yaml`, `deploy/openbao/` -- the stack, one-shot `keygen` and `openbao-setup` services, the test service; remove `openbao.service`.
+- [ ] Tests: startup refusal per host; `/healthz` 200 and 503 cases; a config test over the Compose files for hardening, unpublished health ports, the Master Key handoff and no secret values; an architecture test that `docs/` and `deploy/` hold no systemd unit, host path or non-Docker command; custody tests updated.
+- [ ] `.github/workflows/ci.yml` -- tests through the container; stack job.
+- [ ] `docs/install.md`, `docs/key-custody.md`, `docs/spikes/1-2-key-custody.md`, `docs/threat-model.md`, edges, diagram.
 
 **Acceptance Criteria:**
-- Given the stack in CI, when `docker compose up --wait` runs with the CI override, then every service reports healthy and the job passes.
-- Given any app container, when inspected, then it runs as non-root with a read-only root filesystem and no capabilities.
+- Given a machine with only Docker and Git, when the Operator follows `docs/install.md`, then the stack comes up healthy without any other tool installed.
+- Given CI, when it runs, then every .NET build and test step runs inside the `tests` container.
 
 ## Spec Change Log
+
+- **2026-11-02, course correction (Docker only):** the first version of this spec planned native OpenBao, a LUKS check and initramfs SSH. Esm decided nothing runs outside Docker; the intent contract was rewritten before review. Superseded: `gatekeep check-volumes`, `deploy/luks/`, the native OpenBao bind mount.
 
 ## Review Triage Log
 
 ## Design Notes
 
-- **Defaults list:** keep it in one place, used by every host and testable; compare case-insensitively.
-- **Health port:** for example 8081 inside the container, reachable on the internal network only, so Compose healthchecks and later monitoring (AD-32) can use it.
-- **Socket permissions:** containers run with the host's `gatekeep-custody` group ID as a supplementary group, set by the install; the CI override uses the stand-in container's group.
+- **Secrets directory:** for example `./secrets/` next to `compose.yaml`, ignored by git, created by the keygen and setup services through a bind mount; the docs say to keep it on an encrypted disk and out of backups.
+- **Socket group:** the socket volume is shared by group ID; containers that need it run with that supplementary group.
+- **Testcontainers in a container:** the tests container reaches sibling containers through the host; set `TESTCONTAINERS_HOST_OVERRIDE` (for example `host.docker.internal`) as needed.
 
 ## Verification
 
 **Commands:**
-- `dotnet restore Gatekeep.slnx --locked-mode` -- expected: succeeds.
-- `dotnet build Gatekeep.slnx --no-restore` -- expected: no warnings.
-- `dotnet test tests/Architecture --no-build` -- expected: all pass.
-- `dotnet test tests/Isolation --no-build` -- expected: all pass.
-- `docker compose -f deploy/compose.yaml -f deploy/compose.ci.yaml up --build --wait` then `down -v` -- expected: every service healthy.
-- `dotnet run --project tests/Architecture/Generator` -- expected: no diff after committing the diagram.
+- `docker compose -f deploy/compose.test.yaml run --rm tests` -- expected: restore (locked), build with no warnings, Architecture and Isolation all pass.
+- `docker compose -f deploy/compose.yaml up --build --wait` after the keygen and setup steps in `docs/install.md`, then `down -v` -- expected: every service healthy.
+- Diagram generator inside the tests container -- expected: no diff after committing the diagram.
