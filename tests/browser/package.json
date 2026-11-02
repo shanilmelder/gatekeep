@@ -4,10 +4,23 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "build": "tsc -p fixture/tsconfig.json && vite build --config fixture/vite.config.ts",
     "test": "playwright test"
   },
+  "dependencies": {
+    "@gatekeep/ui": "workspace:*",
+    "react": "catalog:",
+    "react-dom": "catalog:"
+  },
   "devDependencies": {
+    "@axe-core/playwright": "catalog:",
     "@gatekeep/design-tokens": "workspace:*",
-    "@playwright/test": "catalog:"
+    "@playwright/test": "catalog:",
+    "@types/react": "catalog:",
+    "@types/react-dom": "catalog:",
+    "@vitejs/plugin-react": "catalog:",
+    "playwright-core": "catalog:",
+    "typescript": "catalog:",
+    "vite": "catalog:"
   }
 }

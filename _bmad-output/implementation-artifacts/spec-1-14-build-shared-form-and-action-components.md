@@ -2,15 +2,37 @@
 title: 'Story 1.14: Build shared form and action components'
 type: 'feature'
 created: '2026-11-02'
-status: 'ready-for-dev'
+status: 'done'
+baseline_revision: '26b120e08742c5d750166da998cefc880c6d58c7'
 review_loop_iteration: 0
-followup_review_recommended: false
+followup_review_recommended: true
 context:
   - '{project-root}/_bmad-output/planning-artifacts/ux-designs/ux-gatekeep-2026-11-01/DESIGN.md'
   - '{project-root}/_bmad-output/planning-artifacts/ux-designs/ux-gatekeep-2026-11-01/EXPERIENCE.md'
   - '{project-root}/_bmad-output/implementation-artifacts/spec-1-13-generate-design-tokens-and-bundle-fonts.md'
 warnings: [oversized]
-deferred: []
+deferred:
+  - summary: >-
+      Controlled values and callbacks of Toggle, Segmented and RadioGroup are untested.
+    evidence: |-
+      Pin them in the first story wiring a controlled control into a Save form.
+    location: >-
+      packages/ui/src/components
+    severity: medium
+  - summary: >-
+      Checkbox and RadioGroup have no helper, error, required or group-disabled support.
+    evidence: |-
+      Add with the first form needing a required choice, such as a consent checkbox.
+    location: >-
+      packages/ui/src/components/Choice.tsx
+    severity: medium
+  - summary: >-
+      No submit-time validation or first-invalid-field focus.
+    evidence: |-
+      Form-level behaviour belongs to the first form story.
+    location: >-
+      packages/ui/src/components/Field.tsx
+    severity: medium
 ---
 
 <intent-contract>
@@ -92,11 +114,11 @@ deferred: []
 ## Tasks & Acceptance
 
 **Execution:**
-- [ ] `packages/ui/src/` -- the components, their CSS Modules, the message catalogue, and the `hosted` and `admin` entry points.
-- [ ] `packages/ui` build -- React and CSS Modules output usable by both apps.
-- [ ] `tests/browser/fixture/` -- a fixture page rendering every control on both surfaces.
-- [ ] `tests/browser/controls.spec.ts` -- every matrix row, plus axe-core.
-- [ ] A dependency test that fails if `packages/ui` gains a runtime dependency other than React and React DOM.
+- [x] `packages/ui/src/` -- the components, their CSS Modules, the message catalogue, and the `hosted` and `admin` entry points.
+- [x] `packages/ui` build -- React and CSS Modules output usable by both apps.
+- [x] `tests/browser/fixture/` -- a fixture page rendering every control on both surfaces.
+- [x] `tests/browser/controls.spec.ts` -- every matrix row, plus axe-core.
+- [x] A dependency test that fails if `packages/ui` gains a runtime dependency other than React and React DOM.
 
 **Acceptance Criteria:**
 - Given the button variants, when rendered, then primary, secondary, ghost, outlined destructive, disabled and small exist, and no filled warn button exists.
@@ -109,7 +131,72 @@ deferred: []
 
 ## Review Triage Log
 
+### 2026-11-02 — Review pass
+- verdicts: 45 findings — high 0, medium 14, low 29, false 2, maybe-false 0
+- findings:
+  - `[medium]` `[patch]` Gap: a Field's external `error` is untested — fixture and tests for helper text, `aria-invalid`, description, and precedence over `validate`.
+  - `[medium]` `[defer]` Gap: controlled values and change callbacks of Toggle, Segmented and RadioGroup are untested — pin them in the first story that wires a controlled control into a Save form.
+  - `[medium]` `[patch]` Blind: a disabled checked checkbox or toggle looks unchecked — disabled-and-checked rules added.
+  - `[medium]` `[patch]` Blind: a caller's `aria-disabled` doesn't block clicks or submit — blocked and styled.
+  - `[medium]` `[patch]` Blind: ghost, destructive, small and disabled buttons ignore the surface; missing hovers — routed through per-surface variables.
+  - `[low]` `[patch]` Blind: spinner ignores the label colour and can overflow small buttons — `currentColor`, kept inside.
+  - `[medium]` `[patch]` Blind: tabbing through an untouched field shows an error — blur validation waits for a change; submit-time validation belongs to the form stories.
+  - `[low]` `[patch]` Blind: `aria-invalid` grammar and spelling dropped; external error never clears — passed through, and clearing documented as the caller's.
+  - `[medium]` `[defer]` Blind: Checkbox and RadioGroup can't show helper or error text, or be disabled as a group — add with the first form that needs a required choice.
+  - `[low]` `[patch]` Blind: radios size from the checkbox hit-area token — radio token used.
+  - `[low]` `[patch]` Blind: Segmented arrows don't mirror in RTL; rejected controlled change misplaces focus — fixed; group `disabled` deferred with the Checkbox row.
+  - `[medium]` `[patch]` Blind: PasswordField binds its form once, rebuilds its ref, keeps reveal enabled when disabled — fixed.
+  - `[low]` `[patch]` Blind: nearest-surface claim false when an Admin island holds a scope — Admin selectors added.
+  - `[low]` `[patch]` Blind: dependency check misses `composes` and counts comments — matched and stripped.
+  - `[low]` `[patch]` Blind: `react-dom` not a peer; Messages memo defeated by inline objects — declared, and documented.
+  - `[low]` `[patch]` Blind: test gaps (dark, forced colours, reduced motion, disabled, error, pending override, duplicate text in the tab walk) — added.
+  - `[medium]` `[patch]` Edge: `aria-disabled` without `pending` still acts — same fix as the Blind row.
+  - `[medium]` `[patch]` Edge: a control's own id breaks the label — label follows the control's id.
+  - `[low]` `[patch]` Edge: `aria-invalid` values dropped — same fix as the Blind row.
+  - `[low]` `[patch]` Edge: external error stays after a fix — documented as the caller's to clear.
+  - `[medium]` `[patch]` Edge: password stays revealed when native validation blocks submit — masks on `invalid` too.
+  - `[medium]` `[patch]` Edge: password listener stays on an old form — follows the current form.
+  - `[low]` `[patch]` Edge: a disabled toggle submits its value — omitted when disabled.
+  - `[low]` `[patch]` Edge: toggle's hidden input ignores `form` — passed through.
+  - `[low]` `[patch]` Edge: an unmatched Segmented value submits what nothing shows — falls back to the first option.
+  - `[low]` `[patch]` Edge: duplicate Segmented values — asserted in development.
+  - `[low]` `[patch]` Edge: RTL arrows — same fix as the Blind row.
+  - `[low]` `[patch]` Edge: an `undefined` message override wipes the default — ignored.
+  - `[low]` `[patch]` Edge: React 19 ref cleanups dropped — collected and returned.
+  - `[low]` `[patch]` Edge: `composes` imports pass the dependency check — same fix as the Blind row.
+  - `[low]` `[patch]` Edge: a malformed manifest crashes the check — reported as a problem.
+  - `[low]` `[patch]` Edge: unresolvable `argv[1]` breaks importers — guarded.
+  - `[low]` `[patch]` Edge: Admin island under Hosted scope — same fix as the Blind row.
+  - `[medium]` `[patch]` Intent: the "no third party" rule is checked package-wide, not on what Hosted Login reaches, and would wrongly block AD-22's admin primitives and Hosted QR encoder — the strict rule now walks the `hosted` entry's import graph.
+  - `[false]` `[reject]` Intent: EXPERIENCE.md conformance beyond the matrix can't be measured from the diff — the matrix rows are the contract; each row is tested.
+  - `[medium]` `[patch]` Intent: button variants read Admin tokens on Hosted — same fix as the Blind row.
+  - `[low]` `[patch]` Intent: `Select` validation untested — added.
+  - `[low]` `[reject]` Intent: paste is checked by a synthetic event — it proves no handler blocks paste, which is the rule; a real clipboard needs permissions the test runner lacks.
+  - `[low]` `[reject]` Intent: a caller can pass `autoComplete="off"` — the default is right, and the caller owns that choice.
+  - `[low]` `[patch]` Intent: pending message override untested — added.
+  - `[low]` `[patch]` Intent: a named toggle is never shown submitting in a form — test added.
+  - `[low]` `[patch]` Intent: focus ring untested in the error state — added.
+  - `[low]` `[reject]` Intent: other handlers run while pending — pending blocks activation and submit, which is the rule.
+  - `[low]` `[reject]` Intent: the `.` export and the `dist` build were removed — nothing imports the bare package, and the apps compile the source.
+  - `[false]` `[reject]` Intent: the destructive rule is a doc comment — the confirming modal is Story 1.16's, as the spec says.
+
 ## Verification
 
 **Commands:**
 - `docker compose -f deploy/compose.test.yaml run --rm --build tests` -- expected: build with no warnings; token, font and colour checks pass; browser tests (surfaces and controls) pass; Architecture and Isolation pass.
+
+## Auto Run Result
+
+Status: done
+
+**Summary:** `packages/ui` gains Button, Field, Input, Select, Textarea, PasswordField, Toggle, Checkbox, Radio and RadioGroup, and Segmented. They are React and CSS Modules over token variables, sized per surface by `data-gk-surface`, with strings from one catalogue. A dependency check keeps what Hosted Login reaches to React and React DOM. A fixture page and Playwright tests drive every control by keyboard and pointer on both surfaces, with axe in light and dark.
+
+**Files:** `packages/ui/src/` (components, CSS Modules, `surface.css`, `messages.tsx`, `util.ts`, entry points), `packages/ui/scripts/check-dependencies.mjs` and its test, `packages/ui/package.json`; `tests/browser/fixture/`, `tests/browser/controls.spec.ts`, `playwright.config.ts`; the apps' `index.html`; `pnpm-workspace.yaml`, `pnpm-lock.yaml`.
+
+**Review:** 45 findings across four layers: 37 patched, 2 deferred, 6 rejected, each with its reason in the triage log.
+
+**Follow-up review:** recommended. Many medium patches change component behaviour and styling, with new browser tests as their only proof.
+
+**Verification:** see the PR screenshot; the full suite passes in the `tests` container.
+
+**Residual risks:** submit-time validation, choice-control errors and the controlled APIs are deferred to the first form stories. The 5px label gap is 4px because no 5px token exists.

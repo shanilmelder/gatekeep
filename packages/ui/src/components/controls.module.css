@@ -1,0 +1,113 @@
+/*
+ * Text controls on DESIGN.md's input, hosted-input, select and textarea tokens, chosen by
+ * surface.css. Focus adds the accent border and wash beside the global focus ring; an
+ * error sets the bad border, and on Admin the bad-sf ring, and keeps the focus ring.
+ */
+
+.control {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: var(--gk-ui-control-h);
+  margin: 0;
+  padding: 0 var(--gk-ui-control-padding);
+  background: var(--gk-ui-input-background);
+  color: var(--gk-ui-input-foreground);
+  border: 1px solid var(--gk-ui-input-border);
+  border-radius: var(--gk-ui-input-radius);
+  font: var(--gk-ui-control-font);
+}
+
+.control::placeholder {
+  color: var(--gk-ui-placeholder);
+  opacity: 1;
+}
+
+.control:focus {
+  border-color: var(--gk-ui-input-focus-border);
+  box-shadow: var(--gk-ui-input-focus-ring);
+}
+
+.control[aria-invalid='true'] {
+  border-color: var(--gk-ui-input-error-border);
+  box-shadow: var(--gk-ui-input-error-ring);
+}
+
+.control:disabled {
+  background: var(--gk-color-sf2);
+  color: var(--gk-color-tx2);
+  cursor: not-allowed;
+}
+
+/* Identifiers: anything a developer might paste is Geist Mono (DESIGN.md, Typography). */
+.code {
+  font: var(--gk-font-code);
+}
+
+.select {
+  appearance: none;
+  padding-inline-end: calc(var(--gk-ui-control-padding) + var(--gk-space-16));
+  background: var(--gk-ui-select-background);
+  color: var(--gk-ui-select-foreground);
+  border-color: var(--gk-ui-select-border);
+  border-radius: var(--gk-ui-select-radius);
+  cursor: pointer;
+}
+
+.selectWrap {
+  position: relative;
+  display: block;
+}
+
+/* The ▼ glyph (DESIGN.md, Menus and fields). Decorative: the select names itself. */
+.chevron {
+  position: absolute;
+  inset-block: 0;
+  inset-inline-end: var(--gk-ui-control-padding);
+  display: flex;
+  align-items: center;
+  font: var(--gk-font-helper);
+  color: var(--gk-color-tx2);
+  pointer-events: none;
+}
+
+.textarea {
+  display: block;
+  padding-block: var(--gk-space-8);
+  background: var(--gk-ui-textarea-background);
+  color: var(--gk-ui-textarea-foreground);
+  border-color: var(--gk-ui-textarea-border);
+  border-radius: var(--gk-ui-textarea-radius);
+  font: var(--gk-textarea-typography);
+  resize: vertical;
+}
+
+.passwordWrap {
+  position: relative;
+  display: block;
+}
+
+.passwordInput {
+  padding-inline-end: calc(var(--gk-space-48) + var(--gk-space-8));
+}
+
+/* An inline action: a 24px hit area at least (EXPERIENCE.md, Targets). */
+.reveal {
+  position: absolute;
+  inset-block: 0;
+  inset-inline-end: var(--gk-space-4);
+  min-width: var(--gk-checkbox-hit-area);
+  min-height: var(--gk-checkbox-hit-area);
+  margin-block: auto;
+  height: fit-content;
+  padding: 0 var(--gk-space-8);
+  border: 0;
+  border-radius: var(--gk-radius-control-sm);
+  background: transparent;
+  color: var(--gk-color-tx2);
+  font: var(--gk-ui-label-font);
+  cursor: pointer;
+}
+
+.reveal:hover {
+  background: var(--gk-color-sf2);
+}

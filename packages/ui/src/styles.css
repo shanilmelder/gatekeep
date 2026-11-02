@@ -1,11 +1,12 @@
 /*
- * @gatekeep/ui global styles: the generated design tokens, the bundled Geist fonts and the
- * one focus rule. Each app imports this once. The fonts are files in ./fonts, so each app
- * serves them from its own origin: nothing here loads from a font or style host (NFR-18).
+ * @gatekeep/ui global styles: the generated design tokens, the surface sizing the controls
+ * read (surface.css), the bundled Geist fonts and the one focus rule. Each app imports this
+ * once. The fonts are files in ./fonts, so each app serves them from its own origin: nothing here loads from a font or style host (NFR-18).
  * Values come from the tokens only. A raw colour here fails the raw-hex lint.
  */
 
 @import '@gatekeep/design-tokens/tokens.css';
+@import './surface.css';
 
 /* Geist and Geist Mono (SIL Open Font License 1.1, ./fonts/LICENSE.txt), variable weight. */
 @font-face {

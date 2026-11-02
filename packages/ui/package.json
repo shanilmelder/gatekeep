@@ -4,23 +4,29 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": {
-      "types": "./dist/index.d.ts",
-      "default": "./dist/index.js"
-    },
+    "./hosted": "./src/hosted.ts",
+    "./admin": "./src/admin.ts",
     "./styles.css": "./src/styles.css"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "fonts": "node scripts/fonts.mjs",
-    "check": "node scripts/fonts.mjs --check && node scripts/check-no-raw-hex.mjs",
+    "check": "node scripts/fonts.mjs --check && node scripts/check-no-raw-hex.mjs && node scripts/check-dependencies.mjs",
     "test": "node --test \"scripts/**/*.test.mjs\""
   },
   "dependencies": {
     "@gatekeep/design-tokens": "workspace:*"
   },
+  "peerDependencies": {
+    "react": "catalog:",
+    "react-dom": "catalog:"
+  },
   "devDependencies": {
+    "@types/react": "catalog:",
     "geist": "catalog:",
-    "typescript": "catalog:"
+    "react": "catalog:",
+    "react-dom": "catalog:",
+    "typescript": "catalog:",
+    "vite": "catalog:"
   }
 }

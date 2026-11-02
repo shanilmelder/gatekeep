@@ -1,0 +1,139 @@
+/*
+ * Surface sizing (AD-22): one component serves both surfaces, and `data-gk-surface` on an
+ * ancestor or on the component picks the Admin or Hosted values from DESIGN.md's component
+ * tokens. With no attribute, a control takes the Admin values.
+ *
+ * The values are custom properties, so the nearest `data-gk-surface` wins. Some of them are
+ * colours, which resolve against the scheme where they are declared, so, as in tokens.css,
+ * they are declared again on every theme and scheme scope inside a surface. One surface may
+ * nest inside the other once, as a Hosted preview inside the Admin Dashboard or an Admin
+ * island inside a Hosted page: the nested selectors are one step more specific, so the
+ * inner surface wins over the outer one's scope rules, whichever comes later.
+ */
+
+/* Hosted, at the top level or nested once inside Admin. */
+[data-gk-surface='hosted'],
+[data-gk-surface='hosted'] :is([data-gk-theme], [data-gk-scheme]),
+[data-gk-surface='admin'] [data-gk-surface='hosted'],
+[data-gk-surface='admin'] [data-gk-surface='hosted']:is([data-gk-theme], [data-gk-scheme]),
+[data-gk-surface='admin'] [data-gk-surface='hosted'] :is([data-gk-theme], [data-gk-scheme]) {
+  --gk-ui-control-h: var(--gk-hosted-input-height);
+  --gk-ui-control-padding: var(--gk-space-12);
+  --gk-ui-control-font: var(--gk-font-hosted-body);
+  --gk-ui-label-font: var(--gk-font-hosted-label);
+  /* Hosted Login text is tx2 or stronger, placeholders included (DESIGN.md, Colors). */
+  --gk-ui-placeholder: var(--gk-color-tx2);
+
+  --gk-ui-input-background: var(--gk-hosted-input-background);
+  --gk-ui-input-foreground: var(--gk-hosted-input-foreground);
+  --gk-ui-input-border: var(--gk-hosted-input-border);
+  --gk-ui-input-radius: var(--gk-hosted-input-radius);
+  --gk-ui-input-focus-border: var(--gk-hosted-input-focus-border);
+  --gk-ui-input-focus-ring: 0 0 0 var(--gk-hosted-input-focus-ring-width) var(--gk-hosted-input-focus-ring-color);
+  --gk-ui-input-error-border: var(--gk-hosted-input-error-border);
+  /* hosted-input-error has no ring: the border and the helper carry the error. */
+  --gk-ui-input-error-ring: none;
+  --gk-ui-input-error-helper: var(--gk-hosted-input-error-helper);
+
+  /* Hosted selects and textareas share the hosted-input edge, which passes 3:1. */
+  --gk-ui-select-background: var(--gk-hosted-input-background);
+  --gk-ui-select-foreground: var(--gk-hosted-input-foreground);
+  --gk-ui-select-border: var(--gk-hosted-input-border);
+  --gk-ui-select-radius: var(--gk-hosted-input-radius);
+
+  --gk-ui-textarea-background: var(--gk-hosted-input-background);
+  --gk-ui-textarea-foreground: var(--gk-hosted-input-foreground);
+  --gk-ui-textarea-border: var(--gk-hosted-input-border);
+  --gk-ui-textarea-radius: var(--gk-hosted-input-radius);
+
+  --gk-ui-button-height: var(--gk-hosted-button-primary-height);
+  --gk-ui-button-padding: var(--gk-space-16);
+  --gk-ui-button-radius: var(--gk-hosted-button-primary-radius);
+  --gk-ui-button-font: var(--gk-hosted-button-primary-typography);
+  --gk-ui-button-primary-background: var(--gk-hosted-button-primary-background);
+  --gk-ui-button-primary-foreground: var(--gk-hosted-button-primary-foreground);
+  --gk-ui-button-secondary-background: var(--gk-hosted-button-secondary-background);
+  --gk-ui-button-secondary-foreground: var(--gk-hosted-button-secondary-foreground);
+  --gk-ui-button-secondary-border: var(--gk-hosted-button-secondary-border);
+  /* DESIGN.md has no Hosted ghost, destructive, disabled or small button: both surfaces share them. */
+  --gk-ui-button-ghost-background: var(--gk-button-ghost-background);
+  --gk-ui-button-ghost-foreground: var(--gk-button-ghost-foreground);
+  --gk-ui-button-destructive-background: var(--gk-button-destructive-background);
+  --gk-ui-button-destructive-foreground: var(--gk-button-destructive-foreground);
+  --gk-ui-button-destructive-border: var(--gk-button-destructive-border);
+  --gk-ui-button-disabled-background: var(--gk-button-disabled-background);
+  --gk-ui-button-disabled-foreground: var(--gk-button-disabled-foreground);
+  --gk-ui-button-disabled-border: var(--gk-button-disabled-border);
+  --gk-ui-button-sm-height: var(--gk-button-sm-height);
+  --gk-ui-button-sm-padding: var(--gk-space-8);
+  --gk-ui-button-sm-radius: var(--gk-button-sm-radius);
+  --gk-ui-button-sm-font: var(--gk-button-sm-typography);
+
+  /* On Hosted Login, unchecked and unselected edges use tx3 (DESIGN.md, Selection). */
+  --gk-ui-checkbox-border: var(--gk-hosted-input-border);
+  --gk-ui-radio-border: var(--gk-hosted-input-border);
+}
+
+/*
+ * Admin: the default everywhere (zero specificity, so any Hosted rule beats it), then an
+ * explicit Admin surface, at the top level or nested once inside Hosted.
+ */
+:where(:root, [data-gk-theme], [data-gk-scheme]),
+[data-gk-surface='admin'],
+[data-gk-surface='admin'] :is([data-gk-theme], [data-gk-scheme]),
+[data-gk-surface='hosted'] [data-gk-surface='admin'],
+[data-gk-surface='hosted'] [data-gk-surface='admin']:is([data-gk-theme], [data-gk-scheme]),
+[data-gk-surface='hosted'] [data-gk-surface='admin'] :is([data-gk-theme], [data-gk-scheme]) {
+  --gk-ui-control-h: var(--gk-input-height);
+  --gk-ui-control-padding: var(--gk-space-8);
+  --gk-ui-control-font: var(--gk-font-body);
+  --gk-ui-label-font: var(--gk-font-field-label);
+  --gk-ui-text: var(--gk-color-tx);
+  --gk-ui-placeholder: var(--gk-color-tx3);
+
+  --gk-ui-input-background: var(--gk-input-background);
+  --gk-ui-input-foreground: var(--gk-input-foreground);
+  --gk-ui-input-border: var(--gk-input-border);
+  --gk-ui-input-radius: var(--gk-input-radius);
+  --gk-ui-input-focus-border: var(--gk-input-focus-border);
+  --gk-ui-input-focus-ring: 0 0 0 var(--gk-input-focus-ring-width) var(--gk-input-focus-ring-color);
+  --gk-ui-input-error-border: var(--gk-input-error-border);
+  --gk-ui-input-error-ring: 0 0 0 var(--gk-input-error-ring-width) var(--gk-input-error-ring-color);
+  --gk-ui-input-error-helper: var(--gk-input-error-helper);
+
+  --gk-ui-select-background: var(--gk-select-background);
+  --gk-ui-select-foreground: var(--gk-select-foreground);
+  --gk-ui-select-border: var(--gk-select-border);
+  --gk-ui-select-radius: var(--gk-select-radius);
+
+  --gk-ui-textarea-background: var(--gk-textarea-background);
+  --gk-ui-textarea-foreground: var(--gk-textarea-foreground);
+  --gk-ui-textarea-border: var(--gk-textarea-border);
+  --gk-ui-textarea-radius: var(--gk-textarea-radius);
+
+  --gk-ui-button-height: var(--gk-button-primary-height);
+  --gk-ui-button-padding: var(--gk-space-12);
+  --gk-ui-button-radius: var(--gk-button-primary-radius);
+  --gk-ui-button-font: var(--gk-button-primary-typography);
+  --gk-ui-button-primary-background: var(--gk-button-primary-background);
+  --gk-ui-button-primary-foreground: var(--gk-button-primary-foreground);
+  --gk-ui-button-secondary-background: var(--gk-button-secondary-background);
+  --gk-ui-button-secondary-foreground: var(--gk-button-secondary-foreground);
+  --gk-ui-button-secondary-border: var(--gk-button-secondary-border);
+  /* DESIGN.md has no Hosted ghost, destructive, disabled or small button: both surfaces share them. */
+  --gk-ui-button-ghost-background: var(--gk-button-ghost-background);
+  --gk-ui-button-ghost-foreground: var(--gk-button-ghost-foreground);
+  --gk-ui-button-destructive-background: var(--gk-button-destructive-background);
+  --gk-ui-button-destructive-foreground: var(--gk-button-destructive-foreground);
+  --gk-ui-button-destructive-border: var(--gk-button-destructive-border);
+  --gk-ui-button-disabled-background: var(--gk-button-disabled-background);
+  --gk-ui-button-disabled-foreground: var(--gk-button-disabled-foreground);
+  --gk-ui-button-disabled-border: var(--gk-button-disabled-border);
+  --gk-ui-button-sm-height: var(--gk-button-sm-height);
+  --gk-ui-button-sm-padding: var(--gk-space-8);
+  --gk-ui-button-sm-radius: var(--gk-button-sm-radius);
+  --gk-ui-button-sm-font: var(--gk-button-sm-typography);
+
+  --gk-ui-checkbox-border: var(--gk-checkbox-unchecked-border);
+  --gk-ui-radio-border: var(--gk-radio-unselected-border);
+}

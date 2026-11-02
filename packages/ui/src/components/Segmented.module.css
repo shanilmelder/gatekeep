@@ -1,0 +1,54 @@
+/* DESIGN.md's segmented tokens: an sf2 track, and an sf thumb on the selected option. */
+
+.segmented {
+  display: inline-flex;
+  flex-direction: column;
+  gap: var(--gk-space-4);
+}
+
+.label {
+  font: var(--gk-ui-label-font);
+  color: var(--gk-ui-text);
+}
+
+.track {
+  display: inline-flex;
+  box-sizing: border-box;
+  min-height: var(--gk-ui-control-h);
+  padding: calc(var(--gk-space-4) / 2);
+  gap: calc(var(--gk-space-4) / 2);
+  background: var(--gk-segmented-track);
+  border: 1px solid var(--gk-segmented-border);
+  border-radius: var(--gk-segmented-radius);
+}
+
+.segment {
+  flex: 1 1 auto;
+  margin: 0;
+  padding: 0 var(--gk-space-12);
+  border: 1px solid transparent;
+  border-radius: var(--gk-segmented-thumb-radius);
+  background: transparent;
+  color: var(--gk-color-tx2);
+  font: var(--gk-ui-control-font);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.segment[aria-checked='true'] {
+  background: var(--gk-segmented-thumb);
+  color: var(--gk-color-tx);
+  border-color: var(--gk-segmented-border);
+}
+
+.segment:disabled {
+  color: var(--gk-color-tx3);
+  cursor: not-allowed;
+}
+
+/* Forced colours drop the thumb's fill, so the selection takes the system highlight. */
+@media (forced-colors: active) {
+  .segment[aria-checked='true'] {
+    border-color: Highlight;
+  }
+}
