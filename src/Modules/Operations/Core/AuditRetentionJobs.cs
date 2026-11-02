@@ -101,7 +101,7 @@ internal static class AuditRetentionJobs
         {
             command.CommandText = NewestEvent;
             Sql.Add(command, "tenant_id", tenantId);
-            Sql.Add(command, "checkpoint", AuditContract.CheckpointTypeCode);
+            Sql.Add(command, "checkpoint", AuditEvents.RetentionCheckpoint.Code.Value);
             var value = await command.ExecuteScalarAsync(cancellationToken);
             newest = value is DateTime time ? new DateTimeOffset(DateTime.SpecifyKind(time, DateTimeKind.Utc)) : null;
         }

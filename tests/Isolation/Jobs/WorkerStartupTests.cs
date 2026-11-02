@@ -163,7 +163,7 @@ public sealed class WorkerStartupTests(PostgresFixture postgres) : IDisposable
             await chains.ScalarAsync<string>("SELECT status FROM job WHERE type = 'audit.retention.sweep'"));
 
         // Only gk_retention can delete an event or write a checkpoint, so the cut shows the role it ran as.
-        Assert.Equal(1, await chains.ScalarAsync<long>($"SELECT count(*) FROM audit_event WHERE type_code = '{AuditContract.CheckpointTypeCode}'"));
+        Assert.Equal(1, await chains.ScalarAsync<long>($"SELECT count(*) FROM audit_event WHERE type_code = '{AuditEvents.RetentionCheckpoint.Code.Value}'"));
         Assert.DoesNotContain(1L, await chains.SeqsAsync(AuditChains.TenantA));
         Assert.DoesNotContain(2L, await chains.SeqsAsync(AuditChains.TenantA));
     }
@@ -189,7 +189,7 @@ public sealed class WorkerStartupTests(PostgresFixture postgres) : IDisposable
         Assert.Equal(
             "1|2",
             await chains.ScalarAsync<string>(
-                $"SELECT checkpoint_epoch || '|' || checkpoint_seq FROM deployment_audit_event WHERE type_code = '{AuditContract.CheckpointTypeCode}'"));
+                $"SELECT checkpoint_epoch || '|' || checkpoint_seq FROM deployment_audit_event WHERE type_code = '{AuditEvents.RetentionCheckpoint.Code.Value}'"));
         Assert.DoesNotContain(1L, await chains.SeqsAsync(null));
         Assert.DoesNotContain(2L, await chains.SeqsAsync(null));
     }

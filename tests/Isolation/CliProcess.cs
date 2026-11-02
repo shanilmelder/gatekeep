@@ -2,6 +2,9 @@ using System.Diagnostics;
 
 namespace Gatekeep.Tests.Isolation;
 
+/// <summary>What one Cli run wrote to each stream, and its exit code.</summary>
+internal sealed record CliResult(int ExitCode, string StandardOutput, string StandardError);
+
 /// <summary>Runs the real <c>gatekeep</c> Cli in its own process, from its own output folder.</summary>
 internal static class CliProcess
 {
@@ -20,6 +23,15 @@ internal static class CliProcess
         RunWithEnvironmentAsync(new Dictionary<string, string>(), arguments);
 
     public static async Task<(int ExitCode, string Output)> RunWithEnvironmentAsync(
+        IReadOnlyDictionary<string, string> environment,
+        params string[] arguments)
+    {
+        var result = await RunCapturedAsync(environment, arguments);
+        return (result.ExitCode, result.StandardOutput + result.StandardError);
+    }
+
+    /// <summary>Like <see cref="RunWithEnvironmentAsync"/>, with standard output and error kept apart.</summary>
+    public static async Task<CliResult> RunCapturedAsync(
         IReadOnlyDictionary<string, string> environment,
         params string[] arguments)
     {
@@ -55,7 +67,7 @@ internal static class CliProcess
             var standardError = process.StandardError.ReadToEndAsync(timeout.Token);
             await process.WaitForExitAsync(timeout.Token);
 
-            return (process.ExitCode, await standardOutput + await standardError);
+            return new CliResult(process.ExitCode, await standardOutput, await standardError);
         }
         catch (OperationCanceledException)
         {

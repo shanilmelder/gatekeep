@@ -20,9 +20,10 @@ internal sealed class CanaryFoundException(IEnumerable<CanaryFinding> findings)
     : Exception(string.Join(Environment.NewLine, findings));
 
 /// <summary>
-/// The first canary scan (NFR-3, AD-24). A later story adds a value to <see cref="Canaries"/>
+/// The canary scan (NFR-3, AD-24). A later story adds a value to <see cref="Canaries"/>
 /// or a table to <see cref="AuditTables"/>, or passes another source to <see cref="Scan"/>.
-/// Story 7.8 adds a canary per flow and the release gate.
+/// Story 7.8's canary flows (<see cref="CanaryFlows"/>) plant their own values and scan every
+/// table with <see cref="DatabaseSourcesAsync"/>, plus each run's logs, output and responses.
 /// </summary>
 internal static class CanaryScanner
 {
@@ -67,15 +68,49 @@ internal static class CanaryScanner
     /// One source per stored column, named by table, column and column kind. It reads as the
     /// superuser, which row-level security doesn't limit, so every Tenant's rows are seen.
     /// </summary>
-    public static async Task<IReadOnlyList<CanarySource>> AuditSourcesAsync(
+    public static Task<IReadOnlyList<CanarySource>> AuditSourcesAsync(
         string superuserConnection,
+        CancellationToken cancellationToken) =>
+        TableSourcesAsync(superuserConnection, AuditTables, cancellationToken);
+
+    /// <summary>
+    /// Every base table in the database, audit tables included, one source per stored column
+    /// as <see cref="AuditSourcesAsync"/> names them. A canary flow scans this after each run.
+    /// </summary>
+    public static async Task<IReadOnlyList<CanarySource>> DatabaseSourcesAsync(
+        string superuserConnection,
+        CancellationToken cancellationToken) =>
+        await TableSourcesAsync(superuserConnection, await TablesAsync(superuserConnection, cancellationToken), cancellationToken);
+
+    /// <summary>The database's base tables in <c>public</c>, which is every table Gatekeep has.</summary>
+    public static async Task<IReadOnlyList<string>> TablesAsync(string superuserConnection, CancellationToken cancellationToken)
+    {
+        await using var connection = new NpgsqlConnection(superuserConnection);
+        await connection.OpenAsync(cancellationToken);
+        await using var command = new NpgsqlCommand(
+            "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE' ORDER BY table_name",
+            connection);
+
+        var tables = new List<string>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            tables.Add(reader.GetString(0));
+        }
+
+        return tables;
+    }
+
+    private static async Task<IReadOnlyList<CanarySource>> TableSourcesAsync(
+        string superuserConnection,
+        IEnumerable<string> tables,
         CancellationToken cancellationToken)
     {
         await using var connection = new NpgsqlConnection(superuserConnection);
         await connection.OpenAsync(cancellationToken);
 
         var sources = new List<CanarySource>();
-        foreach (var table in AuditTables)
+        foreach (var table in tables)
         {
             var kinds = await ColumnKindsAsync(connection, table, cancellationToken);
             var columns = await ColumnTextAsync(connection, table, cancellationToken);
@@ -112,7 +147,7 @@ internal static class CanaryScanner
         string table,
         CancellationToken cancellationToken)
     {
-        await using var command = new NpgsqlCommand($"SELECT row_to_json(t)::text FROM {table} t", connection);
+        await using var command = new NpgsqlCommand($"SELECT row_to_json(t)::text FROM \"{table}\" t", connection);
 
         var columns = new Dictionary<string, StringBuilder>();
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);

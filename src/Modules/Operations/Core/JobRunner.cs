@@ -71,7 +71,7 @@ internal sealed class JobRunner : IJobRunner
 
     private const string ReadPayload = "SELECT ids::text, ciphertext FROM job_payload WHERE tenant_id = @tenant_id AND job_id = @id";
 
-    private static readonly AuditTypeCode JobDead = new("operations.job.dead");
+    private static readonly AuditTypeCode JobDead = OperationsEvents.JobDead.Code;
 
     private static readonly IReadOnlyDictionary<string, Guid> NoIds = new Dictionary<string, Guid>();
 
