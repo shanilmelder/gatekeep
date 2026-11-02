@@ -12,7 +12,7 @@ namespace Gatekeep.Modules.Sessions.Core;
 
 internal sealed class SessionService(IAuditAppender audit, TimeProvider time) : ISessions
 {
-    private static readonly AuditTypeCode Started = new("sessions.session.started");
+    private static readonly AuditTypeCode Started = SessionsEvents.SessionStarted.Code;
 
     private const string InsertSession =
         """

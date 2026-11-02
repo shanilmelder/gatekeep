@@ -7,7 +7,9 @@ Every audit type code Gatekeep writes, declared in its module's contract. Codes 
 | Code | Module | Summary | FR-40 class |
 | --- | --- | --- | --- |
 | `audit.retention.checkpoint` | Audit | Retention deleted a chain's sealed prefix past the Log period. Names the last deleted row's epoch, seq and hash. | None |
+| `authentication.signin_transaction.started` | Authentication | A sign-in transaction began for an Application. The caller is anonymous, so no person is named. | None |
 | `operations.job.dead` | Operations | A job used its last attempt and went dead. Only its fixed failure code is kept. | None |
+| `sessions.session.started` | Sessions | A User's Session started. Names the User only: the Session ID is stored only as its hash. | None |
 
 ## FR-40 Tenant Log classes
 

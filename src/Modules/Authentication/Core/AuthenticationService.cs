@@ -13,7 +13,7 @@ namespace Gatekeep.Modules.Authentication.Core;
 
 internal sealed class AuthenticationService(IAuditAppender audit, TimeProvider time) : IAuthentication
 {
-    private static readonly AuditTypeCode Started = new("authentication.signin_transaction.started");
+    private static readonly AuditTypeCode Started = AuthenticationEvents.SignInTransactionStarted.Code;
 
     private const string InsertTransaction =
         """
