@@ -1,0 +1,53 @@
+/* DESIGN.md's code-block tokens: code-bg in both themes, with a header strip. */
+
+.block {
+  margin: 0;
+  min-width: 0;
+  overflow: hidden;
+  background: var(--gk-code-block-background);
+  color: var(--gk-code-block-foreground);
+  border-radius: var(--gk-code-block-radius);
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--gk-space-8);
+  padding: var(--gk-space-4) var(--gk-space-4) var(--gk-space-4) var(--gk-space-16);
+  border-bottom: 1px solid var(--gk-color-code-gutter);
+  /* Copy is a ghost button on the dark strip: code text, and no light hover fill. */
+  --gk-ui-button-ghost-foreground: var(--gk-code-block-foreground);
+  --gk-ui-button-hover: transparent;
+}
+
+.filename {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font: var(--gk-font-code);
+  color: var(--gk-color-code-muted);
+}
+
+.copy {
+  flex: none;
+}
+
+.copy button:hover {
+  text-decoration: underline;
+}
+
+.code {
+  margin: 0;
+  padding: var(--gk-space-12) var(--gk-space-16);
+  overflow: auto;
+  font: var(--gk-code-block-typography);
+}
+
+/* The focus ring sits inside the scrolling region, where the block's corners can't clip it. */
+.code:focus-visible {
+  outline-offset: calc(var(--gk-focus-ring-outline-width) * -1);
+}
+
+.code code {
+  font: inherit;
+}

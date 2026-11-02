@@ -1,0 +1,14 @@
+/* The RBAC matrix on the table tokens, with ok ticks (DESIGN.md, Admin blocks). */
+
+.permission {
+  font: var(--gk-font-code);
+}
+
+.center {
+  text-align: center;
+}
+
+.tick {
+  color: var(--gk-color-ok);
+  font-weight: var(--gk-font-section-weight);
+}

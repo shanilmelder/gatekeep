@@ -112,3 +112,6 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-1-14-build-shared-form-and-action-components.md`
   summary: Validate every field on submit and focus the first invalid one.
   evidence: Story 1.14 review; EXPERIENCE "Focus moves only on submit".
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-15-build-data-display-components.md`
+  summary: Colour the usage bar as it nears and passes its limit.
+  evidence: Story 1.15 review; Story 11.4.

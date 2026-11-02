@@ -1,0 +1,60 @@
+/*
+ * DESIGN.md's tabs tokens: a bottom-aligned 2px tx underline on the selected tab, 20px
+ * between tabs, over a bd divider. Jade is not used. Tabs wrap rather than scroll, so
+ * nothing clips the focus ring or the underline.
+ */
+
+.tabs {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gk-space-16);
+  min-width: 0;
+}
+
+.list {
+  display: flex;
+  flex-wrap: wrap;
+  column-gap: var(--gk-space-20);
+  border-bottom: 1px solid var(--gk-tabs-divider);
+}
+
+.tab {
+  flex: none;
+  margin: 0 0 -1px;
+  padding: var(--gk-space-8) 0;
+  border: 0;
+  border-bottom: solid var(--gk-tabs-active-underline);
+  border-bottom-color: transparent;
+  background: transparent;
+  color: var(--gk-tabs-inactive-foreground);
+  font: var(--gk-ui-control-font);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.tab:hover {
+  color: var(--gk-tabs-active-foreground);
+}
+
+/* The underline overlaps the divider. */
+.tab[aria-selected='true'] {
+  color: var(--gk-tabs-active-foreground);
+  border-bottom: solid var(--gk-tabs-active-underline);
+}
+
+@media (forced-colors: active) {
+  .tab[aria-selected='true'] {
+    border-bottom-color: Highlight;
+  }
+}
+
+/* A panel with nothing focusable inside is a tab stop itself, and shows the ring like any control. */
+.panel {
+  min-width: 0;
+  border-radius: var(--gk-radius-tag);
+}
+
+.panel:focus-visible {
+  outline: var(--gk-focus-ring-outline-width) var(--gk-focus-ring-outline-style) var(--gk-focus-ring-outline-color);
+  outline-offset: var(--gk-focus-ring-outline-offset);
+}

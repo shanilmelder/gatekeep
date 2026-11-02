@@ -1,0 +1,18 @@
+/* The Copy control: ghost text "Copy" beside the value, button-sm in toolbars (DESIGN.md). */
+
+.copy {
+  display: inline-flex;
+}
+
+.texts {
+  display: inline-grid;
+  justify-items: center;
+}
+
+.texts > * {
+  grid-area: 1 / 1;
+}
+
+.hidden {
+  visibility: hidden;
+}

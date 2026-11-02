@@ -44,10 +44,10 @@
   border-color: var(--gk-ui-button-destructive-border);
 }
 
-/* Hover uses sf2 (DESIGN.md, Colors). */
+/* Hover uses sf2 (DESIGN.md, Colors). A dark strip, such as a code block header, sets its own. */
 .secondary:not(:disabled, [aria-disabled='true']):hover,
 .ghost:not(:disabled, [aria-disabled='true']):hover {
-  background: var(--gk-color-sf2);
+  background: var(--gk-ui-button-hover, var(--gk-color-sf2));
 }
 
 .sm {

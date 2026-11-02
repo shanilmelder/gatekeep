@@ -1,8 +1,8 @@
-// Browser tests for the built surfaces (Story 1.13) and the shared controls (Story 1.14),
-// run in the tests container. Chromium is the one the tests image installed at build time,
-// at the version the catalog pins, so nothing is downloaded here. Each app's built dist,
-// and the controls fixture's, is served by `vite preview` on a local port, the way the
-// Deployment serves it: from its own origin.
+// Browser tests for the built surfaces (Story 1.13), the shared controls (Story 1.14) and
+// the data display (Story 1.15), run in the tests container. Chromium is the one the tests
+// image installed at build time, at the version the catalog pins, so nothing is downloaded
+// here. Each app's built dist, and the fixture's, is served by `vite preview` on a local
+// port, the way the Deployment serves it: from its own origin.
 
 import { existsSync } from 'node:fs';
 import path from 'node:path';
@@ -41,6 +41,8 @@ export default defineConfig({
       use: { baseURL: `http://127.0.0.1:${port}` },
     })),
     { name: fixture.name, testMatch: 'controls.spec.ts', use: { baseURL: `http://127.0.0.1:${fixture.port}` } },
+    // The data display (Story 1.15), on the same fixture build at ?page=data.
+    { name: 'data', testMatch: 'data.spec.ts', use: { baseURL: `http://127.0.0.1:${fixture.port}` } },
   ],
   webServer: [
     ...surfaces.map(({ name, port }) => ({
