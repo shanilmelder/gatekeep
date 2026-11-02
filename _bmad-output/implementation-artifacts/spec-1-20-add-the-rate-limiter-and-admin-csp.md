@@ -185,7 +185,7 @@ Status: done
 - `src/Adapters/Postgres/Schema/TableRegistry.cs`, `tests/Isolation/CatalogueAudit.cs`, `CatalogueTests.cs`: the registry entry, the `Unlogged` flag and the persistence drift check.
 - `src/Adapters/Hosting/SecurityHeaders.cs`, `src/Gatekeep.Host.Admin/Program.cs`: the headers, static files and the fallbacks.
 - `apps/admin-dashboard/vite.config.ts`: no inlined assets.
-- `deploy/docker/admin.Dockerfile`, `admin.Dockerfile.dockerignore`: the bundle stage and its build context.
+- `deploy/docker/admin.Dockerfile`, `.dockerignore`: the bundle stage, and `apps/` and `packages/` let into the shared build context. A per-Dockerfile ignore file first failed the CI stack job, because the classic builder there ignores it.
 - `deploy/ci/stack-check.sh`: the header check through Caddy. The Admin host now answers 200.
 - `tests/Isolation/RateLimiting/AdminAttemptLimiterTests.cs`, `tests/Isolation/Hosting/AdminBundleTests.cs`: limiter and host tests.
 - `tests/browser/admin-host.mjs`, `admin-csp.spec.ts`, `playwright.config.ts`: the browser tests against the built host.

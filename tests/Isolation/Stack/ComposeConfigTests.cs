@@ -326,7 +326,6 @@ public sealed class ComposeConfigTests
 
         Assert.Contains("deploy/secrets*/", File.ReadAllText(Path.Combine(Repository.Root, ".dockerignore")));
         Assert.Contains("deploy/secrets/", File.ReadAllText(Path.Combine(Repository.Root, "deploy", "docker", "tests.Dockerfile.dockerignore")));
-        Assert.Contains("deploy/secrets*/", File.ReadAllText(Path.Combine(Repository.Root, "deploy", "docker", "admin.Dockerfile.dockerignore")));
     }
 
     [Fact]

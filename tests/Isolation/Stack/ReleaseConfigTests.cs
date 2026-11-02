@@ -217,7 +217,6 @@ public sealed class ReleaseConfigTests
 
         Assert.Contains("deploy/trust/", File.ReadAllText(Path.Combine(Repository.Root, ".dockerignore")));
         Assert.Contains("deploy/trust/", File.ReadAllText(Path.Combine(Repository.Root, "deploy", "docker", "tests.Dockerfile.dockerignore")));
-        Assert.Contains("deploy/trust/", File.ReadAllText(Path.Combine(Repository.Root, "deploy", "docker", "admin.Dockerfile.dockerignore")));
         var gitignore = File.ReadAllText(Path.Combine(Repository.Root, ".gitignore"));
         Assert.Contains("/deploy/trust/", gitignore);
         Assert.Contains("/deploy/release.env", gitignore);

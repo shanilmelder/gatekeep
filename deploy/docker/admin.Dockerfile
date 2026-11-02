@@ -6,9 +6,8 @@
 # The runtime image is Ubuntu chiseled: no shell, no package manager, no HTTP client.
 # The healthcheck runs this binary with --health-probe instead.
 #
-# The build context is filtered by admin.Dockerfile.dockerignore, which lets in the
-# workspace the Admin Dashboard bundle needs (apps/, packages/) that .dockerignore keeps out
-# of the other images.
+# The build context is filtered by the shared .dockerignore, which lets in the pnpm
+# workspace (apps/, packages/) the Admin Dashboard bundle is built from.
 
 # The Admin Dashboard bundle (AD-21): apps/admin-dashboard built by Vite, served by Host.Admin
 # from its web root under the Admin CSP. Node is the image tests.Dockerfile pins, and pnpm the
