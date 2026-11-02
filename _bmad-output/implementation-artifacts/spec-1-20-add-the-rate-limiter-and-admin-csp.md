@@ -84,7 +84,7 @@ deferred:
 - `src/Gatekeep.Kernel/Jobs/IJobEnqueuer.cs`, `JobType.cs`: the port shape and checked-code value type to mirror. `Persistence/CommandContext.cs` has `TenantId` and `CreateCommand()`. `Persistence/FailureContext.cs` commits refused-request effects.
 - `src/Modules/Operations/Core/JobEnqueuer.cs`, `Core/Sql.cs`: how a module writes through `CommandContext` with parameters. `Contracts/OperationsContract.cs` shows the factory-on-contract pattern (`CreateEnqueuer`).
 - `src/Modules/Admins/{Contracts/AdminsContract.cs,Core/AdminsCore.cs,Adapters/AdminsAdapters.cs}`: placeholders. Replace them with `AdminsContract.CreateAttemptLimiter()` and an internal `AdminAttemptLimiter`.
-- `src/Adapters/Postgres/Migrations/Migration20261102070000SealAuditChains.cs`: the latest migration on main. Name the new one `Migration20261102090000CreateAdminAttemptTable`, because `080000` is taken by the open Story 7.3 branch. Migrations are forward-only, with raw SQL and grants in the same migration.
+- `src/Adapters/Postgres/Migrations/Migration20261102070000SealAuditChains.cs`: the latest migration on main. Name the new one `Migration20261102100000CreateAdminAttemptTable`, because `080000` (Story 7.3) and `090000` (Story 2.6) are taken. Migrations are forward-only, with raw SQL and grants in the same migration.
 - `src/Adapters/Postgres/Schema/TableRegistry.cs`: `TableEntry` and `Tables`. Add `admin_attempt` and an `Unlogged` flag. `tests/Isolation/CatalogueAudit.cs` and `CatalogueTests.cs` compare the catalogue to the registry; add a `relpersistence` check and a drift case for it.
 - `src/Gatekeep.Host.Admin/Program.cs`: add the headers middleware, static files, and the fallback that skips `/api/`. `src/Adapters/Hosting/GatekeepHosting.cs` holds the shared host startup; put `SecurityHeaders` beside it.
 - `apps/admin-dashboard/{vite.config.ts,index.html,src/main.tsx}`: the bundle. It imports `@gatekeep/ui/styles.css`, which brings the fonts from Story 1.13.
@@ -98,7 +98,7 @@ deferred:
 
 **Execution:**
 - [ ] `src/Gatekeep.Kernel/RateLimiting/{IRateLimiter.cs,RateLimitPolicy.cs,RateLimitDecision.cs}`: add the port, the validated policy and the decision.
-- [ ] `src/Adapters/Postgres/Migrations/Migration20261102090000CreateAdminAttemptTable.cs`: create `UNLOGGED` `admin_attempt` (`policy` checked code, `subject_hash bytea` of 32 bytes, `window_start timestamptz`, `attempts integer ≥ 1`, primary key `(policy, subject_hash)`) with its grants.
+- [ ] `src/Adapters/Postgres/Migrations/Migration20261102100000CreateAdminAttemptTable.cs`: create `UNLOGGED` `admin_attempt` (`policy` checked code, `subject_hash bytea` of 32 bytes, `window_start timestamptz`, `attempts integer ≥ 1`, primary key `(policy, subject_hash)`) with its grants.
 - [ ] `src/Adapters/Postgres/Schema/TableRegistry.cs`, `tests/Isolation/CatalogueAudit.cs`, `tests/Isolation/CatalogueTests.cs`: register the table, add the `Unlogged` flag and a drift check.
 - [ ] `src/Modules/Admins/Core/AdminAttemptLimiter.cs`, `Contracts/AdminsContract.cs`: a single-statement upsert that resets an elapsed window, saturates the count and returns the count and the time remaining.
 - [ ] `tests/Isolation/RateLimiting/AdminAttemptLimiterTests.cs`: every limiter row in the matrix as `gk_admin`, plus a check that the raw key appears in no stored column and that `gk_hosted` is denied.
@@ -181,7 +181,7 @@ Status: done
 **Files:**
 - `src/Gatekeep.Kernel/RateLimiting/*`: the port, the validated policy and the decision.
 - `src/Modules/Admins/Core/AdminAttemptLimiter.cs`, `Contracts/AdminsContract.cs`: the Admin limiter and its factory. The placeholder `AdminsCore.cs` is removed.
-- `src/Adapters/Postgres/Migrations/Migration20261102090000CreateAdminAttemptTable.cs`: the table and its grants.
+- `src/Adapters/Postgres/Migrations/Migration20261102100000CreateAdminAttemptTable.cs`: the table and its grants.
 - `src/Adapters/Postgres/Schema/TableRegistry.cs`, `tests/Isolation/CatalogueAudit.cs`, `CatalogueTests.cs`: the registry entry, the `Unlogged` flag and the persistence drift check.
 - `src/Adapters/Hosting/SecurityHeaders.cs`, `src/Gatekeep.Host.Admin/Program.cs`: the headers, static files and the fallbacks.
 - `apps/admin-dashboard/vite.config.ts`: no inlined assets.
