@@ -12,7 +12,7 @@ namespace Gatekeep.Modules.Sessions.Core;
 /// </summary>
 internal sealed class SessionRevocation(IAuditAppender audit, TimeProvider time)
 {
-    private static readonly AuditTypeCode Revoked = new("sessions.access.revoked");
+    private static readonly AuditTypeCode Revoked = SessionsEvents.AccessRevoked.Code;
 
     private const string EndSessions =
         """
