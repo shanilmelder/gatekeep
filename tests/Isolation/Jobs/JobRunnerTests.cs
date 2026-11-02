@@ -565,13 +565,27 @@ public sealed class JobRunnerTests(PostgresFixture postgres)
     {
         var registry = Registry;
         var database = await CreateAsync(postgres, registry);
-        _body = (_, token) => Task.Delay(Timeout.InfiniteTimeSpan, token);
+        // Stop only once the body is running, so a slow claim under load can't stop it first.
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _body = (_, token) =>
+        {
+            started.TrySetResult();
+            return Task.Delay(Timeout.InfiniteTimeSpan, token);
+        };
         var job = await EnqueueAsync(database, registry, Work, TenantA, payload: null);
         await using var runner = database.Runner(registry);
         using var stopping = CancellationTokenSource.CreateLinkedTokenSource(Cancellation);
-        stopping.CancelAfter(TimeSpan.FromMilliseconds(500));
 
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => runner.RunOnceAsync(stopping.Token));
+        var run = runner.RunOnceAsync(stopping.Token);
+        if (await Task.WhenAny(started.Task, run).WaitAsync(TimeSpan.FromSeconds(30), Cancellation) == run)
+        {
+            await run;
+            Assert.Fail("The body never started.");
+        }
+
+        await stopping.CancelAsync();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => run);
 
         Assert.Single(_runs);
         Assert.Equal(
