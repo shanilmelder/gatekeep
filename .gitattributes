@@ -4,3 +4,11 @@
 *.service text eol=lf
 Caddyfile text eol=lf
 *.caddy   text eol=lf
+
+# Generated design tokens (AD-22) keep LF, the generator's line endings, on every checkout.
+packages/design-tokens/css/tokens.css            text eol=lf
+packages/design-tokens/src/tokens.generated.ts   text eol=lf
+src/Modules/Tenancy/Core/Theme/DesignTokens.g.cs text eol=lf
+
+# The bundled fonts and their licence stay byte for byte the pinned geist release.
+packages/ui/src/fonts/** -text

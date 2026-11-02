@@ -3,14 +3,36 @@
 # run on the runner. Restore already ran, from lockfiles, when the image was built.
 set -eu
 
+# Testcontainers reaches its sibling containers through the Docker host. On Docker Desktop
+# host.docker.internal can also resolve to an IPv6 address this container can't route to,
+# so pin the override to the host's IPv4 address when there is one.
+if [ "${TESTCONTAINERS_HOST_OVERRIDE:-}" = "host.docker.internal" ]; then
+  ipv4="$(getent ahostsv4 host.docker.internal | awk 'NR == 1 { print $1 }')"
+  if [ -n "$ipv4" ]; then
+    export TESTCONTAINERS_HOST_OVERRIDE="$ipv4"
+  fi
+fi
+echo "== Testcontainers host override: ${TESTCONTAINERS_HOST_OVERRIDE:-none}"
+
 echo "== pnpm audit"
 pnpm audit --audit-level critical
+
+echo "== design tokens: generator tests and drift check"
+pnpm --filter @gatekeep/design-tokens test
+pnpm --filter @gatekeep/design-tokens check
+
+echo "== ui: lint tests, bundled fonts and raw hex lint"
+pnpm --filter @gatekeep/ui test
+pnpm --filter @gatekeep/ui check
 
 echo "== build .NET solution"
 dotnet build Gatekeep.slnx --no-restore
 
 echo "== build workspaces"
 pnpm -r build
+
+echo "== browser tests"
+pnpm --filter @gatekeep/browser-tests test
 
 echo "== architecture tests"
 dotnet test tests/Architecture --no-build

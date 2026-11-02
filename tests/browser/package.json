@@ -1,0 +1,13 @@
+{
+  "name": "@gatekeep/browser-tests",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "playwright test"
+  },
+  "devDependencies": {
+    "@gatekeep/design-tokens": "workspace:*",
+    "@playwright/test": "catalog:"
+  }
+}

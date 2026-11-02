@@ -1,7 +1,7 @@
 # Test-only containers, never part of the stack (AD-26): a machine needs only Docker and Git.
 #
 #   docker compose -f deploy/compose.test.yaml run --rm --build tests
-#       The whole .NET build and both test suites.
+#       The whole .NET build, both test suites, the token and lint checks and the browser tests.
 #
 #   docker compose -f deploy/compose.test.yaml run --rm --build stack
 #       Installs the stack from deploy/compose.yaml and checks it (deploy/ci/stack-check.sh).
