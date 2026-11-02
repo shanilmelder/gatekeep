@@ -4,6 +4,7 @@ using System.Security.Cryptography;
 using Gatekeep.Adapters.OpenBao;
 using Gatekeep.Kernel.Secrets;
 using Gatekeep.Tests.Isolation.Custody;
+using Gatekeep.Tests.Isolation.Spikes.OpenIddict.Stores;
 using Microsoft.AspNetCore;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
@@ -23,9 +24,15 @@ using static OpenIddict.Server.OpenIddictServerEvents;
 namespace Gatekeep.Tests.Isolation.Spikes.OpenIddict;
 
 /// <summary>
-/// The spike build: OpenIddict 7.7.2 in degraded mode on a TestServer, serving two Tenants on
-/// two hosts. Its global options hold only <see cref="InertCredentials"/>; the first Gatekeep
-/// handler swaps in the Tenant's options and sets <c>BaseUri</c> from the stored issuer.
+/// The spike build: OpenIddict 7.7.2 on a TestServer, serving two Tenants on two hosts. Its
+/// global options hold only <see cref="InertCredentials"/>; the first Gatekeep handler swaps in
+/// the Tenant's options and sets <c>BaseUri</c> from the stored issuer.
+/// <para>
+/// Two modes. <see cref="StartAsync(OpenBaoFixture, CancellationToken)"/> is Story 2.1's:
+/// degraded mode, no stores. <see cref="StartWithStoresAsync"/> is Story 2.2's: degraded mode
+/// off, Applications, authorizations and tokens in spike tables under row-level security, and
+/// every store call on the request's <c>TenantScope</c>.
+/// </para>
 /// </summary>
 public sealed class SpikeServer : IAsyncDisposable
 {
@@ -37,12 +44,13 @@ public sealed class SpikeServer : IAsyncDisposable
 
     private readonly WebApplication _app;
 
-    private SpikeServer(WebApplication app, SpikeTenants tenants, InertCredentials inert, TenantRuntimes runtimes)
+    private SpikeServer(WebApplication app, SpikeTenants tenants, InertCredentials inert, SpikeDatabase? database)
     {
         _app = app;
         Tenants = tenants;
         Inert = inert;
-        Runtimes = runtimes;
+        Database = database;
+        Runtimes = app.Services.GetRequiredService<TenantRuntimes>();
         Client = app.GetTestClient();
     }
 
@@ -54,14 +62,30 @@ public sealed class SpikeServer : IAsyncDisposable
 
     public HttpClient Client { get; }
 
+    /// <summary>The store backing. Null in degraded mode.</summary>
+    public SpikeDatabase? Database { get; }
+
+    public SpikeStoreProbe Probe => _app.Services.GetRequiredService<SpikeStoreProbe>();
+
+    public IServiceProvider Services => _app.Services;
+
     /// <summary>The options OpenIddict builds at startup: the ones no Tenant request may use.</summary>
     public OpenIddictServerOptions GlobalOptions =>
         _app.Services.GetRequiredService<IOptionsMonitor<OpenIddictServerOptions>>().CurrentValue;
 
-    public static async Task<SpikeServer> StartAsync(OpenBaoFixture bao, CancellationToken cancellationToken)
+    /// <summary>Story 2.1's build: degraded mode, no stores.</summary>
+    public static Task<SpikeServer> StartAsync(OpenBaoFixture bao, CancellationToken cancellationToken) =>
+        StartAsync(bao, postgres: null, cancellationToken);
+
+    /// <summary>Story 2.2's build: custom stores in a migrated clone, degraded mode off.</summary>
+    public static Task<SpikeServer> StartWithStoresAsync(OpenBaoFixture bao, PostgresFixture postgres, CancellationToken cancellationToken) =>
+        StartAsync(bao, postgres, cancellationToken);
+
+    private static async Task<SpikeServer> StartAsync(OpenBaoFixture bao, PostgresFixture? postgres, CancellationToken cancellationToken)
     {
         var tenants = await SpikeTenants.CreateAsync(bao, cancellationToken);
         var inert = new InertCredentials();
+        var database = postgres is null ? null : await SpikeDatabase.CreateAsync(postgres, tenants);
 
         var builder = WebApplication.CreateSlimBuilder();
         builder.WebHost.UseTestServer();
@@ -73,10 +97,32 @@ public sealed class SpikeServer : IAsyncDisposable
         builder.Services.AddSingleton(_ => new HostedCustody(bao.Custody(OpenBaoFixture.Hosted)));
         builder.Services.AddSingleton(tenants);
         builder.Services.AddSingleton<TenantRuntimes>();
+        builder.Services.AddSingleton<SpikeStoreProbe>();
 
-        builder.Services.AddOpenIddict().AddServer(options =>
+        var openIddict = builder.Services.AddOpenIddict();
+
+        if (database is not null)
         {
-            options.EnableDegradedMode();
+            builder.Services.AddSingleton(database);
+            builder.Services.AddScoped<SpikeRequestTransaction>();
+
+            // No scope store: a Gatekeep handler validates scopes (AD-8).
+            openIddict.AddCore(core => core
+                .SetDefaultApplicationEntity<SpikeApplication>()
+                .SetDefaultAuthorizationEntity<SpikeAuthorization>()
+                .SetDefaultTokenEntity<SpikeToken>()
+                .ReplaceApplicationStore<SpikeApplication, SpikeApplicationStore>()
+                .ReplaceAuthorizationStore<SpikeAuthorization, SpikeAuthorizationStore>()
+                .ReplaceTokenStore<SpikeToken, SpikeTokenStore>()
+                .DisableEntityCaching());
+        }
+
+        openIddict.AddServer(options =>
+        {
+            if (database is null)
+            {
+                options.EnableDegradedMode();
+            }
 
             options.SetAuthorizationEndpointUris(AuthorizePath[1..])
                 .SetTokenEndpointUris(TokenPath[1..])
@@ -98,9 +144,17 @@ public sealed class SpikeServer : IAsyncDisposable
             // The built-in handler would set BaseUri from the Host header after Gatekeep's.
             options.RemoveEventHandler(OpenIddictServerAspNetCoreHandlers.ResolveRequestUri.Descriptor);
             options.AddEventHandler(SelectTenantOptions.Descriptor);
-            options.AddEventHandler(ValidateSpikeAuthorizationRequest.Descriptor);
-            options.AddEventHandler(ValidateSpikeTokenRequest.Descriptor);
             options.AddEventHandler(SignInClientCredentials.Descriptor);
+
+            if (database is null)
+            {
+                options.AddEventHandler(ValidateSpikeAuthorizationRequest.Descriptor);
+                options.AddEventHandler(ValidateSpikeTokenRequest.Descriptor);
+            }
+            else
+            {
+                StoreHandlers.Configure(options);
+            }
 
             options.UseAspNetCore().EnableAuthorizationEndpointPassthrough();
         });
@@ -124,7 +178,7 @@ public sealed class SpikeServer : IAsyncDisposable
         });
 
         await app.StartAsync(cancellationToken);
-        return new SpikeServer(app, tenants, inert, app.Services.GetRequiredService<TenantRuntimes>());
+        return new SpikeServer(app, tenants, inert, database);
     }
 
     public async ValueTask DisposeAsync()
@@ -132,6 +186,11 @@ public sealed class SpikeServer : IAsyncDisposable
         Client.Dispose();
         await _app.StopAsync();
         await _app.DisposeAsync();
+
+        if (Database is not null)
+        {
+            await Database.DisposeAsync();
+        }
     }
 }
 
@@ -214,8 +273,11 @@ public sealed class TenantRuntimes(
 /// The first Gatekeep handler on every OpenIddict request. It resolves the Tenant from the host,
 /// replaces the transaction's options with that Tenant's, and sets <c>BaseUri</c> and the
 /// request URI from the stored issuer. An unmapped host gets 404 before any other handler runs.
+/// With stores, it also opens the request's <c>TenantScope</c> in the request-scoped
+/// <see cref="SpikeRequestTransaction"/>, so every store call that follows runs in that scope's <c>CommandContext</c>.
 /// </summary>
-public sealed class SelectTenantOptions(TenantRuntimes runtimes) : IOpenIddictServerHandler<ProcessRequestContext>
+public sealed class SelectTenantOptions(TenantRuntimes runtimes, SpikeDatabase? database = null)
+    : IOpenIddictServerHandler<ProcessRequestContext>
 {
     public static OpenIddictServerHandlerDescriptor Descriptor { get; } =
         OpenIddictServerHandlerDescriptor.CreateBuilder<ProcessRequestContext>()
@@ -245,10 +307,19 @@ public sealed class SelectTenantOptions(TenantRuntimes runtimes) : IOpenIddictSe
         context.BaseUri = issuer;
         context.RequestUri = new Uri(UriHelper.BuildAbsolute(
             issuer.Scheme, new HostString(issuer.Authority), request.PathBase, request.Path, request.QueryString));
+
+        if (database is not null)
+        {
+            var transaction = request.HttpContext.RequestServices.GetRequiredService<SpikeRequestTransaction>();
+            await transaction.BeginAsync(database, runtime.Tenant, context.CancellationToken);
+        }
     }
 }
 
-/// <summary>The spike's two clients. Degraded mode has no Application store until Story 2.2.</summary>
+/// <summary>
+/// The spike's two clients. Degraded mode checks them by hand; with stores, each Tenant has a
+/// <c>spike_application</c> row for each.
+/// </summary>
 public static class SpikeClients
 {
     public const string Confidential = "spike-service";
@@ -257,7 +328,28 @@ public static class SpikeClients
 
     /// <summary>Random per run, so no secret value is written down anywhere.</summary>
     public static string ConfidentialSecret { get; } = Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
+
+    public static IReadOnlyList<SpikeClient> All { get; } =
+    [
+        new(Confidential, ClientTypes.Confidential, [],
+        [
+            Permissions.Endpoints.Token,
+            Permissions.GrantTypes.ClientCredentials,
+        ]),
+        new(Public, ClientTypes.Public, [RedirectUri],
+        [
+            Permissions.Endpoints.Authorization,
+            Permissions.Endpoints.Token,
+            Permissions.GrantTypes.AuthorizationCode,
+            Permissions.GrantTypes.RefreshToken,
+            Permissions.ResponseTypes.Code,
+            Permissions.Prefixes.Scope + Scopes.OfflineAccess,
+        ]),
+    ];
 }
+
+/// <summary>What a client's <c>spike_application</c> row holds.</summary>
+public sealed record SpikeClient(string ClientId, string ClientType, string[] RedirectUris, string[] Permissions);
 
 /// <summary>Degraded mode needs the client and redirect URI checked by hand, and so does PKCE S256.</summary>
 public sealed class ValidateSpikeAuthorizationRequest : IOpenIddictServerHandler<ValidateAuthorizationRequestContext>

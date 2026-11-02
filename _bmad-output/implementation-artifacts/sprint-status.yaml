@@ -72,7 +72,7 @@ development_status:
 
   epic-2: in-progress
   2-1-prove-per-tenant-options-and-transit-signing: done
-  2-2-prove-custom-stores-and-revocation-commit: backlog
+  2-2-prove-custom-stores-and-revocation-commit: done
   2-3-publish-discovery-and-jwks-per-tenant: backlog
   2-4-rotate-signing-keys-automatically: backlog
   2-5-issue-a-token-by-client-credentials: backlog
