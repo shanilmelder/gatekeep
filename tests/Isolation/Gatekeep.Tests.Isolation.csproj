@@ -38,6 +38,7 @@
     <ProjectReference Include="../../src/Adapters/OpenBao/Gatekeep.Adapters.OpenBao.csproj" />
     <ProjectReference Include="../../src/Adapters/Postgres/Gatekeep.Adapters.Postgres.csproj" />
     <ProjectReference Include="../../src/Gatekeep.Cli/Gatekeep.Cli.csproj" />
+    <ProjectReference Include="../../src/Modules/Admins/Gatekeep.Modules.Admins.csproj" />
     <ProjectReference Include="../../src/Modules/Audit/Gatekeep.Modules.Audit.csproj" />
     <ProjectReference Include="../../src/Modules/Authentication/Gatekeep.Modules.Authentication.csproj" />
     <ProjectReference Include="../../src/Modules/Operations/Gatekeep.Modules.Operations.csproj" />
