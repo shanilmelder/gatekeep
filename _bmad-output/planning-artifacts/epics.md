@@ -135,7 +135,7 @@ NFR-21: Tenant Subdomains sit under a dedicated zone. The application process ca
 
 **Trust zones and surfaces**
 
-- AR-13: `Host.Admin` is reachable only through a Cloudflare Tunnel on its own public hostname (amended 2026-11-02, public Admin). Admin routes aren't registered in `Host.Hosted`, and Hosted Login routes aren't registered in `Host.Admin`. A release test proves from inside its container that `Host.Hosted` has no route to `Host.Admin` (AD-2).
+- AR-13: `Host.Admin` is reachable only through Caddy's Admin site on its own public hostname (amended 2026-11-02, public Admin). Admin routes aren't registered in `Host.Hosted`, and Hosted Login routes aren't registered in `Host.Admin`. A release test proves from inside its container that `Host.Hosted` has no route to `Host.Admin` (AD-2).
 - AR-14: API surfaces per AD-19: `/login/api/*` and `/account/api/*` are private; `/api/v1/tenants/{tenantId}/*` is one route set with two auth schemes; `/api/v1/deployment/*` has no machine access. The OpenAPI document is committed and diffed in CI. `packages/api-client` is generated (AD-23).
 - AR-15: One capability table in the Admins contract encodes FR-39, with `MachineAllowed` and `FreshAssertion` on each capability. Every fresh-assertion capability is machine-denied. A generated test denies every role and machine principal everything outside the table (AD-20).
 - AR-16: Management API tokens are issued only by `/api/v1/tenants/{tenantId}/oauth/token` on `Host.Admin`, signed by a per-Tenant `management` key that's never published (AD-33).
@@ -725,7 +725,7 @@ So that the Admin surface is reached only through its own hostname, never throug
 
 **Given** the Caddy configuration
 **When** a request names a host outside the zone or the Admin hostname
-**Then** it's refused, Caddy never routes to `Host.Admin`, and Admin traffic arrives only through the Cloudflare Tunnel
+**Then** it's refused, and Admin traffic is served only on the Admin hostname
 
 **Given** the Compose networks
 **When** a test runs from inside `Host.Hosted`

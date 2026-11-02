@@ -61,6 +61,17 @@ The Admin panel is reached through a Cloudflare Tunnel, which provides its TLS c
 - **Amended:** the AD-26 Caddy line, the deployment diagram, AR-13 and Story 1.11's first criterion.
 - **Tenant zone DNS (Esm, 2026-11-02):** Caddy gets the Tenant wildcard certificate by ACME DNS-01 through Cloudflare DNS. The token is scoped to a validation-only zone that `_acme-challenge` is delegated to, so NFR-21's validation-only credential still holds.
 
+## 4b. Addendum: Caddy for Admin too (Esm, 2026-11-02, replaces 4a's tunnel)
+
+The Cloudflare Tunnel is dropped. Caddy serves the Admin hostname like the Tenant sites. Both certificates come by ACME DNS-01 through Cloudflare DNS, with the token limited to a validation-only zone. The Admin hostname sits outside the Tenant zone.
+
+Why:
+- **No middleman:** Cloudflare provides DNS only and never sees Admin traffic.
+- **One fewer secret:** there's no tunnel token to protect.
+- **No extra exposure:** port 443 was already open for the Tenant sites.
+
+The architecture, AR-13 and Story 1.11 return to the Caddy Admin site wording.
+
 ## 5. Implementation handoff
 
 **Scope: minor to moderate.** The work is done within Story 1.11, with the threat model updated in the same pull request.
