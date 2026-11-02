@@ -2,12 +2,14 @@ using System.Data.Common;
 using System.Net;
 using Gatekeep.Kernel.Audit;
 using Gatekeep.Kernel.Persistence;
+using Gatekeep.Kernel.Secrets;
 
 namespace Gatekeep.Modules.Audit.Adapters;
 
 /// <summary>
 /// Picks the chain from the scope: a Tenant's, or the Deployment's when the scope has
-/// no Tenant. Both rows go through the context, so they share its transaction.
+/// no Tenant. Both rows go through the context, so they share its transaction. A User-Agent
+/// comes from a request, so its credential shapes are masked before it's stored (T-42).
 /// </summary>
 internal sealed class AuditAppender : IAuditAppender
 {
@@ -71,7 +73,7 @@ internal sealed class AuditAppender : IAuditAppender
             command.CommandText = tenantId is null ? InsertDeploymentDetail : InsertTenantDetail;
             AddKeys(command, tenantId, id);
             Add(command, "ip_address", StoredAddress(detail.IpAddress));
-            Add(command, "user_agent", detail.UserAgent);
+            Add(command, "user_agent", detail.UserAgent is { } userAgent ? CredentialShapes.MaskShapes(userAgent) : null);
             Add(command, "email", detail.Email);
 
             await command.ExecuteNonQueryAsync(cancellationToken);

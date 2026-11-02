@@ -30,6 +30,15 @@ internal sealed class FakeOpenBaoSocket : IDisposable
     /// <summary>The status every request gets. A test may change it while the socket runs.</summary>
     public int Status { get; set; }
 
+    /// <summary>The JSON body every request gets. One body can answer an AppRole login and a Transit call.</summary>
+    public string Body { get; set; } = "{}";
+
+    /// <summary>
+    /// Answers by request path instead of <see cref="Status"/> and <see cref="Body"/>, when set:
+    /// for example a login that succeeds and a Transit call that fails.
+    /// </summary>
+    public Func<string, (int Status, string Body)>? Respond { get; set; }
+
     public void Dispose()
     {
         // A test may stop OpenBao early, and the class disposes it again at the end.
@@ -82,8 +91,16 @@ internal sealed class FakeOpenBaoSocket : IDisposable
                     request.Append(Encoding.ASCII.GetString(buffer, 0, read));
                 }
 
-                await client.SendAsync(Encoding.ASCII.GetBytes(
-                    $"HTTP/1.1 {Status} Fake\r\nContent-Type: application/json\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{{}}"));
+                var path = request.ToString().Split(' ', 3) is [_, var target, _] ? target : string.Empty;
+                var (status, text) = Respond?.Invoke(path) ?? (Status, Body);
+                var body = Encoding.UTF8.GetBytes(text);
+                byte[] response =
+                [
+                    .. Encoding.ASCII.GetBytes(
+                        $"HTTP/1.1 {status} Fake\r\nContent-Type: application/json\r\nContent-Length: {body.Length}\r\nConnection: close\r\n\r\n"),
+                    .. body,
+                ];
+                await client.SendAsync(response);
             }
             catch (SocketException)
             {

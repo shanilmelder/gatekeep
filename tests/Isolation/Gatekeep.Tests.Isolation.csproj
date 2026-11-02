@@ -11,6 +11,11 @@
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
   </ItemGroup>
 
+  <!-- The audit catalogue reader and the FR-40 class list, shared with the generator. -->
+  <ItemGroup>
+    <Compile Include="../Architecture/Generator/AuditCatalogue.cs" Link="Audit/AuditCatalogue.cs" />
+  </ItemGroup>
+
   <ItemGroup>
     <PackageReference Include="Microsoft.AspNetCore.TestHost" />
     <PackageReference Include="Microsoft.EntityFrameworkCore" />

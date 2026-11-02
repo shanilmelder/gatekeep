@@ -17,8 +17,6 @@ namespace Gatekeep.Modules.Audit.Core;
 /// </summary>
 internal sealed class AuditRetention : IAuditRetention
 {
-    public const string CheckpointType = "audit.retention.checkpoint";
-
     private const string Cutoff = "now() - make_interval(days => @days)";
 
     private static readonly ChainSql Tenant = new(
@@ -217,7 +215,7 @@ internal sealed class AuditRetention : IAuditRetention
     {
         var command = context.CreateCommand();
         command.CommandText = sql;
-        ChainLock.Add(command, "checkpoint", CheckpointType);
+        ChainLock.Add(command, "checkpoint", AuditEvents.RetentionCheckpoint.Code.Value);
 
         if (tenantId is not null)
         {

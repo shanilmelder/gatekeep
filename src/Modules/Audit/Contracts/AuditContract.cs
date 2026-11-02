@@ -18,9 +18,6 @@ public static class AuditContract
     /// <summary>The chain verifier (AD-16, FR-40). It only reads: <c>gk_cli</c> runs it.</summary>
     public static IAuditVerifier CreateVerifier() => new AuditVerifier();
 
-    /// <summary>The type code of the event a retention cut writes. Only <c>gk_retention</c> can insert one.</summary>
-    public static string CheckpointTypeCode => AuditRetention.CheckpointType;
-
     /// <summary>
     /// RFC 8785 JSON for one flat object of string, integer and null values.
     /// </summary>
