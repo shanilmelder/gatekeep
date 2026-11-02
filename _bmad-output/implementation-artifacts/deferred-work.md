@@ -22,3 +22,18 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-1-3-write-the-threat-model.md`
   summary: Point the `ARCHITECTURE-SPINE.md` Deferred entry for the threat model at `docs/threat-model.md`, and amend AD-10, AD-18 and AD-26 for the gaps it raises.
   evidence: The spine still lists the threat model as pending, and G-9, G-11 and G-12 are spine-level changes.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-4-enforce-tenant-isolation-in-the-database.md`
+  summary: Catch `ARCHITECTURE-SPINE.md` up with Story 1.4: name `migration_history` in AD-27, add `Cli -> Adapters.Postgres` to the AD-1 diagram, and correct AD-3 if the known limit wording changes.
+  evidence: AD-27 does not list `migration_history`, and the spine diagram has no adapter edge, though the edge list and generated diagram do.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-4-enforce-tenant-isolation-in-the-database.md`
+  summary: Add a test that a failed `TenantScope.BeginAsync` returns its connection to the pool.
+  evidence: Removing the cleanup passed every test, and the failure is hard to force before Story 1.5 gives it a real caller.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-4-enforce-tenant-isolation-in-the-database.md`
+  summary: Add column-level grants to `TableEntry` and the catalogue audit.
+  evidence: AD-2 and TB-6 require per-column allow-lists, but the registry is table-level. The audit reports any column grant as unlisted, so the first story needing one must add this.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-4-enforce-tenant-isolation-in-the-database.md`
+  summary: Correct AD-3 so it no longer says an unscoped query always raises an error.
+  evidence: `Known_limit_an_unscoped_query_the_planner_proves_empty_returns_nothing` shows a query that evaluates the policy for no row returns nothing.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-4-enforce-tenant-isolation-in-the-database.md`
+  summary: Audit function ACLs, `SECURITY DEFINER` and `pg_default_acl` in the catalogue test.
+  evidence: None exist yet, but triggers in Stories 1.8 and 7.1 add functions, and `PUBLIC` can execute new functions by default.

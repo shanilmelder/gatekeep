@@ -1,0 +1,33 @@
+-- Run once by a superuser, connected to the Gatekeep database, before the first
+-- `gatekeep migrate`. Roles have no password here: Story 1.10 delivers those.
+--
+-- Runtime roles never own a table or hold BYPASSRLS or superuser (AD-3). gk_migrator
+-- owns the schema and connects only during `gatekeep migrate` or `gatekeep upgrade`.
+
+BEGIN;
+
+CREATE ROLE gk_migrator LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS NOINHERIT;
+
+CREATE ROLE gk_hosted LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS NOINHERIT;
+CREATE ROLE gk_admin LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS NOINHERIT;
+CREATE ROLE gk_worker LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS NOINHERIT;
+CREATE ROLE gk_dispatch LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS NOINHERIT;
+CREATE ROLE gk_sealer LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS NOINHERIT;
+CREATE ROLE gk_retention LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS NOINHERIT;
+CREATE ROLE gk_cli LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS NOINHERIT;
+
+ALTER SCHEMA public OWNER TO gk_migrator;
+
+REVOKE ALL ON SCHEMA public FROM PUBLIC;
+GRANT USAGE ON SCHEMA public TO gk_hosted, gk_admin, gk_worker, gk_dispatch, gk_sealer, gk_retention, gk_cli;
+
+DO $$
+BEGIN
+  EXECUTE format('REVOKE ALL ON DATABASE %I FROM PUBLIC', current_database());
+  EXECUTE format(
+    'GRANT CONNECT ON DATABASE %I TO gk_migrator, gk_hosted, gk_admin, gk_worker, gk_dispatch, gk_sealer, gk_retention, gk_cli',
+    current_database());
+END
+$$;
+
+COMMIT;

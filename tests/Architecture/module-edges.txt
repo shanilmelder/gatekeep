@@ -21,6 +21,7 @@ dependency Host.Admin -> Admins
 dependency Host.Worker -> Operations
 dependency Cli -> Operations
 dependency Cli -> Admins
+dependency Cli -> Adapters.Postgres
 dependency Protocol -> Authentication
 dependency Protocol -> Directory
 dependency Protocol -> Identity
@@ -59,3 +60,5 @@ dependency Keys -> Tenancy
 dependency Sessions -> Tenancy
 dependency Notifications -> Tenancy
 dependency Admins -> Notifications
+dependency Tests.Isolation -> Adapters.Postgres
+dependency Tests.Isolation -> Cli

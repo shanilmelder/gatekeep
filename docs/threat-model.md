@@ -2,7 +2,7 @@
 
 Status: written 2026-11-02 for Story 1.3, before authentication work starts (NFR-1, AR-3). It's built from AD-2's trust zones and describes the design in `ARCHITECTURE-SPINE.md`, including the Story 1.2 amendment to AD-10.
 
-**Nothing here is proof.** Only the Story 1.1 module boundaries exist in code. Every other control below is designed, not built, and none has been tested against an attacker. A control is evidence only once its story's test passes. The security gate (Story 18.9) checks this document against the built product.
+**Nothing here is proof.** Only the Story 1.1 module boundaries and the Story 1.4 database isolation exist in code: the eight database roles, the AD-3 grants for `tenant`, `tenant_host`, `tenant_settings` and `migration_history`, `TenantScope` and `gatekeep migrate`. Every other control below is designed, not built, and none has been tested against an attacker. A control is evidence only once its story's test passes. The security gate (Story 18.9) checks this document against the built product.
 
 Terms follow PRD §3. `AD-n`, `FR-n` and `NFR-n` refer to the architecture spine and the PRD.
 
@@ -97,7 +97,7 @@ Removing an intruder doesn't end the compromise. These last until replaced:
 | TB-3 | Z-1 to Z-2 | No network path. Stored data does cross, through the shared database | Default-deny container networks. Release test from inside the `Host.Hosted` container. CSP and output encoding on the Dashboard | Z-1 code execution, stored injection (T-37) |
 | TB-4 | Tenant to Tenant | Nothing, except by a bug | `FORCE` RLS, composite foreign keys, opaque artifact prefix, exact-host cookies, separate keys per Tenant, cross-Tenant suite | Application bugs. **Not** code execution: see T-3 |
 | TB-5 | User to Admin | No identity crosses, but User-supplied values are displayed to Admins. Separate identity, tables, cookies and hostname | AD-2, AD-12, AD-31 | A User or User session reaching Admin functions |
-| TB-6 | Hosts to database | SQL as a per-host role | Allow-list grants per table and column. Catalogue test. No role owns a table or holds `BYPASSRLS` | Z-1 or Z-2 code execution exceeding its grants |
+| TB-6 | Hosts to database | SQL as a per-host role | Allow-list grants per table and column. Catalogue test. No role owns a table or holds `BYPASSRLS`. Built in Story 1.4 for the tables that exist so far. Database `CONNECT` is limited to the eight roles, and `PUBLIC` holds nothing. ASVS 5.0 chapters on authorization and configuration need reassessing for this change under NFR-8 | Z-1 or Z-2 code execution exceeding its grants |
 | TB-7 | Hosts to OpenBao | Sign, encrypt, decrypt and wrap requests | One policy per host, per key purpose and class. Private socket. Audit device shipped off the server. Quotas only if confirmed | Bulk decrypt, key export, use of another host's keys |
 | TB-8 | Z-1 to Z-3 | Job rows | Job type registry enforced by trigger. Handlers re-check authoritative state and never trust the payload | Z-1 or Z-2 directing the Worker |
 | TB-9 | Hosts to Z-5 | Docker and host access | Containers, default-deny networks. **Container hardening is unspecified: see G-4** | Container escape |
@@ -183,9 +183,9 @@ Stories cite these by number. Every entry is `designed`: when a story's test pro
 
 | ID | Threat | Controls | What remains |
 | --- | --- | --- | --- |
-| T-1 | A missed filter exposes another Tenant's data | AD-3, AD-4, AD-27 and the cross-Tenant suite. An unscoped query raises an error | One bug in a shared policy still reaches every Tenant |
+| T-1 | A missed filter exposes another Tenant's data | AD-3, AD-4, AD-27 and the cross-Tenant suite. An unscoped query raises an error. Tests: `CatalogueTests.Migrated_database_matches_the_registry`, `TenantBehaviourTests.Scoped_role_sees_its_own_row_and_no_other_Tenants`, `TenantBehaviourTests.Scoped_write_to_another_Tenant_is_refused`, `TenantBehaviourTests.Unscoped_query_on_a_fresh_connection_raises_an_error`, `TenantBehaviourTests.Unscoped_query_on_a_reused_connection_raises_an_error` | One bug in a shared policy still reaches every Tenant. The failing cast fires only when the policy expression is evaluated, so an unscoped query that evaluates it for no row returns nothing rather than raising (`TenantBehaviourTests.Known_limit_an_unscoped_query_the_planner_proves_empty_returns_nothing`). PostgreSQL 18.6 also raises while planning a plain query on an empty table, but that's engine behaviour, not a guarantee. `TenantScope` being the only path is the control there. The cross-Tenant suite (Story 1.31) isn't built |
 | T-2 | A forged `Host` header picks a Tenant or poisons an email link | AD-6. Issuer, RP ID and link base come from the stored Tenant | None identified |
-| T-3 | Code execution sets `gatekeep.tenant_id` to any Tenant | Grants limit which tables it reaches | **RLS stops bugs, not code execution.** Each runtime role sets the Tenant itself |
+| T-3 | Code execution sets `gatekeep.tenant_id` to any Tenant | Grants limit which tables it reaches. Tests: `TenantBehaviourTests.Grants_limit_a_role_that_sets_any_Tenant`, `CatalogueTests.Catalogue_names_each_drift_made_by_the_migrator` | **RLS stops bugs, not code execution.** Each runtime role sets the Tenant itself |
 | T-4 | An artifact from one Tenant is accepted in another | AD-9 prefix check, negative token pack | Rejected events can be flooded, so AD-9 caps them per source |
 
 ### Authentication and tokens
