@@ -138,8 +138,8 @@ development_status:
   6-12-prove-the-fr-25-matrix: backlog
   epic-6-retrospective: optional
 
-  epic-7: backlog
-  7-1-seal-audit-events-into-hash-chains: backlog
+  epic-7: in-progress
+  7-1-seal-audit-events-into-hash-chains: done
   7-2-copy-evidence-off-the-server: backlog
   7-3-verify-chains-and-apply-retention: backlog
   7-4-search-a-tenant-s-logs: backlog

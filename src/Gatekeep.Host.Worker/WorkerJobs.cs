@@ -27,7 +27,7 @@ internal static class WorkerSettings
 internal static class WorkerJobs
 {
     /// <summary>
-    /// Registers the runner and the schedule. Both are built only when the host starts, so a
+    /// Registers the runner, the schedule and the audit seal loop. Each is built only when the host starts, so a
     /// host refused at startup never builds them. With key custody configured, the runner
     /// decrypts credential payloads through it. Without it, such a job fails with a fixed
     /// reason code.
@@ -47,8 +47,14 @@ internal static class WorkerJobs
             provider.GetRequiredService<HostDatabases>()[WorkerSettings.Worker],
             provider.GetRequiredService<ILoggerFactory>().CreateLogger("Gatekeep.Jobs.Schedule")));
 
+        services.AddSingleton(provider => OperationsContract.CreateSealLoop(
+            provider.GetRequiredService<HostDatabases>()[WorkerSettings.Sealer],
+            AuditSealService.Interval,
+            provider.GetRequiredService<ILoggerFactory>().CreateLogger("Gatekeep.Audit.Sealer")));
+
         services.AddHostedService<JobRunnerService>();
         services.AddHostedService<JobScheduleService>();
+        services.AddHostedService<AuditSealService>();
         return services;
     }
 }
@@ -62,4 +68,12 @@ internal sealed class JobScheduleService(IJobScheduleRunner schedule) : Backgrou
 {
     protected override Task ExecuteAsync(CancellationToken stoppingToken) =>
         schedule.RunAsync(JobSchedule.TickInterval, stoppingToken);
+}
+
+/// <summary>Seals every audit chain about once a second, as <c>gk_sealer</c> (AD-16).</summary>
+internal sealed class AuditSealService(IAuditSealLoop loop) : BackgroundService
+{
+    public static readonly TimeSpan Interval = TimeSpan.FromSeconds(1);
+
+    protected override Task ExecuteAsync(CancellationToken stoppingToken) => loop.RunAsync(stoppingToken);
 }
