@@ -52,8 +52,24 @@ public sealed class CatalogueTests(PostgresFixture postgres)
     [InlineData("GRANT SELECT ON migration_history TO gk_hosted", "Grant not in the registry: public.migration_history gk_hosted SELECT.")]
     [InlineData("GRANT SELECT ON tenant TO gk_cli WITH GRANT OPTION", "Grant option not allowed: public.tenant gk_cli SELECT.")]
     [InlineData("GRANT SELECT (id) ON tenant TO gk_cli WITH GRANT OPTION", "Grant option not allowed: public.tenant.id gk_cli SELECT.")]
+    [InlineData("GRANT UPDATE (type_code) ON audit_event TO gk_sealer", "Grant not in the registry: public.audit_event.type_code gk_sealer UPDATE.")]
+    [InlineData("GRANT SELECT ON deployment_audit_event TO gk_hosted", "Grant not in the registry: public.deployment_audit_event gk_hosted SELECT.")]
+    [InlineData("GRANT INSERT ON deployment_audit_detail TO gk_hosted", "Grant not in the registry: public.deployment_audit_detail gk_hosted INSERT.")]
     // A grant the registry lists but the database has lost.
     [InlineData("REVOKE SELECT ON tenant FROM gk_cli", "Grant missing from the database: public.tenant gk_cli SELECT.")]
+    [InlineData("REVOKE UPDATE (hash) ON audit_event FROM gk_sealer", "Grant missing from the database: public.audit_event.hash gk_sealer UPDATE.")]
+    // Triggers, which immutability rests on.
+    [InlineData("DROP TRIGGER audit_event_guard_delete ON audit_event", "Trigger missing from the database: audit_event.audit_event_guard_delete.")]
+    [InlineData("DROP TRIGGER deployment_audit_detail_refuse_truncate ON deployment_audit_detail", "Trigger missing from the database: deployment_audit_detail.deployment_audit_detail_refuse_truncate.")]
+    [InlineData("ALTER TABLE audit_event DISABLE TRIGGER audit_event_guard_update", "Trigger audit_event.audit_event_guard_update: tgenabled is D, not O.")]
+    [InlineData("ALTER TABLE audit_event ENABLE REPLICA TRIGGER audit_event_guard_insert", "Trigger audit_event.audit_event_guard_insert: tgenabled is R, not O.")]
+    [InlineData("CREATE TRIGGER stray BEFORE UPDATE ON tenant FOR EACH ROW EXECUTE FUNCTION audit_guard_update()", "Trigger not in the registry: tenant.stray.")]
+    // Functions and default ACLs.
+    [InlineData("CREATE FUNCTION stray() RETURNS int LANGUAGE sql AS 'SELECT 1'", "Function stray(): PUBLIC can execute it.")]
+    [InlineData("GRANT EXECUTE ON FUNCTION audit_guard_delete() TO PUBLIC", "Function audit_guard_delete(): PUBLIC can execute it.")]
+    [InlineData("CREATE FUNCTION stray() RETURNS int LANGUAGE sql SECURITY DEFINER AS 'SELECT 1'", "Function stray(): is SECURITY DEFINER.")]
+    [InlineData("ALTER DEFAULT PRIVILEGES GRANT SELECT ON TABLES TO gk_hosted", "Default ACL not allowed: gk_migrator on object type r.")]
+    [InlineData("ALTER DEFAULT PRIVILEGES REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC", "Default ACL not allowed: gk_migrator on object type f.")]
     // Row-level security turned down.
     [InlineData("ALTER TABLE tenant_settings NO FORCE ROW LEVEL SECURITY", "tenant_settings: FORCE ROW LEVEL SECURITY is false")]
     [InlineData("ALTER TABLE tenant_settings DISABLE ROW LEVEL SECURITY", "tenant_settings: ENABLE ROW LEVEL SECURITY is false")]
@@ -84,6 +100,7 @@ public sealed class CatalogueTests(PostgresFixture postgres)
     [InlineData("GRANT gk_migrator TO gk_hosted", "gk_hosted: is a member of another role.")]
     [InlineData("GRANT CREATE ON SCHEMA public TO gk_hosted", "Schema grant not allowed: gk_hosted CREATE.")]
     [InlineData("GRANT USAGE ON SCHEMA public TO PUBLIC", "Schema grant not allowed: PUBLIC USAGE.")]
+    [InlineData("ALTER FUNCTION audit_guard_update() OWNER TO gk_admin", "Function audit_guard_update(): owned by gk_admin, not gk_migrator.")]
     [InlineData("ALTER ROLE gk_sealer REPLICATION", "gk_sealer: holds REPLICATION.")]
     [InlineData("GRANT gk_admin TO pg_monitor", "gk_admin: has members.")]
     [InlineData("ALTER ROLE gk_hosted SET gatekeep.tenant_id = 'x'", "Tenant setting default for gk_hosted in all databases: gatekeep.tenant_id=x.")]

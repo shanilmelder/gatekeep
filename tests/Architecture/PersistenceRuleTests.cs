@@ -1,6 +1,7 @@
 using System.Reflection;
 using System.Text.RegularExpressions;
 using System.Xml.Linq;
+using Gatekeep.Kernel.Audit;
 using Gatekeep.Kernel.Persistence;
 using Xunit;
 
@@ -11,6 +12,11 @@ public class PersistenceRuleTests
 {
     private static readonly string Root = EdgeList.FindRepositoryRoot(AppContext.BaseDirectory);
 
+    private const BindingFlags AllInstance = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance;
+
+    /// <summary>The compiler-made property on every record, which holds no data.</summary>
+    private const string EqualityContract = "EqualityContract";
+
     private static readonly string[] SkippedDirectories = ["bin", "obj"];
 
     private static readonly string[] SetConfigOwners =
@@ -20,7 +26,7 @@ public class PersistenceRuleTests
     ];
 
     private static readonly Regex ForbiddenInContracts = new(
-        @"\bTenantScope\b|\bDbDataSource\b|\.\s*(?:Commit|Rollback)(?:Async)?\b|\.\s*(?:Transaction|Connection)\b|(?i:\b(?:COMMIT|ROLLBACK)\b)",
+        @"\b(?:Tenant|Deployment|Command)Scope\b|\bFailureContext\b|\bDbDataSource\b|\.\s*(?:Commit|Rollback)(?:Async)?\b|\.\s*(?:Transaction|Connection)\b|(?i:\b(?:COMMIT|ROLLBACK)\b)",
         RegexOptions.Compiled);
 
     private static readonly Regex SetConfigCall = new(@"\bset_config\s*\(", RegexOptions.IgnoreCase | RegexOptions.Compiled);
@@ -67,6 +73,38 @@ public class PersistenceRuleTests
     }
 
     [Fact]
+    public void Audit_envelope_holds_only_a_code_and_internal_references()
+    {
+        Type[] allowed = [typeof(Guid), typeof(Guid?), typeof(Actor), typeof(AuditTypeCode), typeof(AuditTargetKind?)];
+
+        var members = StoredMemberTypes(typeof(AuditEvent)).ToList();
+
+        Assert.NotEmpty(members);
+        Assert.All(members, t => Assert.Contains(t, allowed));
+    }
+
+    [Fact]
+    public void Actor_holds_only_a_kind_and_an_ID()
+    {
+        Type[] allowed = [typeof(ActorKind), typeof(Guid?)];
+
+        var members = StoredMemberTypes(typeof(Actor)).ToList();
+
+        Assert.NotEmpty(members);
+        Assert.All(members, t => Assert.Contains(t, allowed));
+    }
+
+    [Fact]
+    public void AuditTypeCode_holds_only_its_one_string_value()
+    {
+        var property = Assert.Single(typeof(AuditTypeCode).GetProperties(AllInstance), p => p.Name != EqualityContract);
+
+        Assert.Equal(nameof(AuditTypeCode.Value), property.Name);
+        Assert.Equal(typeof(string), property.PropertyType);
+        Assert.All(StoredMemberTypes(typeof(AuditTypeCode)), t => Assert.Equal(typeof(string), t));
+    }
+
+    [Fact]
     public void Every_module_is_inspected_for_state_changing_contract_methods()
     {
         var assemblies = ModuleAssemblies();
@@ -75,7 +113,10 @@ public class PersistenceRuleTests
             .Select(Path.GetFileNameWithoutExtension);
 
         Assert.Equal(projects.Order(), assemblies.Select(a => a.GetName().Name).Order());
-        Assert.Empty(assemblies.SelectMany(a => a.GetTypes()).SelectMany(MethodsMissingCommandContext));
+        Assert.Empty(assemblies
+            .Append(typeof(CommandContext).Assembly)
+            .SelectMany(a => a.GetTypes())
+            .SelectMany(MethodsMissingCommandContext));
     }
 
     [Fact]
@@ -98,6 +139,9 @@ public class PersistenceRuleTests
 
     [Theory]
     [InlineData("Task Run(TenantScope scope);", true)]
+    [InlineData("Task Run(DeploymentScope scope);", true)]
+    [InlineData("Task Run(CommandScope scope);", true)]
+    [InlineData("await FailureContext.CommitAfterRollbackAsync(scope, Write);", true)]
     [InlineData("Task Run(DbDataSource source);", true)]
     [InlineData("context.CreateCommand().Transaction!.Commit();", true)]
     [InlineData("await transaction.CommitAsync(ct);", true)]
@@ -185,6 +229,13 @@ public class PersistenceRuleTests
 
         Assert.Equal(SetConfigOwners.Order(), callers);
     }
+
+    /// <summary>Instance properties and fields, as a field could hold what a property can't.</summary>
+    private static IEnumerable<Type> StoredMemberTypes(Type type) =>
+        type.GetProperties(AllInstance)
+            .Where(p => p.Name != EqualityContract)
+            .Select(p => p.PropertyType)
+            .Concat(type.GetFields(AllInstance).Select(f => f.FieldType));
 
     private static List<Assembly> ModuleAssemblies()
     {

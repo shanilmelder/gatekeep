@@ -26,6 +26,9 @@ internal static class CatalogueAudit
 
         await CheckTablesAsync(connection, registry, problems);
         await CheckGrantsAsync(connection, registry, problems);
+        await CheckTriggersAsync(connection, registry, problems);
+        await CheckFunctionsAsync(connection, problems);
+        await CheckDefaultAclsAsync(connection, problems);
         await CheckRolesAsync(connection, problems);
         await CheckTenantDefaultsAsync(connection, problems);
         await CheckSchemaAsync(connection, problems);
@@ -140,10 +143,96 @@ internal static class CatalogueAudit
 
         var expected = registry
             .SelectMany(e => e.Grants.SelectMany(g => g.Value.Select(p => $"{Schema}.{e.Name} {g.Key} {p}")))
+            .Concat(registry.SelectMany(ExpectedColumnGrants))
             .ToHashSet();
 
         problems.AddRange(actual.Except(expected).Order().Select(g => $"Grant not in the registry: {g}."));
         problems.AddRange(expected.Except(actual).Order().Select(g => $"Grant missing from the database: {g}."));
+    }
+
+    private static IEnumerable<string> ExpectedColumnGrants(TableEntry entry) =>
+        from role in entry.ColumnGrants ?? new Dictionary<string, IReadOnlyList<ColumnGrant>>()
+        from grant in role.Value
+        from column in grant.Columns
+        select $"{Schema}.{entry.Name}.{column} {role.Key} {grant.Privilege}";
+
+    private static async Task CheckTriggersAsync(
+        NpgsqlConnection connection,
+        IReadOnlyList<TableEntry> registry,
+        List<string> problems)
+    {
+        // Internal triggers are the ones PostgreSQL makes for foreign keys.
+        var rows = await QueryAsync(
+            connection,
+            """
+            SELECT c.relname, t.tgname, t.tgenabled::text
+            FROM pg_trigger t
+            JOIN pg_class c ON c.oid = t.tgrelid
+            JOIN pg_namespace n ON n.oid = c.relnamespace
+            WHERE NOT t.tgisinternal
+              AND n.nspname NOT IN ('pg_catalog', 'information_schema')
+            """);
+
+        var actual = rows.Select(r => $"{r[0]}.{r[1]}").ToHashSet();
+        var expected = registry
+            .SelectMany(e => (e.Triggers ?? []).Select(t => $"{e.Name}.{t}"))
+            .ToHashSet();
+
+        problems.AddRange(actual.Except(expected).Order().Select(t => $"Trigger not in the registry: {t}."));
+        problems.AddRange(expected.Except(actual).Order().Select(t => $"Trigger missing from the database: {t}."));
+
+        // 'O' fires in normal sessions. 'D' never fires, and 'R' fires only on a replica.
+        problems.AddRange(rows.Where(r => r[2] != "O").Select(r => $"Trigger {r[0]}.{r[1]}: tgenabled is {r[2]}, not O."));
+    }
+
+    private static async Task CheckFunctionsAsync(NpgsqlConnection connection, List<string> problems)
+    {
+        // A null proacl means the default, which lets PUBLIC execute, so acldefault fills it in.
+        var rows = await QueryAsync(
+            connection,
+            """
+            SELECT p.oid::regprocedure::text, pg_get_userbyid(p.proowner), p.prosecdef::text,
+                   EXISTS (
+                     SELECT 1
+                     FROM aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) a
+                     WHERE a.grantee = 0 AND a.privilege_type = 'EXECUTE')::text
+            FROM pg_proc p
+            JOIN pg_namespace n ON n.oid = p.pronamespace
+            WHERE n.nspname NOT IN ('pg_catalog', 'information_schema')
+              AND n.nspname NOT LIKE 'pg\_toast%'
+              AND n.nspname NOT LIKE 'pg\_temp%'
+            """);
+
+        foreach (var row in rows)
+        {
+            if (row[1] != TableRegistry.Migrator)
+            {
+                problems.Add($"Function {row[0]}: owned by {row[1]}, not {TableRegistry.Migrator}.");
+            }
+
+            if (row[2] == "true")
+            {
+                problems.Add($"Function {row[0]}: is SECURITY DEFINER.");
+            }
+
+            if (row[3] == "true")
+            {
+                problems.Add($"Function {row[0]}: PUBLIC can execute it.");
+            }
+        }
+    }
+
+    private static async Task CheckDefaultAclsAsync(NpgsqlConnection connection, List<string> problems)
+    {
+        // A default ACL grants on future objects, which no check of existing objects can see.
+        var rows = await QueryAsync(
+            connection,
+            """
+            SELECT pg_get_userbyid(d.defaclrole), d.defaclobjtype::text
+            FROM pg_default_acl d
+            """);
+
+        problems.AddRange(rows.Select(r => $"Default ACL not allowed: {r[0]} on object type {r[1]}."));
     }
 
     private static async Task CheckRolesAsync(NpgsqlConnection connection, List<string> problems)

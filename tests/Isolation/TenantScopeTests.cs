@@ -94,6 +94,30 @@ public sealed class TenantScopeTests(PostgresFixture postgres)
         Assert.Equal(1, tenants);
     }
 
+    [Fact]
+    public async Task Disposing_a_committed_scope_leaves_the_next_scope_on_that_connection_alone()
+    {
+        var database = await TenantDatabaseAsync();
+        var builder = new NpgsqlConnectionStringBuilder(postgres.RoleConnection(TableRegistry.Admin, database))
+        {
+            Pooling = true,
+            MaxPoolSize = 1,
+        };
+        await using var dataSource = NpgsqlDataSource.Create(builder.ConnectionString);
+
+        var first = await TenantScope.BeginAsync(dataSource, TenantA, Cancellation);
+        await first.CommitAsync(Cancellation);
+
+        await using var second = await TenantScope.BeginAsync(dataSource, TenantA, Cancellation);
+        await InsertSettingsAsync(second);
+
+        await first.DisposeAsync();
+
+        await second.CommitAsync(Cancellation);
+
+        Assert.Equal(1, await SettingsCountAsync(database));
+    }
+
     private async Task<string> TenantDatabaseAsync()
     {
         var database = await postgres.NewMigratedDatabaseAsync();
