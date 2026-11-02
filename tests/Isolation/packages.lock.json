@@ -54,6 +54,15 @@
           "Npgsql": "10.0.3"
         }
       },
+      "OpenIddict.Core": {
+        "type": "Direct",
+        "requested": "[7.7.2, )",
+        "resolved": "7.7.2",
+        "contentHash": "VsPYuXWx1YtbKFyW/O2vV/egJtTXmAOUE7AJq+I/laT3WIroeiDqHT8jDnhjIhDjHcjfNupR/u5nhWD6t5ocqg==",
+        "dependencies": {
+          "OpenIddict.Abstractions": "7.7.2"
+        }
+      },
       "OpenIddict.Server.AspNetCore": {
         "type": "Direct",
         "requested": "[7.7.2, )",

@@ -669,7 +669,7 @@ gatekeep/
 
 | Item | Blocks | Default if unresolved |
 | --- | --- | --- |
-| OpenIddict per-Tenant spike: options replacement, `BaseUri`, signing through Transit including the synchronous provider, token protection keys, custom stores, ad-hoc authorization per flow, a refused refresh committing its revocation (AD-8, AD-13) | Core sign-in sequence | Per-Tenant options through a keyed provider, then AD-8 is amended |
+| OpenIddict per-Tenant spike: options replacement, `BaseUri`, signing through Transit including the synchronous provider, token protection keys, custom stores, ad-hoc authorization per flow, a refused refresh committing its revocation (AD-8, AD-13) | Core sign-in sequence | Per-Tenant options through a keyed provider, then AD-8 is amended. Resolved 2026-11-02: every proof passed, so the default wasn't needed and AD-8 and AD-13 stand unamended. Story 2.1 proved options, `BaseUri`, Transit signing and token protection keys ([2-1-openiddict-per-tenant.md](../../../../docs/spikes/2-1-openiddict-per-tenant.md)). Story 2.2 proved custom stores, one ad-hoc authorization per flow, and a refused refresh committing its revocation through `FailureContext` ([2-2-openiddict-stores.md](../../../../docs/spikes/2-2-openiddict-stores.md)). Each record lists the conditions later stories carry over |
 | Linux custody spike (AD-10) | Retired | Retired 2026-11-02: Docker only, no TPM design |
 | Conformance plans' PKCE and logout behaviour, unconfirmed from official pages | SM-4 evidence | AD-25 conformance Tenant |
 | Host has a TPM2 and runs Linux | Retired | Retired 2026-11-02: Docker only, no host dependency |

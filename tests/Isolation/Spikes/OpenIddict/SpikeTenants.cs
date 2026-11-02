@@ -1,11 +1,17 @@
+using System.Security.Cryptography;
 using Gatekeep.Kernel.Secrets;
 using Gatekeep.Tests.Isolation.Custody;
 
 namespace Gatekeep.Tests.Isolation.Spikes.OpenIddict;
 
-/// <summary>One Tenant as the spike stores it: what a <c>tenant</c> and <c>signing_key</c> row would hold.</summary>
+/// <summary>
+/// One Tenant as the spike stores it: what a <c>tenant</c> and <c>signing_key</c> row would hold.
+/// <see cref="PublicId"/> prefixes the Tenant's reference IDs (Story 2.2). It lives in memory,
+/// because <c>tenant</c> has no <c>public_id</c> column yet.
+/// </summary>
 public sealed record SpikeTenant(
     Guid Id,
+    string PublicId,
     string Host,
     Uri Issuer,
     KeyName SigningKey,
@@ -51,6 +57,7 @@ public sealed class SpikeTenants
     private static async Task<SpikeTenant> CreateAsync(IKeyCustody worker, string host, CancellationToken cancellationToken)
     {
         var id = Guid.CreateVersion7();
+        var publicId = "t" + Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(8));
         var signing = KeyName.Signing(id, Guid.CreateVersion7());
         var protection = KeyName.ForTenant(TenantKeyClass.TokenProtection, id);
 
@@ -58,6 +65,6 @@ public sealed class SpikeTenants
         await worker.CreateKeyAsync(protection, cancellationToken);
         var wrapped = await worker.CreateWrappedDataKeyAsync(protection, id, cancellationToken);
 
-        return new SpikeTenant(id, host, new Uri($"https://{host}/"), signing, protection, wrapped);
+        return new SpikeTenant(id, publicId, host, new Uri($"https://{host}/"), signing, protection, wrapped);
     }
 }
