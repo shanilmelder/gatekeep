@@ -10,10 +10,20 @@ internal sealed record JobRunServices(NpgsqlDataSource Source, OperationRegistry
     public override string ToString() => nameof(JobRunServices);
 }
 
-/// <summary>The production Operation types (AD-30). None exists yet.</summary>
+/// <summary>The production Operation types (AD-30).</summary>
 internal static class ProductionOperations
 {
-    public static readonly OperationRegistry Registry = new([]);
+    /// <summary>
+    /// <c>audit.chain.purge</c> deletes a deleted Tenant's audit chain once its retention ends
+    /// (AD-16). Its one Tenant stage enqueues the <c>audit.chain.purge</c> job, which runs as
+    /// <c>gk_retention</c>. Tenant deletion, its future caller, starts it.
+    /// </summary>
+    public static readonly OperationRegistry Registry = new(
+    [
+        new OperationDefinition(
+            AuditRetentionJobs.PurgeOperation,
+            [new OperationStage(AuditRetentionJobs.PurgeStage, OperationStageKind.Tenant, AuditRetentionJobs.PurgeStageAsync)]),
+    ]);
 }
 
 /// <summary>The SQL on <c>operation</c> and <c>operation_step</c>, both <c>control</c> tables.</summary>

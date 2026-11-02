@@ -105,7 +105,7 @@ Prove both acceptance criteria with isolation tests, using a test-only authentic
 
 **Execution:**
 - `src/Gatekeep.Kernel/Limits/Limits.cs` -- add the four lifetime constants with spine and PRD references -- the one-file rule for limits.
-- `src/Adapters/Postgres/Migrations/Migration20261102080000CreateSessionTables.cs` -- create the five tables, RLS and grants in dependency order: `"user"`, `user_session`, `authorization`, `token`, `signin_transaction` -- the tables.
+- `src/Adapters/Postgres/Migrations/Migration20261102090000CreateSessionTables.cs` -- create the five tables, RLS and grants in dependency order: `"user"`, `user_session`, `authorization`, `token`, `signin_transaction` -- the tables.
 - `src/Adapters/Postgres/Schema/TableRegistry.cs` -- add the five entries with their owners and grants -- keeps the catalogue green.
 - `src/Modules/Sessions/Contracts/` (`ISessions.cs`, `SessionsContract.cs`) and `Core/` -- add `ISessions.StartAsync(CommandContext, NewSession(UserId, Amr, AuthTime, ConnectionId?), TimeProvider-based expiry, CancellationToken)`, which returns `StartedSession(SessionId, Secret<string> Token, …)` and writes the row plus audit -- Sessions owns `user_session`.
 - `src/Modules/Authentication/Contracts/` (`IAuthentication.cs`, `AuthenticationResult.cs`, `AuthenticationContract.cs`) and `Core/` -- add `IAuthentication.BeginAsync(CommandContext, SignInRequest(ApplicationId, Parameters), CancellationToken)`, which returns `StartedSignIn(TransactionId, Secret<string> Binding)` and writes the row plus audit -- AD-8 `Begin`.
@@ -177,14 +177,14 @@ Prove both acceptance criteria with isolation tests, using a test-only authentic
 ## Auto Run Result
 
 **Summary.** Story 2.6 adds the tables and the first contracts that sign-in shares:
-- **The migration.** `Migration20261102080000CreateSessionTables` creates `"user"` (Identity), `user_session`, `"authorization"` and `token` (Sessions), and `signin_transaction` (Authentication). Each is Tenant-class, with forced row-level security, the permissive and Tenant policy pair, `gk_hosted` grants and a `TableRegistry` entry. As the user decided, the `application_id` columns have no foreign key; Story 2.5 adds it, and `deferred-work.md` records that.
+- **The migration.** `Migration20261102090000CreateSessionTables` creates `"user"` (Identity), `user_session`, `"authorization"` and `token` (Sessions), and `signin_transaction` (Authentication). Each is Tenant-class, with forced row-level security, the permissive and Tenant policy pair, `gk_hosted` grants and a `TableRegistry` entry. As the user decided, the `application_id` columns have no foreign key; Story 2.5 adds it, and `deferred-work.md` records that.
 - **`IAuthentication.BeginAsync`.** It writes a `signin_transaction` bound to the SHA-256 of a returned 256-bit browser value, the Tenant and an Application ID, plus one audit event.
 - **`ISessions.StartAsync`.** It writes a `user_session`, stores only the hash of its identifier, and writes one audit event.
 - **`AuthenticationResult`.** It carries the Session ID, User ID, `amr` and `auth_time`.
 - **`TestOnlyAuthenticator`.** It lives only under `tests/` and returns a result for a seeded User.
 
 **Files changed**
-- `src/Adapters/Postgres/Migrations/Migration20261102080000CreateSessionTables.cs`: the five tables, their checks, indexes, RLS and grants.
+- `src/Adapters/Postgres/Migrations/Migration20261102090000CreateSessionTables.cs`: the five tables, their checks, indexes, RLS and grants.
 - `src/Adapters/Postgres/Schema/TableRegistry.cs`: five entries.
 - `src/Gatekeep.Kernel/Limits/SecurityLimits.cs`: the sign-in transaction lifetime and the Session idle and absolute defaults.
 - `src/Modules/Authentication/{Contracts,Core}`: `IAuthentication`, `SignInRequest`, `StartedSignIn`, `AuthenticationResult`, `AuthenticationContract` and `AuthenticationService`.

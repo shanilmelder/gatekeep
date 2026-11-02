@@ -121,6 +121,9 @@ done
 say "every service healthy."
 wait_healthz "200 healthy"
 
+say "audit verify, as gk_cli, finds every chain intact."
+$C run --rm cli audit verify || fail "cli audit verify didn't exit 0."
+
 say "the Master Key is in no volume, built image or container environment."
 for volume in $(docker volume ls -q --filter "label=com.docker.compose.project=$COMPOSE_PROJECT_NAME"); do
     find_key -v "$volume:/scan:ro" "$TOOLS" node /ci/find-key.mjs /key/master-key /scan \

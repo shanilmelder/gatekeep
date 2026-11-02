@@ -48,7 +48,7 @@ development_status:
   1-10-run-the-stack-under-compose-with-safe-secrets: done
   1-11-route-traffic-through-caddy-and-default-deny-networks: done
   1-12-document-installation: done
-  1-13-generate-design-tokens-and-bundle-fonts: backlog
+  1-13-generate-design-tokens-and-bundle-fonts: done
   1-14-build-shared-form-and-action-components: backlog
   1-15-build-data-display-components: backlog
   1-16-build-overlay-and-feedback-components: backlog
@@ -141,7 +141,7 @@ development_status:
   epic-7: in-progress
   7-1-seal-audit-events-into-hash-chains: done
   7-2-copy-evidence-off-the-server: backlog
-  7-3-verify-chains-and-apply-retention: backlog
+  7-3-verify-chains-and-apply-retention: done
   7-4-search-a-tenant-s-logs: backlog
   7-5-open-an-event-s-raw-detail: backlog
   7-6-view-a-user-s-history: backlog

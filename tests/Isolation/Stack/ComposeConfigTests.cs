@@ -357,7 +357,7 @@ public sealed class ComposeConfigTests
     public void Each_service_gets_exactly_its_own_secrets()
     {
         string[] passwords = ["postgres_password", "gk_migrator_password", "gk_hosted_password", "gk_admin_password",
-            "gk_worker_password", "gk_dispatch_password", "gk_sealer_password", "gk_retention_password"];
+            "gk_worker_password", "gk_dispatch_password", "gk_sealer_password", "gk_retention_password", "gk_cli_password"];
         var expected = new Dictionary<string, string[]>
         {
             ["postgres"] = passwords,
@@ -367,7 +367,7 @@ public sealed class ComposeConfigTests
             ["admin"] = ["gk_admin_password", "openbao_admin_role_id", "openbao_admin_secret_id"],
             ["worker"] = ["gk_dispatch_password", "gk_worker_password", "gk_sealer_password", "gk_retention_password",
                 "openbao_worker_role_id", "openbao_worker_secret_id"],
-            ["cli"] = ["gk_migrator_password", "openbao_cli_role_id", "openbao_cli_secret_id"],
+            ["cli"] = ["gk_migrator_password", "gk_cli_password", "openbao_cli_role_id", "openbao_cli_secret_id"],
         };
 
         foreach (var service in Services.EnumerateObject())

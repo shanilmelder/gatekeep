@@ -10,8 +10,8 @@ namespace Gatekeep.Adapters.Postgres.Migrations;
 /// Story 2.5's, and its migration adds them.
 /// </summary>
 [DbContext(typeof(MigrationsContext))]
-[Migration("20261102080000_CreateSessionTables")]
-public sealed class Migration20261102080000CreateSessionTables : Migration
+[Migration("20261102090000_CreateSessionTables")]
+public sealed class Migration20261102090000CreateSessionTables : Migration
 {
     private static readonly string[] Tables =
         ["\"user\"", "user_session", "\"authorization\"", "token", "signin_transaction"];

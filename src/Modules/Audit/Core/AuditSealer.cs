@@ -11,16 +11,10 @@ namespace Gatekeep.Modules.Audit.Core;
 /// default: then each statement after the lock reads a fresh snapshot, so a sealer that waited
 /// sees the head the other left. At a stricter level a waiting sealer would read the old head
 /// and fail, on the unique <c>seq</c> key or as a serialization failure, rather than fork the chain.
+/// Retention takes the same lock (<see cref="ChainLock"/>), so a cut never races a seal.
 /// </summary>
 internal sealed class AuditSealer : IAuditSealer
 {
-    /// <summary>The first key of every chain lock, so no other advisory lock can collide with one.</summary>
-    private const int LockNamespace = 0x41554454;
-
-    private const string DeploymentChain = "deployment";
-
-    private const string LockChain = "SELECT pg_advisory_xact_lock(@namespace, hashtext(@chain))";
-
     private static readonly ChainSql Tenant = new(
         """
         SELECT epoch, seq, hash FROM audit_event
@@ -29,7 +23,9 @@ internal sealed class AuditSealer : IAuditSealer
         LIMIT 1
         """,
         """
-        SELECT id, occurred_at, type_code, actor_kind, actor_id, target_kind, target_id FROM audit_event
+        SELECT id, occurred_at, type_code, actor_kind, actor_id, target_kind, target_id,
+          checkpoint_epoch, checkpoint_seq, checkpoint_hash
+        FROM audit_event
         WHERE tenant_id = @tenant_id AND seq IS NULL
         ORDER BY id
         LIMIT @max
@@ -47,7 +43,9 @@ internal sealed class AuditSealer : IAuditSealer
         LIMIT 1
         """,
         """
-        SELECT id, occurred_at, type_code, actor_kind, actor_id, target_kind, target_id FROM deployment_audit_event
+        SELECT id, occurred_at, type_code, actor_kind, actor_id, target_kind, target_id,
+          checkpoint_epoch, checkpoint_seq, checkpoint_hash
+        FROM deployment_audit_event
         WHERE seq IS NULL
         ORDER BY id
         LIMIT @max
@@ -65,13 +63,7 @@ internal sealed class AuditSealer : IAuditSealer
         var tenantId = context.TenantId;
         var sql = tenantId is null ? Deployment : Tenant;
 
-        await using (var command = context.CreateCommand())
-        {
-            command.CommandText = LockChain;
-            Add(command, "namespace", LockNamespace);
-            Add(command, "chain", tenantId?.ToString("D") ?? DeploymentChain);
-            await command.ExecuteNonQueryAsync(cancellationToken);
-        }
+        await ChainLock.TakeAsync(context, cancellationToken);
 
         var head = await ReadHeadAsync(context, sql, tenantId, cancellationToken);
         var waiting = await ReadUnsealedAsync(context, sql, tenantId, maxEvents, cancellationToken);
@@ -155,7 +147,10 @@ internal sealed class AuditSealer : IAuditSealer
                 TargetKind: reader.IsDBNull(5) ? null : reader.GetString(5),
                 TargetId: reader.IsDBNull(6) ? null : reader.GetGuid(6),
                 Epoch: 0,
-                Seq: 0));
+                Seq: 0,
+                CheckpointEpoch: reader.IsDBNull(7) ? null : reader.GetInt64(7),
+                CheckpointSeq: reader.IsDBNull(8) ? null : reader.GetInt64(8),
+                CheckpointHash: reader.IsDBNull(9) ? null : reader.GetFieldValue<byte[]>(9)));
         }
 
         return rows;
@@ -169,13 +164,7 @@ internal sealed class AuditSealer : IAuditSealer
         }
     }
 
-    private static void Add(DbCommand command, string name, object? value)
-    {
-        var parameter = command.CreateParameter();
-        parameter.ParameterName = name;
-        parameter.Value = value ?? DBNull.Value;
-        command.Parameters.Add(parameter);
-    }
+    private static void Add(DbCommand command, string name, object? value) => ChainLock.Add(command, name, value);
 
     private sealed record ChainSql(string Head, string Unsealed, string Seal);
 

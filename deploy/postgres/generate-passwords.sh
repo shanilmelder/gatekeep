@@ -26,7 +26,7 @@ fi
 chmod 0700 "$DIR"
 umask 0333
 
-for name in postgres gk_migrator gk_hosted gk_admin gk_worker gk_dispatch gk_sealer gk_retention; do
+for name in postgres gk_migrator gk_hosted gk_admin gk_worker gk_dispatch gk_sealer gk_retention gk_cli; do
     file="$DIR/${name}_password"
 
     # Compose makes an empty directory for a secret file that's missing at start, and an

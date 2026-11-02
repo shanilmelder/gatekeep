@@ -45,6 +45,18 @@ COPY tests/Architecture/module-edges.txt tests/Architecture/
 COPY --from=projects /src/ ./
 RUN dotnet restore Gatekeep.slnx --locked-mode
 
+# Chromium for the browser tests (tests/browser), at the Playwright version the catalog in
+# pnpm-workspace.yaml pins, with the system libraries it needs. It is downloaded here, at
+# image build, and only here: the tests themselves run with no egress beyond localhost.
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+COPY pnpm-workspace.yaml deploy/docker/playwright-version.mjs /tmp/playwright/
+RUN version="$(node /tmp/playwright/playwright-version.mjs /tmp/playwright/pnpm-workspace.yaml)" \
+    && cd /tmp/playwright \
+    && echo '{"private":true}' > package.json \
+    && npm install --ignore-scripts --no-audit --no-fund --cache /tmp/playwright/.npm "playwright@$version" \
+    && node_modules/.bin/playwright install --with-deps --only-shell chromium \
+    && cd / && rm -rf /tmp/playwright /var/lib/apt/lists/*
+
 COPY . .
 RUN pnpm install --frozen-lockfile --ignore-scripts
 

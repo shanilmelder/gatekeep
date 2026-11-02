@@ -1,0 +1,51 @@
+/*
+ * @gatekeep/ui global styles: the generated design tokens, the bundled Geist fonts and the
+ * one focus rule. Each app imports this once. The fonts are files in ./fonts, so each app
+ * serves them from its own origin: nothing here loads from a font or style host (NFR-18).
+ * Values come from the tokens only. A raw colour here fails the raw-hex lint.
+ */
+
+@import '@gatekeep/design-tokens/tokens.css';
+
+/* Geist and Geist Mono (SIL Open Font License 1.1, ./fonts/LICENSE.txt), variable weight. */
+@font-face {
+  font-family: 'Geist';
+  src: url('./fonts/Geist-Variable.woff2') format('woff2');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Geist Mono';
+  src: url('./fonts/GeistMono-Variable.woff2') format('woff2');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+body {
+  margin: 0;
+  background: var(--gk-color-bg);
+  color: var(--gk-color-tx);
+  font: var(--gk-font-body);
+  /* The font shorthand can't carry letter-spacing; body has none in DESIGN.md today. */
+  letter-spacing: var(--gk-font-body-letter-spacing, normal);
+}
+
+/*
+ * Every interactive element takes the focus ring on keyboard focus, drawn outside the
+ * control: an outline with a positive offset, so no border, fill or clipping inside the
+ * control can hide it. It stays in the error state, and in forced-colours mode it takes
+ * the system highlight.
+ */
+:focus-visible {
+  outline: var(--gk-focus-ring-outline-width) var(--gk-focus-ring-outline-style) var(--gk-focus-ring-outline-color);
+  outline-offset: var(--gk-focus-ring-outline-offset);
+}
+
+@media (forced-colors: active) {
+  :focus-visible {
+    outline-color: Highlight;
+  }
+}

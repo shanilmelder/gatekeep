@@ -1,22 +1,33 @@
 using System.Data.Common;
+using System.Globalization;
 using Gatekeep.Adapters.Postgres;
+using Gatekeep.Kernel.Persistence;
 using Gatekeep.Kernel.Secrets;
+using Gatekeep.Modules.Audit.Contracts;
+using Npgsql;
 
 const int Success = 0;
 const int Failure = 1;
 const int UsageError = 2;
 
-// The cli Compose service sets these, so `docker compose run --rm cli migrate` needs no paths.
+// The cli Compose service sets these, so `docker compose run --rm cli migrate` and
+// `docker compose run --rm cli audit verify` need no paths.
 const string ConnectionFileVariable = "GATEKEEP_MIGRATE_CONNECTION_FILE";
 const string PasswordFileVariable = "GATEKEEP_MIGRATE_PASSWORD_FILE";
+const string CliConnectionFileVariable = "GATEKEEP_CLI_CONNECTION_FILE";
+const string CliPasswordFileVariable = "GATEKEEP_CLI_PASSWORD_FILE";
 
 const string Usage = """
     Usage: gatekeep migrate --connection-file <path> [--password-file <path>]
            gatekeep migrate    (with GATEKEEP_MIGRATE_CONNECTION_FILE and GATEKEEP_MIGRATE_PASSWORD_FILE set)
+           gatekeep audit verify --connection-file <path> [--password-file <path>]
+           gatekeep audit verify    (with GATEKEEP_CLI_CONNECTION_FILE and GATEKEEP_CLI_PASSWORD_FILE set)
     """;
 
 var defaultConnectionFile = Environment.GetEnvironmentVariable(ConnectionFileVariable);
 var defaultPasswordFile = Environment.GetEnvironmentVariable(PasswordFileVariable);
+var cliConnectionFile = Environment.GetEnvironmentVariable(CliConnectionFileVariable);
+var cliPasswordFile = Environment.GetEnvironmentVariable(CliPasswordFileVariable);
 
 return args switch
 {
@@ -24,6 +35,10 @@ return args switch
         await MigrateAsync(defaultConnectionFile, defaultPasswordFile),
     ["migrate", "--connection-file", var path] => await MigrateAsync(path, passwordPath: null),
     ["migrate", "--connection-file", var path, "--password-file", var passwordPath] => await MigrateAsync(path, passwordPath),
+    ["audit", "verify"] when !string.IsNullOrEmpty(cliConnectionFile) && !string.IsNullOrEmpty(cliPasswordFile) =>
+        await VerifyAsync(cliConnectionFile, cliPasswordFile),
+    ["audit", "verify", "--connection-file", var path] => await VerifyAsync(path, passwordPath: null),
+    ["audit", "verify", "--connection-file", var path, "--password-file", var passwordPath] => await VerifyAsync(path, passwordPath),
     _ => ShowUsage(),
 };
 
@@ -45,48 +60,60 @@ static async Task<string?> ReadFileAsync(string path)
     }
 }
 
-static async Task<int> MigrateAsync(string path, string? passwordPath)
+/// <summary>The connection string from its file, with the password file's password in it. Null after saying why not.</summary>
+static async Task<string?> ConnectionAsync(string path, string? passwordPath)
 {
     var connectionString = (await ReadFileAsync(path))?.Trim();
     if (connectionString is null)
     {
         Console.Error.WriteLine("Can't read the connection file.");
-        return Failure;
+        return null;
     }
 
     if (connectionString.Length == 0)
     {
         Console.Error.WriteLine("The connection file is empty.");
-        return Failure;
+        return null;
     }
 
-    if (passwordPath is not null)
+    if (passwordPath is null)
     {
-        // A Compose secret: the connection file then holds no password.
-        var password = (await ReadFileAsync(passwordPath))?.TrimEnd('\r', '\n');
-        if (string.IsNullOrEmpty(password))
-        {
-            Console.Error.WriteLine("Can't read the password file, or it's empty.");
-            return Failure;
-        }
+        return connectionString;
+    }
 
-        // gk_migrator owns the schema, so it gets the same refusal as every host (AD-26).
-        if (SecretDefaults.IsUnsafePassword(password))
-        {
-            Console.Error.WriteLine("The password file holds a known default or a password under 16 characters.");
-            return Failure;
-        }
+    // A Compose secret: the connection file then holds no password.
+    var password = (await ReadFileAsync(passwordPath))?.TrimEnd('\r', '\n');
+    if (string.IsNullOrEmpty(password))
+    {
+        Console.Error.WriteLine("Can't read the password file, or it's empty.");
+        return null;
+    }
 
-        try
-        {
-            connectionString = new DbConnectionStringBuilder { ConnectionString = connectionString, ["Password"] = password }
-                .ConnectionString;
-        }
-        catch (ArgumentException)
-        {
-            Console.Error.WriteLine("The connection file isn't a valid connection string.");
-            return Failure;
-        }
+    // gk_migrator owns the schema and gk_cli reads every chain, so both get the same refusal as every host (AD-26).
+    if (SecretDefaults.IsUnsafePassword(password))
+    {
+        Console.Error.WriteLine("The password file holds a known default or a password under 16 characters.");
+        return null;
+    }
+
+    try
+    {
+        return new DbConnectionStringBuilder { ConnectionString = connectionString, ["Password"] = password }
+            .ConnectionString;
+    }
+    catch (ArgumentException)
+    {
+        Console.Error.WriteLine("The connection file isn't a valid connection string.");
+        return null;
+    }
+}
+
+static async Task<int> MigrateAsync(string path, string? passwordPath)
+{
+    var connectionString = await ConnectionAsync(path, passwordPath);
+    if (connectionString is null)
+    {
+        return Failure;
     }
 
     try
@@ -121,6 +148,109 @@ static async Task<int> MigrateAsync(string path, string? passwordPath)
     {
         // An unhandled exception would print its message and stack trace.
         Console.Error.WriteLine($"Migration failed: {e.GetType().Name}");
+        return Failure;
+    }
+}
+
+/// <summary>
+/// Walks the Deployment chain and every Tenant's chain, each Tenant in its own scope, as
+/// <c>gk_cli</c>, which can only read the audit tables. Prints one line per problem, by
+/// position only and never row content, and exits 1 on any problem.
+/// </summary>
+static async Task<int> VerifyAsync(string path, string? passwordPath)
+{
+    const string CliRole = "gk_cli";
+
+    var connectionString = await ConnectionAsync(path, passwordPath);
+    if (connectionString is null)
+    {
+        return Failure;
+    }
+
+    var verifier = AuditContract.CreateVerifier();
+
+    NpgsqlDataSource source;
+    try
+    {
+        source = NpgsqlDataSource.Create(connectionString);
+    }
+    catch (ArgumentException)
+    {
+        // Its message can quote the connection string, which holds the password.
+        Console.Error.WriteLine("The connection file isn't a valid connection string.");
+        return Failure;
+    }
+
+    await using var ownedSource = source;
+
+    try
+    {
+
+        var chains = new List<(string Name, ChainReport Report)>();
+        var tenants = new List<Guid>();
+
+        await using (var scope = await DeploymentScope.BeginAsync(source, CancellationToken.None))
+        {
+            var context = scope.CreateCommandContext();
+
+            await using (var command = context.CreateCommand())
+            {
+                command.CommandText = "SELECT current_user::text";
+                var role = (string)(await command.ExecuteScalarAsync())!;
+                if (role != CliRole)
+                {
+                    Console.Error.WriteLine($"Audit verify runs only as {CliRole}, not {role}.");
+                    return Failure;
+                }
+            }
+
+            await using (var command = context.CreateCommand())
+            {
+                command.CommandText = "SELECT id FROM tenant ORDER BY id";
+                await using var reader = await command.ExecuteReaderAsync();
+                while (await reader.ReadAsync())
+                {
+                    tenants.Add(reader.GetGuid(0));
+                }
+            }
+
+            chains.Add(("deployment", await verifier.VerifyAsync(context, CancellationToken.None)));
+            await scope.CommitAsync(CancellationToken.None);
+        }
+
+        foreach (var tenantId in tenants)
+        {
+            await using var scope = await TenantScope.BeginAsync(source, tenantId, CancellationToken.None);
+            chains.Add((tenantId.ToString("D"), await verifier.VerifyAsync(scope.CreateCommandContext(), CancellationToken.None)));
+            await scope.CommitAsync(CancellationToken.None);
+        }
+
+        var problems = 0;
+        foreach (var (name, report) in chains)
+        {
+            foreach (var problem in report.Problems)
+            {
+                Console.WriteLine($"chain {name}: {problem}");
+                problems++;
+            }
+        }
+
+        var rows = chains.Sum(c => c.Report.SealedRows);
+        Console.WriteLine(string.Create(
+            CultureInfo.InvariantCulture,
+            $"verified {chains.Count:N0} chains, {rows:N0} sealed rows, {problems:N0} {(problems == 1 ? "problem" : "problems")}"));
+
+        return problems == 0 ? Success : Failure;
+    }
+    catch (DbException e)
+    {
+        Console.Error.WriteLine($"Verification failed: {e.GetType().Name} {e.SqlState}".TrimEnd());
+        return Failure;
+    }
+    catch (Exception e)
+    {
+        // An unhandled exception would print its message and stack trace.
+        Console.Error.WriteLine($"Verification failed: {e.GetType().Name}");
         return Failure;
     }
 }

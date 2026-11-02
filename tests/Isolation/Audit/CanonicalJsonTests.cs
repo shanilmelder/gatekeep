@@ -136,6 +136,26 @@ public sealed class CanonicalJsonTests
     }
 
     [Fact]
+    public void Checkpoint_envelope_adds_its_three_members_with_lower_case_hex()
+    {
+        var checkpoint = Envelope with
+        {
+            TypeCode = "audit.retention.checkpoint",
+            ActorKind = "system",
+            ActorId = null,
+            TargetKind = null,
+            TargetId = null,
+            CheckpointEpoch = 1,
+            CheckpointSeq = 6,
+            CheckpointHash = [0x0A, 0xBC, 0xFF],
+        };
+
+        Assert.Equal(
+            """{"actor_id":null,"actor_kind":"system","checkpoint_epoch":1,"checkpoint_hash":"0abcff","checkpoint_seq":6,"epoch":1,"id":"0190abcd-0000-7000-8000-0000000000e1","occurred_at":"2026-11-02T07:30:15.123456Z","seq":7,"target_id":null,"target_kind":null,"tenant_id":"0190abcd-0000-7000-8000-00000000000a","type_code":"audit.retention.checkpoint"}""",
+            AuditContract.CanonicalEnvelope(checkpoint));
+    }
+
+    [Fact]
     public void Genesis_hash_is_over_the_envelope_alone()
     {
         var expected = SHA256.HashData(Encoding.UTF8.GetBytes(ExpectedEnvelope));

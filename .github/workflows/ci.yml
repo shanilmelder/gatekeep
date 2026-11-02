@@ -23,8 +23,9 @@ jobs:
       - name: Build the tests image
         run: docker compose -f deploy/compose.test.yaml build tests
 
-      # pnpm audit, the .NET build, the workspace build, and the Architecture and
-      # Isolation tests (deploy/docker/run-tests.sh).
+      # pnpm audit, the design token drift check, the raw hex lint, the .NET build, the
+      # workspace build, the browser tests, and the Architecture and Isolation tests
+      # (deploy/docker/run-tests.sh).
       - name: Build and test in the tests container
         run: docker compose -f deploy/compose.test.yaml run --rm tests
 

@@ -517,8 +517,8 @@ public sealed class AuditTests(PostgresFixture postgres)
     }
 
     [Theory]
-    [InlineData("audit_event", "tenant_id,id,occurred_at,type_code,actor_kind,actor_id,target_kind,target_id,seq,prev_hash,hash,epoch")]
-    [InlineData("deployment_audit_event", "id,occurred_at,type_code,actor_kind,actor_id,target_kind,target_id,seq,prev_hash,hash,epoch")]
+    [InlineData("audit_event", "tenant_id,id,occurred_at,type_code,actor_kind,actor_id,target_kind,target_id,seq,prev_hash,hash,epoch,checkpoint_epoch,checkpoint_seq,checkpoint_hash")]
+    [InlineData("deployment_audit_event", "id,occurred_at,type_code,actor_kind,actor_id,target_kind,target_id,seq,prev_hash,hash,epoch,checkpoint_epoch,checkpoint_seq,checkpoint_hash")]
     public async Task Event_tables_have_exactly_these_columns(string table, string columns)
     {
         var database = await postgres.NewMigratedDatabaseAsync();
