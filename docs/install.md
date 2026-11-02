@@ -2,7 +2,7 @@
 
 How the Operator installs one Deployment (AD-26). Gatekeep runs only inside Docker: every process, OpenBao, the CLI, setup and key generation included, is a Compose service. The machine needs Docker with Compose and Git, and nothing else. Every command below is a `docker` or `git` command, run from the repository root.
 
-Written for Story 1.10, with Caddy, TLS and published ports added by Story 1.11, and run on Docker Desktop (Linux containers) and in CI. Production TLS (`cloudflare` mode) has been validated offline only: it hasn't yet obtained a real certificate.
+Written for Story 1.10, with Caddy, TLS and published ports added by Story 1.11. Story 1.12 added the dedicated-zone rule and the "Not yet covered" list. Run on Docker Desktop (Linux containers) and in CI. Production TLS (`cloudflare` mode) has been validated offline only: it hasn't yet obtained a real certificate.
 
 ## What the Docker host must provide
 
@@ -85,6 +85,7 @@ Caddy is the only way in (AD-2, AD-26). It serves two sites and refuses everythi
 | Every Tenant host, `*.{zone}` | `GATEKEEP_TENANT_ZONE` | `gatekeep.localhost` | `Host.Hosted`, port 8080 |
 | The Admin hostname | `GATEKEEP_ADMIN_HOST` | `admin.gatekeep-admin.localhost` | `Host.Admin`, port 8080 |
 
+- **The Tenant zone is used only by Gatekeep** (NFR-21). Here "zone" means a DNS name and everything under it, such as `id.example.com`, not necessarily a zone of its own in Cloudflare. No application, mail server or other host may have a name under it, the zone itself included, because the `*.{zone}` wildcard certificate covers every name there: whoever holds its key can impersonate any of them, and a foreign site there would be a sibling origin of every Tenant (`docs/threat-model.md`, T-17 and T-35). Pick a name of its own rather than a domain that already serves something. Hosts on the parent domain (`example.com` in the examples, which also serves `admin.example.com`) can still set `Domain=example.com` cookies that every Tenant name receives (T-17). Gatekeep's own `__Host-` cookies can't be overwritten that way, but only put hosts you trust on the parent domain.
 - **The Admin hostname must be outside the Tenant zone**: not the zone itself and not any name under it. Caddy refuses to start otherwise, and its log names `GATEKEEP_ADMIN_HOST`. For example, with the zone `id.example.com`, use `admin.example.com`, never `admin.id.example.com`.
 - Only one label under the zone is served: `acme.id.example.com`, not `id.example.com` or `a.b.id.example.com`. Any name Caddy doesn't serve fails the TLS handshake. A request whose `Host` header isn't the name its TLS connection was for gets an empty `421`, so one site's connection never reaches the other.
 - Plain HTTP on port 80 only redirects the two sites to HTTPS, with no body and no cookie, and closes the connection for any other name.
@@ -104,7 +105,7 @@ Certificates and their private keys live only in the `caddy-data` volume, which 
 
 Challenge records never go into the zone that serves Gatekeep's names (NFR-21). They go into a separate **validation-only zone** that holds nothing else, so the API token Caddy holds can't touch the real records. With the Tenant zone `id.example.com`, the Admin hostname `admin.example.com` and a validation zone `example-acme.com`, all in Cloudflare:
 
-1. **The sites' records.** In the zone that holds them, add `*.id.example.com` and `admin.example.com` as `A` records to the Docker host's public IPv4 address. Don't add `AAAA` records: the Compose networks are IPv4 only, and IPv6 traffic would reach Caddy through Docker's proxy, from an address inside the `edge` network rather than the client's. Set both to **DNS only** (grey cloud), never proxied, so Cloudflare never terminates or sees Gatekeep traffic.
+1. **The sites' records.** Choose a Tenant zone nothing else uses (see "Hostnames and TLS" above). In the zone that holds them, add `*.id.example.com` and `admin.example.com` as `A` records to the Docker host's public IPv4 address. Don't add `AAAA` records: the Compose networks are IPv4 only, and IPv6 traffic would reach Caddy through Docker's proxy, from an address inside the `edge` network rather than the client's. Set both to **DNS only** (grey cloud), never proxied, so Cloudflare never terminates or sees Gatekeep traffic.
 2. **The validation-only zone.** Add `example-acme.com` to Cloudflare as its own zone, used for nothing else.
 3. **The challenge CNAMEs.** In the sites' zone, add two `CNAME` records, both **DNS only**:
    - `_acme-challenge.id.example.com` to `id.example-acme.com`
@@ -181,5 +182,19 @@ docker compose -f deploy/compose.yaml up -d --wait --force-recreate
 
 ## Not yet covered
 
-- Signed images and `gatekeep upgrade` (Story 12.5 and Epic 12).
-- Backups, which must leave the secrets directory out (Epic 12).
+These steps install the stack, not a usable product. What they can't deliver yet, and the work that owns each:
+
+- **A working Admin Dashboard.** After install every host reports healthy, but there's no Admin sign-in, bootstrap or Dashboard to use yet (Stories 1.21 to 1.25).
+- **Certificate Transparency alerts.** Gatekeep raises none yet (Epic 11). Until then watch CT logs yourself for the wildcard `*.id.example.com` and the Admin hostname `admin.example.com`: search crt.sh regularly, or subscribe both names to a CT monitoring service that emails you on each new certificate. Any certificate Caddy didn't obtain is misissued.
+- **Emergency certificate replacement.** No procedure or rehearsal exists yet for a stolen key or misissued certificate (Story 13.6). As a stopgap: revoke the certificate with the CA that issued it (Let's Encrypt or ZeroSSL, through ACME revocation or the CA's own process); roll the Cloudflare token in the dashboard and write the new one to `cloudflare/dns-token`; then remove the certificates from `caddy-data` and restart Caddy, which obtains new ones and a new key:
+
+  ```sh
+  docker compose -f deploy/compose.yaml -f deploy/compose.cloudflare.yaml stop caddy
+  docker compose -f deploy/compose.yaml -f deploy/compose.cloudflare.yaml run --rm --no-deps --entrypoint sh caddy -c 'rm -rf /data/caddy/certificates/*/wildcard_.id.example.com /data/caddy/certificates/*/admin.example.com'
+  docker compose -f deploy/compose.yaml -f deploy/compose.cloudflare.yaml up -d --wait caddy
+  ```
+
+- **Real client addresses.** No forwarded header is trusted yet, so the hosts see Caddy's address, not the client's (Story 1.20).
+- **IPv6.** The Compose networks are IPv4 only. Add no `AAAA` records.
+- **A real production certificate.** `cloudflare` mode has been validated offline only and has never obtained a real certificate. On the first production start, watch Caddy's log until both certificates are obtained.
+- **Backups and upgrades.** No backup, restore, signed images or `gatekeep upgrade` yet. Backups must leave the secrets directory out (Epic 12, signed images in Story 12.5).
