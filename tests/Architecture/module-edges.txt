@@ -73,5 +73,7 @@ dependency Tests.Isolation -> Adapters.Logging
 dependency Tests.Isolation -> Adapters.OpenBao
 dependency Tests.Isolation -> Adapters.Postgres
 dependency Tests.Isolation -> Audit
+dependency Tests.Isolation -> Authentication
 dependency Tests.Isolation -> Cli
 dependency Tests.Isolation -> Operations
+dependency Tests.Isolation -> Sessions

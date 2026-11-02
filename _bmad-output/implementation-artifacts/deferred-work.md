@@ -94,6 +94,15 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-1-11-route-traffic-through-caddy-and-default-deny-networks.md`
   summary: Prove Caddy's cloudflare mode issues real certificates on the first real install.
   evidence: Story 1.11 validated it offline only.
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-6-add-session-and-transaction-tables.md`
+  summary: Add `(tenant_id, application_id) REFERENCES application (tenant_id, id) ON DELETE RESTRICT` on `signin_transaction`, `authorization` and `token` in Story 2.5's migration.
+  evidence: Story 2.6 created those columns with no foreign key, because the `application` table is Story 2.5's (user decision, 2026-11-02).
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-6-add-session-and-transaction-tables.md`
+  summary: Narrow `gk_hosted` UPDATE on `user_session`, `signin_transaction`, `authorization` and `token` to the columns that change, once Story 2.9's stores and Story 2.7's revocation define them.
+  evidence: Story 2.6 grants table-wide UPDATE, so the Hosted path could rewrite `id_hash`, `binding_hash` or `user_id`.
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-6-add-session-and-transaction-tables.md`
+  summary: Confirm the `token.reference_id` CHECK (`^[A-Za-z0-9+/_-]{43}=?$`) against real OpenIddict output in Story 2.9, and recheck it on every OpenIddict upgrade.
+  evidence: It assumes OpenIddict 7.7.2's obfuscated form (base64 SHA-256), and only a hand-built value has tested it.
 - source_spec: `_bmad-output/implementation-artifacts/spec-1-13-generate-design-tokens-and-bundle-fonts.md`
   summary: Prove fonts and same-origin requests through Caddy once the stack serves the apps.
   evidence: Story 1.13 proved them on vite preview.

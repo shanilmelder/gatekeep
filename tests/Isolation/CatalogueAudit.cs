@@ -396,7 +396,10 @@ internal static class CatalogueAudit
         var rows = await QueryAsync(
             connection,
             """
-            SELECT con.conname, con.conrelid::regclass::text, con.confrelid::regclass::text,
+            SELECT con.conname,
+                   -- relname, not regclass, which quotes a reserved name such as "user".
+                   (SELECT c.relname::text FROM pg_class c WHERE c.oid = con.conrelid),
+                   (SELECT c.relname::text FROM pg_class c WHERE c.oid = con.confrelid),
                    con.confdeltype::text,
                    (SELECT coalesce(bool_or(child.attname = 'tenant_id' AND parent.attname = 'tenant_id'), false)
                     FROM unnest(con.conkey, con.confkey) WITH ORDINALITY AS pair (child_column, parent_column, position)

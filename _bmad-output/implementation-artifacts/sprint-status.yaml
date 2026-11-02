@@ -76,7 +76,7 @@ development_status:
   2-3-publish-discovery-and-jwks-per-tenant: backlog
   2-4-rotate-signing-keys-automatically: backlog
   2-5-issue-a-token-by-client-credentials: backlog
-  2-6-add-session-and-transaction-tables: backlog
+  2-6-add-session-and-transaction-tables: done
   2-7-build-the-one-revocation-path: backlog
   2-8-add-the-system-application: backlog
   2-9-run-the-authorization-code-flow-with-pkce: backlog

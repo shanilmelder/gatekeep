@@ -89,6 +89,8 @@ flowchart TD
   TestsIsolation --> AdaptersOpenBao
   TestsIsolation --> AdaptersPostgres
   TestsIsolation --> Audit
+  TestsIsolation --> Authentication
   TestsIsolation --> Cli
   TestsIsolation --> Operations
+  TestsIsolation --> Sessions
 ```

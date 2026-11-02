@@ -139,6 +139,24 @@ public sealed class CatalogueTests(PostgresFixture postgres)
     }
 
     [Fact]
+    public async Task Catalogue_refuses_a_single_column_foreign_key_into_a_reserved_name_tenant_table()
+    {
+        // regclass would print the parent as "user", in quotes, and the check would miss it.
+        await AssertDriftReportedAsync(
+            TableRegistry.Migrator,
+            """
+            CREATE UNIQUE INDEX user_id_only ON "user" (id);
+            CREATE TABLE child_row (
+              id uuid PRIMARY KEY,
+              tenant_id uuid NOT NULL,
+              user_id uuid NOT NULL CONSTRAINT child_row_user_fkey REFERENCES "user" (id) ON DELETE RESTRICT
+            );
+            """,
+            "child_row_user_fkey: foreign key between tenant tables isn't composite on tenant_id.",
+            [.. TableRegistry.Tables, Entry("child_row", TableClass.Tenant)]);
+    }
+
+    [Fact]
     public async Task Catalogue_refuses_a_composite_foreign_key_that_crosses_tenant_id()
     {
         await AssertDriftReportedAsync(
