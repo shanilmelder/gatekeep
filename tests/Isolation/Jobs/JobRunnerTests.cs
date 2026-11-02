@@ -577,7 +577,12 @@ public sealed class JobRunnerTests(PostgresFixture postgres)
         using var stopping = CancellationTokenSource.CreateLinkedTokenSource(Cancellation);
 
         var run = runner.RunOnceAsync(stopping.Token);
-        await started.Task.WaitAsync(TimeSpan.FromSeconds(30), Cancellation);
+        if (await Task.WhenAny(started.Task, run).WaitAsync(TimeSpan.FromSeconds(30), Cancellation) == run)
+        {
+            await run;
+            Assert.Fail("The body never started.");
+        }
+
         await stopping.CancelAsync();
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => run);
