@@ -55,7 +55,7 @@ internal static class CatalogueAudit
             connection,
             """
             SELECT n.nspname, c.relname, c.relkind::text, pg_get_userbyid(c.relowner),
-                   c.relrowsecurity::text, c.relforcerowsecurity::text
+                   c.relrowsecurity::text, c.relforcerowsecurity::text, c.relpersistence::text
             FROM pg_class c
             JOIN pg_namespace n ON n.oid = c.relnamespace
             WHERE n.nspname NOT IN ('pg_catalog', 'information_schema')
@@ -67,6 +67,7 @@ internal static class CatalogueAudit
         foreach (var row in rows)
         {
             var (schema, name, kind, owner, rowSecurity, forceRowSecurity) = (row[0], row[1], row[2], row[3], row[4], row[5]);
+            var persistence = row[6];
 
             if (owner != TableRegistry.Migrator)
             {
@@ -94,6 +95,14 @@ internal static class CatalogueAudit
             if (forceRowSecurity != (isTenant ? "true" : "false"))
             {
                 problems.Add($"{name}: FORCE ROW LEVEL SECURITY is {forceRowSecurity} for class {entry.Class}.");
+            }
+
+            // 'u' is UNLOGGED and 'p' an ordinary logged table. Only crash-resettable counters
+            // are unlogged (AD-14), and a logged counter table is drift too.
+            var unlogged = persistence == "u";
+            if (unlogged != entry.Unlogged)
+            {
+                problems.Add($"{name}: is {(unlogged ? "UNLOGGED" : "logged")}, but the registry says {(entry.Unlogged ? "UNLOGGED" : "logged")}.");
             }
         }
 

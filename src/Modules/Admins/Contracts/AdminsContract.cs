@@ -1,4 +1,16 @@
+using Gatekeep.Kernel.RateLimiting;
+using Gatekeep.Modules.Admins.Core;
+
 namespace Gatekeep.Modules.Admins.Contracts;
 
-/// <summary>Placeholder until the first story that publishes an Admins contract.</summary>
-public static class AdminsContract;
+/// <summary>What a composition root uses to wire the Admins module.</summary>
+public static class AdminsContract
+{
+    /// <summary>
+    /// The Kernel <see cref="IRateLimiter"/> for Admin attempts, such as bootstrap claims and
+    /// Admin sign-in (AD-14). It counts in <c>admin_attempt</c> and serves a Deployment scope
+    /// only: in a Tenant's it throws <see cref="InvalidOperationException"/> and writes nothing.
+    /// It runs as <c>gk_admin</c>, the only role granted the table.
+    /// </summary>
+    public static IRateLimiter CreateAttemptLimiter() => new AdminAttemptLimiter();
+}

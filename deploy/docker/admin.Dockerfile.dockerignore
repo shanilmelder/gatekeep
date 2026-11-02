@@ -1,0 +1,24 @@
+# admin.Dockerfile's context: what .dockerignore lets in, plus the pnpm workspace the Admin
+# Dashboard bundle is built from (apps/, packages/). Secrets and keys stay out, as everywhere.
+**/bin/
+**/obj/
+**/node_modules/
+**/dist/
+**/TestResults/
+**/test-results/
+**/playwright-report/
+.git/
+.vs/
+.claude/
+_bmad/
+_bmad-output/
+graft/
+design/
+docs/
+deploy/secrets*/
+deploy/trust/
+deploy/release.env
+dist/
+**/.env*
+**/*.pem
+**/*.pfx
