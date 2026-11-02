@@ -43,3 +43,9 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-1-5-write-an-audit-event-with-every-state-change.md`
   summary: Add `DeploymentScope`, `FailureContext` and `gk_retention` `DELETE` on detail tables to the spine (AD-4, AD-16, AD-28).
   evidence: The spine names none of them, and AD-16 gives detail deletion only to `gk_worker`, though `ON DELETE RESTRICT` needs it for range deletion.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-6-scrub-logs-and-scan-for-canaries.md`
+  summary: Decide whether `AuditDetail` text is scrubbed before storage, and extend the canary scan to shaped request values.
+  evidence: The clean scan wraps canaries in `Secret<T>`, so a raw value never reaches the appender. Story 7.8 extends the scan.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-6-scrub-logs-and-scan-for-canaries.md`
+  summary: Scan a real host process stdout in the canary scan.
+  evidence: The scan reads what the console provider hands its formatter from test-sent records, because no flow exists yet.

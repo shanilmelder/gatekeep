@@ -12,6 +12,7 @@ flowchart TD
   Identity[Identity]
   Sessions[Sessions]
   Tenancy[Tenancy]
+  AdaptersLogging[Adapters.Logging]
   HostAdmin[Host.Admin]
   Management[Management]
   Admins[Admins]
@@ -29,9 +30,12 @@ flowchart TD
   HostHosted --> Identity
   HostHosted --> Sessions
   HostHosted --> Tenancy
+  HostHosted --> AdaptersLogging
   HostAdmin --> Management
   HostAdmin --> Admins
+  HostAdmin --> AdaptersLogging
   HostWorker --> Operations
+  HostWorker --> AdaptersLogging
   Cli --> Operations
   Cli --> Admins
   Cli --> AdaptersPostgres
@@ -73,6 +77,7 @@ flowchart TD
   Sessions --> Tenancy
   Notifications --> Tenancy
   Admins --> Notifications
+  TestsIsolation --> AdaptersLogging
   TestsIsolation --> AdaptersPostgres
   TestsIsolation --> Audit
   TestsIsolation --> Cli

@@ -400,6 +400,9 @@
           "Gatekeep.Modules.Operations": "[0.1.0, )"
         }
       },
+      "gatekeep.adapters.logging": {
+        "type": "Project"
+      },
       "gatekeep.adapters.postgres": {
         "type": "Project",
         "dependencies": {
