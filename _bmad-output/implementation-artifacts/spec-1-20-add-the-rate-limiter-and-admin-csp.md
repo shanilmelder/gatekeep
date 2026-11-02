@@ -209,5 +209,5 @@ Status: done
 
 **Residual risks:**
 - Nothing calls the limiter until Stories 1.21 to 1.23. Which forwarded address to trust moved to Story 1.21; the user has been asked to confirm this.
-- The Story 7.3 branch also adds a migration, so whichever branch merges second must set `MigrateCommandTests` to 7.
+- Rebased onto Story 7.3 (merged first): `MigrateCommandTests` now expects 7 migrations, and the threat model keeps both stories' text. On the rebased branch: browser 12/12, Architecture 362/362, Isolation 1217/1220, the three failures being PostgreSQL connection timeouts in untouched audit tests that passed on a rerun (99/99 with `MigrateCommandTests`).
 - Kernel-level 400, 413 and 431 responses, and unhandled 500s, may not carry the headers.
