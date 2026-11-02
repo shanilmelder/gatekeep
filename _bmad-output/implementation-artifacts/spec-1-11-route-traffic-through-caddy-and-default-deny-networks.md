@@ -2,17 +2,38 @@
 title: 'Story 1.11: Route traffic through Caddy and default-deny networks'
 type: 'feature'
 created: '2026-11-02'
-status: 'in-progress'
+status: 'done'
 baseline_revision: '5984088ad227d720bbdcface517e779460708704'
 review_loop_iteration: 0
-followup_review_recommended: false
+followup_review_recommended: true
 context:
   - '{project-root}/_bmad-output/planning-artifacts/sprint-change-proposal-2026-11-02-public-admin.md'
   - '{project-root}/_bmad-output/planning-artifacts/sprint-change-proposal-2026-11-02-docker-only.md'
   - '{project-root}/docs/threat-model.md'
   - '{project-root}/docs/install.md'
 warnings: [oversized]
-deferred: []
+deferred:
+  - summary: >-
+      Cloudflare mode is proven only offline.
+    evidence: |-
+      No real certificate has been issued; prove it on the first real install.
+    location: >-
+      deploy/caddy/tls-cloudflare.caddy
+    severity: low
+  - summary: >-
+      Forwarded-header trust and real client IPs are undecided.
+    evidence: |-
+      Rate limits (Story 1.20) need the real client address behind Caddy.
+    location: >-
+      src/Adapters/Hosting/GatekeepHosting.cs
+    severity: medium
+  - summary: >-
+      No edge access log.
+    evidence: |-
+      Caddy logs could record sensitive query values (T-42); decide with the logging and alerts work.
+    location: >-
+      deploy/caddy/Caddyfile
+    severity: medium
 ---
 
 <intent-contract>
@@ -30,7 +51,7 @@ deferred: []
 - Hostnames come from configuration, not code: the Tenant zone (for example `gatekeep.localhost` locally) and the Admin hostname (for example `admin.gatekeep-admin.localhost` locally). The Admin hostname must not fall under `*.{zone}`; Caddy refuses to start (config validation) if it does, so a Tenant host can never route to `Host.Admin`.
 - Caddy site rules: `*.{zone}` proxies to `Host.Hosted`'s public port; the Admin hostname proxies to `Host.Admin`'s public port; any other host name is refused with no content (TLS handshake failure or an empty fixed response, no proxying, no cookie). Plain HTTP on port 80 returns only a redirect to HTTPS with an empty body and no `Set-Cookie` for the two sites, and nothing for other hosts. A request whose `Host` header names one site over a TLS connection for the other is refused.
 - TLS mode is configuration for both sites: `internal` (Caddy's local CA) for local and CI, and `cloudflare` for production. In `cloudflare` mode Caddy gets the `*.{zone}` wildcard certificate and the Admin hostname's certificate by ACME DNS-01 through Cloudflare DNS (Esm, 2026-11-02). Caddy is built with the `caddy-dns/cloudflare` module, pinned to an exact version, in a multi-stage Dockerfile from digest-pinned bases.
-- NFR-21 still holds: `_acme-challenge.{zone}` and `_acme-challenge.{admin hostname}` are CNAMEs to a separate validation-only Cloudflare zone, and Caddy writes challenge records there through its challenge-domain override. The Cloudflare API token is scoped to `Zone:DNS:Edit` on that validation zone only. It's delivered only as the Compose secret `cloudflare_dns_token`, read from the file, never from an environment variable or command line. In `internal` mode the secret isn't needed, so CI and local runs use no token. Docs tell the Operator to keep both sites' DNS records "DNS only" (not proxied), so Cloudflare never sees Gatekeep traffic.
+- NFR-21 still holds: `_acme-challenge.{zone}` and `_acme-challenge.{admin hostname}` are CNAMEs to a separate validation-only Cloudflare zone, and Caddy writes challenge records there through its challenge-domain override. The Cloudflare API token is scoped to `Zone:DNS:Edit` and `Zone:Read` on that validation zone only. It's delivered only as the Compose secret `cloudflare_dns_token`, read from the file, never from an environment variable or command line. In `internal` mode the secret isn't needed, so CI and local runs use no token. Docs tell the Operator to keep both sites' DNS records "DNS only" (not proxied), so Cloudflare never sees Gatekeep traffic.
 - Certificate private keys live only in Caddy's data volume, mounted by Caddy alone, with the directory and key files readable only by Caddy's user.
 - Networks: Caddy joins `edge` (non-internal, for published ports and ACME), `hosted-edge` (Caddy and `hosted`, internal) and `admin-edge` (Caddy and `admin`, internal). `hosted` and `admin` share no network except through PostgreSQL's per-host networks, which hold no other host. `worker`, `postgres` and `openbao` never join an edge network.
 - Each host's health port stays unpublished and unreachable from Caddy's networks.
@@ -40,7 +61,7 @@ deferred: []
 - No VPN, no IP allowlist, no Cloudflare Tunnel, no Caddy admin API exposed (`admin off` or bound to localhost inside the container).
 - No route from Caddy to `worker`, `postgres`, `openbao` or any health port.
 - No Cloudflare account, token or zone ID in the repository, CI or tests, and no CI step that calls Cloudflare.
-- No DNS provider plugin or credential in this story.
+- No DNS provider other than Cloudflare, and no DNS credential with access beyond the validation-only zone.
 
 ## I/O & Edge-Case Matrix
 
@@ -75,16 +96,18 @@ deferred: []
 ## Tasks & Acceptance
 
 **Execution:**
-- [ ] `deploy/caddy/Caddyfile`, `deploy/docker/caddy.Dockerfile` -- Tenant zone and Admin sites, refusals, HTTP behaviour, TLS mode (`internal` or `cloudflare`, with the challenge-domain override), `admin off`; Caddy built with the pinned `caddy-dns/cloudflare` module.
-- [ ] `deploy/compose.yaml` -- `caddy` service, `edge`, `hosted-edge`, `admin-edge` networks, `caddy-data` and `caddy-config` volumes, the `cloudflare_dns_token` secret.
-- [ ] `tests/Isolation/Stack/ComposeConfigTests.cs` -- Caddy hardening, only Caddy publishes 80 and 443, edge network membership, Caddy volumes and the DNS token mounted by Caddy alone.
-- [ ] `deploy/ci/stack-check.sh` -- every matrix row against the running stack using a client container with `--resolve` and Caddy's internal CA.
-- [ ] `docs/install.md`, `docs/threat-model.md` -- hostnames, ports, TLS settings; public Admin threat and closed G-13.
+- [x] `deploy/caddy/Caddyfile`, `deploy/docker/caddy.Dockerfile` -- Tenant zone and Admin sites, refusals, HTTP behaviour, TLS mode (`internal` or `cloudflare`, with the challenge-domain override), `admin off`; Caddy built with the pinned `caddy-dns/cloudflare` module.
+- [x] `deploy/compose.yaml` -- `caddy` service, `edge`, `hosted-edge`, `admin-edge` networks, `caddy-data` and `caddy-config` volumes, the `cloudflare_dns_token` secret.
+- [x] `tests/Isolation/Stack/ComposeConfigTests.cs` -- Caddy hardening, only Caddy publishes 80 and 443, edge network membership, Caddy volumes and the DNS token mounted by Caddy alone.
+- [x] `deploy/ci/stack-check.sh` -- every matrix row against the running stack using a client container with `--resolve` and Caddy's internal CA.
+- [x] `docs/install.md`, `docs/threat-model.md` -- hostnames, ports, TLS settings; public Admin threat and closed G-13.
 
 **Acceptance Criteria:**
 - Given a host with only Docker, when the stack comes up, then the Tenant zone and the Admin hostname are served over HTTPS by Caddy and nothing else is published.
 
 ## Spec Change Log
+
+- **2026-11-02, implementation:** removed the stale "no DNS provider plugin" line left from before the Cloudflare DNS decision; the token also needs `Zone:Read` on the validation zone so the module can find it.
 
 - **2026-11-02, before review (Esm):** Caddy serves the Admin panel too, with its certificate by DNS-01 through Cloudflare. The Cloudflare Tunnel is dropped. Superseded: `cloudflared`, `cloudflare-egress`, `cloudflare_tunnel_token`.
 
@@ -93,8 +116,68 @@ deferred: []
 
 ## Review Triage Log
 
+### 2026-11-02 — Review pass
+- verdicts: 40 findings — high 6, medium 12, low 18, false 4, maybe-false 0
+- findings:
+  - `[false]` `[reject]` Intent: the under-zone refusal lives in the entrypoint, not Caddy's own config — the entrypoint is the image's only way in, and the intent asks that Caddy refuse to start, which it does.
+  - `[false]` `[reject]` Intent: health-port isolation is an application bind, not a network rule — the intent asks that it be unreachable from Caddy's networks, by any means; the stack check proves it.
+  - `[low]` `[reject]` Intent: published ports can be changed — defaults are 80 and 443 and the config test checks them; the override exists for machines where 80 is taken.
+  - `[low]` `[defer]` Intent: refusals and certificates are proven only in `internal` mode — `cloudflare` mode needs real zones and a real CA; prove it on the first real install (Stories 1.12, 18.11).
+  - `[false]` `[reject]` Intent: key modes are checked only by the stack check — the matrix row names config and stack checks, and both exist.
+  - `[low]` `[patch]` Intent: OpenBao and Worker's other ports aren't probed from Caddy — probes added.
+  - `[high]` `[patch]` Blind: code in `hosted` can reach `Host.Admin` through Caddy with SNI set to the Admin hostname, so "no route" is false — fixed edge subnets, each site aborts the other host's subnet, stack-check case, threat model corrected.
+  - `[medium]` `[patch]` Blind: `GATEKEEP_ACME_EMAIL` is substituted into the Caddyfile unchecked — strict address pattern.
+  - `[low]` `[patch]` Blind: the token check passes a file Caddy can't read — `-r` and non-whitespace required.
+  - `[low]` `[patch]` Blind: Caddy's healthcheck says nothing about certificates — documented.
+  - `[medium]` `[patch]` Blind: no test for a client with no SNI or connecting by IP — cases added, empty SNI rejected if Caddy falls back.
+  - `[low]` `[patch]` Blind: `edge` gives Caddy unrestricted egress — recorded as a residual risk; it's needed for ACME and the Cloudflare API.
+  - `[medium]` `[defer]` Blind: client IPs and forwarded headers are unhandled — trusted-proxy handling is Story 1.20's decision with the rate limiter; the `AAAA` advice is dropped or its Docker IPv6 need stated now.
+  - `[medium]` `[patch]` Blind: no HSTS on the public sites, and no edge access log — HSTS added without `includeSubDomains`; the access log is deferred because it could record sensitive query values (T-42).
+  - `[low]` `[patch]` Blind: a failed cloudflare validation hides its output — printed on failure.
+  - `[medium]` `[patch]` Blind: offline validation checks rewritten copies — the shipped files are validated with a placeholder token at the real path.
+  - `[low]` `[patch]` Blind: the loopback health bind has no unit test — test added.
+  - `[low]` `[patch]` Blind: the under-zone test is a string match — the stack check now runs every refusal, and the threat model cites it.
+  - `[low]` `[patch]` Blind: `/config` owner and modes unchecked — checked.
+  - `[low]` `[patch]` Blind: no total-length limit on names — 253 characters.
+  - `[medium]` `[patch]` Blind: a zone under the Admin hostname is accepted — refused.
+  - `[medium]` `[patch]` Gap: start.sh's name check never runs on a bad value — the stack check loops over bad values and asserts each refusal names its setting.
+  - `[medium]` `[patch]` Gap: which challenge domain each site uses is checked only as text — `caddy adapt` output asserted per site.
+  - `[high]` `[patch]` Gap (other): a value with a newline passes `check_name` and can inject Caddyfile tokens — any character outside `[a-z0-9.-]` is refused.
+  - `[high]` `[patch]` Edge: newline in a name passes the check — same fix as the Gap row.
+  - `[high]` `[patch]` Edge: a newline tail bypasses the under-zone refusal — same fix.
+  - `[medium]` `[patch]` Edge: the ACME email goes into the Caddyfile unchecked — same fix as the Blind row.
+  - `[low]` `[patch]` Edge: IP-like names pass — refused.
+  - `[low]` `[patch]` Edge: no total-length limit — same fix as the Blind row.
+  - `[low]` `[patch]` Edge: an unreadable or blank token file passes — same fix as the Blind row.
+  - `[medium]` `[patch]` Edge: challenge domains aren't compared with the sites or each other — refused when equal or under.
+  - `[low]` `[patch]` Edge: the getcap guard passes when getcap is missing — required and captured.
+  - `[medium]` `[patch]` Edge: a client with no SNI is untested — same fix as the Blind row.
+  - `[low]` `[patch]` Edge: `Host` with a port or mixed case is untested — cases added.
+  - `[low]` `[patch]` Edge: `getent` returning nothing gives a misleading failure — guarded.
+  - `[medium]` `[patch]` Edge: `GATEKEEP_TLS_MODE` in `.env` is ignored — Compose and docs made consistent.
+  - `[high]` `[patch]` Edge (claim): Hosted reaches Admin through Caddy — same fix as the Blind row.
+  - `[high]` `[patch]` Edge (claim): TB-3 overstates isolation — corrected with the fix.
+  - `[false]` `[reject]` Edge (claim): `compose.yaml` lacks the DNS token secret — it lives in the production override by design, so local and CI runs need no token.
+  - `[low]` `[patch]` Edge: the loopback health contract has no unit test — same fix as the Blind row.
+
 ## Verification
 
 **Commands:**
 - `docker compose -f deploy/compose.test.yaml run --rm --build tests` -- expected: build with no warnings; Architecture and Isolation all pass.
 - `docker compose -f deploy/compose.test.yaml run --rm --build stack` (PowerShell, `GATEKEEP_HOST_REPO` set) -- expected: `stack-check: passed.`
+
+## Auto Run Result
+
+Status: done
+
+**Summary:** Caddy is the only service that publishes ports. It serves the Tenant zone wildcard to `Host.Hosted` and the public Admin hostname to `Host.Admin`, refuses every other name, keeps plain HTTP to a bare redirect and sets HSTS. Certificates come from its internal CA locally and in CI, and by ACME DNS-01 through Cloudflare DNS in production, with a token limited to a validation-only zone. Separate edge networks, client-subnet refusals and loopback health ports keep `Host.Hosted` from reaching `Host.Admin` directly or through Caddy.
+
+**Files:** `deploy/caddy/`, `deploy/docker/caddy.Dockerfile`, `deploy/compose.yaml`, `deploy/compose.cloudflare.yaml`, `deploy/ci/stack-check.sh`; `src/Adapters/Hosting/GatekeepHosting.cs`; `tests/Isolation/Stack/ComposeConfigTests.cs`, `tests/Isolation/Hosting/HostStartupTests.cs`; `docs/install.md`, `docs/threat-model.md`; `.gitattributes`.
+
+**Review:** 40 findings across four layers: 33 patched, 2 deferred, 5 rejected, each with its reason in the triage log.
+
+**Follow-up review:** recommended. A high finding (Hosted reaching Admin through Caddy) was patched with subnet refusals that only the stack check exercises.
+
+**Verification:** see the PR screenshot; inside Docker, the tests container passes and the stack check passes every routing row.
+
+**Residual risks:** the Admin surface faces the internet (T-47). Caddy has outbound access for ACME. Cloudflare mode hasn't issued a real certificate yet. Client IPs behind Caddy are undecided until Story 1.20.

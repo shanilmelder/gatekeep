@@ -56,7 +56,9 @@ public static class GatekeepHosting
         builder.WebHost.ConfigureKestrel(kestrel =>
         {
             kestrel.AddServerHeader = false;
-            kestrel.ListenAnyIP(settings.HealthPort);
+            // Health only on loopback: the container's own healthcheck asks it there, and no
+            // other container, Caddy included, can reach it (Story 1.11).
+            kestrel.Listen(System.Net.IPAddress.Loopback, settings.HealthPort);
             if (profile.HasPublicEndpoint)
             {
                 kestrel.ListenAnyIP(settings.PublicPort);

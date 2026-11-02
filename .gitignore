@@ -26,3 +26,6 @@ TestResults/
 # The Docker host's secrets directory (docs/install.md). Never committed or backed up.
 /deploy/secrets/
 /deploy/secrets-*/
+
+# Parallel Claude Code worktrees (git worktree add .claude/worktrees/...). Never committed.
+/.claude/worktrees/

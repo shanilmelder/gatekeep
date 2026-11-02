@@ -296,6 +296,44 @@ public sealed class HostStartupTests(PostgresFixture postgres) : IDisposable
     }
 
     [Fact]
+    public async Task Health_port_listens_on_loopback_only()
+    {
+        // Story 1.11: no other container, Caddy included, can reach health. The public port,
+        // on every address, shows the non-loopback address itself is reachable.
+        var address = System.Net.NetworkInformation.NetworkInterface.GetAllNetworkInterfaces()
+            .Where(n => n.OperationalStatus == System.Net.NetworkInformation.OperationalStatus.Up)
+            .SelectMany(n => n.GetIPProperties().UnicastAddresses)
+            .Select(a => a.Address)
+            .FirstOrDefault(a => a.AddressFamily == AddressFamily.InterNetwork && !IPAddress.IsLoopback(a));
+        // The test container always has one: its address on the Docker network.
+        Assert.NotNull(address);
+
+        var database = await postgres.NewMigratedDatabaseAsync();
+        var health = HostProcess.FreePort();
+        var publicPort = HostProcess.FreePort();
+
+        using var process = HostProcess.Start(
+            "Admin",
+            Connections(Databases("Admin"), database)
+                .Concat(Custody())
+                .Append($"--Gatekeep:HealthPort={health}")
+                .Append($"--Gatekeep:PublicPort={publicPort}"));
+
+        // Health answering means Kestrel has bound every endpoint it will.
+        Assert.Equal(HttpStatusCode.OK, (await process.GetAsync(health, HealthEndpoint, Timeout, Cancellation)).Status);
+
+        using (var reachable = new TcpClient())
+        {
+            await reachable.ConnectAsync(address, publicPort, Cancellation);
+        }
+
+        using var client = new TcpClient();
+        var refused = await Assert.ThrowsAsync<SocketException>(
+            async () => await client.ConnectAsync(address, health, Cancellation));
+        Assert.Equal(SocketError.ConnectionRefused, refused.SocketErrorCode);
+    }
+
+    [Fact]
     public async Task Worker_listens_on_no_port_but_health_even_when_given_a_public_port()
     {
         var database = await postgres.NewMigratedDatabaseAsync();

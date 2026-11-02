@@ -1,0 +1,24 @@
+# Production TLS for both of Caddy's sites (docs/install.md): the *.<zone> wildcard and the
+# Admin hostname's certificates by ACME DNS-01 through Cloudflare DNS, with challenge
+# records written only into a separate validation-only zone (NFR-21). Add it to every
+# command:
+#
+#   docker compose -f deploy/compose.yaml -f deploy/compose.cloudflare.yaml up -d --wait
+#
+# The API token, scoped to that validation zone, reaches Caddy only as this Compose secret,
+# read from its file. Local runs and CI use Caddy's internal CA and need no token, so they
+# leave this file out.
+
+services:
+  caddy:
+    environment:
+      GATEKEEP_TLS_MODE: cloudflare
+      GATEKEEP_ACME_EMAIL: ${GATEKEEP_ACME_EMAIL:?set the ACME account address}
+      GATEKEEP_ACME_CHALLENGE_DOMAIN: ${GATEKEEP_ACME_CHALLENGE_DOMAIN:?set the validation-only name _acme-challenge.<zone> points to}
+      GATEKEEP_ADMIN_ACME_CHALLENGE_DOMAIN: ${GATEKEEP_ADMIN_ACME_CHALLENGE_DOMAIN:?set the validation-only name _acme-challenge.<admin host> points to}
+    secrets:
+      - cloudflare_dns_token
+
+secrets:
+  cloudflare_dns_token:
+    file: ${GATEKEEP_SECRETS_DIR:-./secrets}/cloudflare/dns-token

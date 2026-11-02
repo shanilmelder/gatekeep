@@ -6,15 +6,26 @@ using Xunit;
 namespace Gatekeep.Tests.Isolation.Stack;
 
 /// <summary>
-/// Story 1.10: the Compose definition as Compose itself resolves it (<c>docker compose config</c>),
+/// Stories 1.10 and 1.11: the Compose definition as Compose itself resolves it (<c>docker compose config</c>),
 /// so anchors, merges and defaults are applied before anything is checked.
 /// </summary>
 public sealed class ComposeConfigTests
 {
-    private static readonly string[] HardenedServices = ["hosted", "admin", "worker", "cli", "postgres", "postgres-passwords", "openbao"];
+    private static readonly string[] HardenedServices = ["hosted", "admin", "worker", "cli", "postgres", "postgres-passwords", "openbao", "caddy"];
     private static readonly string[] Hosts = ["hosted", "admin", "worker"];
 
     private static readonly Lazy<JsonElement> Stack = new(() => Config("deploy/compose.yaml", "--profile", "tools", "--profile", "setup"));
+
+    /// <summary>Production TLS for both sites: the Cloudflare DNS-01 override on top.</summary>
+    private static readonly Lazy<JsonElement> CloudflareStack = new(() => Config(
+        ["deploy/compose.yaml", "deploy/compose.cloudflare.yaml"],
+        new Dictionary<string, string>
+        {
+            ["GATEKEEP_ACME_EMAIL"] = "ops@gatekeep.invalid",
+            ["GATEKEEP_ACME_CHALLENGE_DOMAIN"] = "zone.validation.invalid",
+            ["GATEKEEP_ADMIN_ACME_CHALLENGE_DOMAIN"] = "admin.validation.invalid",
+        },
+        "--profile", "tools", "--profile", "setup"));
 
     private static JsonElement Services => Stack.Value.GetProperty("services");
 
@@ -51,9 +62,15 @@ public sealed class ComposeConfigTests
     }
 
     [Fact]
-    public void No_service_publishes_a_port_and_health_ports_stay_private()
+    public void Only_Caddy_publishes_ports_only_80_and_443_and_health_ports_stay_private()
     {
-        foreach (var service in Services.EnumerateObject())
+        // Caddy listens unprivileged inside, published as the host's 80 and 443.
+        var published = Services.GetProperty("caddy").GetProperty("ports").EnumerateArray()
+            .Select(p => $"{p.GetProperty("published").GetString()}->{p.GetProperty("target").GetInt32()}/{p.GetProperty("protocol").GetString()}")
+            .Order();
+        Assert.Equal(["443->8443/tcp", "80->8080/tcp"], published);
+
+        foreach (var service in Services.EnumerateObject().Where(s => s.Name != "caddy"))
         {
             Assert.False(
                 service.Value.TryGetProperty("ports", out var ports) && ports.GetArrayLength() > 0,
@@ -71,17 +88,117 @@ public sealed class ComposeConfigTests
     }
 
     [Fact]
-    public void Every_network_is_internal_and_each_host_has_its_own()
+    public void Only_the_edge_network_has_egress_and_each_host_has_its_own()
     {
         foreach (var network in Stack.Value.GetProperty("networks").EnumerateObject())
         {
-            Assert.True(
-                network.Value.TryGetProperty("internal", out var isInternal) && isInternal.GetBoolean(),
-                $"Network {network.Name} has egress.");
+            var isInternal = network.Value.TryGetProperty("internal", out var value) && value.GetBoolean();
+            Assert.True(isInternal == (network.Name != "edge"), $"Network {network.Name} is internal: {isInternal}.");
         }
 
-        var networks = Hosts.Select(h => Services.GetProperty(h).GetProperty("networks").EnumerateObject().Select(n => n.Name).Single()).ToList();
-        Assert.Equal(Hosts.Length, networks.Distinct().Count());
+        // Each host's own network is the one named after it, and it joins no other host's.
+        foreach (var host in Hosts)
+        {
+            var networks = NetworksOf(Services.GetProperty(host));
+            Assert.Contains(host, networks);
+            Assert.DoesNotContain(networks, n => Hosts.Contains(n) && n != host);
+            Assert.DoesNotContain("edge", networks);
+        }
+    }
+
+    [Fact]
+    public void Caddy_reaches_Hosted_and_Admin_each_over_a_network_of_its_own_and_nothing_else()
+    {
+        Assert.Equal(["admin-edge", "edge", "hosted-edge"], NetworksOf(Services.GetProperty("caddy")));
+        Assert.Equal(["hosted", "hosted-edge"], NetworksOf(Services.GetProperty("hosted")));
+        Assert.Equal(["admin", "admin-edge"], NetworksOf(Services.GetProperty("admin")));
+        Assert.Equal(["worker"], NetworksOf(Services.GetProperty("worker")));
+
+        // The Caddyfile proxies to the two public ports only, and its admin API is off.
+        var caddy = Path.Combine(Repository.Root, "deploy", "caddy");
+        var configs = Directory.EnumerateFiles(caddy, "*.caddy").Append(Path.Combine(caddy, "Caddyfile")).Select(File.ReadAllText).ToList();
+        var upstreams = configs.SelectMany(t => Regex.Matches(t, @"(?m)^\s*reverse_proxy\s+(\S+)").Select(m => m.Groups[1].Value)).Order();
+        Assert.Equal(["admin:8080", "hosted:8080"], upstreams);
+        Assert.Matches(@"(?m)^\s*admin off\s*$", configs[^1]);
+
+        // Each site refuses the other host's edge subnet, which Compose fixes.
+        string Subnet(string network) => Stack.Value.GetProperty("networks").GetProperty(network)
+            .GetProperty("ipam").GetProperty("config").EnumerateArray().Single().GetProperty("subnet").GetString()!;
+        Assert.Contains($"@from_admin_edge remote_ip {Subnet("admin-edge")}", configs[^1]);
+        Assert.Contains($"@from_hosted_edge remote_ip {Subnet("hosted-edge")}", configs[^1]);
+        Assert.Matches(@"(?s)https://\*\.\{\$GATEKEEP_TENANT_ZONE\} \{[^}]*abort @from_admin_edge", configs[^1]);
+        Assert.Matches(@"(?s)https://\{\$GATEKEEP_ADMIN_HOST\} \{[^}]*abort @from_hosted_edge", configs[^1]);
+        Assert.Equal(2, Regex.Matches(configs[^1], @"header Strict-Transport-Security ""max-age=31536000""").Count);
+        Assert.All(configs, t => Assert.DoesNotMatch(@"(?m)^\s*(metrics|admin\s+(?!off\s*$)\S)", t));
+    }
+
+    [Fact]
+    public void Caddy_refuses_an_Admin_hostname_under_the_Tenant_zone()
+    {
+        var start = File.ReadAllText(Path.Combine(Repository.Root, "deploy", "caddy", "start.sh"));
+        Assert.Contains("at_or_under \"$admin\" \"$zone\" && refuse \"GATEKEEP_ADMIN_HOST is under", start);
+        Assert.Contains("at_or_under \"$zone\" \"$admin\" && refuse \"GATEKEEP_TENANT_ZONE is under", start);
+        Assert.Contains("case \"$1\" in \"$2\" | *\".$2\") return 0 ;; esac", start);
+        Assert.Contains("ENTRYPOINT [\"sh\", \"/etc/caddy/start.sh\"]", File.ReadAllText(Path.Combine(Repository.Root, "deploy", "docker", "caddy.Dockerfile")));
+
+        // The defaults are two separate names.
+        var environment = Services.GetProperty("caddy").GetProperty("environment");
+        var zone = environment.GetProperty("GATEKEEP_TENANT_ZONE").GetString()!;
+        var admin = environment.GetProperty("GATEKEEP_ADMIN_HOST").GetString()!;
+        Assert.False(admin == zone || admin.EndsWith("." + zone, StringComparison.Ordinal), $"{admin} is under {zone}.");
+    }
+
+    [Fact]
+    public void Caddy_volumes_are_mounted_by_Caddy_alone()
+    {
+        foreach (var service in Services.EnumerateObject())
+        {
+            var mounts = Volumes(service.Value)
+                .Where(v => v.Source.StartsWith("caddy-", StringComparison.Ordinal))
+                .Select(v => $"{v.Source}:{v.Target}")
+                .Order()
+                .ToList();
+            Assert.Equal(service.Name == "caddy" ? new[] { "caddy-config:/config", "caddy-data:/data" } : [], mounts);
+        }
+    }
+
+    [Fact]
+    public void Caddy_uses_its_internal_CA_with_no_token_unless_the_Cloudflare_override_is_added()
+    {
+        var caddy = Services.GetProperty("caddy");
+        Assert.Equal("internal", caddy.GetProperty("environment").GetProperty("GATEKEEP_TLS_MODE").GetString());
+        Assert.False(caddy.TryGetProperty("secrets", out _), "Caddy gets a secret in internal mode.");
+        Assert.False(Stack.Value.GetProperty("secrets").TryGetProperty("cloudflare_dns_token", out _));
+
+        var production = CloudflareStack.Value.GetProperty("services");
+        var cloudflare = production.GetProperty("caddy");
+        Assert.Equal("cloudflare", cloudflare.GetProperty("environment").GetProperty("GATEKEEP_TLS_MODE").GetString());
+        var secret = Assert.Single(cloudflare.GetProperty("secrets").EnumerateArray());
+        Assert.Equal("cloudflare_dns_token", secret.GetProperty("source").GetString());
+        Assert.Equal("/run/secrets/cloudflare_dns_token", secret.GetProperty("target").GetString());
+        Assert.EndsWith(
+            "/secrets/cloudflare/dns-token",
+            Normalized(CloudflareStack.Value.GetProperty("secrets").GetProperty("cloudflare_dns_token").GetProperty("file").GetString()!),
+            StringComparison.Ordinal);
+
+        // The DNS token reaches Caddy alone.
+        foreach (var service in production.EnumerateObject().Where(s => s.Name != "caddy"))
+        {
+            Assert.False(
+                service.Value.TryGetProperty("secrets", out var secrets)
+                    && secrets.EnumerateArray().Any(s => s.GetProperty("source").GetString() == "cloudflare_dns_token"),
+                $"{service.Name} gets the DNS token.");
+        }
+
+        // Caddy reads it from that file, never from its environment, and writes challenge
+        // records only under the validation-only names.
+        var tls = File.ReadAllText(Path.Combine(Repository.Root, "deploy", "caddy", "tls-cloudflare.caddy"));
+        Assert.Contains("dns cloudflare {file./run/secrets/cloudflare_dns_token}", tls);
+        Assert.Contains("dns_challenge_override_domain {args[0]}", tls);
+        Assert.Contains("import cloudflare-dns-01 {$GATEKEEP_ACME_CHALLENGE_DOMAIN}", tls);
+        Assert.Contains("import cloudflare-dns-01 {$GATEKEEP_ADMIN_ACME_CHALLENGE_DOMAIN}", tls);
+        Assert.DoesNotContain("{env.", tls);
+        Assert.All(cloudflare.GetProperty("environment").EnumerateObject(), v => Assert.DoesNotContain("TOKEN", v.Name, StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
@@ -271,6 +388,9 @@ public sealed class ComposeConfigTests
             ["admin"] = ["admin", "postgres"],
             ["worker"] = ["postgres", "worker"],
             ["tools"] = ["cli", "postgres", "postgres-passwords"],
+            ["edge"] = ["caddy"],
+            ["hosted-edge"] = ["caddy", "hosted"],
+            ["admin-edge"] = ["admin", "caddy"],
         };
 
         var members = Services.EnumerateObject()
@@ -317,6 +437,11 @@ public sealed class ComposeConfigTests
             Assert.Matches($@"(?m)^\s*{Regex.Escape(appRole)}\) echo {uid} ;;", setup);
         }
 
+        // Caddy's uid is its own too, and the one its image runs as.
+        var caddyUser = Services.GetProperty("caddy").GetProperty("user").GetString()!;
+        Assert.Matches($@"(?m)^USER {Regex.Escape(caddyUser)}\s*$", File.ReadAllText(Path.Combine(Repository.Root, "deploy", "docker", "caddy.Dockerfile")));
+        users.Add(caddyUser.Split(':')[0]);
+
         Assert.Equal(users.Count, users.Distinct().Count());
         Assert.DoesNotContain(Services.GetProperty("openbao").GetProperty("user").GetString()!.Split(':')[0], users);
 
@@ -324,6 +449,9 @@ public sealed class ComposeConfigTests
         var openBaoUser = Services.GetProperty("openbao").GetProperty("user").GetString()!;
         Assert.Contains($"GATEKEEP_KEY_OWNER:-{openBaoUser}", keygen);
     }
+
+    private static List<string> NetworksOf(JsonElement service) =>
+        [.. service.GetProperty("networks").EnumerateObject().Select(n => n.Name).Order()];
 
     private static string Normalized(string path) => path.Replace('\\', '/');
 
@@ -351,7 +479,9 @@ public sealed class ComposeConfigTests
                 v.GetProperty("target").GetString()!)).ToList()
             : [];
 
-    private static JsonElement Config(string file, params string[] arguments)
+    private static JsonElement Config(string file, params string[] arguments) => Config([file], new Dictionary<string, string>(), arguments);
+
+    private static JsonElement Config(string[] files, Dictionary<string, string> environment, params string[] arguments)
     {
         var start = new ProcessStartInfo("docker")
         {
@@ -359,13 +489,22 @@ public sealed class ComposeConfigTests
             RedirectStandardOutput = true,
             RedirectStandardError = true,
         };
-        foreach (var argument in new[] { "compose", "-f", file }.Concat(arguments).Concat(["config", "--format", "json"]))
+        foreach (var argument in new[] { "compose" }.Concat(files.SelectMany(f => new[] { "-f", f })).Concat(arguments).Concat(["config", "--format", "json"]))
         {
             start.ArgumentList.Add(argument);
         }
 
         start.Environment.Remove("GATEKEEP_SECRETS_DIR");
         start.Environment.Remove("COMPOSE_PROJECT_NAME");
+        foreach (var name in start.Environment.Keys.Where(k => k.StartsWith("GATEKEEP_", StringComparison.Ordinal)).ToList())
+        {
+            start.Environment.Remove(name);
+        }
+
+        foreach (var (name, value) in environment)
+        {
+            start.Environment[name] = value;
+        }
 
         using var process = Process.Start(start)!;
         var output = process.StandardOutput.ReadToEndAsync();

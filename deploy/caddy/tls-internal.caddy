@@ -1,0 +1,10 @@
+# GATEKEEP_TLS_MODE=internal: both certificates come from Caddy's local CA, whose root and
+# keys stay in the caddy-data volume. Local and CI only: no browser trusts it, and no token
+# or outside call is needed.
+(tenant-tls) {
+	tls internal
+}
+
+(admin-tls) {
+	tls internal
+}
