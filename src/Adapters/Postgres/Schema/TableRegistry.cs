@@ -214,6 +214,29 @@ public static class TableRegistry
                 [Cli] = [new ColumnGrant(Update, StepRetryColumns)],
             },
             ["operation_step_guard_insert"]),
+
+        // AD-12 and AD-13. Only the Hosted request path reaches these yet: sign-in reads Users,
+        // and writes Sessions, transactions and OpenIddict's entities. No role deletes.
+        new("user", TableClass.Tenant, "Identity", new Dictionary<string, IReadOnlyList<string>>
+        {
+            [Hosted] = [Select],
+        }),
+        new("user_session", TableClass.Tenant, "Sessions", new Dictionary<string, IReadOnlyList<string>>
+        {
+            [Hosted] = [Select, Insert, Update],
+        }),
+        new("authorization", TableClass.Tenant, "Sessions", new Dictionary<string, IReadOnlyList<string>>
+        {
+            [Hosted] = [Select, Insert, Update],
+        }),
+        new("token", TableClass.Tenant, "Sessions", new Dictionary<string, IReadOnlyList<string>>
+        {
+            [Hosted] = [Select, Insert, Update],
+        }),
+        new("signin_transaction", TableClass.Tenant, "Authentication", new Dictionary<string, IReadOnlyList<string>>
+        {
+            [Hosted] = [Select, Insert, Update],
+        }),
     ];
 
     private static IReadOnlyList<string> EventTriggers(string table) =>

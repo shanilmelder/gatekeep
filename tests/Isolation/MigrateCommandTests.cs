@@ -20,7 +20,7 @@ public sealed class MigrateCommandTests(PostgresFixture postgres) : IDisposable
 
         var first = await MigrateAsync(file);
         Assert.True(first.ExitCode == 0, first.Output);
-        Assert.Contains("Applied 5 migration(s).", first.Output);
+        Assert.Contains("Applied 6 migration(s).", first.Output);
 
         var second = await MigrateAsync(file);
         Assert.True(second.ExitCode == 0, second.Output);
@@ -28,7 +28,7 @@ public sealed class MigrateCommandTests(PostgresFixture postgres) : IDisposable
 
         var applied = await PostgresFixture.ScalarAsync<long>(
             postgres.SuperuserConnection(database), $"SELECT count(*) FROM {GatekeepMigrator.HistoryTable}");
-        Assert.Equal(5, applied);
+        Assert.Equal(6, applied);
     }
 
     [Fact]
@@ -43,7 +43,7 @@ public sealed class MigrateCommandTests(PostgresFixture postgres) : IDisposable
             "migrate", "--connection-file", ConnectionFile(connection), "--password-file", ConnectionFile(PostgresFixture.Password + "\n"));
 
         Assert.True(result.ExitCode == 0, result.Output);
-        Assert.Contains("Applied 5 migration(s).", result.Output);
+        Assert.Contains("Applied 6 migration(s).", result.Output);
         Assert.DoesNotContain(PostgresFixture.Password, result.Output);
     }
 
@@ -78,7 +78,7 @@ public sealed class MigrateCommandTests(PostgresFixture postgres) : IDisposable
             "migrate");
 
         Assert.True(result.ExitCode == 0, result.Output);
-        Assert.Contains("Applied 5 migration(s).", result.Output);
+        Assert.Contains("Applied 6 migration(s).", result.Output);
     }
 
     [Fact]
