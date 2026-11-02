@@ -1,7 +1,8 @@
 # Gatekeep.Cli, the `cli` Compose service, run on demand:
 #   docker compose -f deploy/compose.yaml run --rm cli migrate
 # Built locally from this repository (AD-26): docker compose -f deploy/compose.yaml build.
-# Base images are pinned by digest. Signing is Story 12.5.
+# Base images are pinned by digest. Releases are built, signed and shipped with an SBOM
+# by .github/workflows/release.yml: docs/release-signing.md.
 #
 # The runtime image is Ubuntu chiseled: no shell, no package manager, no HTTP client.
 # It runs one command and exits, so it has no healthcheck and listens on no port.

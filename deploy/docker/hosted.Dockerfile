@@ -1,6 +1,7 @@
 # Host.Hosted: OIDC, Hosted Login and Account Portal (Z-1).
 # Built locally from this repository (AD-26): docker compose -f deploy/compose.yaml build.
-# Base images are pinned by digest. Signing is Story 12.5.
+# Base images are pinned by digest. Releases are built, signed and shipped with an SBOM
+# by .github/workflows/release.yml: docs/release-signing.md.
 #
 # The runtime image is Ubuntu chiseled: no shell, no package manager, no HTTP client.
 # The healthcheck runs this binary with --health-probe instead.

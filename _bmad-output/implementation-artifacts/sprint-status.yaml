@@ -183,12 +183,12 @@ development_status:
   11-5-show-health-rate-limits: backlog
   epic-11-retrospective: optional
 
-  epic-12: backlog
+  epic-12: in-progress
   12-1-back-up-the-deployment: backlog
   12-2-restore-a-deployment-onto-clean-hardware: backlog
   12-3-reconcile-keys-and-end-stale-access-after-restore: backlog
   12-4-replay-revocations-after-restore: backlog
-  12-5-sign-release-images: backlog
+  12-5-sign-release-images: done
   12-6-upgrade-between-releases: backlog
   12-7-rotate-the-master-key: backlog
   epic-12-retrospective: optional

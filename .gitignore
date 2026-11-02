@@ -29,3 +29,8 @@ TestResults/
 
 # Parallel Claude Code worktrees (git worktree add .claude/worktrees/...). Never committed.
 /.claude/worktrees/
+
+# The Docker host's pinned release key directory, and the release.env of the release being
+# deployed (docs/install.md, "Install a signed release"). Host state, never committed.
+/deploy/trust/
+/deploy/release.env
