@@ -93,7 +93,7 @@ Once real people's credentials are involved, though, the learning goal stops set
 The Operator can install a Deployment from a released version using documented steps.
 
 **Consequences (testable):**
-- A clean install on an on-premises server reaches a working Admin Dashboard using only the documentation.
+- A clean install on an on-premises Docker host reaches a working Admin Dashboard using only the documentation.
 - The core runtime needs no cloud-managed service. External dependencies are limited to those in §10.
 - The documentation covers the wildcard DNS and TLS certificates that Tenant Subdomains need.
 - A Deployment refuses to start if required secrets are missing or left at insecure defaults.

@@ -1,0 +1,358 @@
+# Gatekeep: the whole Deployment as one Compose project (AD-26). Every Gatekeep process
+# runs here, OpenBao included. docs/install.md has the steps; in short:
+#
+#   docker compose -f deploy/compose.yaml --profile tools --profile setup build
+#   docker compose -f deploy/compose.yaml run --rm keygen
+#   docker compose -f deploy/compose.yaml run --rm passwords
+#   docker compose -f deploy/compose.yaml up -d openbao
+#   docker compose -f deploy/compose.yaml run --rm openbao-setup
+#   docker compose -f deploy/compose.yaml run --rm cli migrate
+#   docker compose -f deploy/compose.yaml up -d --wait
+#
+# Secrets live in GATEKEEP_SECRETS_DIR (default deploy/secrets, resolved against this
+# file's directory), a directory on the Docker host that is never a Docker volume, never
+# committed and never backed up. Its subdirectories are master/ (the Master Key),
+# postgres/ (database passwords), recovery/ (OpenBao recovery keys, until escrowed) and
+# approle/ (each role's AppRole IDs). Secrets reach containers only as Compose secrets
+# under /run/secrets. No secret is in this file, an image or an environment variable.
+#
+# No service publishes a port: Caddy arrives in Story 1.11. Every network is internal,
+# so nothing here has egress. Host.Hosted, Host.Admin and Host.Worker each have their own
+# network and share only PostgreSQL, so Hosted has no route to Admin (AD-2).
+
+name: gatekeep
+
+# Every service: bounded processes, and rotated logs so a crash loop can't fill the disk.
+x-limits: &limits
+  pids_limit: 256
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
+
+x-hardened: &hardened
+  <<: *limits
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+  tmpfs: ["/tmp:size=16m,mode=1777"]
+
+x-host-healthcheck: &host-healthcheck
+  interval: 10s
+  timeout: 8s
+  retries: 3
+  start_period: 60s
+  start_interval: 2s
+
+x-host: &host
+  <<: *hardened
+  restart: unless-stopped
+  # The gatekeep-custody group, which owns OpenBao's socket.
+  group_add: ["4500"]
+  depends_on:
+    postgres:
+      condition: service_healthy
+    postgres-passwords:
+      condition: service_completed_successfully
+    openbao:
+      condition: service_healthy
+
+# One-shot tools that write into the secrets directory. Root, for chown into it, with
+# only the capabilities that needs, and no network. Each mounts only the subdirectory
+# it writes, so none of them can read the Master Key but keygen.
+x-secrets-tool: &secrets-tool
+  <<: *limits
+  read_only: true
+  network_mode: none
+  user: "0:0"
+  cap_drop: [ALL]
+  cap_add: [CHOWN, DAC_OVERRIDE, FOWNER]
+  security_opt: ["no-new-privileges:true"]
+  restart: "no"
+
+services:
+  postgres:
+    image: postgres:18.6@sha256:3a4264520e121176619f54ff867d12774bc81e95e7b84db58d63bccdb6144b81
+    <<: *hardened
+    pids_limit: 512
+    user: "999:999"
+    tmpfs: ["/tmp:size=16m,mode=1777", "/var/run/postgresql:size=1m,mode=1777"]
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: gatekeep
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+    secrets: &role-password-secrets
+      - postgres_password
+      - gk_migrator_password
+      - gk_hosted_password
+      - gk_admin_password
+      - gk_worker_password
+      - gk_dispatch_password
+      - gk_sealer_password
+      - gk_retention_password
+    volumes:
+      - postgres-data:/var/lib/postgresql
+      - ./postgres/roles.sql:/docker-entrypoint-initdb.d/10-roles.sql:ro
+      - ./postgres/role-passwords.sh:/docker-entrypoint-initdb.d/20-role-passwords.sh:ro
+    networks: [hosted, admin, worker, tools]
+    healthcheck:
+      # Over tcp: the entrypoint's temporary init server listens on the unix socket only,
+      # so this passes only once init has finished and the real server is up.
+      test: ["CMD", "pg_isready", "--host=127.0.0.1", "--username=postgres", "--dbname=gatekeep"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  # Sets every login role's password from its file, on each `up`, so a password file
+  # changed or restored later can't drift from the database. Hosts start after it.
+  postgres-passwords:
+    image: postgres:18.6@sha256:3a4264520e121176619f54ff867d12774bc81e95e7b84db58d63bccdb6144b81
+    <<: *hardened
+    user: "999:999"
+    restart: "no"
+    entrypoint: ["sh", "/gatekeep/role-passwords.sh"]
+    environment:
+      PGHOST: postgres
+      PGUSER: postgres
+      PGDATABASE: gatekeep
+      GATEKEEP_SUPERUSER_PASSWORD_FILE: /run/secrets/postgres_password
+    secrets: *role-password-secrets
+    volumes:
+      - ./postgres/role-passwords.sh:/gatekeep/role-passwords.sh:ro
+    networks: [tools]
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  openbao:
+    build:
+      context: ..
+      dockerfile: deploy/docker/openbao.Dockerfile
+    image: gatekeep/openbao:local
+    <<: *hardened
+    user: "100:1000"
+    group_add: ["4500"]
+    restart: unless-stopped
+    # No network at all: hosts reach it only on its socket, on the openbao-socket volume.
+    network_mode: none
+    secrets:
+      - master_key
+    volumes:
+      - openbao-data:/var/lib/openbao
+      - openbao-socket:/run/openbao
+      - openbao-audit:/var/log/openbao
+    healthcheck:
+      # 0 only when initialized and unsealed: before openbao-setup it stays unhealthy.
+      test: ["CMD", "bao", "status", "-address=unix:///run/openbao/openbao.sock"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  hosted:
+    build:
+      context: ..
+      dockerfile: deploy/docker/hosted.Dockerfile
+    image: gatekeep/hosted:local
+    <<: *host
+    user: "10001:10001"
+    environment:
+      ConnectionStrings__Hosted: Host=postgres;Port=5432;Database=gatekeep;Username=gk_hosted;Gss Encryption Mode=Disable
+      Custody__SocketPath: /run/openbao/openbao.sock
+      Custody__RoleIdFile: /run/secrets/openbao_role_id
+      Custody__SecretIdFile: /run/secrets/openbao_secret_id
+    secrets:
+      - source: gk_hosted_password
+        target: Database__Hosted__Password
+      - source: openbao_hosted_role_id
+        target: openbao_role_id
+      - source: openbao_hosted_secret_id
+        target: openbao_secret_id
+    volumes:
+      - openbao-socket:/run/openbao:ro
+    networks: [hosted]
+    healthcheck:
+      <<: *host-healthcheck
+      test: ["CMD", "dotnet", "/app/Gatekeep.Host.Hosted.dll", "--health-probe"]
+
+  admin:
+    build:
+      context: ..
+      dockerfile: deploy/docker/admin.Dockerfile
+    image: gatekeep/admin:local
+    <<: *host
+    user: "10002:10002"
+    environment:
+      ConnectionStrings__Admin: Host=postgres;Port=5432;Database=gatekeep;Username=gk_admin;Gss Encryption Mode=Disable
+      Custody__SocketPath: /run/openbao/openbao.sock
+      Custody__RoleIdFile: /run/secrets/openbao_role_id
+      Custody__SecretIdFile: /run/secrets/openbao_secret_id
+    secrets:
+      - source: gk_admin_password
+        target: Database__Admin__Password
+      - source: openbao_admin_role_id
+        target: openbao_role_id
+      - source: openbao_admin_secret_id
+        target: openbao_secret_id
+    volumes:
+      - openbao-socket:/run/openbao:ro
+    networks: [admin]
+    healthcheck:
+      <<: *host-healthcheck
+      test: ["CMD", "dotnet", "/app/Gatekeep.Host.Admin.dll", "--health-probe"]
+
+  worker:
+    build:
+      context: ..
+      dockerfile: deploy/docker/worker.Dockerfile
+    image: gatekeep/worker:local
+    <<: *host
+    user: "10003:10003"
+    environment:
+      ConnectionStrings__Dispatch: Host=postgres;Port=5432;Database=gatekeep;Username=gk_dispatch;Gss Encryption Mode=Disable
+      ConnectionStrings__Worker: Host=postgres;Port=5432;Database=gatekeep;Username=gk_worker;Gss Encryption Mode=Disable
+      ConnectionStrings__Sealer: Host=postgres;Port=5432;Database=gatekeep;Username=gk_sealer;Gss Encryption Mode=Disable
+      ConnectionStrings__Retention: Host=postgres;Port=5432;Database=gatekeep;Username=gk_retention;Gss Encryption Mode=Disable
+      Custody__SocketPath: /run/openbao/openbao.sock
+      Custody__RoleIdFile: /run/secrets/openbao_role_id
+      Custody__SecretIdFile: /run/secrets/openbao_secret_id
+    secrets:
+      - source: gk_dispatch_password
+        target: Database__Dispatch__Password
+      - source: gk_worker_password
+        target: Database__Worker__Password
+      - source: gk_sealer_password
+        target: Database__Sealer__Password
+      - source: gk_retention_password
+        target: Database__Retention__Password
+      - source: openbao_worker_role_id
+        target: openbao_role_id
+      - source: openbao_worker_secret_id
+        target: openbao_secret_id
+    volumes:
+      - openbao-socket:/run/openbao:ro
+    networks: [worker]
+    healthcheck:
+      <<: *host-healthcheck
+      test: ["CMD", "dotnet", "/app/Gatekeep.Host.Worker.dll", "--health-probe"]
+
+  # gatekeep, run on demand: docker compose -f deploy/compose.yaml run --rm cli <command>.
+  # A bare `migrate` takes its connection and password files from the environment below.
+  cli:
+    build:
+      context: ..
+      dockerfile: deploy/docker/cli.Dockerfile
+    image: gatekeep/cli:local
+    profiles: [tools]
+    <<: *hardened
+    user: "10004:10004"
+    group_add: ["4500"]
+    restart: "no"
+    environment:
+      GATEKEEP_MIGRATE_CONNECTION_FILE: /gatekeep/migrator.connection
+      GATEKEEP_MIGRATE_PASSWORD_FILE: /run/secrets/gk_migrator_password
+    secrets:
+      - gk_migrator_password
+      - source: openbao_cli_role_id
+        target: openbao_role_id
+      - source: openbao_cli_secret_id
+        target: openbao_secret_id
+    volumes:
+      - ./postgres/migrator.connection:/gatekeep/migrator.connection:ro
+      - openbao-socket:/run/openbao:ro
+    networks: [tools]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      postgres-passwords:
+        condition: service_completed_successfully
+
+  # Writes a new Master Key into master/. Refuses to replace one.
+  keygen:
+    image: gatekeep/openbao:local
+    profiles: [setup]
+    <<: *secrets-tool
+    entrypoint: ["sh", "/opt/gatekeep/openbao/generate-master-key.sh"]
+    volumes:
+      - ${GATEKEEP_SECRETS_DIR:-./secrets}/master:/secrets
+
+  # Writes any missing PostgreSQL password into postgres/.
+  passwords:
+    image: busybox:1.37.0@sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec
+    profiles: [setup]
+    <<: *secrets-tool
+    entrypoint: ["sh", "/gatekeep/generate-passwords.sh"]
+    volumes:
+      - ${GATEKEEP_SECRETS_DIR:-./secrets}/postgres:/secrets/postgres
+      - ./postgres/generate-passwords.sh:/gatekeep/generate-passwords.sh:ro
+
+  # First setup of OpenBao, once, over its socket. Writes recovery keys into recovery/ and
+  # AppRole IDs into approle/ only. It can't see master/ or postgres/.
+  openbao-setup:
+    image: gatekeep/openbao:local
+    profiles: [setup]
+    <<: *secrets-tool
+    group_add: ["4500"]
+    environment:
+      HOME: /tmp
+      GATEKEEP_ESCROW_FILE: /secrets/recovery/openbao-init.json
+      GATEKEEP_APPROLE_DIR: /secrets/approle
+    tmpfs: ["/tmp:size=16m,mode=1777"]
+    entrypoint: ["sh", "/opt/gatekeep/openbao/setup.sh"]
+    volumes:
+      - ${GATEKEEP_SECRETS_DIR:-./secrets}/recovery:/secrets/recovery
+      - ${GATEKEEP_SECRETS_DIR:-./secrets}/approle:/secrets/approle
+      - openbao-socket:/run/openbao
+
+secrets:
+  master_key:
+    file: ${GATEKEEP_SECRETS_DIR:-./secrets}/master/master-key
+  postgres_password:
+    file: ${GATEKEEP_SECRETS_DIR:-./secrets}/postgres/postgres_password
+  gk_migrator_password:
+    file: ${GATEKEEP_SECRETS_DIR:-./secrets}/postgres/gk_migrator_password
+  gk_hosted_password:
+    file: ${GATEKEEP_SECRETS_DIR:-./secrets}/postgres/gk_hosted_password
+  gk_admin_password:
+    file: ${GATEKEEP_SECRETS_DIR:-./secrets}/postgres/gk_admin_password
+  gk_worker_password:
+    file: ${GATEKEEP_SECRETS_DIR:-./secrets}/postgres/gk_worker_password
+  gk_dispatch_password:
+    file: ${GATEKEEP_SECRETS_DIR:-./secrets}/postgres/gk_dispatch_password
+  gk_sealer_password:
+    file: ${GATEKEEP_SECRETS_DIR:-./secrets}/postgres/gk_sealer_password
+  gk_retention_password:
+    file: ${GATEKEEP_SECRETS_DIR:-./secrets}/postgres/gk_retention_password
+  openbao_hosted_role_id:
+    file: ${GATEKEEP_SECRETS_DIR:-./secrets}/approle/host-hosted/role-id
+  openbao_hosted_secret_id:
+    file: ${GATEKEEP_SECRETS_DIR:-./secrets}/approle/host-hosted/secret-id
+  openbao_admin_role_id:
+    file: ${GATEKEEP_SECRETS_DIR:-./secrets}/approle/host-admin/role-id
+  openbao_admin_secret_id:
+    file: ${GATEKEEP_SECRETS_DIR:-./secrets}/approle/host-admin/secret-id
+  openbao_worker_role_id:
+    file: ${GATEKEEP_SECRETS_DIR:-./secrets}/approle/host-worker/role-id
+  openbao_worker_secret_id:
+    file: ${GATEKEEP_SECRETS_DIR:-./secrets}/approle/host-worker/secret-id
+  openbao_cli_role_id:
+    file: ${GATEKEEP_SECRETS_DIR:-./secrets}/approle/cli/role-id
+  openbao_cli_secret_id:
+    file: ${GATEKEEP_SECRETS_DIR:-./secrets}/approle/cli/secret-id
+
+volumes:
+  postgres-data:
+  openbao-data:
+  openbao-socket:
+  openbao-audit:
+
+networks:
+  hosted:
+    internal: true
+  admin:
+    internal: true
+  worker:
+    internal: true
+  tools:
+    internal: true

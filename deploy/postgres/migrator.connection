@@ -1,0 +1,1 @@
+Host=postgres;Port=5432;Database=gatekeep;Username=gk_migrator;Gss Encryption Mode=Disable

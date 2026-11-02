@@ -17,11 +17,14 @@ dependency Host.Hosted -> Identity
 dependency Host.Hosted -> Sessions
 dependency Host.Hosted -> Tenancy
 dependency Host.Hosted -> Adapters.Logging
+dependency Host.Hosted -> Adapters.Hosting
 dependency Host.Admin -> Management
 dependency Host.Admin -> Admins
 dependency Host.Admin -> Adapters.Logging
+dependency Host.Admin -> Adapters.Hosting
 dependency Host.Worker -> Operations
 dependency Host.Worker -> Adapters.Logging
+dependency Host.Worker -> Adapters.Hosting
 dependency Cli -> Operations
 dependency Cli -> Admins
 dependency Cli -> Adapters.Postgres
@@ -63,6 +66,8 @@ dependency Keys -> Tenancy
 dependency Sessions -> Tenancy
 dependency Notifications -> Tenancy
 dependency Admins -> Notifications
+dependency Adapters.Hosting -> Adapters.OpenBao
+dependency Tests.Isolation -> Adapters.Hosting
 dependency Tests.Isolation -> Adapters.Logging
 dependency Tests.Isolation -> Adapters.OpenBao
 dependency Tests.Isolation -> Adapters.Postgres

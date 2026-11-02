@@ -1,0 +1,52 @@
+# Test-only containers, never part of the stack (AD-26): a machine needs only Docker and Git.
+#
+#   docker compose -f deploy/compose.test.yaml run --rm --build tests
+#       The whole .NET build and both test suites.
+#
+#   docker compose -f deploy/compose.test.yaml run --rm --build stack
+#       Installs the stack from deploy/compose.yaml and checks it (deploy/ci/stack-check.sh).
+#
+# These are the only services that get the Docker socket: Testcontainers starts PostgreSQL
+# and OpenBao beside the tests, and the stack check drives Compose. That makes them equal to
+# root on the machine they run on, so they run only code from this repository.
+
+name: gatekeep-tests
+
+x-test: &test
+  build:
+    context: ..
+    dockerfile: deploy/docker/tests.Dockerfile
+  image: gatekeep/tests:local
+  pids_limit: 2048
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
+
+services:
+  tests:
+    <<: *test
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      # Containers Testcontainers starts are siblings, reached through the Docker host.
+      TESTCONTAINERS_HOST_OVERRIDE: host.docker.internal
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  stack:
+    <<: *test
+    profiles: [stack]
+    # The repository at the same path it has on the Docker host, because the Compose it
+    # drives sends bind mount paths to the Docker engine, which resolves them on the host.
+    # CI sets GATEKEEP_HOST_REPO to the checkout. Docker Desktop on Windows needs the
+    # /run/desktop/mnt/host/<drive>/... form of the path.
+    working_dir: ${GATEKEEP_HOST_REPO:-/gatekeep-host-repo-unset}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ..:${GATEKEEP_HOST_REPO:-/gatekeep-host-repo-unset}
+    environment:
+      GATEKEEP_HOST_REPO: ${GATEKEEP_HOST_REPO:-}
+      GATEKEEP_SECRETS_DIR: ${GATEKEEP_SECRETS_DIR:-}
+    entrypoint: ["sh", "deploy/ci/stack-check.sh"]

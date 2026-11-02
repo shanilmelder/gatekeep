@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Startup shared by the three hosts (AD-26): file secrets, refusal of missing or default
+       settings, /healthz on a private port, and key custody wiring. -->
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Npgsql" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../Gatekeep.Kernel/Gatekeep.Kernel.csproj" />
+    <ProjectReference Include="../OpenBao/Gatekeep.Adapters.OpenBao.csproj" />
+  </ItemGroup>
+
+</Project>

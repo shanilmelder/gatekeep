@@ -45,7 +45,7 @@ development_status:
   1-7-hold-keys-in-openbao-behind-ikeycustody: done
   1-8-run-tenant-scoped-jobs: done
   1-9-track-long-running-operations: done
-  1-10-run-the-stack-under-compose-with-safe-secrets: backlog
+  1-10-run-the-stack-under-compose-with-safe-secrets: done
   1-11-route-traffic-through-caddy-and-default-deny-networks: backlog
   1-12-document-installation: backlog
   1-13-generate-design-tokens-and-bundle-fonts: backlog

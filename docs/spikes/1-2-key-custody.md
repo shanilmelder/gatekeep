@@ -1,5 +1,7 @@
 # Key custody spike (Story 1.2)
 
+> **Superseded by Docker only (2026-11-02).** Esm decided that nothing related to Gatekeep runs outside Docker (`_bmad-output/planning-artifacts/sprint-change-proposal-2026-11-02-docker-only.md`). OpenBao is now a Compose service, and the Master Key reaches it as a read-only Compose secret from a file on the Docker host (amended AD-10, `docs/key-custody.md`). The TPM design and this spike are retired, not deferred: they need host access Gatekeep no longer has. The record below is kept unchanged as history.
+
 **Outcome: not run. The fallback applies, and it's a weaker control.**
 
 Date: 2026-11-02. No Linux host with a TPM2 was available, so Esm chose to record the fallback rather than run the spike. Nothing here was tested on Linux, and no commands were run.

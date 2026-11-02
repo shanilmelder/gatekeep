@@ -6,8 +6,8 @@ namespace Gatekeep.Adapters.OpenBao;
 public static class OpenBaoServiceCollectionExtensions
 {
     /// <summary>
-    /// Registers OpenBao as this host's <see cref="IKeyCustody"/>. No host calls this yet:
-    /// Story 1.10 wires hosts and delivers their secret IDs.
+    /// Registers OpenBao as this host's <see cref="IKeyCustody"/>. The shared host startup
+    /// (Story 1.10) calls it with the socket path and the host's AppRole files.
     /// </summary>
     public static IServiceCollection AddOpenBaoKeyCustody(this IServiceCollection services, OpenBaoOptions options)
     {

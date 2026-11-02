@@ -114,7 +114,7 @@ NFR-21: Tenant Subdomains sit under a dedicated zone. The application process ca
 
 **Spikes that block other work**
 
-- AR-1: Linux custody spike (AD-10, Open Items) proves `LoadCredentialEncrypted`, PCR 7, static seal, Raft, socket access from containers, OpenBao host login and quotas. It blocks only the TPM design, because Story 1.2 applied the fallback: a root-only key file on a separate volume, recorded as a weaker control.
+- AR-1: Retired 2026-11-02 (Docker only, `sprint-change-proposal-2026-11-02-docker-only.md`): no Linux custody spike and no TPM design.
 - AR-2: OpenIddict per-Tenant spike (AD-8, Open Items) proves options replacement, `BaseUri`, signing through Transit including the synchronous provider, token protection keys, custom stores, one ad-hoc authorization per flow, and a refused refresh committing its revocation. It blocks Core sign-in. The fallback is per-Tenant options through a keyed provider, which amends AD-8.
 - AR-3: The threat model (NFR-1) is a Foundation story built from AD-2's trust zones, finished before authentication work starts.
 
@@ -148,7 +148,7 @@ NFR-21: Tenant Subdomains sit under a dedicated zone. The application process ca
 
 **Keys, tokens and credentials**
 
-- AR-20: OpenBao Transit runs as a native systemd service with non-exportable keys, per-purpose names and per-host policies. Signing happens in OpenBao. The Master Key is the barrier key, held in a root-only key file on a separate volume as a weaker control (Story 1.2), with offline escrow, until the custody spike passes and `systemd-creds` sealed to TPM2 replaces it. Disks use LUKS (AD-10).
+- AR-20: OpenBao Transit runs as a Compose service with non-exportable keys, per-purpose names and per-host policies. Signing happens in OpenBao. The Master Key is the barrier key, a 32-byte file on the Docker host delivered to the OpenBao container as a read-only Compose secret, never in an image, environment variable, data volume, log, repository or backup, with offline escrow (a weaker control). Disk encryption is a host requirement (AD-10).
 - AR-21: Signing Key states and the JWKS follow AD-11. RS256 with RSA-3072 is a Deployment-wide constant. Access tokens are `at+jwt`, codes and refresh tokens are references, and opaque artifacts are `{tenantPublicId}.{random}` (AD-9).
 - AR-22: OpenIddict is wrapped per AD-8: per-Tenant options, inert global credentials, custom stores owned by Directory and Sessions, Gatekeep client authentication, entity caching off and pruning off.
 - AR-23: `ISessions.RevokeAccess(context, scope, exceptSessionId)` is the only revocation path. A generated test walks the FR-48 trigger list (AD-13).
@@ -168,7 +168,7 @@ NFR-21: Tenant Subdomains sit under a dedicated zone. The application process ca
 - AR-31: Hosted Login and the Account Portal are one React bundle with a 150 kB compressed budget. The first response embeds the step as JSON. Every response is a `StepResponse`. All responses are `no-store`, and CSP follows the exact AD-21 string on all three surfaces.
 - AR-32: Themes are versioned rows, draft or published, with server-generated same-origin CSS. Logos live in `tenant_asset` up to 1 MB. SVG uploads are rasterized by a job and never served as SVG (AD-21).
 - AR-33: Release gates per AD-25: architecture tests, catalogue test, cross-Tenant suite, FR-25 matrix, FR-48 walk, canary scan, negative token pack, OpenAPI diff, dependency scan and OpenID conformance plans. Images are signed, shipped with an SBOM and deployed by digest. `GATEKEEP_CONFORMANCE_TENANT` is refused alongside any Prod Tenant.
-- AR-34: Deployment per AD-26: one Linux host, LUKS volumes, Docker Compose for everything but OpenBao, Caddy with public and Admin sites, a validation-only DNS credential, a default-deny firewall, one `EgressHttp` handler that blocks private addresses, and code-owned social endpoints.
+- AR-34: Deployment per AD-26: one Docker host, every process in Docker Compose including OpenBao and the CLI, Caddy with public and Admin sites, a validation-only DNS credential, Compose networks that deny by default, one `EgressHttp` handler that blocks private addresses, and code-owned social endpoints. Disk encryption and the host firewall are documented host requirements.
 - AR-35: Operations envelope per AD-32: runbooks in `docs/runbooks`, SM-5 rehearsals recorded there, external monitoring, and `service_status` written by `Host.Worker`.
 - AR-36: Conventions apply to every story: UUIDv7 internally with prefixed public IDs, RFC 9457 errors with a stable `code` and `traceId`, cursor pagination at 50, UTC `timestamptz`, message catalogues, §5.2 constants in one Kernel file, and each new table's registry entry, policies and grants in the same migration.
 
@@ -184,7 +184,7 @@ NFR-21: Tenant Subdomains sit under a dedicated zone. The application process ca
 - AR-43: Each Tenant has a hidden system Application, used only to bind Portal sign-in transactions (AD-12).
 - AR-44: `deployment_email_provider` is configured on a Deployment email provider screen (EXPERIENCE), which Admin invites depend on.
 - AR-41: Conformance behaviour for PKCE and logout is unconfirmed. Default is the AD-25 conformance Tenant, with any deviation recorded per FR-23.
-- AR-42: TPM2 and Linux on the host are unconfirmed. The TPM2 default follows AR-1. Linux has no fallback, and Stories 1.7 and 1.10 need it.
+- AR-42: Retired 2026-11-02: Docker only, so there is no Linux or TPM2 dependency.
 
 ### UX Design Requirements
 
@@ -680,7 +680,7 @@ So that a partial failure is visible and can be retried.
 ### Story 1.10: Run the stack under Compose with safe secrets
 
 As the Operator,
-I want Gatekeep running from locally built images until Story 12.5 signs releases,
+I want Gatekeep running only in Docker, from locally built images until Story 12.5 signs releases,
 So that it needs no cloud service and refuses unsafe settings.
 
 **Requirements:** FR-1, AR-20, AR-34; AD-10, AD-26
@@ -688,21 +688,29 @@ So that it needs no cloud service and refuses unsafe settings.
 
 **Acceptance Criteria:**
 
-**Given** a clean Linux host and the install docs
-**When** the Operator follows them
-**Then** the stack runs under Compose with OpenBao native, and each host exposes `/healthz` on a private port
+**Given** the install docs and a host with only Docker
+**When** the Operator runs `docker compose up`
+**Then** the whole stack, OpenBao included, runs as containers, and each host exposes `/healthz` on an unpublished port
 
 **Given** a required secret that's missing or left at a default
 **When** a host starts
 **Then** it refuses to start and logs the secret's name, never a value
 
-**Given** the stack on a host with no cloud egress
+**Given** the stack with no egress
 **When** it starts
 **Then** every `/healthz` passes
 
-**Given** the OpenBao and PostgreSQL data
-**When** the install is checked
-**Then** both sit on LUKS volumes, and a test fails on an unencrypted mount
+**Given** the Master Key
+**When** the stack is inspected
+**Then** it reaches OpenBao only as a read-only Compose secret, and it's in no image, environment variable, data volume or backup
+
+**Given** the CLI, OpenBao setup and Master Key generation
+**When** the Operator runs them
+**Then** they run as Compose services, and the docs give no command to run outside Docker
+
+**Given** the test suite
+**When** a developer or CI runs it
+**Then** it runs in the `tests` container, needing only Docker on the machine
 
 ### Story 1.11: Route traffic through Caddy and default-deny networks
 
@@ -719,7 +727,7 @@ So that the Admin surface is never exposed publicly.
 **When** a request names a host outside the zone or the Admin hostname
 **Then** it's refused, and Admin traffic is served only on the VPN interface
 
-**Given** the host firewall and Compose networks
+**Given** the Compose networks
 **When** a test runs from inside `Host.Hosted`
 **Then** `Host.Admin` is unreachable
 
@@ -745,6 +753,10 @@ So that I can install using the documentation alone.
 **Given** the install docs
 **When** they're reviewed
 **Then** they cover wildcard DNS and TLS, the dedicated zone, CAA records and a validation-only DNS credential
+
+**Given** the install docs
+**When** they're reviewed
+**Then** they state the Docker host requirements: encrypted disks for volumes and the secrets directory, a firewall allowing only Caddy's ports, and that Docker access equals full control of Gatekeep
 
 ### Story 1.13: Generate design tokens and bundle fonts
 
@@ -1343,7 +1355,7 @@ So that I can't be permanently locked out, and recovery can't happen quietly.
 
 **Acceptance Criteria:**
 
-**Given** `gatekeep recover-admin` on the host
+**Given** `gatekeep recover-admin` in the `cli` container
 **When** it runs
 **Then** it sends the alert through `IAlertChannel` and writes the off-server record itself, and issues the enrolment only after both are confirmed
 
@@ -1359,7 +1371,7 @@ So that I can't be permanently locked out, and recovery can't happen quietly.
 **When** it finishes
 **Then** that Admin's sessions are ended and the Deployment Log is written
 
-**Given** a process other than `Gatekeep.Cli` on the host
+**Given** any container other than `cli`
 **When** it tries the recovery path
 **Then** no network route offers it
 

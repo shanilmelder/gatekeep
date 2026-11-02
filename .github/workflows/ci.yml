@@ -8,45 +8,37 @@ on:
 permissions:
   contents: read
 
+# Docker only (AD-26): the runner needs nothing but Docker and Git. Every .NET and pnpm
+# step runs inside the tests container (deploy/compose.test.yaml).
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
-    env:
-      DOTNET_NOLOGO: true
-      DOTNET_CLI_TELEMETRY_OPTOUT: true
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
-        with:
-          global-json-file: global.json
+      # The image build restores from lockfiles in locked mode, which is also the NuGet
+      # critical audit: a critical advisory is NU1904, which TreatWarningsAsErrors turns
+      # into a restore failure naming the package. pnpm installs with scripts disabled.
+      - name: Build the tests image
+        run: docker compose -f deploy/compose.test.yaml build tests
 
-      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      # pnpm audit, the .NET build, the workspace build, and the Architecture and
+      # Isolation tests (deploy/docker/run-tests.sh).
+      - name: Build and test in the tests container
+        run: docker compose -f deploy/compose.test.yaml run --rm tests
 
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version-file: .nvmrc
+  stack:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      # Also the NuGet critical audit: a critical advisory is NU1904, which
-      # TreatWarningsAsErrors turns into a restore failure naming the package.
-      - name: Restore from lockfiles and audit NuGet packages
-        run: dotnet restore Gatekeep.slnx --locked-mode
-
-      - name: Install from lockfile with scripts disabled
-        run: pnpm install --frozen-lockfile --ignore-scripts
-
-      - name: Audit pnpm packages
-        run: pnpm audit --audit-level critical
-
-      - name: Build .NET solution
-        run: dotnet build Gatekeep.slnx --no-restore
-
-      - name: Build workspaces
-        run: pnpm -r build
-
-      - name: Test
-        run: dotnet test tests/Architecture --no-build
-
-      - name: Test tenant isolation on PostgreSQL
-        run: dotnet test tests/Isolation --no-build
+      # deploy/ci/stack-check.sh, run in the stack container: installs the stack as
+      # docs/install.md says, checks every service healthy, the Master Key in no volume,
+      # image or environment, the hardening of each running container, no egress,
+      # PostgreSQL and OpenBao stopped and a missing Master Key. Tears everything down.
+      - name: Bring the stack up and check it
+        env:
+          GATEKEEP_HOST_REPO: ${{ github.workspace }}
+        run: docker compose -f deploy/compose.test.yaml run --rm --build stack

@@ -104,7 +104,7 @@ flowchart TD
 - **Rule:**
   - `Host.Hosted` serves Tenant Subdomains only: OIDC endpoints, Hosted Login and the Account Portal.
   - `Host.Admin` serves the Admin Dashboard and Management API, and listens only on the private network.
-  - `Host.Worker` has no inbound port except health. `Gatekeep.Cli` runs only on the host, with its own role.
+  - `Host.Worker` has no inbound port except health. `Gatekeep.Cli` runs only as the `cli` Compose service, with its own role and no published port.
   - Admin routes aren't registered in `Host.Hosted`, and Hosted Login routes aren't registered in `Host.Admin`.
   - Database grants are an allow-list per table and column in the AD-3 registry. A grant not listed fails the catalogue test.
   - `gk_hosted` has no `SELECT` on `admin*`, `tenant_role` or `deployment_*` tables, and no write on configuration or Signing Key tables. `user.blocked_at` is writable only by `gk_admin` and `gk_worker`. `user.password_reset_required` and `user.totp_reset_required` are set only by `gk_worker` and `gk_cli`, and `gk_hosted` may only clear them.
@@ -192,15 +192,15 @@ flowchart TD
 - **Binds:** FR-4, FR-37, FR-38, NFR-3, UJ-6
 - **Prevents:** private signing keys or the Master Key sitting in an internet-facing process, on the database disk or in a backup.
 - **Rule:** `[ASSUMPTION: replaces cloud KMS, which FR-1 rules out]`
-  - OpenBao Transit runs on the same host as a native systemd service with Raft storage, reachable only over a private socket. It holds non-exportable keys.
+  - OpenBao Transit runs as a Compose service with Raft storage on its own volume, attached to no network and reachable only over a unix socket on a shared volume. It holds non-exportable keys.
   - Each Signing Key is its own Transit key. Each Tenant has separate Transit keys per secret class: `totp` (TOTP seeds and pending Recovery Codes), `social` (social provider credentials), `email` (email provider credentials), `payload` (credential-equivalent job payloads), `hmac`, and a wrap key for the token protection key. The Deployment has its own `email`, `payload` and `hmac` keys for Admin flows.
   - Signing happens in OpenBao, and no host process holds private signing material.
   - The token protection key is a per-Tenant random 256-bit key, wrapped by Transit. `Host.Hosted` may hold it unwrapped in memory for up to 5 minutes. This is the only cached key.
   - Secrets are stored as Transit ciphertext with the Tenant ID as `associated_data`, not `context`, which non-derived keys ignore. A value is decrypted only at the moment of use.
   - `Host.Hosted` may sign with Signing Keys, encrypt `totp` and `payload`, decrypt `totp` and `social`, compute `hmac`, and unwrap the token protection key. `Host.Admin` may create Signing and Management keys, sign with the Management key (AD-33), encrypt `social`, `email` and `payload`, and compute the Deployment `hmac`. It decrypts nothing. `Host.Worker` may create, rotate and delete keys, wrap the token protection key, decrypt `social`, `email` and `payload`, and sign off-server records with the Deployment key. `Gatekeep.Cli` has its own policy: create, rotate, rewrap and delete keys, encrypt `social` and `email`, and sign and verify off-server records. Nobody may export.
   - OpenBao runs an audit device whose output goes off the server, with decrypt-rate alerts per host. Per-host quotas apply if the spike confirms support.
-  - The barrier key is the Master Key. **Amended by Story 1.2:** no TPM2 host was available and the custody spike didn't run (`docs/spikes/1-2-key-custody.md`), so the static seal key, which this document calls the Master Key, is held in a root-only key file on a separate volume, recorded as a weaker control. That leaves the static seal with no root of trust beyond file permissions, a risk Esm accepted. The target design remains `systemd-creds` sealed to the host TPM2 and PCR 7, adopted only after that spike passes on a real host. Either way, an offline escrow copy is kept apart from backups, alongside the recovery keys. It's never in a container, environment file or backup. Every escrowed generation is kept until the last backup that needs it has expired.
-  - This protects backups, and a stolen database disk if the key volume isn't taken with it. It also protects a stolen server that's powered off, because the OpenBao, PostgreSQL and key volumes use LUKS unlocked by a passphrase at boot, with no unlock key on the host. A person must enter that passphrase after every reboot, so restarts aren't unattended. It doesn't protect a server taken while running, and the key isn't bound to the hardware. It doesn't protect against live root, which UJ-6 treats as full compromise.
+  - The barrier key is the Master Key. **Amended 2026-11-02 (Docker only, `sprint-change-proposal-2026-11-02-docker-only.md`):** the static seal key is a 32-byte file on the Docker host, outside every data volume and backup, delivered to the OpenBao container as a read-only Compose secret. It is never in an image, environment variable, data volume, log, repository or backup. Root or Docker access on the host reads it, so this is a weaker control. It replaces the earlier root-only key file and the TPM target, which needed host access Gatekeep no longer has. An offline escrow copy is kept apart from backups, alongside the recovery keys, and every escrowed generation is kept until the last backup that needs it has expired.
+  - This protects backups. Protection of a stolen disk or a powered-off server depends on the Docker host's disk encryption, which the host owner provides and Gatekeep can't verify. Whether restarts are unattended is the host owner's choice. It doesn't protect against live root or Docker access, which UJ-6 treats as full compromise.
   - Master Key rotation is a rehearsed seal rotation and Transit rewrap, needing no User action.
   - A key's Transit name starts with its purpose, so a policy can separate keys by path: `sig-{tenantId}-{rowId}`, `mgmt-{tenantId}-{rowId}`, `{class}-{tenantId}`, and `dep-{class}` for Deployment keys. A Signing or Management key is created first, named from a pre-generated row ID, and then its row commits. An orphan sweep removes only `sig-` and `mgmt-` keys with no row after 24 hours. Secret class keys have no row, and only Tenant creation and deletion create or destroy them.
   - All access goes through the Kernel `IKeyCustody` port.
@@ -427,12 +427,12 @@ stateDiagram-v2
 
 - **Binds:** FR-1, FR-6, NFR-7, NFR-10, NFR-21
 - **Prevents:** a Deployment that only works with cloud services, or TLS keys reachable by the application.
-- **Rule:** One Linux host. `[ASSUMPTION: Linux]`
-  - OpenBao and PostgreSQL's disks sit on LUKS volumes. OpenBao runs as a native systemd service. Everything else runs in Docker Compose, with pinned, signed images per release.
-  - Environments are local (`*.gatekeep.localhost`), CI, rehearsal VM and production, sharing one Compose definition with different values.
+- **Rule:** One Docker host running Docker Compose. `[DECISION: Docker only, 2026-11-02]`
+  - Every Gatekeep process runs in a container: the hosts, PostgreSQL, OpenBao, Caddy, the CLI, setup and key generation, and the test suite. Nothing is installed on the host but Docker, with pinned, signed images per release. Disk encryption, the host firewall and host access control are host requirements in the install docs, not something Gatekeep sets up.
+  - Environments are local (`*.gatekeep.localhost`), CI and production, sharing one Compose definition with different values.
   - Caddy has two sites: the public zone wildcard, and the Admin hostname on the VPN interface, with a certificate from Caddy's internal CA trusted on Admin devices. `[ASSUMPTION]` Certificate private keys are readable only by Caddy.
   - The public DNS credential covers only validation records, by delegating `_acme-challenge` to a validation-only zone. CAA records are set. Certificate Transparency monitoring raises Security Alerts.
-  - The host firewall allows public traffic only to Caddy. Application egress is limited to `Host.Hosted`, `Host.Worker` and `Gatekeep.Cli`, through one `EgressHttp` handler that blocks private addresses. Infrastructure egress is limited to named endpoints: Caddy to its ACME and DNS providers, and pgBackRest and OpenBao's snapshot and audit shipping to their off-server targets. Social provider endpoints are code-owned constants, never Tenant input.
+  - Only Caddy publishes ports, and the install docs require a host firewall allowing just those. Application egress is limited to `Host.Hosted`, `Host.Worker` and `Gatekeep.Cli`, through one `EgressHttp` handler that blocks private addresses. Infrastructure egress is limited to named endpoints: Caddy to its ACME and DNS providers, and pgBackRest and OpenBao's snapshot and audit shipping to their off-server targets. Social provider endpoints are code-owned constants, never Tenant input.
   - Startup refuses missing or default secrets. Every host exposes `/healthz` on a private port. Operational logs are JSON to stdout, carrying W3C trace IDs, which are the IDs shown to Users.
 
 ### AD-27 — Table ownership
@@ -491,7 +491,7 @@ stateDiagram-v2
 - **Rule:**
   - The Admins module owns FR-46 sign-in on `Host.Admin`. It uses the Kernel `IWebAuthnVerifier` port, whose stateless adapter in `src/Adapters/Fido2` takes the RP ID and origin per call and knows no User or Admin types, but no tables or flows from Identity or Authentication. The Admin RP ID is the Admin hostname.
   - `gatekeep init` writes a one-time 256-bit bootstrap token to a root-only file and stores its SHA-256 and a 15-minute expiry in `bootstrap_state`. It can reissue the token until bootstrap completes. `[ASSUMPTION: lifetime]` Only `Host.Admin` accepts it. Consuming it and creating the first Admin is one command that records completion, and the row is never deleted. The route then returns the same 404 as any unknown path. The first Admin can do nothing else until two WebAuthn credentials are registered. No Tenant can exist before bootstrap, so `Host.Hosted` needs no check: AD-6's fixed 404 refuses all traffic. `gatekeep restore` refuses a backup with incomplete bootstrap unless given an explicit flag, which raises a Security Alert.
-  - `gatekeep recover-admin` runs on the host as `gk_cli`. It sends the Security Alert through `IAlertChannel` and writes the off-server record itself, and issues the enrolment only after both are confirmed, so stopping `Host.Worker` can't suppress them. The enrolment for FR-5 is single-use and expires in 15 minutes. `[ASSUMPTION: lifetime]` It then ends that Admin's sessions and writes to the Deployment Log.
+  - `gatekeep recover-admin` runs in the `cli` container as `gk_cli`. It sends the Security Alert through `IAlertChannel` and writes the off-server record itself, and issues the enrolment only after both are confirmed, so stopping `Host.Worker` can't suppress them. The enrolment for FR-5 is single-use and expires in 15 minutes. `[ASSUMPTION: lifetime]` It then ends that Admin's sessions and writes to the Deployment Log.
   - Admin invites use the provider in `deployment_email_provider`. `Host.Admin` has no egress, so sending is a Deployment-wide job. `job_payload` is a `tenant` table, so the invite link waits in `admin_invite` as Transit ciphertext under the Deployment `payload` key, and is erased once sent.
   - Single-use Admin enrolments from `gatekeep recover-admin` and "Reset credentials" live in the `admin_enrolment` `control` table, which holds the Admin ID, a SHA-256 of the value, an expiry and a used time. A "Reset credentials" enrolment lasts for the §5.2 credential enrolment link lifetime and is returned through `RevealOnce`.
 
@@ -523,7 +523,7 @@ stateDiagram-v2
 | Limits | §5.2 values are constants in one Kernel file, and every setting validates against them. |
 | Text | User-facing strings live in message catalogues, per NFR-19. |
 | Migrations | Forward-only SQL through EF Core migrations, which may commit per migration. Every new table includes its registry entry, policies and grants in the same migration. |
-| Secrets in config | Injected at runtime through systemd credentials or Compose secrets. Never in environment files in git. |
+| Secrets in config | Injected at runtime only as Compose secrets. Never in environment files in git. |
 | Email | A port with SMTP and HTTP adapters. Templates are subject and body text with fixed variable substitution and no template engine. Previews are text only. |
 
 ## Stack
@@ -625,7 +625,7 @@ gatekeep/
     Isolation/
     Protocol/                # conformance and negative token pack
     Flows/
-  deploy/                    # Compose, Caddyfile, systemd units, OpenBao policies
+  deploy/                    # Compose, Dockerfiles, Caddyfile, OpenBao config and policies
   docs/                      # quickstarts, API reference, threat model, runbooks, ASVS evidence
   design/                    # reference exports, unchanged
 ```
@@ -670,7 +670,7 @@ gatekeep/
 | Item | Blocks | Default if unresolved |
 | --- | --- | --- |
 | OpenIddict per-Tenant spike: options replacement, `BaseUri`, signing through Transit including the synchronous provider, token protection keys, custom stores, ad-hoc authorization per flow, a refused refresh committing its revocation (AD-8, AD-13) | Core sign-in sequence | Per-Tenant options through a keyed provider, then AD-8 is amended |
-| Linux custody spike: `LoadCredentialEncrypted`, PCR 7, static seal, Raft, socket access from containers, OpenBao host login and quotas (AD-10) | TPM design only | Applied by Story 1.2: root-only key file on a separate volume, recorded as a weaker control. Run the spike on a real host to adopt the TPM design |
+| Linux custody spike (AD-10) | Retired | Retired 2026-11-02: Docker only, no TPM design |
 | Conformance plans' PKCE and logout behaviour, unconfirmed from official pages | SM-4 evidence | AD-25 conformance Tenant |
-| Host has a TPM2 and runs Linux. Unconfirmed on 2026-11-02 | TPM2: as the custody spike. Linux: AD-10, AD-26, Stories 1.7 and 1.10 | TPM2: root-only key file. Linux has no fallback |
+| Host has a TPM2 and runs Linux | Retired | Retired 2026-11-02: Docker only, no host dependency |
 | WebAuthn and `__Host-` cookies on `*.localhost` in Safari | Local development only | Use Chrome or Firefox locally |

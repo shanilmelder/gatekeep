@@ -8,6 +8,7 @@ public class KeyCustodyRuleTests
 {
     private const string AdapterDirectory = "src/Adapters/OpenBao/";
     private const string DeployDirectory = "deploy/openbao";
+    private const string ComposeFile = "deploy/compose.yaml";
 
     private static readonly string Root = EdgeList.FindRepositoryRoot(AppContext.BaseDirectory);
 
@@ -148,35 +149,48 @@ public class KeyCustodyRuleTests
     {
         var violations = ListenerViolations(
             File.ReadAllText(Path.Combine(Root, DeployDirectory, "openbao.hcl")),
-            File.ReadAllText(Path.Combine(Root, DeployDirectory, "openbao.service")));
+            OpenBaoService(File.ReadAllText(Path.Combine(Root, ComposeFile))));
 
         Assert.Empty(violations);
     }
 
     [Theory]
-    [InlineData("listener \"unix\" { address = \"/run/openbao/openbao.sock\" }", "PrivateNetwork=yes", 0)]
-    [InlineData("listener \"unix\" { address = \"/run/openbao/openbao.sock\" }\nlistener \"tcp\" {\n address = \"127.0.0.1:8200\"\n}", "PrivateNetwork=yes", 0)]
-    [InlineData("listener \"unix\" { address = \"/run/openbao/openbao.sock\" }\nlistener \"tcp\" {\n address = \"0.0.0.0:8200\"\n}", "PrivateNetwork=yes", 1)]
-    [InlineData("listener \"unix\" { address = \"/run/openbao/openbao.sock\" }\nlistener \"tcp\" {\n address = \"127.0.0.1:8200\"\n}", "", 1)]
-    [InlineData("listener \"tcp\" {\n address = \"127.0.0.1:8200\"\n}", "PrivateNetwork=yes", 1)]
-    public void Listener_violation_detection(string config, string unit, int violations)
+    [InlineData("listener \"unix\" { address = \"/run/openbao/openbao.sock\" }", "    network_mode: none\n", 0)]
+    [InlineData("listener \"unix\" { address = \"/run/openbao/openbao.sock\" }\nlistener \"tcp\" {\n address = \"127.0.0.1:8200\"\n}", "    network_mode: none\n", 0)]
+    [InlineData("listener \"unix\" { address = \"/run/openbao/openbao.sock\" }\nlistener \"tcp\" {\n address = \"0.0.0.0:8200\"\n}", "    network_mode: none\n", 1)]
+    [InlineData("listener \"unix\" { address = \"/run/openbao/openbao.sock\" }\nlistener \"tcp\" {\n address = \"127.0.0.1:8200\"\n}", "    networks: [tools]\n", 1)]
+    [InlineData("listener \"unix\" { address = \"/run/openbao/openbao.sock\" }\nlistener \"tcp\" {\n address = \"127.0.0.1:8200\"\n}", "    # network_mode: none\n", 1)]
+    [InlineData("listener \"tcp\" {\n address = \"127.0.0.1:8200\"\n}", "    network_mode: none\n", 1)]
+    public void Listener_violation_detection(string config, string service, int violations)
     {
-        Assert.Equal(violations, ListenerViolations(config, unit).Count);
+        Assert.Equal(violations, ListenerViolations(config, service).Count);
     }
 
     [Fact]
-    public void Unit_hands_the_key_over_by_plain_LoadCredential_only()
+    public void OpenBao_service_gets_the_Master_Key_only_as_a_secret_file()
     {
-        var unit = File.ReadAllText(Path.Combine(Root, DeployDirectory, "openbao.service"));
-        var directives = HclComment.Replace(unit, string.Empty);
+        var service = OpenBaoService(File.ReadAllText(Path.Combine(Root, ComposeFile)));
+        var config = HclComment.Replace(File.ReadAllText(Path.Combine(Root, DeployDirectory, "openbao.hcl")), string.Empty);
 
-        Assert.Contains("LoadCredential=master-key:/srv/gatekeep/keys/master-key", directives);
-        Assert.Contains("RequiresMountsFor=/srv/gatekeep/keys /var/lib/openbao", directives);
-        Assert.Contains("User=openbao", directives);
-        Assert.DoesNotContain("LoadCredentialEncrypted", directives);
-        Assert.DoesNotContain("systemd-creds", directives);
-        Assert.DoesNotContain("EnvironmentFile", directives);
-        Assert.DoesNotContain("Environment=", directives);
+        Assert.NotEmpty(service);
+        Assert.Contains("current_key    = \"file:///run/secrets/master_key\"", config);
+        Assert.Matches(@"(?m)^      - master_key$", service);
+        Assert.DoesNotContain("environment:", service);
+        Assert.DoesNotContain("env_file", service);
+        Assert.DoesNotContain("SECRETS_DIR", service);
+    }
+
+    [Fact]
+    public void No_deploy_file_is_a_systemd_unit()
+    {
+        Assert.Empty(Directory.EnumerateFiles(Path.Combine(Root, "deploy"), "*.service", SearchOption.AllDirectories));
+    }
+
+    /// <summary>The openbao service's lines in compose.yaml, up to the next service.</summary>
+    private static string OpenBaoService(string compose)
+    {
+        var match = Regex.Match(compose.ReplaceLineEndings("\n"), @"(?m)^  openbao:\n(?<body>(?:(?:    .*)?\n)*)");
+        return match.Success ? match.Groups["body"].Value : string.Empty;
     }
 
     private static List<string> PolicyViolations(string policy)
@@ -216,7 +230,7 @@ public class KeyCustodyRuleTests
         return violations;
     }
 
-    private static List<string> ListenerViolations(string config, string unit)
+    private static List<string> ListenerViolations(string config, string service)
     {
         var listeners = Listener.Matches(HclComment.Replace(config, string.Empty));
         var violations = new List<string>();
@@ -229,7 +243,8 @@ public class KeyCustodyRuleTests
         foreach (Match listener in listeners.Where(l => l.Groups["type"].Value != "unix"))
         {
             var loopback = Regex.IsMatch(listener.Groups["body"].Value, @"\baddress\s*=\s*""127\.0\.0\.1:\d+""");
-            var isolated = HclComment.Replace(unit, string.Empty).Contains("PrivateNetwork=yes", StringComparison.Ordinal);
+            // With no network, the loopback is the container's own.
+            var isolated = Regex.IsMatch(service, @"(?m)^[ \t]*network_mode:[ \t]*none[ \t]*$");
 
             if (listener.Groups["type"].Value != "tcp" || !loopback || !isolated)
             {

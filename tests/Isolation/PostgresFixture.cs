@@ -15,7 +15,11 @@ namespace Gatekeep.Tests.Isolation;
 public sealed class PostgresFixture : IAsyncLifetime
 {
     public const string Image = "postgres:18.6";
-    public const string Password = "isolation-test-only";
+    /// <summary>
+    /// Fresh for each run. A fixed test password would be public, and hosts refuse a known
+    /// default, so this one is random and only lives as long as the container.
+    /// </summary>
+    public static readonly string Password = "isolation-" + Convert.ToHexStringLower(System.Security.Cryptography.RandomNumberGenerator.GetBytes(12));
 
     private const string ClusterDatabase = "gatekeep_cluster";
     private const string Unmigrated = "gatekeep_unmigrated";

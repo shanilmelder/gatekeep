@@ -1,0 +1,15 @@
+# The tests image needs the whole repository except build output and local state.
+**/bin/
+**/obj/
+**/node_modules/
+**/dist/
+**/TestResults/
+.git/
+.vs/
+.claude/
+graft/
+deploy/secrets/
+deploy/secrets-*/
+**/.env*
+**/*.pem
+**/*.pfx

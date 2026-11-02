@@ -1,47 +1,50 @@
+using Gatekeep.Adapters.Hosting;
+using Gatekeep.Kernel.Secrets;
 using Gatekeep.Modules.Operations.Contracts;
 
 namespace Gatekeep.Host.Worker;
 
 /// <summary>
-/// The connection settings <c>Host.Worker</c> needs. Story 1.10 supplies them. A missing one
-/// refuses startup, naming only the setting.
+/// The connections <c>Host.Worker</c> needs, one per role. The shared startup check refuses
+/// a missing, empty or default one, naming only the setting.
 /// </summary>
 internal static class WorkerSettings
 {
-    public const string Dispatch = "ConnectionStrings:Dispatch";
-    public const string Worker = "ConnectionStrings:Worker";
-    public const string Sealer = "ConnectionStrings:Sealer";
-    public const string Retention = "ConnectionStrings:Retention";
+    public const string Dispatch = "Dispatch";
+    public const string Worker = "Worker";
+    public const string Sealer = "Sealer";
+    public const string Retention = "Retention";
 
-    public static readonly IReadOnlyList<string> All = [Dispatch, Worker, Sealer, Retention];
+    public static readonly HostProfile Profile = new(
+        "Host.Worker",
+        [Dispatch, Worker, Sealer, Retention],
+        HasPublicEndpoint: false);
 
-    public static IReadOnlyList<string> Missing(IConfiguration configuration) =>
-        [.. All.Where(name => string.IsNullOrWhiteSpace(configuration[name]))];
-
-    public static JobDatabases Databases(IConfiguration configuration) =>
-        new(configuration[Dispatch]!, configuration[Worker]!, configuration[Sealer]!, configuration[Retention]!);
+    public static JobDatabases Databases(HostDatabases databases) =>
+        new(databases[Dispatch], databases[Worker], databases[Sealer], databases[Retention]);
 }
 
 internal static class WorkerJobs
 {
     /// <summary>
     /// Registers the runner and the schedule. Both are built only when the host starts, so a
-    /// host refused for missing settings never builds them. No key custody is wired here
-    /// (Story 1.10), so a job carrying a credential fails with a fixed reason code.
+    /// host refused at startup never builds them. With key custody configured, the runner
+    /// decrypts credential payloads through it. Without it, such a job fails with a fixed
+    /// reason code.
     /// </summary>
     public static IServiceCollection AddGatekeepJobs(this IServiceCollection services)
     {
         services.AddSingleton(provider => OperationsContract.CreateRunner(
             OperationsContract.ProductionRegistry,
-            WorkerSettings.Databases(provider.GetRequiredService<IConfiguration>()),
+            WorkerSettings.Databases(provider.GetRequiredService<HostDatabases>()),
             options: null,
-            custody: null,
+            custody: provider.GetService<IKeyCustody>(),
             provider.GetRequiredService<ILoggerFactory>().CreateLogger("Gatekeep.Jobs")));
 
         services.AddSingleton(provider => OperationsContract.CreateScheduleRunner(
             OperationsContract.ProductionRegistry,
             JobSchedule.Entries,
-            provider.GetRequiredService<IConfiguration>()[WorkerSettings.Worker]!,
+            provider.GetRequiredService<HostDatabases>()[WorkerSettings.Worker],
             provider.GetRequiredService<ILoggerFactory>().CreateLogger("Gatekeep.Jobs.Schedule")));
 
         services.AddHostedService<JobRunnerService>();

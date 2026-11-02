@@ -2,8 +2,22 @@
   "version": 2,
   "dependencies": {
     "net10.0": {
+      "gatekeep.adapters.hosting": {
+        "type": "Project",
+        "dependencies": {
+          "Gatekeep.Adapters.OpenBao": "[0.1.0, )",
+          "Gatekeep.Kernel": "[0.1.0, )",
+          "Npgsql": "[10.0.3, )"
+        }
+      },
       "gatekeep.adapters.logging": {
         "type": "Project"
+      },
+      "gatekeep.adapters.openbao": {
+        "type": "Project",
+        "dependencies": {
+          "Gatekeep.Kernel": "[0.1.0, )"
+        }
       },
       "gatekeep.kernel": {
         "type": "Project"

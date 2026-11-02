@@ -1,22 +1,17 @@
+using Gatekeep.Adapters.Hosting;
 using Gatekeep.Adapters.Logging;
 using Gatekeep.Host.Worker;
 
-var builder = Host.CreateApplicationBuilder(args);
-builder.Logging.AddGatekeepLogging();
-builder.Services.AddGatekeepJobs();
-var host = builder.Build();
+if (HealthProbe.IsRequested(args))
+{
+    Environment.ExitCode = await HealthProbe.RunAsync(args);
+    return;
+}
 
-var missing = WorkerSettings.Missing(host.Services.GetRequiredService<IConfiguration>());
-if (missing.Count == 0)
-{
-    await host.RunAsync();
-}
-else
-{
-    // Names the settings only, never a value. Disposing the host flushes the log.
-    host.Services.GetRequiredService<ILoggerFactory>()
-        .CreateLogger("Gatekeep.Host.Worker")
-        .LogCritical("Host.Worker refuses to start. Missing settings: {Settings}.", string.Join(", ", missing));
-    host.Dispose();
-    Environment.ExitCode = 1;
-}
+// A web host only for /healthz on its private port: Host.Worker has no other inbound port.
+var builder = WebApplication.CreateBuilder(args);
+builder.Logging.AddGatekeepLogging();
+builder.AddGatekeepHost(WorkerSettings.Profile);
+builder.Services.AddGatekeepJobs();
+var app = builder.Build();
+Environment.ExitCode = await app.RunGatekeepAsync();

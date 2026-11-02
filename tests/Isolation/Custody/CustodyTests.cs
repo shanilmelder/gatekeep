@@ -34,13 +34,13 @@ public sealed class CustodyTests(OpenBaoFixture bao)
     }
 
     [Fact]
-    public async Task Master_key_is_32_bytes_root_only_and_the_service_copy_is_its_own()
+    public async Task Master_key_is_32_bytes_readable_only_by_openbao_and_reaches_it_as_a_secret_file()
     {
         var key = await bao.ExecAsync("stat", "-c", "%a %U %G %s", OpenBaoFixture.KeyFile);
-        var credential = await bao.ExecAsync("stat", "-c", "%a %U %s", "/run/credentials/openbao.service/master-key");
+        var secret = await bao.ExecAsync("stat", "-c", "%a %U %s", OpenBaoFixture.MasterKeySecret);
 
-        Assert.Equal("400 root root 32", key.Stdout.Trim());
-        Assert.Equal("400 openbao 32", credential.Stdout.Trim());
+        Assert.Equal("400 openbao openbao 32", key.Stdout.Trim());
+        Assert.Equal("400 openbao 32", secret.Stdout.Trim());
     }
 
     [Fact]
@@ -246,6 +246,21 @@ public sealed class CustodyTests(OpenBaoFixture bao)
         Assert.Contains("already exists", again.Stderr);
     }
 
+    [Theory]
+    [InlineData(OpenBaoFixture.Hosted, 10001)]
+    [InlineData(OpenBaoFixture.Admin, 10002)]
+    [InlineData(OpenBaoFixture.Worker, 10003)]
+    [InlineData(OpenBaoFixture.Cli, 10004)]
+    public async Task AppRole_files_are_readable_only_by_their_own_container_user(string role, int uid)
+    {
+        foreach (var file in new[] { "role-id", "secret-id" })
+        {
+            var mode = await bao.ExecAsync("stat", "-c", "%a %u", $"{OpenBaoFixture.AppRoleDirectory}/{role}/{file}");
+
+            Assert.Equal($"400 {uid}", mode.Stdout.Trim());
+        }
+    }
+
     [Fact]
     public async Task Adapter_reaches_OpenBao_over_a_unix_socket()
     {
@@ -296,7 +311,7 @@ public sealed class CustodyTests(OpenBaoFixture bao)
         Assert.NotEqual(0, setup.ExitCode);
 
         using var escrow = JsonDocument.Parse(System.Text.Encoding.UTF8.GetString(
-            await container.ReadFileAsync(OpenBaoFixture.EscrowFile, Cancellation)));
+            await OpenBaoFixture.ReadBytesAsync(container, OpenBaoFixture.EscrowFile)));
         var rootToken = escrow.RootElement.GetProperty("root_token").GetString()!;
 
         using var http = new HttpClient

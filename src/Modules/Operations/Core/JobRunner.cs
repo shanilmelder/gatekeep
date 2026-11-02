@@ -163,6 +163,17 @@ internal sealed class JobRunner : IJobRunner
 
     public async Task RunAsync(CancellationToken cancellationToken)
     {
+        // Says whether credential jobs can be decrypted here, which no other output shows
+        // until such a job fails.
+        if (_custody is null)
+        {
+            _logger?.LogWarning("Job runner started without key custody: credential jobs fail with custody_failed.");
+        }
+        else
+        {
+            _logger?.LogInformation("Job runner started with key custody.");
+        }
+
         while (!cancellationToken.IsCancellationRequested)
         {
             try
