@@ -9,10 +9,11 @@
 #     starts and can't drift from the database.
 #
 # The password is read by psql itself (\set with backticks), so it never appears in a
-# process's arguments, and statement logging is off by default. gk_cli gets no password:
-# nothing logs in as it yet. Any failure exits non-zero, which stops the init or the hosts.
+# process's arguments, and statement logging is off by default. gk_cli has one since
+# `gatekeep audit verify` logs in as it (Story 7.3). Any failure
+# exits non-zero, which stops the init or the hosts.
 
-roles="gk_migrator gk_hosted gk_admin gk_worker gk_dispatch gk_sealer gk_retention"
+roles="gk_migrator gk_hosted gk_admin gk_worker gk_dispatch gk_sealer gk_retention gk_cli"
 
 # Over the network, the superuser's password goes in a pgpass file on the tmpfs, never in
 # the environment or an argument.

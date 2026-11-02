@@ -135,6 +135,65 @@ public sealed class WorkerStartupTests(PostgresFixture postgres) : IDisposable
         Assert.Equal(1, row.Envelope.Seq);
     }
 
+    [Fact]
+    public async Task Configured_worker_sweeps_one_retention_job_into_each_Tenant_and_cuts_as_gk_retention()
+    {
+        var chains = await AuditChains.CreateAsync(postgres, AuditChains.TenantA, AuditChains.TenantB);
+        await chains.SealedChainAsync(AuditChains.TenantA, 3, 1, 2);
+        await chains.SealedChainAsync(AuditChains.TenantB, 1);
+
+        using var process = HostProcess.Start("Worker", Configured(chains.Name));
+
+        const string ApplyJobs = "FROM job WHERE type = 'audit.retention.apply' AND status = 'done'";
+        var deadline = DateTimeOffset.UtcNow + Timeout;
+        while (await chains.ScalarAsync<long>($"SELECT count(DISTINCT tenant_id) {ApplyJobs}") < 2
+            && !process.HasExited
+            && DateTimeOffset.UtcNow < deadline)
+        {
+            await Task.Delay(TimeSpan.FromMilliseconds(250), Cancellation);
+        }
+
+        Assert.False(process.HasExited, "Host.Worker stopped instead of running.");
+        Assert.Equal(
+            $"{AuditChains.TenantA}|1,{AuditChains.TenantB}|1",
+            await chains.ScalarAsync<string>(
+                $"SELECT string_agg(tenant_id || '|' || n, ',' ORDER BY tenant_id) FROM (SELECT tenant_id, count(*) AS n FROM job WHERE type = 'audit.retention.apply' GROUP BY tenant_id) j"));
+        Assert.Equal(
+            "done",
+            await chains.ScalarAsync<string>("SELECT status FROM job WHERE type = 'audit.retention.sweep'"));
+
+        // Only gk_retention can delete an event or write a checkpoint, so the cut shows the role it ran as.
+        Assert.Equal(1, await chains.ScalarAsync<long>($"SELECT count(*) FROM audit_event WHERE type_code = '{AuditContract.CheckpointTypeCode}'"));
+        Assert.DoesNotContain(1L, await chains.SeqsAsync(AuditChains.TenantA));
+        Assert.DoesNotContain(2L, await chains.SeqsAsync(AuditChains.TenantA));
+    }
+
+    [Fact]
+    public async Task Configured_worker_runs_the_scheduled_Deployment_retention_to_done_and_writes_a_checkpoint()
+    {
+        var chains = await AuditChains.CreateAsync(postgres);
+        await chains.SealedChainAsync(tenantId: null, 3, 1, 2);
+
+        using var process = HostProcess.Start("Worker", Configured(chains.Name));
+
+        var deadline = DateTimeOffset.UtcNow + Timeout;
+        while (await chains.ScalarAsync<long>("SELECT count(*) FROM job WHERE type = 'audit.retention.deployment' AND status = 'done'") == 0
+            && !process.HasExited
+            && DateTimeOffset.UtcNow < deadline)
+        {
+            await Task.Delay(TimeSpan.FromMilliseconds(250), Cancellation);
+        }
+
+        Assert.False(process.HasExited, "Host.Worker stopped instead of running.");
+        Assert.Equal(1L, await chains.ScalarAsync<long>("SELECT count(*) FROM job WHERE type = 'audit.retention.deployment' AND status = 'done'"));
+        Assert.Equal(
+            "1|2",
+            await chains.ScalarAsync<string>(
+                $"SELECT checkpoint_epoch || '|' || checkpoint_seq FROM deployment_audit_event WHERE type_code = '{AuditContract.CheckpointTypeCode}'"));
+        Assert.DoesNotContain(1L, await chains.SeqsAsync(null));
+        Assert.DoesNotContain(2L, await chains.SeqsAsync(null));
+    }
+
     public void Dispose()
     {
         _openBao.Dispose();

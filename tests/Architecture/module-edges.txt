@@ -27,6 +27,7 @@ dependency Host.Worker -> Adapters.Logging
 dependency Host.Worker -> Adapters.Hosting
 dependency Cli -> Operations
 dependency Cli -> Admins
+dependency Cli -> Audit
 dependency Cli -> Adapters.Postgres
 dependency Protocol -> Authentication
 dependency Protocol -> Directory

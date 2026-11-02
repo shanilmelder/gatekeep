@@ -14,7 +14,8 @@ internal sealed record SealedRow(ChainEnvelope Envelope, byte[]? PreviousHash, b
 internal static class ChainCheck
 {
     private const string Columns =
-        "id, occurred_at, type_code, actor_kind, actor_id, target_kind, target_id, epoch, seq, prev_hash, hash";
+        "id, occurred_at, type_code, actor_kind, actor_id, target_kind, target_id, epoch, seq, prev_hash, hash, "
+        + "checkpoint_epoch, checkpoint_seq, checkpoint_hash";
 
     /// <summary>The sealed rows of one chain in <c>seq</c> order. A null Tenant reads the Deployment chain.</summary>
     public static async Task<List<SealedRow>> ReadAsync(string superuserConnection, Guid? tenantId)
@@ -42,7 +43,10 @@ internal static class ChainCheck
                     reader.IsDBNull(5) ? null : reader.GetString(5),
                     reader.IsDBNull(6) ? null : reader.GetGuid(6),
                     reader.GetInt64(7),
-                    reader.GetInt64(8)),
+                    reader.GetInt64(8),
+                    reader.IsDBNull(11) ? null : reader.GetInt64(11),
+                    reader.IsDBNull(12) ? null : reader.GetInt64(12),
+                    reader.IsDBNull(13) ? null : reader.GetFieldValue<byte[]>(13)),
                 reader.IsDBNull(9) ? null : reader.GetFieldValue<byte[]>(9),
                 reader.GetFieldValue<byte[]>(10)));
         }

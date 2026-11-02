@@ -9,6 +9,7 @@
     <ProjectReference Include="../Gatekeep.Kernel/Gatekeep.Kernel.csproj" />
     <ProjectReference Include="../Modules/Operations/Gatekeep.Modules.Operations.csproj" />
     <ProjectReference Include="../Modules/Admins/Gatekeep.Modules.Admins.csproj" />
+    <ProjectReference Include="../Modules/Audit/Gatekeep.Modules.Audit.csproj" />
     <ProjectReference Include="../Adapters/Postgres/Gatekeep.Adapters.Postgres.csproj" />
   </ItemGroup>
 
