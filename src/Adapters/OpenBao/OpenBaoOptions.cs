@@ -2,7 +2,7 @@ namespace Gatekeep.Adapters.OpenBao;
 
 /// <summary>
 /// Where OpenBao is and how this host logs in. The role ID and secret ID are read from
-/// files at each login, never held in configuration (Story 1.10 delivers them).
+/// files at each login, never held in configuration. Compose mounts them as secrets (Story 1.10).
 /// </summary>
 public sealed record OpenBaoOptions
 {

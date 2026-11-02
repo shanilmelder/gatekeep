@@ -25,10 +25,11 @@ public class OpenBaoFixture : IAsyncLifetime
 {
     public const string Image = "openbao/openbao:2.7.2";
     public const string Socket = "unix:///run/openbao/openbao.sock";
-    public const string KeyDirectory = "/srv/gatekeep/keys";
+    public const string KeyDirectory = "/secrets";
     public const string KeyFile = KeyDirectory + "/master-key";
-    public const string EscrowFile = "/root/openbao-init.json";
-    public const string AppRoleDirectory = "/etc/gatekeep/openbao";
+    public const string EscrowFile = KeyDirectory + "/openbao-init.json";
+    public const string AppRoleDirectory = KeyDirectory + "/approle";
+    public const string MasterKeySecret = "/run/secrets/master_key";
     public const string AuditLog = "/var/log/openbao/audit.log";
 
     public const string Hosted = "host-hosted";
@@ -92,7 +93,7 @@ public class OpenBaoFixture : IAsyncLifetime
             {
                 await File.WriteAllBytesAsync(
                     Path.Combine(_credentials, role, file),
-                    await _container.ReadFileAsync($"{AppRoleDirectory}/{role}/{file}"));
+                    await ReadBytesAsync(_container, $"{AppRoleDirectory}/{role}/{file}"));
             }
         }
 
@@ -147,23 +148,28 @@ public class OpenBaoFixture : IAsyncLifetime
     }
 
     public async Task<string> ReadTextAsync(string path) =>
-        Encoding.UTF8.GetString(await Container.ReadFileAsync(path));
+        Encoding.UTF8.GetString(await ReadBytesAsync(Container, path));
 
     public Task<ExecResult> ExecAsync(params string[] command) => Container.ExecAsync(command);
 
-    /// <summary>Docker can't copy a file out of a tmpfs, so the key file is read through exec.</summary>
-    public async Task<byte[]> ReadKeyFileAsync()
+    public Task<byte[]> ReadKeyFileAsync() => ReadBytesAsync(Container, KeyFile);
+
+    /// <summary>
+    /// Docker can't copy a file out of a tmpfs, and the secrets directory is one, so files
+    /// are read through exec.
+    /// </summary>
+    public static async Task<byte[]> ReadBytesAsync(IContainer container, string path)
     {
-        var read = await ExecAsync("base64", "-w", "0", KeyFile);
+        var read = await container.ExecAsync(["base64", "-w", "0", path]);
         return read.ExitCode == 0
             ? Convert.FromBase64String(read.Stdout.Trim())
-            : throw new InvalidOperationException("Couldn't read the key file.");
+            : throw new InvalidOperationException($"Couldn't read {path}.");
     }
 
     /// <summary>
-    /// The container as root, with the deploy files where the host keeps them. Line endings
+    /// The container as root, with the deploy files where the OpenBao image keeps them. Line endings
     /// are normalized because a Windows checkout may hold CRLF, which sh can't run. The key
-    /// directory is a mount, as the key volume is: a tmpfs, or <paramref name="keyVolume"/>
+    /// directory is a mount, as the bind-mounted secrets directory is: a tmpfs, or <paramref name="keyVolume"/>
     /// when the key must survive a restart.
     /// </summary>
     public static ContainerBuilder Build(bool generateKey, IVolume? keyVolume = null)

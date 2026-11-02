@@ -82,3 +82,6 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-1-9-track-long-running-operations.md`
   summary: Restrict Operation and step status transitions and step inserts to the transitions start, retry and the Worker make.
   evidence: Column grants let gk_admin, gk_cli and gk_worker set any status and add steps. T-46.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-10-run-the-stack-under-compose-with-safe-secrets.md`
+  summary: Check each host's AppRole login at startup, so a wrong or revoked secret ID stops the host instead of reporting healthy.
+  evidence: Story 1.10 health checks only sys/health, which needs no token.

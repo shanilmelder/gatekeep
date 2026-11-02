@@ -13,6 +13,7 @@ flowchart TD
   Sessions[Sessions]
   Tenancy[Tenancy]
   AdaptersLogging[Adapters.Logging]
+  AdaptersHosting[Adapters.Hosting]
   HostAdmin[Host.Admin]
   Management[Management]
   Admins[Admins]
@@ -24,19 +25,22 @@ flowchart TD
   Keys[Keys]
   Notifications[Notifications]
   Audit[Audit]
-  TestsIsolation[Tests.Isolation]
   AdaptersOpenBao[Adapters.OpenBao]
+  TestsIsolation[Tests.Isolation]
   HostHosted --> Protocol
   HostHosted --> Authentication
   HostHosted --> Identity
   HostHosted --> Sessions
   HostHosted --> Tenancy
   HostHosted --> AdaptersLogging
+  HostHosted --> AdaptersHosting
   HostAdmin --> Management
   HostAdmin --> Admins
   HostAdmin --> AdaptersLogging
+  HostAdmin --> AdaptersHosting
   HostWorker --> Operations
   HostWorker --> AdaptersLogging
+  HostWorker --> AdaptersHosting
   Cli --> Operations
   Cli --> Admins
   Cli --> AdaptersPostgres
@@ -78,6 +82,8 @@ flowchart TD
   Sessions --> Tenancy
   Notifications --> Tenancy
   Admins --> Notifications
+  AdaptersHosting --> AdaptersOpenBao
+  TestsIsolation --> AdaptersHosting
   TestsIsolation --> AdaptersLogging
   TestsIsolation --> AdaptersOpenBao
   TestsIsolation --> AdaptersPostgres

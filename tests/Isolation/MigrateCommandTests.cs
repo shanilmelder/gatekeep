@@ -31,6 +31,66 @@ public sealed class MigrateCommandTests(PostgresFixture postgres) : IDisposable
         Assert.Equal(4, applied);
     }
 
+    [Fact]
+    public async Task Password_file_supplies_the_password_the_connection_file_leaves_out()
+    {
+        var database = await postgres.NewUnmigratedDatabaseAsync();
+        var connection = postgres.RoleConnection(TableRegistry.Migrator, database)
+            .Replace($"Password={PostgresFixture.Password};", string.Empty);
+        Assert.DoesNotContain(PostgresFixture.Password, connection);
+
+        var result = await RunAsync(
+            "migrate", "--connection-file", ConnectionFile(connection), "--password-file", ConnectionFile(PostgresFixture.Password + "\n"));
+
+        Assert.True(result.ExitCode == 0, result.Output);
+        Assert.Contains("Applied 4 migration(s).", result.Output);
+        Assert.DoesNotContain(PostgresFixture.Password, result.Output);
+    }
+
+    [Theory]
+    [InlineData("changeme")]
+    [InlineData("postgres")]
+    [InlineData("isolation-test-only")]
+    [InlineData("fifteen-chars-x")]
+    public async Task Default_or_short_password_file_is_refused_before_connecting(string password)
+    {
+        var result = await RunAsync(
+            "migrate", "--connection-file", ConnectionFile("Host=localhost;Username=gk_migrator"), "--password-file", ConnectionFile(password + "\n"));
+
+        Assert.NotEqual(0, result.ExitCode);
+        Assert.Contains("The password file holds a known default or a password under 16 characters.", result.Output);
+        Assert.DoesNotContain(password, result.Output);
+    }
+
+    [Fact]
+    public async Task Bare_migrate_takes_both_files_from_the_environment()
+    {
+        var database = await postgres.NewUnmigratedDatabaseAsync();
+        var connection = postgres.RoleConnection(TableRegistry.Migrator, database)
+            .Replace($"Password={PostgresFixture.Password};", string.Empty);
+
+        var result = await RunWithEnvironmentAsync(
+            new Dictionary<string, string>
+            {
+                ["GATEKEEP_MIGRATE_CONNECTION_FILE"] = ConnectionFile(connection),
+                ["GATEKEEP_MIGRATE_PASSWORD_FILE"] = ConnectionFile(PostgresFixture.Password),
+            },
+            "migrate");
+
+        Assert.True(result.ExitCode == 0, result.Output);
+        Assert.Contains("Applied 4 migration(s).", result.Output);
+    }
+
+    [Fact]
+    public async Task Empty_password_file_exits_non_zero()
+    {
+        var result = await RunAsync(
+            "migrate", "--connection-file", ConnectionFile("Host=localhost;Username=gk_migrator"), "--password-file", ConnectionFile(""));
+
+        Assert.NotEqual(0, result.ExitCode);
+        Assert.Contains("Can't read the password file, or it's empty.", result.Output);
+    }
+
     [Theory]
     [InlineData(TableRegistry.Hosted)]
     [InlineData(TableRegistry.Cli)]
@@ -137,7 +197,12 @@ public sealed class MigrateCommandTests(PostgresFixture postgres) : IDisposable
     private static Task<(int ExitCode, string Output)> MigrateAsync(string file) =>
         RunAsync("migrate", "--connection-file", file);
 
-    private static async Task<(int ExitCode, string Output)> RunAsync(params string[] arguments)
+    private static Task<(int ExitCode, string Output)> RunAsync(params string[] arguments) =>
+        RunWithEnvironmentAsync(new Dictionary<string, string>(), arguments);
+
+    private static async Task<(int ExitCode, string Output)> RunWithEnvironmentAsync(
+        IReadOnlyDictionary<string, string> environment,
+        params string[] arguments)
     {
         var host = Environment.GetEnvironmentVariable("DOTNET_HOST_PATH");
         var start = new ProcessStartInfo(string.IsNullOrEmpty(host) ? "dotnet" : host)
@@ -145,6 +210,13 @@ public sealed class MigrateCommandTests(PostgresFixture postgres) : IDisposable
             RedirectStandardOutput = true,
             RedirectStandardError = true,
         };
+
+        start.Environment.Remove("GATEKEEP_MIGRATE_CONNECTION_FILE");
+        start.Environment.Remove("GATEKEEP_MIGRATE_PASSWORD_FILE");
+        foreach (var (name, value) in environment)
+        {
+            start.Environment[name] = value;
+        }
 
         start.ArgumentList.Add(BuildOutput.AssemblyPath("Gatekeep.Cli", "gatekeep"));
         foreach (var argument in arguments)

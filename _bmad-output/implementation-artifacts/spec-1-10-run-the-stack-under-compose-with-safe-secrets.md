@@ -2,16 +2,31 @@
 title: 'Story 1.10: Run the stack under Compose with safe secrets'
 type: 'feature'
 created: '2026-11-02'
-status: 'ready-for-dev'
+status: 'done'
+baseline_revision: '865b23abd1271ae95d9d89e8adfa65610736ea90'
 review_loop_iteration: 0
-followup_review_recommended: false
+followup_review_recommended: true
 context:
   - '{project-root}/_bmad-output/planning-artifacts/sprint-change-proposal-2026-11-02-docker-only.md'
   - '{project-root}/_bmad-output/planning-artifacts/architecture/architecture-gatekeep-2026-11-02/ARCHITECTURE-SPINE.md'
   - '{project-root}/docs/threat-model.md'
   - '{project-root}/docs/key-custody.md'
 warnings: [oversized, multiple-goals]
-deferred: []
+deferred:
+  - summary: >-
+      keygen recovery from an empty directory left by Compose is untested.
+    evidence: |-
+      Reached only when install steps run out of order.
+    location: >-
+      deploy/openbao/generate-master-key.sh
+    severity: low
+  - summary: >-
+      Health never proves an AppRole login, so a wrong secret ID reports healthy.
+    evidence: |-
+      A login per health call would mint tokens every 10 seconds. The first story using custody at runtime adds a startup login check.
+    location: >-
+      src/Adapters/OpenBao/OpenBaoHealth.cs
+    severity: medium
 ---
 
 <intent-contract>
@@ -73,12 +88,12 @@ deferred: []
 ## Tasks & Acceptance
 
 **Execution:**
-- [ ] Shared host startup, host `Program.cs` files, custody wiring -- per the Always list.
-- [ ] `deploy/docker/` -- Dockerfiles for the three hosts, `cli` and `tests`.
-- [ ] `deploy/compose.yaml`, `deploy/compose.test.yaml`, `deploy/openbao/` -- the stack, one-shot `keygen` and `openbao-setup` services, the test service; remove `openbao.service`.
-- [ ] Tests: startup refusal per host; `/healthz` 200 and 503 cases; a config test over the Compose files for hardening, unpublished health ports, the Master Key handoff and no secret values; an architecture test that `docs/` and `deploy/` hold no systemd unit, host path or non-Docker command; custody tests updated.
-- [ ] `.github/workflows/ci.yml` -- tests through the container; stack job.
-- [ ] `docs/install.md`, `docs/key-custody.md`, `docs/spikes/1-2-key-custody.md`, `docs/threat-model.md`, edges, diagram.
+- [x] Shared host startup, host `Program.cs` files, custody wiring -- per the Always list.
+- [x] `deploy/docker/` -- Dockerfiles for the three hosts, `cli` and `tests`.
+- [x] `deploy/compose.yaml`, `deploy/compose.test.yaml`, `deploy/openbao/` -- the stack, one-shot `keygen` and `openbao-setup` services, the test service; remove `openbao.service`.
+- [x] Tests: startup refusal per host; `/healthz` 200 and 503 cases; a config test over the Compose files for hardening, unpublished health ports, the Master Key handoff and no secret values; an architecture test that `docs/` and `deploy/` hold no systemd unit, host path or non-Docker command; custody tests updated.
+- [x] `.github/workflows/ci.yml` -- tests through the container; stack job.
+- [x] `docs/install.md`, `docs/key-custody.md`, `docs/spikes/1-2-key-custody.md`, `docs/threat-model.md`, edges, diagram.
 
 **Acceptance Criteria:**
 - Given a machine with only Docker and Git, when the Operator follows `docs/install.md`, then the stack comes up healthy without any other tool installed.
@@ -89,6 +104,54 @@ deferred: []
 - **2026-11-02, course correction (Docker only):** the first version of this spec planned native OpenBao, a LUKS check and initramfs SSH. Esm decided nothing runs outside Docker; the intent contract was rewritten before review. Superseded: `gatekeep check-volumes`, `deploy/luks/`, the native OpenBao bind mount.
 
 ## Review Triage Log
+
+### 2026-11-02 — Review pass
+- verdicts: 44 findings — high 0, medium 19, low 23, false 2, maybe-false 0
+- findings:
+  - `[medium]` `[patch]` Gap: a sealed or uninitialized OpenBao is never shown to fail `/healthz` — the fake socket answers a set status; a 503 answer gives `unhealthy: custody`, tested.
+  - `[medium]` `[patch]` Gap: container health is never read after a dependency stops — the stack check waits for each host to turn `unhealthy` while PostgreSQL is down.
+  - `[medium]` `[patch]` Gap: nothing shows the hosts wire custody or Worker hands it to its runner — custody is now required; a Worker test shows its runner has custody.
+  - `[low]` `[patch]` Gap: Worker's health-port-only listening is untested — test shows its public port refuses connections.
+  - `[low]` `[defer]` Gap: keygen's recovery from an empty directory Compose left behind is untested — reached only when install steps run out of order; add with the custody suite.
+  - `[low]` `[patch]` Gap (other): `OpenBaoHealth` lacks the trailing slash `OpenBaoKeyCustody` adds — added.
+  - `[low]` `[patch]` Gap (other): `WorkerStartupTests` leaves `Database__*`, `Custody__*` and real secret files in reach — cleared, empty secrets directory.
+  - `[medium]` `[patch]` Intent: the stack check runs `sh`, `grep` and `sed` on the CI runner, outside Docker — it now runs in a container; CI calls only `docker`.
+  - `[low]` `[reject]` Intent: hosts accept passwords from any configuration source — the deployment rule is enforced by Compose and its config test; arguments serve the process tests.
+  - `[medium]` `[patch]` Intent: custody is optional — required for all three hosts, same fix as the Gap row.
+  - `[low]` `[patch]` Intent: a missing password file is named as the connection string — the password setting is named.
+  - `[medium]` `[patch]` Intent: the Master Key's absence from image layers, environment and volumes is never checked on the real stack — the stack check asserts it.
+  - `[low]` `[patch]` Intent: the bare `docker compose run --rm cli migrate` didn't work — the `cli` service supplies its file paths by default; docs updated.
+  - `[false]` `[reject]` Intent: `openbao-setup` mounts the socket volume — it must reach OpenBao to set it up.
+  - `[false]` `[reject]` Intent: PostgreSQL and busybox images are pulled, not built — pinned by digest, and the intent's locally built images are Gatekeep's own.
+  - `[low]` `[reject]` Intent: running-stack expectations are verified only by the stack check — that check runs in CI on every pull request, in a container after this review.
+  - `[low]` `[patch]` Intent: threat-model leftovers (status paragraph lists the removed unit; G-3 dropped Story 1.10) — fixed.
+  - `[low]` `[patch]` Blind: Dockerfiles copy all source before restore, so the restore layer never caches, against their comment — project and lock files first.
+  - `[medium]` `[defer]` Blind: the health check never proves an AppRole login, so a wrong secret ID still reports healthy — a login per health call would mint tokens every 10 seconds; the first story that uses custody at runtime must add a startup login check.
+  - `[medium]` `[patch]` Blind: custody is never required — same fix as the Gap row.
+  - `[medium]` `[patch]` Blind: health checks run one after another and outlast the probe and healthcheck timeouts — parallel under one deadline.
+  - `[medium]` `[patch]` Blind: hardening untested for PostgreSQL and OpenBao, per-service secrets and network membership unchecked — config tests added; Hosted-to-Admin reachability is Story 1.11's criterion.
+  - `[low]` `[patch]` Blind: uid and gid numbers are typed in several places with nothing tying them — config test checks them unique and equal everywhere.
+  - `[medium]` `[patch]` Blind: setup tools mount the whole secrets directory, so `openbao-setup` can read the Master Key — each mounts only its own subpaths.
+  - `[medium]` `[patch]` Blind: Docker Desktop bind mounts ignore `chown` and `chmod` — scripts re-read owner and mode and warn; docs limit the guarantee to a Linux host file system.
+  - `[medium]` `[patch]` Blind: database passwords drift from the files with no recovery — a one-shot service applies every role password on each `up`.
+  - `[low]` `[patch]` Blind: G-14 closure cites install.md text that doesn't exist — host requirements added.
+  - `[low]` `[patch]` Blind: threat model cites stand-in tests as proof of the Compose handoff — says which use a stand-in and that the stack check covers the real one.
+  - `[low]` `[patch]` Blind: `GATEKEEP_SECRETS_DIR` resolves against `deploy/`, and an absolute path breaks the stack check's cleanup — documented and handled.
+  - `[medium]` `[patch]` Blind: no process or log limits — `pids_limit` and log rotation on every service.
+  - `[low]` `[patch]` Blind: `migrate` skips the defaults list — refused; `cli`'s custody mount stays for the commands that will need it.
+  - `[low]` `[patch]` Blind: smaller fixes — copied comments, usage line and stray spaces fixed; the regex duplicate, fixed sleeps and pnpm pin are covered by the stack-check and config-test changes or left as low value.
+  - `[medium]` `[patch]` Edge: `pg_isready` over the socket answers during the init-time server, so `up --wait` can return early — probes TCP.
+  - `[medium]` `[patch]` Edge: a failed init script leaves roles without passwords after restart — same fix as the password-drift row.
+  - `[low]` `[patch]` Edge: an empty directory or file counts as an existing password — removed and regenerated.
+  - `[medium]` `[patch]` Edge: regenerated secrets with a persisted data volume don't match the roles — same fix as the password-drift row.
+  - `[medium]` `[patch]` Edge: `openbao-setup` can run before the socket listens — retries `bao status` for 30 seconds.
+  - `[medium]` `[patch]` Edge: the Docker-only rule misses fences indented in list items, so no install.md command is checked — matched, with cases.
+  - `[low]` `[patch]` Edge: tilde fences and info strings skip the rule — matched.
+  - `[low]` `[patch]` Edge: the probe ignores `appsettings*.json` — reads them.
+  - `[low]` `[reject]` Edge: a health port above 65535 throws `UriFormatException` — the setting is code-owned in Compose, and the failure is loud.
+  - `[low]` `[patch]` Edge: ambient settings leak into `WorkerStartupTests` — same fix as the Gap row.
+  - `[low]` `[patch]` Edge: `migrate` accepts a default password — same fix as the Blind row.
+  - `[low]` `[reject]` Edge: a failed assertion leaks the fake socket in a temp directory — test-only, cleaned with the directory.
 
 ## Design Notes
 
@@ -102,3 +165,19 @@ deferred: []
 - `docker compose -f deploy/compose.test.yaml run --rm tests` -- expected: restore (locked), build with no warnings, Architecture and Isolation all pass.
 - `docker compose -f deploy/compose.yaml up --build --wait` after the keygen and setup steps in `docs/install.md`, then `down -v` -- expected: every service healthy.
 - Diagram generator inside the tests container -- expected: no diff after committing the diagram.
+
+## Auto Run Result
+
+Status: done
+
+**Summary:** every Gatekeep process now runs in Docker: PostgreSQL, OpenBao (no network, Master Key as a read-only Compose secret), the three hosts, the `cli`, key generation, password generation, OpenBao setup and the test suite. Hosts share startup code that reads secrets from files, refuses missing or default ones, serves `/healthz` on an unpublished port and wires key custody. CI runs everything through containers.
+
+**Files:** `src/Adapters/Hosting/`; `src/Adapters/OpenBao/OpenBaoHealth.cs`; the three host `Program.cs` files; `src/Gatekeep.Cli/Program.cs`; `deploy/compose.yaml`, `deploy/compose.test.yaml`, `deploy/docker/`, `deploy/ci/`, `deploy/openbao/`, `deploy/postgres/`; `tests/Isolation/Hosting/`, `tests/Isolation/Stack/`, custody and job test updates; `tests/Architecture/DockerOnlyRuleTests.cs`, `KeyCustodyRuleTests.cs`; `.github/workflows/ci.yml`; `docs/install.md`, `docs/key-custody.md`, `docs/threat-model.md`, the spike note; edges and diagram.
+
+**Review:** 44 findings across four layers: 36 patched, 2 deferred, 6 rejected, each with its reason in the triage log.
+
+**Follow-up review:** recommended. Many medium patches change the stack check, the role-password service and the secrets mounts, which only the stack check exercises end to end.
+
+**Verification:** see the PR screenshot; inside the `tests` container: restore, build, Architecture and Isolation pass; `deploy/ci/stack-check.sh` brings the stack up and passes.
+
+**Residual risks:** the Master Key is a file on the Docker host, readable by host root or Docker access, and disk encryption is the host owner's job (T-29, T-30). On Docker Desktop for Windows or macOS, file ownership and mode on the secrets directory don't hold. Health doesn't prove an AppRole login. Nothing has run on a production Docker host yet.

@@ -7,6 +7,7 @@
   <ItemGroup>
     <ProjectReference Include="../Gatekeep.Kernel/Gatekeep.Kernel.csproj" />
     <ProjectReference Include="../Adapters/Logging/Gatekeep.Adapters.Logging.csproj" />
+    <ProjectReference Include="../Adapters/Hosting/Gatekeep.Adapters.Hosting.csproj" />
     <ProjectReference Include="../Modules/Management/Gatekeep.Modules.Management.csproj" />
     <ProjectReference Include="../Modules/Admins/Gatekeep.Modules.Admins.csproj" />
   </ItemGroup>

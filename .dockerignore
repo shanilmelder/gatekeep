@@ -1,0 +1,20 @@
+# Image builds copy only what restore and publish need (deploy/docker/*.Dockerfile).
+**/bin/
+**/obj/
+**/node_modules/
+**/dist/
+**/TestResults/
+.git/
+.vs/
+.claude/
+_bmad/
+_bmad-output/
+graft/
+design/
+docs/
+apps/
+packages/
+deploy/secrets*/
+**/.env*
+**/*.pem
+**/*.pfx

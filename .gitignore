@@ -22,3 +22,7 @@ dist/
 *.user
 TestResults/
 *.tsbuildinfo
+
+# The Docker host's secrets directory (docs/install.md). Never committed or backed up.
+/deploy/secrets/
+/deploy/secrets-*/
