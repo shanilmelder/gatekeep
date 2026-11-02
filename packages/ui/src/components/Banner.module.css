@@ -1,0 +1,67 @@
+/*
+ * The inline banner (DESIGN.md, components.banner): a status -sf surface, radius card,
+ * padding 10px 12px, and a leading glyph in the status colour. Text stays tx, which reads
+ * on every -sf pair in both schemes.
+ */
+
+.banner {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--gk-space-8);
+  box-sizing: border-box;
+  padding: var(--gk-banner-padding);
+  border-radius: var(--gk-banner-radius);
+  color: var(--gk-color-tx);
+  font: var(--gk-font-body);
+}
+
+.info {
+  --gk-ui-banner-tone: var(--gk-color-info);
+  background: var(--gk-color-info-sf);
+}
+
+.warn {
+  --gk-ui-banner-tone: var(--gk-color-warn);
+  background: var(--gk-color-warn-sf);
+}
+
+.bad {
+  --gk-ui-banner-tone: var(--gk-color-bad);
+  background: var(--gk-color-bad-sf);
+}
+
+/* One line of body text tall, so the glyph sits on the first line. */
+.glyph {
+  flex: none;
+  width: var(--gk-space-16);
+  height: var(--gk-font-body-line-height);
+  fill: none;
+  stroke: var(--gk-ui-banner-tone);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.text {
+  flex: 1;
+  min-width: 0;
+}
+
+.text > p {
+  margin: 0;
+}
+
+.action {
+  flex: none;
+  align-self: center;
+}
+
+@media (forced-colors: active) {
+  .banner {
+    border: 1px solid CanvasText;
+  }
+
+  .glyph {
+    stroke: CanvasText;
+  }
+}

@@ -114,9 +114,13 @@ for (const surface of ['admin', 'hosted'] as const) {
       }
       expect(adminOnly).toEqual(
         [
+          'ConfirmModal',
           'DataTable',
           'EmptyState',
           'JsonViewer',
+          'Modal',
+          'ModalProvider',
+          'OneTimeReveal',
           'PAGE_SIZE',
           'RbacMatrix',
           'SKELETON_DELAY_MS',

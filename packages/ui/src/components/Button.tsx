@@ -76,7 +76,7 @@ export function Button({
         {pending && (
           // The spinner is hidden from the name, so the name stays the label. Its text is
           // the button's description while pending.
-          <span className={styles.spinner} aria-hidden="true">
+          <span className={styles.spinner} aria-hidden="true" data-gk-motion="essential">
             <span id={statusId} className={a11y.visuallyHidden}>
               {messages.pending}
             </span>

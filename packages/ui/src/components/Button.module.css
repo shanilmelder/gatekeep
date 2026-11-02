@@ -112,6 +112,10 @@
   }
 }
 
+/*
+ * The spinner is a pending button's only motion cue, so reduced motion slows it rather
+ * than stopping it. data-gk-motion="essential" exempts it from the shared rule in styles.css.
+ */
 @media (prefers-reduced-motion: reduce) {
   .spinner {
     animation-duration: calc(var(--gk-motion-duration-max) * 12);
