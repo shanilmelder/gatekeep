@@ -76,7 +76,7 @@ FR-42: An authorized machine-to-machine Application can perform Tenant-scoped ac
 FR-43: Developers can follow quickstarts for React, Next.js, Node, .NET and Python and read a reference for every public API. Quickstarts complete UJ-1 within 30 minutes, never pre-fill a secret, validate signature, `iss`, `aud`, `exp` and a fixed algorithm, and a negative test pack runs on every release.
 FR-44: An Admin can reach every v1 feature from the sidebar, light or dark, on desktop and tablet. Deferred features don't appear in any form, and landing depends on whether Tenants exist.
 FR-45: The Deployment sends Security Alerts through an independent channel for the twelve listed events, with delivery tested as part of SM-5.
-FR-46: Admins sign in with WebAuthn only, stored apart from every Tenant's Users, with two credentials or one plus an offline Recovery Code. The Admin Dashboard has its own hostname on a VPN or private network, and the listed actions need a fresh WebAuthn assertion within §5.2.
+FR-46: Admins sign in with WebAuthn only, stored apart from every Tenant's Users, with two credentials or one plus an offline Recovery Code. The Admin Dashboard has its own public hostname, and the listed actions need a fresh WebAuthn assertion within §5.2.
 FR-47: The system protects every sign-in against fixation, step skipping and cross-site attacks. Session identifiers change at each privilege step, transactions are bound and short-lived, steps need a server-side record, and login CSRF plus `state`, `nonce` and PKCE apply.
 FR-48: The system ends existing access when a credential changes. All Sessions and Token Families end on the listed triggers, the acting Session continues for self-service changes, and quickstarts state the residual access token window.
 FR-49: A Tenant Owner can export or erase a User's personal data. Logs identify people by internal reference, so erasure keeps the event record and hash chain intact.
@@ -135,7 +135,7 @@ NFR-21: Tenant Subdomains sit under a dedicated zone. The application process ca
 
 **Trust zones and surfaces**
 
-- AR-13: `Host.Admin` listens only on the private network. Admin routes aren't registered in `Host.Hosted`, and Hosted Login routes aren't registered in `Host.Admin`. A release test proves from inside its container that `Host.Hosted` has no route to `Host.Admin` (AD-2).
+- AR-13: `Host.Admin` is reachable only through Caddy's Admin site on its own public hostname (amended 2026-11-02, public Admin). Admin routes aren't registered in `Host.Hosted`, and Hosted Login routes aren't registered in `Host.Admin`. A release test proves from inside its container that `Host.Hosted` has no route to `Host.Admin` (AD-2).
 - AR-14: API surfaces per AD-19: `/login/api/*` and `/account/api/*` are private; `/api/v1/tenants/{tenantId}/*` is one route set with two auth schemes; `/api/v1/deployment/*` has no machine access. The OpenAPI document is committed and diffed in CI. `packages/api-client` is generated (AD-23).
 - AR-15: One capability table in the Admins contract encodes FR-39, with `MachineAllowed` and `FreshAssertion` on each capability. Every fresh-assertion capability is machine-denied. A generated test denies every role and machine principal everything outside the table (AD-20).
 - AR-16: Management API tokens are issued only by `/api/v1/tenants/{tenantId}/oauth/token` on `Host.Admin`, signed by a per-Tenant `management` key that's never published (AD-33).
@@ -716,7 +716,7 @@ So that it needs no cloud service and refuses unsafe settings.
 
 As the Operator,
 I want only intended traffic to reach each host,
-So that the Admin surface is never exposed publicly.
+So that the Admin surface is reached only through its own hostname, never through a Tenant host.
 
 **Requirements:** FR-1, NFR-4, NFR-21, AR-34; AD-2, AD-26
 **Screens:** None
@@ -725,7 +725,7 @@ So that the Admin surface is never exposed publicly.
 
 **Given** the Caddy configuration
 **When** a request names a host outside the zone or the Admin hostname
-**Then** it's refused, and Admin traffic is served only on the VPN interface
+**Then** it's refused, and Admin traffic is served only on the Admin hostname
 
 **Given** the Compose networks
 **When** a test runs from inside `Host.Hosted`

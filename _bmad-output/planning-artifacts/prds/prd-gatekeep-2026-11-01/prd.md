@@ -610,7 +610,7 @@ Admins sign in to the Admin Dashboard with WebAuthn only.
 - Every Admin registers two WebAuthn credentials, or one and a Recovery Code held offline. A Recovery Code sets up a new credential and can't reach any other action.
 - A lost credential is recovered by another Deployment Owner or through FR-5.
 - Admin sessions have the lifetimes in §5.2.
-- The Admin Dashboard is on its own hostname, outside every Tenant's origin, and reachable only by VPN or private network.
+- The Admin Dashboard is on its own public hostname, outside every Tenant's origin (amended 2026-11-02, `sprint-change-proposal-2026-11-02-public-admin.md`).
 - These actions need a fresh WebAuthn assertion within §5.2: Admin grant or removal, Signing Key revocation, lowering MFA policy, changing a Prod Tenant's callback URLs or label, rotating a client secret, changing the email provider, granting Management API access, Tenant deletion, and FR-50 actions.
 
 #### FR-40: Search Logs
@@ -864,7 +864,7 @@ Build v1 in this order, so that the riskiest foundations come first and the firs
 
 - An email provider, with SPF, DKIM and DMARC.
 - A dedicated DNS zone with wildcard DNS and TLS certificates.
-- VPN or private network access to the Admin Dashboard.
+- A public DNS name and TLS certificate for the Admin Dashboard.
 - Off-server storage for backups and copied security events.
 - Offline storage for the escrowed Master Key.
 - An alert channel independent of the Deployment.
@@ -896,7 +896,7 @@ No open question blocks UX or architecture. Each of these has a safe default and
 - **A-10 (§7.1):** Esm is the sole builder and Operator, with 1–3 web apps at launch and no payment, health or other regulated data. Applications use another login until SM-3 passes.
 - **A-11 (SM-1):** 90 days on Gatekeep is long enough to show stability.
 - **A-12 (§5.2):** The security limit values are starting points.
-- **A-13 (FR-42):** The Management API is reachable only by VPN or private network.
+- **A-13 (FR-42):** The Management API is reachable on the Admin hostname, which is public (amended 2026-11-02, `sprint-change-proposal-2026-11-02-public-admin.md`).
 - **A-14 (FR-29):** The breach dataset is held locally.
 - **A-15 (NFR-8):** The assessment uses ASVS 5.0 at Level 2.
 - **A-16 (FR-23):** Each Tenant uses one fixed asymmetric signing algorithm.

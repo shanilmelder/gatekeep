@@ -18,7 +18,7 @@ Gatekeep has three web surfaces (Hosted Login, the Account Portal and the Admin 
 | Surface | Audience | Form factor | Accessibility bar |
 | --- | --- | --- | --- |
 | Hosted Login and Account Portal | Users, on each Tenant Subdomain | Desktop and mobile browsers (NFR-17), following the device's colour scheme | WCAG 2.2 AA (NFR-16) |
-| Admin Dashboard | Admins, on its own hostname, VPN only | Desktop-first, responsive to tablet, light and dark (FR-44) | See Accessibility Floor |
+| Admin Dashboard | Admins, on its own public hostname | Desktop-first, responsive to tablet, light and dark (FR-44) | See Accessibility Floor |
 | Operator tooling | The Operator | Command line and documentation | Not a UI surface |
 
 **Precedence.** The PRD decides what ships (PRD §0). `DESIGN.md` decides how it looks. This file decides how it behaves. All three win over the exports. A designed control isn't a v1 commitment.
@@ -628,7 +628,7 @@ Failures: removing the last method under Always is refused. Re-authentication fa
 
 ### Flow 13: First Admin bootstrap (Esm, on a fresh Deployment)
 
-1. Esm reads the one-time token on the server and opens the Admin hostname over VPN.
+1. Esm reads the one-time token on the server and opens the Admin hostname.
 2. Bootstrap takes the token.
 3. Admin credential setup registers two WebAuthn credentials.
 4. **Climax:** Esm lands on the create-Tenant form as Deployment Owner, and the bootstrap path is dead.
