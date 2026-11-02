@@ -24,6 +24,7 @@ internal sealed class SessionService(IAuditAppender audit, TimeProvider time) : 
 
     private readonly IAuditAppender _audit = audit ?? throw new ArgumentNullException(nameof(audit));
     private readonly TimeProvider _time = time ?? throw new ArgumentNullException(nameof(time));
+    private readonly SessionRevocation _revocation = new(audit, time);
 
     public async Task<StartedSession> StartAsync(
         CommandContext context,
@@ -80,7 +81,17 @@ internal sealed class SessionService(IAuditAppender audit, TimeProvider time) : 
         return new StartedSession(id, token, authTime, idleExpiresAt, absoluteExpiresAt);
     }
 
-    private static DateTimeOffset ToMicroseconds(DateTimeOffset value) =>
+    public Task<RevocationOutcome> RevokeAccessAsync(
+        CommandContext context,
+        RevocationScope scope,
+        Guid? exceptSessionId,
+        RevocationReason reason,
+        Actor actor,
+        CancellationToken cancellationToken) =>
+        _revocation.RevokeAsync(context, scope, exceptSessionId, reason, actor, cancellationToken);
+
+    /// <summary>timestamptz holds microseconds, so what's compared or returned must be what's stored.</summary>
+    internal static DateTimeOffset ToMicroseconds(DateTimeOffset value) =>
         new(value.Ticks - (value.Ticks % TimeSpan.TicksPerMicrosecond), value.Offset);
 
     /// <summary>

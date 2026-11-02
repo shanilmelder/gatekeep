@@ -77,7 +77,7 @@ development_status:
   2-4-rotate-signing-keys-automatically: backlog
   2-5-issue-a-token-by-client-credentials: backlog
   2-6-add-session-and-transaction-tables: done
-  2-7-build-the-one-revocation-path: backlog
+  2-7-build-the-one-revocation-path: done
   2-8-add-the-system-application: backlog
   2-9-run-the-authorization-code-flow-with-pkce: backlog
   2-10-rotate-refresh-tokens-and-detect-reuse: backlog

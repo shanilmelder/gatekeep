@@ -121,3 +121,6 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-1-14-build-shared-form-and-action-components.md`
   summary: Validate every field on submit and focus the first invalid one.
   evidence: Story 1.14 review; EXPERIENCE "Focus moves only on submit".
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-7-build-the-one-revocation-path.md`
+  summary: In Story 2.9, record every revocation OpenIddict asks the stores for (token store `RevokeByAuthorizationIdAsync`, authorization-store revokes, and any `UpdateAsync` that sets a revoked status) on the request, route it through `ISessions.RevokeAccessAsync`, and replay it through `FailureContext` at endpoint end, including the unhandled-exception path.
+  evidence: The spike 2.2 carry-over gave this capture to Story 2.7, but 2.7 has no stores to capture from. It proved only that `RevokeAccessAsync` commits inside `CommitAfterRollbackAsync`.
