@@ -20,7 +20,7 @@ public sealed class MigrateCommandTests(PostgresFixture postgres) : IDisposable
 
         var first = await MigrateAsync(file);
         Assert.True(first.ExitCode == 0, first.Output);
-        Assert.Contains("Applied 2 migration(s).", first.Output);
+        Assert.Contains("Applied 3 migration(s).", first.Output);
 
         var second = await MigrateAsync(file);
         Assert.True(second.ExitCode == 0, second.Output);
@@ -28,7 +28,7 @@ public sealed class MigrateCommandTests(PostgresFixture postgres) : IDisposable
 
         var applied = await PostgresFixture.ScalarAsync<long>(
             postgres.SuperuserConnection(database), $"SELECT count(*) FROM {GatekeepMigrator.HistoryTable}");
-        Assert.Equal(2, applied);
+        Assert.Equal(3, applied);
     }
 
     [Theory]

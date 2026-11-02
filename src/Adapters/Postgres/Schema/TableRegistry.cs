@@ -130,6 +130,46 @@ public static class TableRegistry
                 [Cli] = [Select, Insert],
             },
             Triggers: DetailTriggers("deployment_audit_detail")),
+        new(
+            "job",
+            TableClass.Control,
+            "Operations",
+            new Dictionary<string, IReadOnlyList<string>>
+            {
+                [Hosted] = [Insert],
+                [Admin] = [Insert],
+                [Worker] = [Select, Insert, Delete],
+                [Dispatch] = [Select],
+                [Sealer] = [Insert],
+                [Cli] = [Insert],
+            },
+            new Dictionary<string, IReadOnlyList<ColumnGrant>>
+            {
+                // Finishing a job: done or dead, with its timing and a dead job's reason code.
+                // Never its type, Tenant or attempts.
+                [Worker] = [new ColumnGrant(Update, ["status", "locked_until", "finished_at", "failure_code"])],
+                // Claiming and retrying: dispatch columns only.
+                [Dispatch] = [new ColumnGrant(Update, ["status", "attempts", "run_after", "locked_until", "failure_code"])],
+            },
+            ["job_guard_insert", "job_notify_insert"]),
+        new(
+            "job_payload",
+            TableClass.Tenant,
+            "Operations",
+            new Dictionary<string, IReadOnlyList<string>>
+            {
+                [Hosted] = [Insert],
+                [Admin] = [Insert],
+                [Worker] = [Select, Insert, Delete],
+                [Sealer] = [Select, Insert],
+                [Retention] = [Select],
+                [Cli] = [Insert],
+            },
+            new Dictionary<string, IReadOnlyList<ColumnGrant>>
+            {
+                // Erasing a dead job's credential.
+                [Worker] = [new ColumnGrant(Update, ["ciphertext"])],
+            }),
     ];
 
     private static IReadOnlyList<string> EventTriggers(string table) =>

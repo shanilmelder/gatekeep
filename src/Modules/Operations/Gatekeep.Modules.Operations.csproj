@@ -1,5 +1,14 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
+  <PropertyGroup>
+    <!-- The architecture tests load this assembly from its own output, so Npgsql must sit beside it. -->
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Npgsql" />
+  </ItemGroup>
+
   <ItemGroup>
     <ProjectReference Include="../../Gatekeep.Kernel/Gatekeep.Kernel.csproj" />
     <ProjectReference Include="../Authentication/Gatekeep.Modules.Authentication.csproj" />

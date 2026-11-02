@@ -83,4 +83,5 @@ flowchart TD
   TestsIsolation --> AdaptersPostgres
   TestsIsolation --> Audit
   TestsIsolation --> Cli
+  TestsIsolation --> Operations
 ```
