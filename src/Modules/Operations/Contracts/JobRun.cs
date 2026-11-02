@@ -1,6 +1,7 @@
 using Gatekeep.Kernel.Jobs;
 using Gatekeep.Kernel.Persistence;
 using Gatekeep.Kernel.Secrets;
+using Gatekeep.Modules.Operations.Core;
 
 namespace Gatekeep.Modules.Operations.Contracts;
 
@@ -21,7 +22,8 @@ public sealed class JobRun
         int attempt,
         IReadOnlyDictionary<string, Guid> ids,
         CommandContext context,
-        Func<CancellationToken, Task<Secret<byte[]>>>? decrypt)
+        Func<CancellationToken, Task<Secret<byte[]>>>? decrypt,
+        JobRunServices services)
     {
         JobId = jobId;
         Type = type;
@@ -31,6 +33,7 @@ public sealed class JobRun
         Ids = ids;
         Context = context;
         _decrypt = decrypt;
+        Services = services;
     }
 
     public Guid JobId { get; }
@@ -51,6 +54,9 @@ public sealed class JobRun
     public CommandContext Context { get; }
 
     public bool HasCredential => _decrypt is not null;
+
+    /// <summary>What Operations' own handlers need beyond the context: the run-as database and the Operation registry.</summary>
+    internal JobRunServices Services { get; }
 
     /// <summary>Decrypts the payload's credential at the moment of use (AD-10).</summary>
     /// <exception cref="InvalidOperationException">The payload has no credential.</exception>

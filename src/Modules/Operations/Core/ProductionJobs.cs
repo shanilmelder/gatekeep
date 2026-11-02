@@ -10,6 +10,10 @@ internal static class ProductionJobs
 
     public static readonly JobType Purge = new("operations.job.purge");
 
+    public static readonly JobType RunOperation = new("operations.operation.run");
+
+    public static readonly JobType RunOperationStep = new("operations.operation.step");
+
     public static readonly JobRegistry Registry = new(
     [
         new JobDefinition(
@@ -24,6 +28,26 @@ internal static class ProductionJobs
                 new DateOnly(2026, 11, 2),
                 "Touches only the control table job, deleting done rows finished more than 30 days ago. "
                 + "It takes no parameter, and no Tenant table is read or written.")),
+        new JobDefinition(
+            RunOperation,
+            JobScope.DeploymentWide,
+            enqueuingRoles: [JobRole.Admin, JobRole.Cli, JobRole.Worker],
+            runAs: JobRole.Worker,
+            maxAttempts: 5,
+            handler: OperationJobs.RunAsync,
+            review: new JobReview(
+                "Story 1.9 build review",
+                new DateOnly(2026, 11, 2),
+                "Its only parameter is the operation_id. In its own scope it reads and writes only the control "
+                + "tables operation and operation_step, running the Operation's Deployment stages. Each pending "
+                + "Tenant step fans out into one operations.operation.step job, enqueued in that Tenant's own scope.")),
+        new JobDefinition(
+            RunOperationStep,
+            JobScope.Tenant,
+            enqueuingRoles: [JobRole.Worker],
+            runAs: JobRole.Worker,
+            maxAttempts: 5,
+            handler: OperationJobs.StepAsync),
     ]);
 
     private const string DeleteDone =

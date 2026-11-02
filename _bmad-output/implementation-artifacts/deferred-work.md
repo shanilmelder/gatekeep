@@ -73,3 +73,12 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-1-8-run-tenant-scoped-jobs.md`
   summary: Give operations.job.dead a job reference, and raise the Security Alert.
   evidence: G-17.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-9-track-long-running-operations.md`
+  summary: Mark open Operation steps failed when their run or step job goes dead, so the Operation can be retried.
+  evidence: Story 1.9 review: a dead job leaves the Operation stuck active. Needed before the first production Operation type.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-9-track-long-running-operations.md`
+  summary: Order Operation stages, so Tenant deletion can purge before it removes the Tenant.
+  evidence: Story 1.9 runs stages unordered.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-9-track-long-running-operations.md`
+  summary: Restrict Operation and step status transitions and step inserts to the transitions start, retry and the Worker make.
+  evidence: Column grants let gk_admin, gk_cli and gk_worker set any status and add steps. T-46.

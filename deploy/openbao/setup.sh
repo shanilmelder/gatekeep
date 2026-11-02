@@ -79,7 +79,13 @@ until bao status > /dev/null 2>&1; do
 done
 
 # The audit device is declared in openbao.hcl. Without one, no request is recorded.
-bao audit list -format=json 2> /dev/null | grep -q '"type"' || fail "no audit device is enabled. openbao.hcl must declare one."
+# OpenBao sets up declared devices just after it unseals, so wait briefly for it.
+tries=0
+until bao audit list -format=json 2> /dev/null | grep -q '"type"'; do
+    tries=$((tries + 1))
+    [ "$tries" -lt 15 ] || fail "no audit device is enabled. openbao.hcl must declare one."
+    sleep 1
+done
 
 say "enabling Transit and AppRole."
 bao secrets enable -path=transit transit > /dev/null
