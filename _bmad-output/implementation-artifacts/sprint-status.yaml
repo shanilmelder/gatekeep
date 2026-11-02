@@ -51,7 +51,7 @@ development_status:
   1-13-generate-design-tokens-and-bundle-fonts: done
   1-14-build-shared-form-and-action-components: done
   1-15-build-data-display-components: done
-  1-16-build-overlay-and-feedback-components: backlog
+  1-16-build-overlay-and-feedback-components: done
   1-17-build-the-drawer-and-menu: backlog
   1-18-build-the-hosted-component-entry-and-screen-package: backlog
   1-19-initialise-a-deployment: backlog

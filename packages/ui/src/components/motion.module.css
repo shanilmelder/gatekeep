@@ -1,0 +1,20 @@
+/*
+ * DESIGN.md's one animation (elevation.motion, gkIn): a 6px rise and a fade, 150ms to
+ * 200ms. Modals take the long end and toasts the short one. Reduced motion removes it,
+ * with every other animation and transition, through the one rule in styles.css.
+ */
+
+.rise {
+  animation: gkIn var(--gk-motion-duration-max) var(--gk-motion-easing) both;
+}
+
+.riseQuick {
+  animation: gkIn var(--gk-motion-duration-min) var(--gk-motion-easing) both;
+}
+
+@keyframes gkIn {
+  from {
+    opacity: 0;
+    translate: 0 var(--gk-motion-rise);
+  }
+}

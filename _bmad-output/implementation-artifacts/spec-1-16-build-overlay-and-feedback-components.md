@@ -2,9 +2,10 @@
 title: 'Story 1.16: Build overlay and feedback components'
 type: 'feature'
 created: '2026-11-03'
-status: 'ready-for-dev'
+status: 'done'
+baseline_revision: '819c47bac3b67b4f6b01135b336e067a048d54df'
 review_loop_iteration: 0
-followup_review_recommended: false
+followup_review_recommended: true
 context:
   - '{project-root}/_bmad-output/planning-artifacts/ux-designs/ux-gatekeep-2026-11-01/DESIGN.md'
   - '{project-root}/_bmad-output/planning-artifacts/ux-designs/ux-gatekeep-2026-11-01/EXPERIENCE.md'
@@ -101,8 +102,8 @@ Story 1.13 also deferred a reduced-motion override for the motion tokens to this
 ## Tasks & Acceptance
 
 **Execution:**
-- [ ] `packages/ui/src/components/` -- `Modal`, `ModalProvider`, `ConfirmModal`, `OneTimeReveal`, `ToastProvider` with `useToast`, `Banner`; the shared reduced-motion rule; catalogue strings; exports.
-- [ ] `tests/browser/fixture/` and `tests/browser/overlay.spec.ts` -- every matrix row, plus axe.
+- [x] `packages/ui/src/components/` -- `Modal`, `ModalProvider`, `ConfirmModal`, `OneTimeReveal`, `ToastProvider` with `useToast`, `Banner`; the shared reduced-motion rule; catalogue strings; exports.
+- [x] `tests/browser/fixture/` and `tests/browser/overlay.spec.ts` -- every matrix row, plus axe.
 
 **Acceptance Criteria:**
 - Given a modal, when it opens, then focus is trapped, Esc and Cancel close it, focus returns to the trigger or next row, and no second modal can open over it.
@@ -114,7 +115,74 @@ Story 1.13 also deferred a reduced-motion override for the motion tokens to this
 
 ## Review Triage Log
 
+### 2026-11-02 — Review pass
+- verdicts: 47 findings — high 3, medium 23, low 19, false 2, maybe-false 0
+- findings:
+  - `[false]` `[reject]` Intent: no Admin page or Portal uses the components yet — the story builds them; pages adopt them later.
+  - `[medium]` `[patch]` Intent: sibling or mixed providers can stack modals — one registry per document, tested.
+  - `[low]` `[patch]` Intent: the 1-second banner path is untested — timer-mounted banner test added.
+  - `[medium]` `[patch]` Intent: the reduced-motion rule reaches the host page — scoped to Gatekeep surfaces.
+  - `[low]` `[reject]` Intent: the reveal value stays with the caller — the caller owns the secret; the component never renders it again, tested at the DOM.
+  - `[low]` `[patch]` Intent: Hosted toast "next action" covers click only — keyboard submit tested.
+  - `[medium]` `[patch]` Intent: a toast fired with a modal open is hidden — shown above the modal, tested.
+  - `[low]` `[patch]` Intent: the 6px rise and fade are untested — tested.
+  - `[low]` `[patch]` Intent: the destructive Confirm's outline isn't asserted — asserted.
+  - `[false]` `[reject]` Intent: hidden or disabled triggers count as gone — focus can't return to them, so the fallback is right.
+  - `[low]` `[patch]` Gap: the reveal's warning banner could become an alert unnoticed — role asserted absent.
+  - `[medium]` `[patch]` Gap: the toast `aside` placement is untested — tested with a viewport-spanning control.
+  - `[low]` `[patch]` Gap: a late banner without interaction is untested — tested.
+  - `[medium]` `[patch]` Gap: native dialog closes are untested — tested for a dismissible modal and an unticked reveal.
+  - `[low]` `[patch]` Gap: Hosted toast on form submit is untested — tested.
+  - `[low]` `[patch]` Gap: nested providers, provider-less modals and `initialFocus` are untested — tested with the registry fix.
+  - `[medium]` `[patch]` Edge: a toast sent on mount is dropped — queued.
+  - `[medium]` `[patch]` Edge: toast hidden behind an open modal — same fix as the Intent row.
+  - `[low]` `[patch]` Edge: placement measured mid-animation — measured without the offset.
+  - `[medium]` `[patch]` Edge: Esc handled by a child still closes the modal — `defaultPrevented` and composition respected.
+  - `[low]` `[patch]` Edge: disabled fieldsets and radio groups break the Tab wrap — filtered.
+  - `[medium]` `[patch]` Edge: no `checkVisibility` breaks focus handling — fallback added.
+  - `[low]` `[patch]` Edge: a refused modal's caller may keep `open` true — documented through `onClose`, and the registry fix stops a stale claim.
+  - `[medium]` `[patch]` Edge: a native close leaves the registry claimed — released.
+  - `[high]` `[patch]` Edge: a destructive confirm can be cancelled while its action runs — non-dismissible while pending, tested.
+  - `[low]` `[patch]` Edge: an empty `confirmText` enables Confirm — treated as none, with an error.
+  - `[medium]` `[patch]` Edge: a changed `confirmText` keeps the old typed value — reset.
+  - `[high]` `[patch]` Edge: a new secret while open keeps "copied" ticked, allowing Close before copying — reset on change.
+  - `[low]` `[patch]` Edge: a banner's tone change may not be announced — keyed by tone.
+  - `[medium]` `[patch]` Edge: the reduced-motion rule hits host-page elements — same fix as the Intent row.
+  - `[low]` `[reject]` Edge (deletion): consumers without `styles.css` lose reduced motion — `styles.css` is required for fonts, tokens and focus, so every consumer loads it.
+  - `[medium]` `[patch]` Edge (claim): sibling providers stack modals — same fix as the Intent row.
+  - `[medium]` `[patch]` Edge (claim): a spent secret shows again after A, null, A — spent until a different value.
+  - `[medium]` `[patch]` Blind: sibling or mixed providers stack modals — same fix.
+  - `[medium]` `[patch]` Blind: Esc ignores `defaultPrevented` — same fix as the Edge row.
+  - `[high]` `[patch]` Blind: ConfirmModal cancellable while pending — same fix as the Edge row.
+  - `[low]` `[patch]` Blind: the typed field's default label duplicates the button's — distinct catalogue label.
+  - `[medium]` `[patch]` Blind: Enter in the typed field does nothing — the body is a guarded form.
+  - `[medium]` `[patch]` Blind: global reduced-motion rule — same fix as the Intent row.
+  - `[medium]` `[patch]` Blind: pending spinners lose their motion cue — spinner keeps a slow rotation under reduced motion again.
+  - `[medium]` `[patch]` Blind: toasts hidden while a modal is open — same fix.
+  - `[medium]` `[patch]` Blind: the footer scrolls away on a short screen — the body scrolls, header and footer pinned, tested at 360px.
+  - `[medium]` `[patch]` Blind: `checkVisibility` unguarded — same fix as the Edge row.
+  - `[low]` `[patch]` Blind: a news info banner is never announced — `role="status"`.
+  - `[medium]` `[patch]` Blind: focus return fails where clicks don't focus — trigger recorded from the pointer target.
+  - `[low]` `[patch]` Blind: untested behaviours and a hard-coded `TOAST_MS` — tests added, constant imported; forced colours left as low value.
+  - `[low]` `[reject]` Blind: "next action" is too broad or too narrow on Hosted — any click or submit ends a status that stays "until the next action"; keyboard submit is now tested, and other keys don't count as acting.
+
 ## Verification
 
 **Commands:**
 - `docker compose -f deploy/compose.test.yaml run --rm --build tests` -- expected: build with no warnings; all checks and browser tests pass; Architecture and Isolation pass.
+
+## Auto Run Result
+
+Status: done
+
+**Summary:** `packages/ui` gains Modal and ModalProvider (one per document), ConfirmModal with typed confirmation, OneTimeReveal, ToastProvider with `useToast`, and Banner. A shared reduced-motion rule, scoped to Gatekeep surfaces, removes their motion. A `?page=overlay` fixture and Playwright tests cover every behaviour, with axe in light and dark.
+
+**Files:** `packages/ui/src/components/` (Modal, ConfirmModal, OneTimeReveal, Toast, Banner, CSS Modules), `styles.css`, `messages.tsx`, the entry points, `Button.module.css`; `tests/browser/fixture/src/OverlayFixture.tsx`, `main.tsx`, `tests/browser/overlay.spec.ts`, `controls.spec.ts`, `data.spec.ts`, `playwright.config.ts`.
+
+**Review:** 47 findings across four layers: 42 patched, 0 deferred, 5 rejected, each with its reason in the triage log.
+
+**Follow-up review:** recommended. Two high findings (cancelling a running destructive action, and Close before copying a new secret) were patched, and only the new browser tests prove them.
+
+**Verification:** see the PR screenshot; the full suite passes in the `tests` container.
+
+**Residual risks:** behaviour is tested in Chromium only. The re-authentication slot is empty until Story 1.26.

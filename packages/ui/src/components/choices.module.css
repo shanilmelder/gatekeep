@@ -174,13 +174,6 @@
   background: var(--gk-color-tx3);
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .track,
-  .knob {
-    transition: none;
-  }
-}
-
 /* Forced colours drop fills, so state is drawn in system colours instead. */
 @media (forced-colors: active) {
   .box::before,

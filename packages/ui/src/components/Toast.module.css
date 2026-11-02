@@ -1,0 +1,82 @@
+/*
+ * The toast (DESIGN.md, components.toast): inverted, tx with bg text, radius card, shadow
+ * sh, with an ac check (a recorded decorative contrast exception). It floats at the bottom
+ * centre, or at the top when the focused control is under it. "aside" keeps it in the
+ * status region for assistive technology only, when both places would cover that control.
+ */
+
+/*
+ * A manual popover, so the region is in the top layer, above app chrome and an open modal.
+ * Where popovers aren't supported, the z-index keeps it above anything an app stacks: the
+ * highest 32-bit value, documented here as the toast's one layer.
+ */
+.region {
+  position: fixed;
+  inset: auto 0 var(--gk-space-24) 0;
+  z-index: 2147483647;
+  display: flex;
+  justify-content: center;
+  box-sizing: border-box;
+  width: auto;
+  height: auto;
+  margin: 0;
+  border: 0;
+  padding: 0 var(--gk-space-16);
+  overflow: visible;
+  background: transparent;
+  color: inherit;
+  pointer-events: none;
+}
+
+.region[data-placement='top'] {
+  top: var(--gk-space-24);
+  bottom: auto;
+}
+
+.toast {
+  display: flex;
+  align-items: center;
+  gap: var(--gk-space-8);
+  box-sizing: border-box;
+  max-width: 100%;
+  padding: var(--gk-space-8) var(--gk-space-12);
+  border-radius: var(--gk-toast-radius);
+  background: var(--gk-toast-background);
+  color: var(--gk-toast-foreground);
+  box-shadow: var(--gk-toast-shadow);
+  font: var(--gk-font-body);
+  pointer-events: auto;
+}
+
+.region[data-placement='aside'] .toast {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.check {
+  flex: none;
+  width: var(--gk-space-16);
+  height: var(--gk-space-16);
+  fill: none;
+  stroke: var(--gk-color-ac);
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.message {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+@media (forced-colors: active) {
+  .toast {
+    border: 1px solid CanvasText;
+  }
+}

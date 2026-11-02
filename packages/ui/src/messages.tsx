@@ -53,6 +53,24 @@ export interface Messages {
   permission: string;
   /** What a JSON viewer shows for a value JSON can't represent. It never repeats the value. */
   jsonUnavailable: string;
+  /** A modal's Cancel. Closes it and confirms nothing. */
+  cancel: string;
+  /** A confirm modal's Confirm, when the caller names no action. */
+  confirm: string;
+  /** A one-time reveal's Close. */
+  close: string;
+  /** Typed confirmation's helper, naming what to type. Placeholder: {value}. */
+  typeToConfirm: string;
+  /** Typed confirmation's field label, when the caller gives none. */
+  typeToConfirmLabel: string;
+  /** A one-time reveal's warning that the value is shown only this once. */
+  revealWarning: string;
+  /** A one-time reveal's acknowledgement checkbox. */
+  revealAcknowledge: string;
+  /** Why a one-time reveal's Close is disabled. Keep it naming `revealAcknowledge`. */
+  revealCloseHint: string;
+  /** What a one-time reveal shows once its value has been closed. It never repeats the value. */
+  revealGone: string;
 }
 
 export const defaultMessages: Readonly<Messages> = Object.freeze({
@@ -83,6 +101,15 @@ export const defaultMessages: Readonly<Messages> = Object.freeze({
   copiedNamed: 'Copied {what}',
   permission: 'Permission',
   jsonUnavailable: "This value can't be shown as JSON.",
+  cancel: 'Cancel',
+  confirm: 'Confirm',
+  close: 'Close',
+  typeToConfirm: 'Type {value} to confirm.',
+  typeToConfirmLabel: 'Type to confirm',
+  revealWarning: "This is the only time it's shown. Copy it now and store it somewhere safe.",
+  revealAcknowledge: "I've copied this",
+  revealCloseHint: "Tick \"I've copied this\" to close.",
+  revealGone: "This value can't be shown again. Create a new one if you need it.",
 });
 
 /**

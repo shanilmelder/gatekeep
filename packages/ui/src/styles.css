@@ -50,3 +50,20 @@ body {
     outline-color: Highlight;
   }
 }
+
+/*
+ * Reduced motion removes every animation and transition inside a data-gk-surface subtree,
+ * modal, toast and toggle alike, here and nowhere else (EXPERIENCE.md, Reflow and motion).
+ * Only motion marked data-gk-motion="essential" keeps going, slowed by its own rule: the
+ * pending spinner, a button's only cue that work is under way. State never depends on an
+ * animation ending, so nothing waits on a missing animationend.
+ */
+@media (prefers-reduced-motion: reduce) {
+  :where([data-gk-surface], [data-gk-surface] *):not([data-gk-motion='essential']),
+  :where([data-gk-surface], [data-gk-surface] *)::before,
+  :where([data-gk-surface], [data-gk-surface] *)::after,
+  :where([data-gk-surface], [data-gk-surface] *)::backdrop {
+    animation: none !important;
+    transition: none !important;
+  }
+}

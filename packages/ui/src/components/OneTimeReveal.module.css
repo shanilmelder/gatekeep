@@ -1,0 +1,20 @@
+/* The one-time reveal's value: code type on sf2 beside its Copy control (DESIGN.md). Long values wrap; on a phone Copy drops below. */
+
+.value {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--gk-space-8);
+  padding: var(--gk-space-8) var(--gk-space-12);
+  border: 1px solid var(--gk-color-bd);
+  border-radius: var(--gk-radius-control);
+  background: var(--gk-color-sf2);
+}
+
+.code {
+  flex: 1;
+  min-width: 0;
+  font: var(--gk-font-code);
+  color: var(--gk-color-tx);
+  overflow-wrap: anywhere;
+}

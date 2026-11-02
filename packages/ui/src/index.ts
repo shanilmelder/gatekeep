@@ -30,6 +30,10 @@ export {
 export { CodeBlock, type CodeBlockProps } from './components/CodeBlock';
 export { COPIED_MS, CopyButton, type CopyButtonProps } from './components/CopyButton';
 
+// The feedback the Account Portal uses too (Story 1.16): toast and banner.
+export { Banner, type BannerAction, type BannerProps, type BannerTone } from './components/Banner';
+export { TOAST_MS, ToastProvider, useToast, type Toast, type ToastProviderProps } from './components/Toast';
+
 export {
   MessagesProvider,
   defaultMessages,
