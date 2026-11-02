@@ -12,6 +12,15 @@ public static class AuditContract
     /// <summary>The chain sealer (AD-16). It must run as <c>gk_sealer</c>, the only role that may set seal columns.</summary>
     public static IAuditSealer CreateSealer() => new AuditSealer();
 
+    /// <summary>Retention cuts and purges (AD-16). It must run as <c>gk_retention</c>, the only role that may delete events.</summary>
+    public static IAuditRetention CreateRetention() => new AuditRetention();
+
+    /// <summary>The chain verifier (AD-16, FR-40). It only reads: <c>gk_cli</c> runs it.</summary>
+    public static IAuditVerifier CreateVerifier() => new AuditVerifier();
+
+    /// <summary>The type code of the event a retention cut writes. Only <c>gk_retention</c> can insert one.</summary>
+    public static string CheckpointTypeCode => AuditRetention.CheckpointType;
+
     /// <summary>
     /// RFC 8785 JSON for one flat object of string, integer and null values.
     /// </summary>

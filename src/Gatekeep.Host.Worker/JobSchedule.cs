@@ -13,5 +13,7 @@ internal static class JobSchedule
     public static readonly IReadOnlyList<ScheduleEntry> Entries =
     [
         new(OperationsContract.PurgeJobs, TimeSpan.FromDays(1)),
+        new(OperationsContract.SweepRetention, TimeSpan.FromDays(1)),
+        new(OperationsContract.DeploymentRetention, TimeSpan.FromDays(1)),
     ];
 }

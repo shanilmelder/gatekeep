@@ -20,9 +20,30 @@ public static class OperationsContract
     /// <summary>Runs one Tenant step of an Operation in that Tenant's own scope.</summary>
     public static JobType RunOperationStep => ProductionJobs.RunOperationStep;
 
+    /// <summary>Fans out one <c>audit.retention.apply</c> job per Tenant (AD-16). Scheduled daily.</summary>
+    public static JobType SweepRetention => ProductionJobs.SweepRetention;
+
+    /// <summary>Applies retention to one Tenant's chain, as <c>gk_retention</c>.</summary>
+    public static JobType ApplyRetention => ProductionJobs.ApplyRetention;
+
+    /// <summary>Applies retention to the Deployment chain, as <c>gk_retention</c>. Scheduled daily.</summary>
+    public static JobType DeploymentRetention => ProductionJobs.DeploymentRetention;
+
+    /// <summary>Deletes one Tenant's whole chain once its retention has ended, as <c>gk_retention</c>.</summary>
+    public static JobType PurgeChain => ProductionJobs.PurgeChain;
+
     /// <summary>
-    /// The code-owned production Operation types. None exists yet: Tenant creation and deletion
-    /// arrive in their own stories.
+    /// The Operation that purges a deleted Tenant's audit chain once its retention ends. Its
+    /// future caller, Tenant deletion, starts it with one <see cref="PurgeChainStage"/> step for the Tenant.
+    /// </summary>
+    public static OperationType PurgeChainOperation => AuditRetentionJobs.PurgeOperation;
+
+    /// <summary>The purge Operation's one Tenant stage, which enqueues <see cref="PurgeChain"/>.</summary>
+    public static OperationCode PurgeChainStage => AuditRetentionJobs.PurgeStage;
+
+    /// <summary>
+    /// The code-owned production Operation types: <see cref="PurgeChainOperation"/> so far.
+    /// Tenant creation and deletion arrive in their own stories.
     /// </summary>
     public static OperationRegistry ProductionOperationRegistry => ProductionOperations.Registry;
 

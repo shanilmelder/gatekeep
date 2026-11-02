@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using Gatekeep.Adapters.Postgres;
 using Gatekeep.Adapters.Postgres.Schema;
 using Xunit;
@@ -8,8 +7,6 @@ namespace Gatekeep.Tests.Isolation;
 /// <summary>Runs the real <c>gatekeep migrate</c> command in its own process.</summary>
 public sealed class MigrateCommandTests(PostgresFixture postgres) : IDisposable
 {
-    private static readonly TimeSpan CommandTimeout = TimeSpan.FromMinutes(1);
-
     private readonly string _directory = Directory.CreateTempSubdirectory("gatekeep-migrate-").FullName;
 
     [Fact]
@@ -20,7 +17,7 @@ public sealed class MigrateCommandTests(PostgresFixture postgres) : IDisposable
 
         var first = await MigrateAsync(file);
         Assert.True(first.ExitCode == 0, first.Output);
-        Assert.Contains("Applied 5 migration(s).", first.Output);
+        Assert.Contains("Applied 6 migration(s).", first.Output);
 
         var second = await MigrateAsync(file);
         Assert.True(second.ExitCode == 0, second.Output);
@@ -28,7 +25,7 @@ public sealed class MigrateCommandTests(PostgresFixture postgres) : IDisposable
 
         var applied = await PostgresFixture.ScalarAsync<long>(
             postgres.SuperuserConnection(database), $"SELECT count(*) FROM {GatekeepMigrator.HistoryTable}");
-        Assert.Equal(5, applied);
+        Assert.Equal(6, applied);
     }
 
     [Fact]
@@ -43,7 +40,7 @@ public sealed class MigrateCommandTests(PostgresFixture postgres) : IDisposable
             "migrate", "--connection-file", ConnectionFile(connection), "--password-file", ConnectionFile(PostgresFixture.Password + "\n"));
 
         Assert.True(result.ExitCode == 0, result.Output);
-        Assert.Contains("Applied 5 migration(s).", result.Output);
+        Assert.Contains("Applied 6 migration(s).", result.Output);
         Assert.DoesNotContain(PostgresFixture.Password, result.Output);
     }
 
@@ -78,7 +75,7 @@ public sealed class MigrateCommandTests(PostgresFixture postgres) : IDisposable
             "migrate");
 
         Assert.True(result.ExitCode == 0, result.Output);
-        Assert.Contains("Applied 5 migration(s).", result.Output);
+        Assert.Contains("Applied 6 migration(s).", result.Output);
     }
 
     [Fact]
@@ -198,47 +195,10 @@ public sealed class MigrateCommandTests(PostgresFixture postgres) : IDisposable
         RunAsync("migrate", "--connection-file", file);
 
     private static Task<(int ExitCode, string Output)> RunAsync(params string[] arguments) =>
-        RunWithEnvironmentAsync(new Dictionary<string, string>(), arguments);
+        CliProcess.RunAsync(arguments);
 
-    private static async Task<(int ExitCode, string Output)> RunWithEnvironmentAsync(
+    private static Task<(int ExitCode, string Output)> RunWithEnvironmentAsync(
         IReadOnlyDictionary<string, string> environment,
-        params string[] arguments)
-    {
-        var host = Environment.GetEnvironmentVariable("DOTNET_HOST_PATH");
-        var start = new ProcessStartInfo(string.IsNullOrEmpty(host) ? "dotnet" : host)
-        {
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-        };
-
-        start.Environment.Remove("GATEKEEP_MIGRATE_CONNECTION_FILE");
-        start.Environment.Remove("GATEKEEP_MIGRATE_PASSWORD_FILE");
-        foreach (var (name, value) in environment)
-        {
-            start.Environment[name] = value;
-        }
-
-        start.ArgumentList.Add(BuildOutput.AssemblyPath("Gatekeep.Cli", "gatekeep"));
-        foreach (var argument in arguments)
-        {
-            start.ArgumentList.Add(argument);
-        }
-
-        using var process = Process.Start(start)!;
-        using var timeout = new CancellationTokenSource(CommandTimeout);
-
-        try
-        {
-            var standardOutput = process.StandardOutput.ReadToEndAsync(timeout.Token);
-            var standardError = process.StandardError.ReadToEndAsync(timeout.Token);
-            await process.WaitForExitAsync(timeout.Token);
-
-            return (process.ExitCode, await standardOutput + await standardError);
-        }
-        catch (OperationCanceledException)
-        {
-            process.Kill(entireProcessTree: true);
-            throw;
-        }
-    }
+        params string[] arguments) =>
+        CliProcess.RunWithEnvironmentAsync(environment, arguments);
 }

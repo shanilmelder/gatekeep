@@ -14,6 +14,14 @@ internal static class ProductionJobs
 
     public static readonly JobType RunOperationStep = new("operations.operation.step");
 
+    public static readonly JobType SweepRetention = new("audit.retention.sweep");
+
+    public static readonly JobType ApplyRetention = new("audit.retention.apply");
+
+    public static readonly JobType DeploymentRetention = new("audit.retention.deployment");
+
+    public static readonly JobType PurgeChain = new("audit.chain.purge");
+
     public static readonly JobRegistry Registry = new(
     [
         new JobDefinition(
@@ -48,6 +56,46 @@ internal static class ProductionJobs
             runAs: JobRole.Worker,
             maxAttempts: 5,
             handler: OperationJobs.StepAsync),
+        new JobDefinition(
+            SweepRetention,
+            JobScope.DeploymentWide,
+            enqueuingRoles: [JobRole.Worker],
+            runAs: JobRole.Worker,
+            maxAttempts: 5,
+            handler: AuditRetentionJobs.SweepAsync,
+            review: new JobReview(
+                "Story 7.3 build review",
+                new DateOnly(2026, 11, 2),
+                "Takes no parameter. In its own scope it reads only tenant IDs and the job table. For each Tenant "
+                + "it enqueues one audit.retention.apply job in that Tenant's own scope, unless one is already "
+                + "waiting there. It deletes nothing: the apply job does, as gk_retention.")),
+        new JobDefinition(
+            ApplyRetention,
+            JobScope.Tenant,
+            enqueuingRoles: [JobRole.Worker],
+            runAs: JobRole.Retention,
+            maxAttempts: 5,
+            handler: AuditRetentionJobs.ApplyAsync),
+        new JobDefinition(
+            DeploymentRetention,
+            JobScope.DeploymentWide,
+            enqueuingRoles: [JobRole.Worker],
+            runAs: JobRole.Retention,
+            maxAttempts: 5,
+            handler: AuditRetentionJobs.ApplyAsync,
+            review: new JobReview(
+                "Story 7.3 build review",
+                new DateOnly(2026, 11, 2),
+                "Takes no parameter. As gk_retention, under the chain's seal lock, it deletes only the Deployment "
+                + "chain's sealed prefix older than the fixed 90-day period, never its head, with that prefix's "
+                + "detail, and writes one checkpoint event. It reads and writes no Tenant table.")),
+        new JobDefinition(
+            PurgeChain,
+            JobScope.Tenant,
+            enqueuingRoles: [JobRole.Worker],
+            runAs: JobRole.Retention,
+            maxAttempts: 20,
+            handler: AuditRetentionJobs.PurgeAsync),
     ]);
 
     private const string DeleteDone =

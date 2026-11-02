@@ -141,7 +141,7 @@ development_status:
   epic-7: in-progress
   7-1-seal-audit-events-into-hash-chains: done
   7-2-copy-evidence-off-the-server: backlog
-  7-3-verify-chains-and-apply-retention: backlog
+  7-3-verify-chains-and-apply-retention: done
   7-4-search-a-tenant-s-logs: backlog
   7-5-open-an-event-s-raw-detail: backlog
   7-6-view-a-user-s-history: backlog

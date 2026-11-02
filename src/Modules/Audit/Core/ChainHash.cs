@@ -18,7 +18,7 @@ internal static class ChainHash
     {
         ArgumentNullException.ThrowIfNull(envelope);
 
-        return CanonicalJson.Write(
+        List<KeyValuePair<string, object?>> members =
         [
             new("actor_id", Text(envelope.ActorId)),
             new("actor_kind", envelope.ActorKind),
@@ -30,7 +30,25 @@ internal static class ChainHash
             new("target_kind", envelope.TargetKind),
             new("tenant_id", Text(envelope.TenantId)),
             new("type_code", envelope.TypeCode),
-        ]);
+        ];
+
+        // Written only when set, so an ordinary row's envelope stays exactly the ten members above.
+        if (envelope.CheckpointEpoch is { } checkpointEpoch)
+        {
+            members.Add(new("checkpoint_epoch", checkpointEpoch));
+        }
+
+        if (envelope.CheckpointSeq is { } checkpointSeq)
+        {
+            members.Add(new("checkpoint_seq", checkpointSeq));
+        }
+
+        if (envelope.CheckpointHash is { } checkpointHash)
+        {
+            members.Add(new("checkpoint_hash", Convert.ToHexStringLower(checkpointHash)));
+        }
+
+        return CanonicalJson.Write(members);
     }
 
     public static byte[] Compute(byte[]? previousHash, ChainEnvelope envelope)

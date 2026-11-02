@@ -76,6 +76,23 @@ The secrets directory is `deploy/secrets` unless `GATEKEEP_SECRETS_DIR` says oth
     docker compose -f deploy/compose.yaml ps -a
     ```
 
+## Verifying the audit chains
+
+`gatekeep audit verify` walks every audit chain, the Deployment's and each Tenant's, as `gk_cli`, which can only read them. It checks that no row is missing, that each row links to the one before and that each hash recomputes. It prints one line per problem, naming the chain (a Tenant ID or `deployment`), the epoch and the `seq`, never a row's content, then a count, and exits `1` on any problem and `0` when every chain verifies:
+
+```sh
+docker compose -f deploy/compose.yaml run --rm cli audit verify
+```
+
+```text
+chain deployment: seq 1-2: missing (no checkpoint names seq 2)
+verified 4 chains, 1,203 sealed rows, 1 problem
+```
+
+The `cli` service supplies its own connection and password files. A row sealed in the last second or so isn't walked yet. The range the daily retention job removed is accounted for by the checkpoint it writes, sealed or not yet.
+
+Audit events are kept for 90 days. Retention runs daily in `Host.Worker` and deletes only older, sealed events. The period is fixed in the release, and no setting, route or command changes it.
+
 ## Hostnames and TLS
 
 Caddy is the only way in (AD-2, AD-26). It serves two sites and refuses everything else:
@@ -179,6 +196,8 @@ The steps above build every image from source. To run a published release instea
 Caddy keeps its `edge` network, and `release-verify` alone gets egress besides, on a `registry` network that exists only in the overlay. The pinned key is mounted into `release-verify` alone, read-only. Moving an existing Deployment to a new release is `gatekeep upgrade` (Story 12.6), which isn't built yet.
 
 ## Changing a database password
+
+An install made before `gatekeep audit verify` existed has no `gk_cli` password: run step 5's `passwords` again, which writes only the missing one, then recreate the stack.
 
 Change the password file in `postgres/`, then recreate the stack. `postgres-passwords` runs on every `up` and sets every role's password from its file before any host starts, so a changed or restored file can't drift from the database, and the recreated hosts read the new file.
 

@@ -20,11 +20,11 @@ flowchart TD
   HostWorker[Host.Worker]
   Operations[Operations]
   Cli[Cli]
+  Audit[Audit]
   AdaptersPostgres[Adapters.Postgres]
   Directory[Directory]
   Keys[Keys]
   Notifications[Notifications]
-  Audit[Audit]
   AdaptersOpenBao[Adapters.OpenBao]
   TestsIsolation[Tests.Isolation]
   HostHosted --> Protocol
@@ -43,6 +43,7 @@ flowchart TD
   HostWorker --> AdaptersHosting
   Cli --> Operations
   Cli --> Admins
+  Cli --> Audit
   Cli --> AdaptersPostgres
   Protocol --> Authentication
   Protocol --> Directory

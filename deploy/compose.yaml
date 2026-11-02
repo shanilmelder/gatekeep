@@ -99,6 +99,7 @@ services:
       - gk_dispatch_password
       - gk_sealer_password
       - gk_retention_password
+      - gk_cli_password
     volumes:
       - postgres-data:/var/lib/postgresql
       - ./postgres/roles.sql:/docker-entrypoint-initdb.d/10-roles.sql:ro
@@ -277,7 +278,8 @@ services:
       retries: 12
 
   # gatekeep, run on demand: docker compose -f deploy/compose.yaml run --rm cli <command>.
-  # A bare `migrate` takes its connection and password files from the environment below.
+  # A bare `migrate` (as gk_migrator) and a bare `audit verify` (as gk_cli) take their
+  # connection and password files from the environment below.
   cli:
     build:
       context: ..
@@ -291,14 +293,18 @@ services:
     environment:
       GATEKEEP_MIGRATE_CONNECTION_FILE: /gatekeep/migrator.connection
       GATEKEEP_MIGRATE_PASSWORD_FILE: /run/secrets/gk_migrator_password
+      GATEKEEP_CLI_CONNECTION_FILE: /gatekeep/cli.connection
+      GATEKEEP_CLI_PASSWORD_FILE: /run/secrets/gk_cli_password
     secrets:
       - gk_migrator_password
+      - gk_cli_password
       - source: openbao_cli_role_id
         target: openbao_role_id
       - source: openbao_cli_secret_id
         target: openbao_secret_id
     volumes:
       - ./postgres/migrator.connection:/gatekeep/migrator.connection:ro
+      - ./postgres/cli.connection:/gatekeep/cli.connection:ro
       - openbao-socket:/run/openbao:ro
     networks: [tools]
     depends_on:
@@ -363,6 +369,8 @@ secrets:
     file: ${GATEKEEP_SECRETS_DIR:-./secrets}/postgres/gk_sealer_password
   gk_retention_password:
     file: ${GATEKEEP_SECRETS_DIR:-./secrets}/postgres/gk_retention_password
+  gk_cli_password:
+    file: ${GATEKEEP_SECRETS_DIR:-./secrets}/postgres/gk_cli_password
   openbao_hosted_role_id:
     file: ${GATEKEEP_SECRETS_DIR:-./secrets}/approle/host-hosted/role-id
   openbao_hosted_secret_id:
