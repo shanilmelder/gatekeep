@@ -189,7 +189,7 @@ public sealed class VerifyTests(PostgresFixture postgres)
         await chains.SuperuserAsync(
             $"""
             SET session_replication_role = replica;
-            UPDATE audit_event SET {assignment} WHERE tenant_id = '{TenantA}' AND type_code = '{AuditContract.CheckpointTypeCode}';
+            UPDATE audit_event SET {assignment} WHERE tenant_id = '{TenantA}' AND type_code = '{AuditEvents.RetentionCheckpoint.Code.Value}';
             """);
 
         var report = await chains.VerifyAsync(TenantA);
@@ -308,7 +308,7 @@ public sealed class VerifyTests(PostgresFixture postgres)
             command.CommandText =
                 $"""
                 INSERT INTO audit_event (tenant_id, id, type_code, actor_kind, checkpoint_epoch, checkpoint_seq, checkpoint_hash)
-                VALUES ('{TenantA}', gen_random_uuid(), '{AuditContract.CheckpointTypeCode}', 'system', 1, 2, '\x01')
+                VALUES ('{TenantA}', gen_random_uuid(), '{AuditEvents.RetentionCheckpoint.Code.Value}', 'system', 1, 2, '\x01')
                 """;
             return await command.ExecuteNonQueryAsync(Cancellation);
         }));
@@ -331,7 +331,7 @@ public sealed class VerifyTests(PostgresFixture postgres)
             command.CommandText =
                 $"""
                 INSERT INTO deployment_audit_event (id, type_code, actor_kind, checkpoint_epoch, checkpoint_seq, checkpoint_hash)
-                VALUES (gen_random_uuid(), '{AuditContract.CheckpointTypeCode}', 'system', 1, 2, '\x01')
+                VALUES (gen_random_uuid(), '{AuditEvents.RetentionCheckpoint.Code.Value}', 'system', 1, 2, '\x01')
                 """;
             return await command.ExecuteNonQueryAsync(Cancellation);
         }));

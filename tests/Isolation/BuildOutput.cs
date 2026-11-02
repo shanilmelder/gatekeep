@@ -7,7 +7,8 @@ namespace Gatekeep.Tests.Isolation;
 /// </summary>
 internal static class BuildOutput
 {
-    public static string AssemblyPath(string project, string assembly)
+    /// <summary>The folder holding <c>Gatekeep.slnx</c>, above this test's output.</summary>
+    public static string RepositoryRoot()
     {
         var root = new DirectoryInfo(AppContext.BaseDirectory);
         while (!File.Exists(Path.Combine(root.FullName, "Gatekeep.slnx")))
@@ -15,10 +16,17 @@ internal static class BuildOutput
             root = root.Parent ?? throw new InvalidOperationException("No Gatekeep.slnx above the test output.");
         }
 
+        return root.FullName;
+    }
+
+    public static string AssemblyPath(string project, string assembly)
+    {
+        var root = RepositoryRoot();
+
         var output = Path.GetRelativePath(
-            Path.Combine(root.FullName, "tests/Isolation"),
+            Path.Combine(root, "tests/Isolation"),
             AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
 
-        return Path.Combine(root.FullName, "src", project, output, $"{assembly}.dll");
+        return Path.Combine(root, "src", project, output, $"{assembly}.dll");
     }
 }
