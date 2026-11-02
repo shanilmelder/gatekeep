@@ -9,12 +9,20 @@ public enum TableClass
     Control,
 }
 
-/// <summary>One table: its class, its one owning module and every privilege per role.</summary>
+/// <summary>One privilege on named columns only.</summary>
+public sealed record ColumnGrant(string Privilege, IReadOnlyList<string> Columns);
+
+/// <summary>
+/// One table: its class, its one owning module, every privilege per role, on the table
+/// and per column, and the triggers it must have.
+/// </summary>
 public sealed record TableEntry(
     string Name,
     TableClass Class,
     string Owner,
-    IReadOnlyDictionary<string, IReadOnlyList<string>> Grants);
+    IReadOnlyDictionary<string, IReadOnlyList<string>> Grants,
+    IReadOnlyDictionary<string, IReadOnlyList<ColumnGrant>>? ColumnGrants = null,
+    IReadOnlyList<string>? Triggers = null);
 
 /// <summary>
 /// The AD-3 and AD-27 source of truth. A table not listed here, or a privilege
@@ -38,6 +46,13 @@ public static class TableRegistry
     private const string Select = "SELECT";
     private const string Insert = "INSERT";
     private const string Update = "UPDATE";
+    private const string Delete = "DELETE";
+
+    private static readonly IReadOnlyDictionary<string, IReadOnlyList<ColumnGrant>> SealColumns =
+        new Dictionary<string, IReadOnlyList<ColumnGrant>>
+        {
+            [Sealer] = [new ColumnGrant(Update, ["seq", "prev_hash", "hash"])],
+        };
 
     public static readonly IReadOnlyList<TableEntry> Tables =
     [
@@ -61,5 +76,65 @@ public static class TableRegistry
             [Worker] = [Select],
         }),
         new("migration_history", TableClass.Control, "Operations", new Dictionary<string, IReadOnlyList<string>>()),
+        new(
+            "audit_event",
+            TableClass.Tenant,
+            "Audit",
+            new Dictionary<string, IReadOnlyList<string>>
+            {
+                [Hosted] = [Insert],
+                [Admin] = [Select, Insert],
+                [Worker] = [Select, Insert],
+                [Sealer] = [Select],
+                [Retention] = [Select, Insert, Delete],
+                [Cli] = [Select, Insert],
+            },
+            SealColumns,
+            EventTriggers("audit_event")),
+        new(
+            "audit_detail",
+            TableClass.Tenant,
+            "Audit",
+            new Dictionary<string, IReadOnlyList<string>>
+            {
+                [Hosted] = [Insert],
+                [Admin] = [Select, Insert],
+                [Worker] = [Select, Insert, Delete],
+                [Retention] = [Select, Delete],
+                [Cli] = [Select, Insert],
+            },
+            Triggers: DetailTriggers("audit_detail")),
+        new(
+            "deployment_audit_event",
+            TableClass.Control,
+            "Audit",
+            new Dictionary<string, IReadOnlyList<string>>
+            {
+                [Admin] = [Select, Insert],
+                [Worker] = [Select, Insert],
+                [Sealer] = [Select],
+                [Retention] = [Select, Insert, Delete],
+                [Cli] = [Select, Insert],
+            },
+            SealColumns,
+            EventTriggers("deployment_audit_event")),
+        new(
+            "deployment_audit_detail",
+            TableClass.Control,
+            "Audit",
+            new Dictionary<string, IReadOnlyList<string>>
+            {
+                [Admin] = [Select, Insert],
+                [Worker] = [Select, Insert, Delete],
+                [Retention] = [Select, Delete],
+                [Cli] = [Select, Insert],
+            },
+            Triggers: DetailTriggers("deployment_audit_detail")),
     ];
+
+    private static IReadOnlyList<string> EventTriggers(string table) =>
+        [$"{table}_guard_insert", .. DetailTriggers(table)];
+
+    private static IReadOnlyList<string> DetailTriggers(string table) =>
+        [$"{table}_guard_update", $"{table}_guard_delete", $"{table}_refuse_truncate"];
 }

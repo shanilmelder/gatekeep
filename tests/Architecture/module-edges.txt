@@ -61,4 +61,5 @@ dependency Sessions -> Tenancy
 dependency Notifications -> Tenancy
 dependency Admins -> Notifications
 dependency Tests.Isolation -> Adapters.Postgres
+dependency Tests.Isolation -> Audit
 dependency Tests.Isolation -> Cli

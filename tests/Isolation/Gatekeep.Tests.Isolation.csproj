@@ -22,6 +22,7 @@
     <ProjectReference Include="../../src/Gatekeep.Kernel/Gatekeep.Kernel.csproj" />
     <ProjectReference Include="../../src/Adapters/Postgres/Gatekeep.Adapters.Postgres.csproj" />
     <ProjectReference Include="../../src/Gatekeep.Cli/Gatekeep.Cli.csproj" />
+    <ProjectReference Include="../../src/Modules/Audit/Gatekeep.Modules.Audit.csproj" />
   </ItemGroup>
 
 </Project>

@@ -37,3 +37,9 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-1-4-enforce-tenant-isolation-in-the-database.md`
   summary: Audit function ACLs, `SECURITY DEFINER` and `pg_default_acl` in the catalogue test.
   evidence: None exist yet, but triggers in Stories 1.8 and 7.1 add functions, and `PUBLIC` can execute new functions by default.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-5-write-an-audit-event-with-every-state-change.md`
+  summary: Add a rule that fails a state-changing handler which does not call `IAuditAppender`.
+  evidence: No production command exists until Story 1.21, so the AD-5 rule for every state change is neither enforced nor tested.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-5-write-an-audit-event-with-every-state-change.md`
+  summary: Add `DeploymentScope`, `FailureContext` and `gk_retention` `DELETE` on detail tables to the spine (AD-4, AD-16, AD-28).
+  evidence: The spine names none of them, and AD-16 gives detail deletion only to `gk_worker`, though `ON DELETE RESTRICT` needs it for range deletion.

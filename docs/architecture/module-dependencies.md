@@ -74,5 +74,6 @@ flowchart TD
   Notifications --> Tenancy
   Admins --> Notifications
   TestsIsolation --> AdaptersPostgres
+  TestsIsolation --> Audit
   TestsIsolation --> Cli
 ```

@@ -5,24 +5,23 @@ namespace Gatekeep.Kernel.Persistence;
 /// <summary>
 /// The only way to reach <c>tenant</c> tables (AD-4). One scope is one transaction
 /// for one Tenant. The setting is transaction-local, so it ends with the scope.
-/// Disposing a scope that wasn't committed rolls it back.
 /// </summary>
-public sealed class TenantScope : IAsyncDisposable
+public sealed class TenantScope : CommandScope
 {
     private const string SetTenant = "SELECT set_config('gatekeep.tenant_id', @tenant_id, true)";
 
-    private readonly DbConnection _connection;
-    private readonly DbTransaction _transaction;
-    private bool _finished;
+    private readonly DbDataSource _dataSource;
 
-    private TenantScope(DbConnection connection, DbTransaction transaction, Guid tenantId)
+    private TenantScope(DbDataSource dataSource, DbConnection connection, DbTransaction transaction, Guid tenantId)
+        : base(connection, transaction)
     {
-        _connection = connection;
-        _transaction = transaction;
+        _dataSource = dataSource;
         TenantId = tenantId;
     }
 
     public Guid TenantId { get; }
+
+    internal override Guid? ContextTenantId => TenantId;
 
     public static async Task<TenantScope> BeginAsync(
         DbDataSource dataSource,
@@ -54,7 +53,7 @@ public sealed class TenantScope : IAsyncDisposable
 
             await command.ExecuteNonQueryAsync(cancellationToken);
 
-            return new TenantScope(connection, transaction, tenantId);
+            return new TenantScope(dataSource, connection, transaction, tenantId);
         }
         catch
         {
@@ -74,61 +73,6 @@ public sealed class TenantScope : IAsyncDisposable
         }
     }
 
-    public CommandContext CreateCommandContext()
-    {
-        ThrowIfFinished();
-        return new CommandContext(this);
-    }
-
-    public async Task CommitAsync(CancellationToken cancellationToken)
-    {
-        ThrowIfFinished();
-        _finished = true;
-
-        try
-        {
-            await _transaction.CommitAsync(cancellationToken);
-        }
-        finally
-        {
-            // A command made earlier must fail, not run in autocommit on this connection.
-            await ReleaseAsync();
-        }
-    }
-
-    public async ValueTask DisposeAsync()
-    {
-        _finished = true;
-        await ReleaseAsync();
-    }
-
-    internal DbCommand CreateEnlistedCommand()
-    {
-        ThrowIfFinished();
-
-        var command = _connection.CreateCommand();
-        command.Transaction = _transaction;
-        return command;
-    }
-
-    private async ValueTask ReleaseAsync()
-    {
-        try
-        {
-            // Disposing an uncompleted transaction rolls it back.
-            await _transaction.DisposeAsync();
-        }
-        finally
-        {
-            await _connection.DisposeAsync();
-        }
-    }
-
-    private void ThrowIfFinished()
-    {
-        if (_finished)
-        {
-            throw new InvalidOperationException("This Tenant scope has finished.");
-        }
-    }
+    internal override async Task<CommandScope> BeginFreshAsync(CancellationToken cancellationToken) =>
+        await BeginAsync(_dataSource, TenantId, cancellationToken);
 }
