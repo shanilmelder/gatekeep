@@ -41,7 +41,7 @@ development_status:
   1-3-write-the-threat-model: done
   1-4-enforce-tenant-isolation-in-the-database: done
   1-5-write-an-audit-event-with-every-state-change: done
-  1-6-scrub-logs-and-scan-for-canaries: backlog
+  1-6-scrub-logs-and-scan-for-canaries: done
   1-7-hold-keys-in-openbao-behind-ikeycustody: backlog
   1-8-run-tenant-scoped-jobs: backlog
   1-9-track-long-running-operations: backlog

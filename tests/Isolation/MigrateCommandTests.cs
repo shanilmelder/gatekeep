@@ -146,7 +146,7 @@ public sealed class MigrateCommandTests(PostgresFixture postgres) : IDisposable
             RedirectStandardError = true,
         };
 
-        start.ArgumentList.Add(Path.Combine(AppContext.BaseDirectory, "gatekeep.dll"));
+        start.ArgumentList.Add(BuildOutput.AssemblyPath("Gatekeep.Cli", "gatekeep"));
         foreach (var argument in arguments)
         {
             start.ArgumentList.Add(argument);
