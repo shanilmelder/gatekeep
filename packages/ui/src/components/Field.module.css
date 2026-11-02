@@ -1,0 +1,27 @@
+/* A label above, a helper below (DESIGN.md, Inputs). */
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gk-space-4);
+  min-width: 0;
+}
+
+.label {
+  font: var(--gk-ui-label-font);
+  color: var(--gk-ui-text);
+}
+
+.helper {
+  min-height: var(--gk-font-helper-line-height);
+  font: var(--gk-font-helper);
+  color: var(--gk-color-tx2);
+}
+
+.helper:empty {
+  min-height: 0;
+}
+
+.error {
+  color: var(--gk-ui-input-error-helper);
+}

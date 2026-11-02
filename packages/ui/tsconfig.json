@@ -1,9 +1,10 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "rootDir": "src",
-    "outDir": "dist",
-    "declaration": true
+    // The package ships its TypeScript and CSS Modules source, and each app's Vite build
+    // compiles them (AD-22: static CSS only). This build type-checks it.
+    "noEmit": true,
+    "types": ["vite/client"]
   },
   "include": ["src"]
 }

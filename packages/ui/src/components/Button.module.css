@@ -1,0 +1,119 @@
+/*
+ * Buttons on DESIGN.md's button-* and hosted-button-* tokens. Every variant and size reads
+ * its values from the --gk-ui-button-* variables in surface.css, so data-gk-surface picks
+ * them. Heights are min-heights, so text at 200% doesn't clip. DESIGN.md defines a hover
+ * only as sf2 on surfaces, so only secondary and ghost have one.
+ */
+
+.button {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  min-height: var(--gk-ui-button-height);
+  margin: 0;
+  padding: 0 var(--gk-ui-button-padding);
+  border: 1px solid transparent;
+  border-radius: var(--gk-ui-button-radius);
+  font: var(--gk-ui-button-font);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.primary {
+  background: var(--gk-ui-button-primary-background);
+  color: var(--gk-ui-button-primary-foreground);
+}
+
+.secondary {
+  background: var(--gk-ui-button-secondary-background);
+  color: var(--gk-ui-button-secondary-foreground);
+  border-color: var(--gk-ui-button-secondary-border);
+}
+
+.ghost {
+  background: var(--gk-ui-button-ghost-background);
+  color: var(--gk-ui-button-ghost-foreground);
+}
+
+/* Outlined on bad-sf, never filled with bad (DESIGN.md, Buttons). */
+.destructive {
+  background: var(--gk-ui-button-destructive-background);
+  color: var(--gk-ui-button-destructive-foreground);
+  border-color: var(--gk-ui-button-destructive-border);
+}
+
+/* Hover uses sf2 (DESIGN.md, Colors). */
+.secondary:not(:disabled, [aria-disabled='true']):hover,
+.ghost:not(:disabled, [aria-disabled='true']):hover {
+  background: var(--gk-color-sf2);
+}
+
+.sm {
+  min-height: var(--gk-ui-button-sm-height);
+  padding: 0 var(--gk-ui-button-sm-padding);
+  border-radius: var(--gk-ui-button-sm-radius);
+  font: var(--gk-ui-button-sm-font);
+}
+
+/* aria-disabled from the caller looks disabled too; a pending button keeps its look. */
+.button:disabled,
+.button[aria-disabled='true']:not([aria-busy='true']) {
+  background: var(--gk-ui-button-disabled-background);
+  color: var(--gk-ui-button-disabled-foreground);
+  border-color: var(--gk-ui-button-disabled-border);
+  cursor: not-allowed;
+}
+
+.pending {
+  cursor: progress;
+}
+
+.label {
+  position: relative;
+}
+
+/*
+ * The spinner sits left of the label, in the label's colour. It's out of flow and the label
+ * only shifts visually, by half the spinner and its gap, so the button keeps the width it
+ * had at rest. The shift is never more than the padding, so the spinner stays inside the
+ * border: a small button uses a narrower gap.
+ */
+.button {
+  --gk-ui-spinner-gap: var(--gk-space-8);
+}
+
+.sm {
+  --gk-ui-spinner-gap: calc(var(--gk-ui-button-sm-padding) * 2 - var(--gk-spinner-size));
+}
+
+.pending .label {
+  transform: translateX(calc((var(--gk-spinner-size) + var(--gk-ui-spinner-gap)) / 2));
+}
+
+.spinner {
+  position: absolute;
+  top: 50%;
+  right: calc(100% + var(--gk-ui-spinner-gap));
+  box-sizing: border-box;
+  width: var(--gk-spinner-size);
+  height: var(--gk-spinner-size);
+  margin-top: calc(var(--gk-spinner-size) / -2);
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: var(--gk-radius-full);
+  animation: spin calc(var(--gk-motion-duration-max) * 4) linear infinite;
+}
+
+@keyframes spin {
+  to {
+    rotate: 1turn;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spinner {
+    animation-duration: calc(var(--gk-motion-duration-max) * 12);
+  }
+}

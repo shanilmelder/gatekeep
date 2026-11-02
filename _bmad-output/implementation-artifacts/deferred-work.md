@@ -103,3 +103,12 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-1-13-generate-design-tokens-and-bundle-fonts.md`
   summary: Add a prefers-reduced-motion override for motion tokens.
   evidence: Story 1.13 review; Story 1.16.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-14-build-shared-form-and-action-components.md`
+  summary: Test controlled values and change callbacks of Toggle, Segmented and RadioGroup.
+  evidence: Story 1.14 review.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-14-build-shared-form-and-action-components.md`
+  summary: Give Checkbox and RadioGroup helper, error, required and group-disabled support.
+  evidence: Story 1.14 review.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-14-build-shared-form-and-action-components.md`
+  summary: Validate every field on submit and focus the first invalid one.
+  evidence: Story 1.14 review; EXPERIENCE "Focus moves only on submit".

@@ -1,0 +1,208 @@
+/*
+ * Toggle, checkbox and radio on DESIGN.md's toggle, checkbox and radio tokens. Checkboxes and
+ * radios are native inputs: the input is the 24px hit area and draws its 15px box itself.
+ */
+
+.choice,
+.toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--gk-space-4);
+  min-height: var(--gk-checkbox-hit-area);
+  font: var(--gk-ui-control-font);
+  color: var(--gk-ui-text);
+}
+
+.choice,
+.text {
+  cursor: pointer;
+}
+
+.box {
+  appearance: none;
+  position: relative;
+  flex: none;
+  box-sizing: border-box;
+  width: var(--gk-checkbox-hit-area);
+  height: var(--gk-checkbox-hit-area);
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.box::before {
+  content: '';
+  position: absolute;
+  inset: calc((var(--gk-checkbox-hit-area) - var(--gk-checkbox-size)) / 2);
+  box-sizing: border-box;
+  border: 1px solid var(--gk-ui-checkbox-border);
+  border-radius: var(--gk-checkbox-radius);
+  background: var(--gk-color-sf);
+}
+
+.checkbox:checked::before {
+  background: var(--gk-checkbox-background);
+  border-color: var(--gk-checkbox-background);
+}
+
+/* The tick, in on-ac, sized from the box. */
+.checkbox:checked::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  box-sizing: border-box;
+  width: calc(var(--gk-checkbox-size) * 0.3);
+  height: calc(var(--gk-checkbox-size) * 0.55);
+  border: solid var(--gk-checkbox-foreground);
+  border-width: 0 2px 2px 0;
+  transform: translate(-50%, -60%) rotate(45deg);
+}
+
+.radio {
+  width: var(--gk-radio-hit-area);
+  height: var(--gk-radio-hit-area);
+}
+
+.radio::before {
+  inset: calc((var(--gk-radio-hit-area) - var(--gk-radio-size)) / 2);
+  border-color: var(--gk-ui-radio-border);
+  border-radius: var(--gk-radius-full);
+}
+
+/* A 4.5px ring when selected (DESIGN.md, Selection): 0.3 of the 15px radio. */
+.radio:checked::before {
+  border: calc(var(--gk-radio-size) * 0.3) solid var(--gk-radio-selected-ring);
+}
+
+.box:disabled,
+.box:disabled + .text {
+  cursor: not-allowed;
+}
+
+.box:disabled::before {
+  background: var(--gk-color-sf2);
+  border-color: var(--gk-color-bd);
+}
+
+/* Disabled keeps its checked state visible, in the disabled tx3 instead of the accent. */
+.checkbox:disabled:checked::before {
+  background: var(--gk-color-tx3);
+  border-color: var(--gk-color-tx3);
+}
+
+.radio:disabled:checked::before {
+  background: var(--gk-color-sf2);
+  border-color: var(--gk-color-tx3);
+}
+
+.group {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.legend {
+  margin-bottom: var(--gk-space-4);
+  padding: 0;
+  font: var(--gk-ui-label-font);
+  color: var(--gk-ui-text);
+}
+
+.options {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gk-space-4);
+}
+
+.switch {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  min-width: var(--gk-checkbox-hit-area);
+  min-height: var(--gk-checkbox-hit-area);
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: var(--gk-radius-full);
+  background: transparent;
+  cursor: pointer;
+}
+
+.track {
+  position: relative;
+  box-sizing: border-box;
+  width: var(--gk-toggle-size-width);
+  height: var(--gk-toggle-size-height);
+  border-radius: var(--gk-radius-full);
+  background: var(--gk-toggle-off);
+  transition: background-color var(--gk-motion-duration-min) var(--gk-motion-easing);
+}
+
+.knob {
+  position: absolute;
+  top: calc(var(--gk-space-4) / 2);
+  left: calc(var(--gk-space-4) / 2);
+  width: calc(var(--gk-toggle-size-height) - var(--gk-space-4));
+  height: calc(var(--gk-toggle-size-height) - var(--gk-space-4));
+  border-radius: var(--gk-radius-full);
+  background: var(--gk-toggle-knob);
+  transition: transform var(--gk-motion-duration-min) var(--gk-motion-easing);
+}
+
+.switch[aria-checked='true'] .track {
+  background: var(--gk-toggle-on);
+}
+
+.switch[aria-checked='true'] .knob {
+  transform: translateX(calc(var(--gk-toggle-size-width) - var(--gk-toggle-size-height)));
+}
+
+.switch:disabled {
+  cursor: not-allowed;
+}
+
+.switch:disabled .track {
+  background: var(--gk-color-bd);
+}
+
+.switch:disabled[aria-checked='true'] .track {
+  background: var(--gk-color-tx3);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .track,
+  .knob {
+    transition: none;
+  }
+}
+
+/* Forced colours drop fills, so state is drawn in system colours instead. */
+@media (forced-colors: active) {
+  .box::before,
+  .track,
+  .knob {
+    forced-color-adjust: none;
+    border: 1px solid CanvasText;
+    background: Canvas;
+  }
+
+  .checkbox:checked::before,
+  .switch[aria-checked='true'] .knob {
+    background: Highlight;
+    border-color: Highlight;
+  }
+
+  .radio:checked::before {
+    border-color: Highlight;
+  }
+
+  .checkbox:checked::after {
+    forced-color-adjust: none;
+    border-color: HighlightText;
+  }
+}
