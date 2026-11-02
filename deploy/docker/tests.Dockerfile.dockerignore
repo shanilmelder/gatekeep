@@ -10,6 +10,9 @@
 graft/
 deploy/secrets/
 deploy/secrets-*/
+deploy/trust/
+deploy/release.env
+dist/
 **/.env*
 **/*.pem
 **/*.pfx

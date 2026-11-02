@@ -331,9 +331,9 @@ public sealed class ComposeConfigTests
     [Fact]
     public void Only_the_test_services_get_the_Docker_socket()
     {
-        var tests = Config("deploy/compose.test.yaml", "--profile", "stack").GetProperty("services");
+        var tests = Config("deploy/compose.test.yaml", "--profile", "stack", "--profile", "release").GetProperty("services");
 
-        Assert.Equal(["stack", "tests"], tests.EnumerateObject().Select(s => s.Name).Order());
+        Assert.Equal(["release", "stack", "tests"], tests.EnumerateObject().Select(s => s.Name).Order());
         foreach (var service in tests.EnumerateObject())
         {
             Assert.Contains(Volumes(service.Value), v => v.Target == "/var/run/docker.sock");
@@ -455,7 +455,7 @@ public sealed class ComposeConfigTests
 
     private static string Normalized(string path) => path.Replace('\\', '/');
 
-    private static void AssertFromLinesPinned(string dockerfile)
+    internal static void AssertFromLinesPinned(string dockerfile)
     {
         var lines = File.ReadAllLines(Path.Combine(Repository.Root, dockerfile))
             .Where(l => l.TrimStart().StartsWith("FROM ", StringComparison.OrdinalIgnoreCase));
@@ -466,12 +466,12 @@ public sealed class ComposeConfigTests
         }
     }
 
-    private static IEnumerable<string> Strings(JsonElement element, string property) =>
+    internal static IEnumerable<string> Strings(JsonElement element, string property) =>
         element.TryGetProperty(property, out var array) && array.ValueKind == JsonValueKind.Array
             ? array.EnumerateArray().Select(e => e.GetString()!).ToList()
             : [];
 
-    private static IEnumerable<(string Type, string Source, string Target)> Volumes(JsonElement service) =>
+    internal static IEnumerable<(string Type, string Source, string Target)> Volumes(JsonElement service) =>
         service.TryGetProperty("volumes", out var volumes)
             ? volumes.EnumerateArray().Select(v => (
                 v.GetProperty("type").GetString()!,
@@ -479,9 +479,31 @@ public sealed class ComposeConfigTests
                 v.GetProperty("target").GetString()!)).ToList()
             : [];
 
-    private static JsonElement Config(string file, params string[] arguments) => Config([file], new Dictionary<string, string>(), arguments);
+    /// <summary>Story 1.11's form: files and extra variables, then arguments.</summary>
+    private static JsonElement Config(string[] files, Dictionary<string, string> environment, params string[] arguments) =>
+        Config(files, arguments, environment);
 
-    private static JsonElement Config(string[] files, Dictionary<string, string> environment, params string[] arguments)
+    internal static JsonElement Config(string file, params string[] arguments) =>
+        Config([file], arguments, new Dictionary<string, string>());
+
+    /// <summary>
+    /// <c>docker compose config</c> over <paramref name="files"/>, with <paramref name="environment"/>
+    /// as the only extra variables. Throws when Compose refuses.
+    /// </summary>
+    internal static JsonElement Config(string[] files, string[] arguments, IReadOnlyDictionary<string, string> environment)
+    {
+        var (exitCode, output, error) = TryConfig(files, arguments, environment);
+        if (exitCode != 0)
+        {
+            throw new InvalidOperationException($"docker compose config failed: {error}");
+        }
+
+        using var document = JsonDocument.Parse(output);
+        return document.RootElement.Clone();
+    }
+
+    internal static (int ExitCode, string Output, string Error) TryConfig(
+        string[] files, string[] arguments, IReadOnlyDictionary<string, string> environment)
     {
         var start = new ProcessStartInfo("docker")
         {
@@ -489,18 +511,25 @@ public sealed class ComposeConfigTests
             RedirectStandardOutput = true,
             RedirectStandardError = true,
         };
-        foreach (var argument in new[] { "compose" }.Concat(files.SelectMany(f => new[] { "-f", f })).Concat(arguments).Concat(["config", "--format", "json"]))
+        start.ArgumentList.Add("compose");
+        foreach (var file in files)
+        {
+            start.ArgumentList.Add("-f");
+            start.ArgumentList.Add(file);
+        }
+
+        foreach (var argument in arguments.Concat(["config", "--format", "json"]))
         {
             start.ArgumentList.Add(argument);
         }
 
-        start.Environment.Remove("GATEKEEP_SECRETS_DIR");
-        start.Environment.Remove("COMPOSE_PROJECT_NAME");
+        // Only what the caller passes: nothing from the machine running the tests.
         foreach (var name in start.Environment.Keys.Where(k => k.StartsWith("GATEKEEP_", StringComparison.Ordinal)).ToList())
         {
             start.Environment.Remove(name);
         }
 
+        start.Environment.Remove("COMPOSE_PROJECT_NAME");
         foreach (var (name, value) in environment)
         {
             start.Environment[name] = value;
@@ -515,13 +544,7 @@ public sealed class ComposeConfigTests
             throw new TimeoutException("docker compose config didn't finish.");
         }
 
-        if (process.ExitCode != 0)
-        {
-            throw new InvalidOperationException($"docker compose config failed: {error.Result}");
-        }
-
-        using var document = JsonDocument.Parse(output.Result);
-        return document.RootElement.Clone();
+        return (process.ExitCode, output.Result, error.Result);
     }
 }
 

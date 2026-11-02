@@ -1,0 +1,121 @@
+name: Release
+
+# A signed release (Story 12.5, docs/release-signing.md), from a pushed v* tag. Two jobs:
+#
+#   build  GitHub-hosted, read-only token, nothing secret. It runs third-party code (the
+#          NuGet and pnpm restores, buildx, syft), so it gets nothing worth stealing: it
+#          runs the gates, then builds each release image to an OCI archive with its SBOM
+#          and digest, and hands those over only as a workflow artifact.
+#   sign   Esm's self-hosted signing runner, behind the release-signing environment, which
+#          needs Esm's approval. It runs nothing the build job made and builds nothing: it
+#          pushes the archives, refuses any digest that differs from the build's, signs each
+#          digest and attests its SBOM with the hardware key, and publishes release.env.
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions: {}
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # The same gates as CI: restores from lockfiles with install scripts disabled, the
+      # dependency audits, the build, and the Architecture and Isolation tests.
+      - name: Build and test in the tests container
+        run: docker compose -f deploy/compose.test.yaml run --rm --build tests
+
+      - name: Bring the stack up and check it
+        env:
+          GATEKEEP_HOST_REPO: ${{ github.workspace }}
+        run: docker compose -f deploy/compose.test.yaml run --rm --build stack
+
+      - name: Build the release tools image
+        run: docker build --file deploy/docker/release-tools.Dockerfile --tag gatekeep/release-tools:local .
+
+      # deploy/release/build.sh: dist/<svc>.tar, dist/<svc>.spdx.json and dist/digests.txt.
+      - name: Build each release image with its SBOM and digest
+        run: |
+          docker run --rm \
+            --user "$(id -u):$(id -g)" --group-add "$(stat -c %g /var/run/docker.sock)" \
+            --volume /var/run/docker.sock:/var/run/docker.sock \
+            --volume "$PWD:/work" --workdir /work \
+            --entrypoint sh gatekeep/release-tools:local /opt/gatekeep/release/build.sh
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-dist
+          path: dist/
+          if-no-files-found: error
+          retention-days: 7
+
+  sign:
+    needs: build
+    runs-on: [self-hosted, gatekeep-signing]
+    environment: release-signing
+    timeout-minutes: 60
+    permissions:
+      contents: write
+      packages: write
+    env:
+      GATEKEEP_RELEASE_TAG: ${{ github.ref_name }}
+      # A reference to the hardware key ("sk" for the YubiKey's PIV slot), from a repository
+      # variable. Never key material: the private key never leaves the YubiKey.
+      GATEKEEP_SIGNING_KEY: ${{ vars.GATEKEEP_SIGNING_KEY }}
+    steps:
+      # Only for deploy/release/publish.sh at the tag. Nothing from the build job runs here.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-dist
+          path: dist
+
+      # The job's own token, in a registry config that lives only in this job's temp dir.
+      - name: Log in to GHCR
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "DOCKER_CONFIG=$RUNNER_TEMP/docker-config" >> "$GITHUB_ENV"
+          mkdir -p "$RUNNER_TEMP/docker-config"
+          echo "$GITHUB_TOKEN" | DOCKER_CONFIG="$RUNNER_TEMP/docker-config" \
+            docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+
+      # Host cosign (the pivkey build) and crane. The YubiKey asks for a touch per signature.
+      - name: Push, sign and attest each image
+        run: |
+          GATEKEEP_REGISTRY="ghcr.io/$(echo "$GITHUB_REPOSITORY_OWNER" | tr 'A-Z' 'a-z')" \
+            sh deploy/release/publish.sh
+
+      # Create or update, so re-running only this job (same archives, same digests) works
+      # after a failure partway (docs/release-signing.md, "A sign job that fails").
+      - name: Publish the GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if gh release view "$GATEKEEP_RELEASE_TAG" > /dev/null 2>&1; then
+            gh release upload "$GATEKEEP_RELEASE_TAG" --clobber \
+              dist/release.env dist/digests.txt dist/*.spdx.json
+          else
+            gh release create "$GATEKEEP_RELEASE_TAG" --verify-tag --title "$GATEKEEP_RELEASE_TAG" \
+              --notes "Signed release. Verify before deploying: docs/install.md, Install a signed release." \
+              dist/release.env dist/digests.txt dist/*.spdx.json
+          fi
+
+      - name: Log out of GHCR
+        if: always()
+        run: rm -rf "$RUNNER_TEMP/docker-config"

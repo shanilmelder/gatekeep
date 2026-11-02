@@ -42,3 +42,16 @@ jobs:
         env:
           GATEKEEP_HOST_REPO: ${{ github.workspace }}
         run: docker compose -f deploy/compose.test.yaml run --rm --build stack
+
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # deploy/ci/release-check.sh, run in the release container: the release scripts end
+      # to end with a throwaway key and a local registry (build, publish, verify), then each
+      # refusal: unsigned digest, another key, a tag reference, no pinned key, a software key
+      # outside the rehearsal and a drifted digest. Tears everything down.
+      - name: Rehearse the signed release path
+        run: docker compose -f deploy/compose.test.yaml run --rm --build release

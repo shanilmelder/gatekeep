@@ -144,6 +144,40 @@ Challenge records never go into the zone that serves Gatekeep's names (NFR-21). 
 
 A stolen token can issue certificates for both sites, the wildcard included, while it lives (`docs/threat-model.md`, Cloudflare DNS API token). Revoke and replace it if the host is compromised.
 
+## Install a signed release
+
+The steps above build every image from source. To run a published release instead, every Gatekeep image comes from GHCR by digest, and is checked against the release key pinned on this host before anything runs (Story 12.5). `docs/release-signing.md` says how releases are signed.
+
+1. **Pin the release key**, once per host: put Esm's public key at `deploy/trust/release-signing.pub`, copied by hand, never downloaded from the release, and compare its SHA-256 with Esm's (`docs/release-signing.md`, "Pin the key on a Docker host"). `GATEKEEP_TRUST_DIR` moves the directory; a relative value is resolved against `deploy/`. It's a host directory like the secrets directory: never a volume, never committed, never in an image.
+
+2. **Get the release.** Check out the release tag, then download that release's `release.env` from its GitHub release page into `deploy/release.env`. It holds one `GATEKEEP_<SVC>_IMAGE=<repository>@sha256:<digest>` line per image, and nothing else. The images and their signatures must be pullable from this host: the release packages are public, and if one isn't, run `docker login ghcr.io` here first.
+
+   ```sh
+   git fetch --tags
+   git checkout v1.2.3
+   ```
+
+3. **Check every image.** `release-verify` checks each digest's signature and signed SBOM against the pinned key, and refuses a tag reference, an unsigned image, another key's signature, an image in another service's slot, images from two releases or a missing key file. Don't go on unless it ends with `every image is signed by the pinned key`.
+
+   ```sh
+   docker compose -f deploy/compose.yaml -f deploy/compose.release.yaml --env-file deploy/release.env --profile release run --rm release-verify
+   ```
+
+4. **Install** with steps 3 to 10 above, adding the overlay and the env file to every command. Skip step 2: nothing is built, and Compose refuses to start if any image variable is missing rather than build one. For example:
+
+   ```sh
+   docker compose -f deploy/compose.yaml -f deploy/compose.release.yaml --env-file deploy/release.env run --rm keygen
+   docker compose -f deploy/compose.yaml -f deploy/compose.release.yaml --env-file deploy/release.env up -d --wait
+   ```
+
+   On a production host, also add the Cloudflare override, and name `deploy/.env` as well: once any `--env-file` is given, Compose reads only the files named, so the hostnames in `deploy/.env` would otherwise be lost. Use this form for step 3 above too:
+
+   ```sh
+   docker compose -f deploy/compose.yaml -f deploy/compose.cloudflare.yaml -f deploy/compose.release.yaml --env-file deploy/.env --env-file deploy/release.env up -d --wait
+   ```
+
+Caddy keeps its `edge` network, and `release-verify` alone gets egress besides, on a `registry` network that exists only in the overlay. The pinned key is mounted into `release-verify` alone, read-only. Moving an existing Deployment to a new release is `gatekeep upgrade` (Story 12.6), which isn't built yet.
+
 ## Changing a database password
 
 Change the password file in `postgres/`, then recreate the stack. `postgres-passwords` runs on every `up` and sets every role's password from its file before any host starts, so a changed or restored file can't drift from the database, and the recreated hosts read the new file.
@@ -197,4 +231,4 @@ These steps install the stack, not a usable product. What they can't deliver yet
 - **Real client addresses.** No forwarded header is trusted yet, so the hosts see Caddy's address, not the client's (Story 1.20).
 - **IPv6.** The Compose networks are IPv4 only. Add no `AAAA` records.
 - **A real production certificate.** `cloudflare` mode has been validated offline only and has never obtained a real certificate. On the first production start, watch Caddy's log until both certificates are obtained.
-- **Backups and upgrades.** No backup, restore, signed images or `gatekeep upgrade` yet. Backups must leave the secrets directory out (Epic 12, signed images in Story 12.5).
+- **Backups and upgrades.** No backup, restore or `gatekeep upgrade` yet. Backups must leave the secrets directory out (Epic 12). Signed releases can be installed ("Install a signed release" above), but `gatekeep upgrade`, which will check signatures itself, is Story 12.6.

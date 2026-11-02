@@ -31,6 +31,17 @@ public class DockerOnlyRuleTests
 
     private static readonly string[] AllowedCommands = ["docker", "git"];
 
+    /// <summary>
+    /// The one exception, per file. The release signing runbook (Story 12.5) is for Esm's
+    /// signing machine, which holds the hardware key and runs no part of a Deployment: cosign
+    /// must reach the YubiKey, and the Actions runner, crane and gh run beside it. Nothing it
+    /// lists runs on a Docker host.
+    /// </summary>
+    private static readonly Dictionary<string, string[]> SigningMachineCommands = new()
+    {
+        ["docs/release-signing.md"] = ["cosign", "crane", "gh", "./config.sh", "./run.sh"],
+    };
+
     public static TheoryData<string> CheckedFiles =>
     [
         .. new[] { "deploy", "docs" }
@@ -71,7 +82,15 @@ public class DockerOnlyRuleTests
             return;
         }
 
-        Assert.Empty(NonDockerCommands(File.ReadAllText(Path.Combine(Root, file))));
+        Assert.Empty(NonDockerCommands(File.ReadAllText(Path.Combine(Root, file)), SigningMachineCommands.GetValueOrDefault(file, [])));
+    }
+
+    [Fact]
+    public void Only_the_signing_runbook_may_give_signing_machine_commands()
+    {
+        Assert.Equal(["docs/release-signing.md"], SigningMachineCommands.Keys);
+        Assert.Contains("docs/release-signing.md", CheckedFiles.Select(f => (string)f));
+        Assert.Single(NonDockerCommands("```sh\ncosign piv-tool generate-key\n```\n"));
     }
 
     [Theory]
@@ -95,7 +114,7 @@ public class DockerOnlyRuleTests
         Assert.Equal(expected, NonDockerCommands(markdown).Count);
     }
 
-    private static List<string> NonDockerCommands(string markdown)
+    private static List<string> NonDockerCommands(string markdown, string[]? alsoAllowed = null)
     {
         var offenders = new List<string>();
         foreach (Match block in FencedBlock.Matches(markdown.ReplaceLineEndings("\n")))
@@ -119,7 +138,7 @@ public class DockerOnlyRuleTests
 
                 line = line.StartsWith("$ ", StringComparison.Ordinal) ? line[2..] : line;
                 var command = line.Split(' ', 2)[0];
-                if (!AllowedCommands.Contains(command))
+                if (!AllowedCommands.Contains(command) && !(alsoAllowed ?? []).Contains(command))
                 {
                     offenders.Add(line);
                 }
