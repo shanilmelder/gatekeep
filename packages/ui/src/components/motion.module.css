@@ -1,7 +1,7 @@
 /*
  * DESIGN.md's one animation (elevation.motion, gkIn): a 6px rise and a fade, 150ms to
- * 200ms. Modals take the long end and toasts the short one. Reduced motion removes it,
- * with every other animation and transition, through the one rule in styles.css.
+ * 200ms. Modals and drawers take the long end and toasts the short one. Reduced motion
+ * removes it, with every other animation and transition, through the one rule in styles.css.
  */
 
 .rise {
@@ -16,5 +16,28 @@
   from {
     opacity: 0;
     translate: 0 var(--gk-motion-rise);
+  }
+}
+
+/* The drawer's version: the same 6px and fade, in from the inline end it sits at. */
+.slide {
+  animation: gkSlide var(--gk-motion-duration-max) var(--gk-motion-easing) both;
+}
+
+.slide:dir(rtl) {
+  animation-name: gkSlideRtl;
+}
+
+@keyframes gkSlide {
+  from {
+    opacity: 0;
+    translate: var(--gk-motion-rise) 0;
+  }
+}
+
+@keyframes gkSlideRtl {
+  from {
+    opacity: 0;
+    translate: calc(var(--gk-motion-rise) * -1) 0;
   }
 }

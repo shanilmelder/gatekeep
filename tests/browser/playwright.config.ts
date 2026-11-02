@@ -7,6 +7,7 @@
 // Story 1.14: the shared controls fixture's dist is served the same way (controls.spec.ts).
 // Story 1.15: the data display is served from the same fixture build at ?page=data (data.spec.ts).
 // Story 1.16: the overlays and feedback, from the same build at ?page=overlay (overlay.spec.ts).
+// Story 1.17: the drawer and menu, from the same build at ?page=drawer (drawer.spec.ts).
 // Story 1.20: the built Admin Dashboard is also served by the built Host.Admin itself, because
 // the CSP and the other AD-21 headers under test are the host's own (admin-csp.spec.ts).
 
@@ -46,7 +47,7 @@ export default defineConfig({
       name,
       // Every spec that isn't another project's own, so a new spec runs by default.
       testMatch: '*.spec.ts',
-      testIgnore: ['admin-csp.spec.ts', 'controls.spec.ts', 'data.spec.ts', 'overlay.spec.ts'],
+      testIgnore: ['admin-csp.spec.ts', 'controls.spec.ts', 'data.spec.ts', 'overlay.spec.ts', 'drawer.spec.ts'],
       use: { baseURL: `http://127.0.0.1:${port}` },
     })),
     { name: fixture.name, testMatch: 'controls.spec.ts', use: { baseURL: `http://127.0.0.1:${fixture.port}` } },
@@ -54,6 +55,8 @@ export default defineConfig({
     { name: 'data', testMatch: 'data.spec.ts', use: { baseURL: `http://127.0.0.1:${fixture.port}` } },
     // The overlays and feedback (Story 1.16), on the same fixture build at ?page=overlay.
     { name: 'overlay', testMatch: 'overlay.spec.ts', use: { baseURL: `http://127.0.0.1:${fixture.port}` } },
+    // The drawer and menu (Story 1.17), on the same fixture build at ?page=drawer.
+    { name: 'drawer', testMatch: 'drawer.spec.ts', use: { baseURL: `http://127.0.0.1:${fixture.port}` } },
     {
       name: 'admin-host',
       testMatch: 'admin-csp.spec.ts',

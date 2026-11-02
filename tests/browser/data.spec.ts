@@ -116,8 +116,11 @@ for (const surface of ['admin', 'hosted'] as const) {
         [
           'ConfirmModal',
           'DataTable',
+          'Drawer',
           'EmptyState',
+          'EventDrawer',
           'JsonViewer',
+          'Menu',
           'Modal',
           'ModalProvider',
           'OneTimeReveal',

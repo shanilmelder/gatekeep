@@ -1,9 +1,9 @@
 // Renders the @gatekeep/ui fixture on one surface: `?surface=admin` (the default) or
 // `?surface=hosted`, and `?scheme=light` (the default) or `?scheme=dark`. `?page=data` shows
-// the data display (Story 1.15) and `?page=overlay` the overlays and feedback (Story 1.16)
-// instead of the controls (Story 1.14). The surface and scheme
-// go on <html>, as an app sets them, and the components come from that surface's own entry
-// point.
+// the data display (Story 1.15), `?page=overlay` the overlays and feedback (Story 1.16) and
+// `?page=drawer` the drawer and menu (Story 1.17) instead of the controls (Story 1.14). The
+// surface and scheme go on <html>, as an app sets them, and the components come from that
+// surface's own entry point; the drawer page is Admin only, as its components are.
 
 import '@gatekeep/ui/styles.css';
 import * as admin from '@gatekeep/ui/admin';
@@ -11,13 +11,16 @@ import * as hosted from '@gatekeep/ui/hosted';
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { DataFixture } from './DataFixture';
+import { DrawerFixture } from './DrawerFixture';
 import { Fixture } from './Fixture';
 import { OverlayFixture } from './OverlayFixture';
 
 const params = new URLSearchParams(location.search);
-const surface = params.get('surface') === 'hosted' ? 'hosted' : 'admin';
 const scheme = params.get('scheme') === 'dark' ? 'dark' : 'light';
-const page = params.get('page') === 'data' ? 'data' : params.get('page') === 'overlay' ? 'overlay' : 'controls';
+const pages = ['data', 'overlay', 'drawer'] as const;
+const page = pages.find((name) => name === params.get('page')) ?? 'controls';
+// The drawer page's components are Admin only, so it's always on the Admin surface.
+const surface = page !== 'drawer' && params.get('surface') === 'hosted' ? 'hosted' : 'admin';
 
 document.documentElement.dataset.gkSurface = surface;
 document.documentElement.dataset.gkScheme = scheme;
@@ -33,8 +36,11 @@ const names = Object.keys(hostedExports);
 const ADMIN_ONLY = [
   'ConfirmModal',
   'DataTable',
+  'Drawer',
   'EmptyState',
+  'EventDrawer',
   'JsonViewer',
+  'Menu',
   'Modal',
   'ModalProvider',
   'OneTimeReveal',
@@ -64,7 +70,9 @@ document.documentElement.dataset.adminOnlyExports = Object.keys(adminExports)
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    {page === 'overlay' ? (
+    {page === 'drawer' ? (
+      <DrawerFixture admin={admin} />
+    ) : page === 'overlay' ? (
       <OverlayFixture surface={surface} ui={surface === 'hosted' ? hosted : admin} admin={surface === 'admin' ? admin : null} />
     ) : page === 'data' ? (
       <DataFixture surface={surface} ui={surface === 'hosted' ? hosted : admin} admin={surface === 'admin' ? admin : null} />

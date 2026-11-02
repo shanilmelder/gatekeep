@@ -2,9 +2,10 @@
 title: 'Story 1.17: Build the drawer and menu'
 type: 'feature'
 created: '2026-11-03'
-status: 'ready-for-dev'
+status: 'done'
+baseline_revision: 'a94841860c0685acd963ce522891211cc6fd68cd'
 review_loop_iteration: 0
-followup_review_recommended: false
+followup_review_recommended: true
 context:
   - '{project-root}/_bmad-output/planning-artifacts/ux-designs/ux-gatekeep-2026-11-01/DESIGN.md'
   - '{project-root}/_bmad-output/planning-artifacts/ux-designs/ux-gatekeep-2026-11-01/EXPERIENCE.md'
@@ -94,8 +95,8 @@ Neither exists yet.
 ## Tasks & Acceptance
 
 **Execution:**
-- [ ] `packages/ui/src/components/` -- `Drawer`, `EventDrawer`, `Menu`, their CSS Modules, catalogue strings, `admin` exports.
-- [ ] `tests/browser/fixture/` and `tests/browser/drawer.spec.ts` -- every matrix row, plus axe.
+- [x] `packages/ui/src/components/` -- `Drawer`, `EventDrawer`, `Menu`, their CSS Modules, catalogue strings, `admin` exports.
+- [x] `tests/browser/fixture/` and `tests/browser/drawer.spec.ts` -- every matrix row, plus axe.
 
 **Acceptance Criteria:**
 - Given a drawer, when Esc is pressed, then it closes and focus returns.
@@ -105,7 +106,64 @@ Neither exists yet.
 
 ## Review Triage Log
 
+### 2026-11-02 — Review pass
+- verdicts: 37 findings — high 0, medium 9, low 27, false 1, maybe-false 0
+- findings:
+  - `[false]` `[reject]` Intent: no Admin page uses the components yet — the story builds them; the shell (1.25) and Logs (Epic 7) adopt them.
+  - `[low]` `[reject]` Intent: the Viewer gate is a prop, not a role — the server decides who gets raw detail (Story 7.5); the component never renders raw without the prop, tested.
+  - `[low]` `[reject]` Intent: the drawer can be narrower than 440px — DESIGN.md caps it at half the window, and DESIGN.md wins.
+  - `[low]` `[reject]` Intent: the menu can open above its trigger — needed to stay inside the viewport, which the spec also requires; now tested.
+  - `[low]` `[reject]` Intent: the role note doesn't name the role — the component doesn't know the caller's role; the generic note is the catalogue's.
+  - `[low]` `[patch]` Intent: Shift+Tab out of the menu checked only negatively — the landing control asserted.
+  - `[low]` `[patch]` Intent: the refusal test can't tell which component logged — specific message asserted; drawer over drawer tested.
+  - `[low]` `[reject]` Intent: extra drawer and menu options beyond the spec — small, documented and tested; the Modal refactor removes duplicated dialog code.
+  - `[medium]` `[patch]` Gap: menu placement near the bottom, in a short viewport and after scroll or resize is untested — tested.
+  - `[medium]` `[patch]` Gap (other): late drawer content isn't observed, so the body can't be scrolled by keyboard — `MutationObserver` added.
+  - `[medium]` `[patch]` Blind: the scroll check goes stale — same fix as the Gap row.
+  - `[low]` `[patch]` Blind: the `initialFocus` doc is wrong — Close is the explicit default.
+  - `[low]` `[patch]` Blind: the body region repeats the dialog's name — distinct catalogue label.
+  - `[low]` `[patch]` Blind: unserialisable `raw` drops Copy silently — neutral message shown, tested.
+  - `[medium]` `[patch]` Blind: types allow `raw` with `canSeeRaw: false` — discriminated union.
+  - `[low]` `[patch]` Blind: hover and focus highlight two items — hover moves focus.
+  - `[medium]` `[patch]` Blind: the menu stays open when focus leaves another way — closes on `focusout`.
+  - `[medium]` `[patch]` Blind: focus lost when items change while open — re-homed.
+  - `[low]` `[patch]` Blind: no-popover fallback broken inside the drawer — fallback dropped; popover is required.
+  - `[low]` `[patch]` Blind: `place()` thrashes layout on scroll — throttled to a frame.
+  - `[medium]` `[patch]` Blind: an empty menu opens empty — trigger disabled.
+  - `[low]` `[patch]` Blind: one-character typeahead — buffered.
+  - `[low]` `[patch]` Blind: RTL untested — tested.
+  - `[low]` `[patch]` Blind: flip and scroll paths untested — same fix as the Gap row.
+  - `[low]` `[patch]` Blind: narrow-window rule untested — tested.
+  - `[low]` `[patch]` Blind: toasts inside the drawer untested — tested.
+  - `[low]` `[patch]` Blind: `describedBy` untested — tested.
+  - `[low]` `[patch]` Blind: last axe run doesn't wait for animations — waits.
+  - `[medium]` `[patch]` Edge: late drawer content not observed — same fix as the Gap row.
+  - `[low]` `[patch]` Edge: no `ResizeObserver` — resize fallback.
+  - `[low]` `[patch]` Edge: an `align` change jumps focus — initial focus only on open.
+  - `[low]` `[patch]` Edge: arrows after clicking a disabled item jump to the ends — nearest neighbour.
+  - `[medium]` `[patch]` Edge: focused item removed while open — same fix as the Blind row.
+  - `[low]` `[patch]` Edge: `100vw` includes the scrollbar — pixel max width from `clientWidth`.
+  - `[low]` `[patch]` Edge: trigger scrolled out of view leaves the menu detached — closes.
+  - `[low]` `[patch]` Edge: the drawer fixture can render with Hosted sizing — Admin surface forced.
+  - `[low]` `[patch]` Edge: the focus-trap test depends on viewport size — viewport pinned.
+
 ## Verification
 
 **Commands:**
 - `docker compose -f deploy/compose.test.yaml run --rm --build tests` -- expected: build with no warnings; all checks and browser tests pass; Architecture and Isolation pass.
+
+## Auto Run Result
+
+Status: done
+
+**Summary:** `packages/ui` gains Drawer, EventDrawer and Menu in the `admin` entry. The drawer is a 440px inline-end dialog that shares the one-per-document registry with Modal through a shared `useModalDialog` hook. EventDrawer shows a code badge, summary rows and raw JSON only with `canSeeRaw`. Menu follows the ARIA menu button pattern on a popover. A `?page=drawer` fixture and Playwright tests cover every behaviour, with axe in light and dark.
+
+**Files:** `packages/ui/src/components/` (Drawer, EventDrawer, Menu, `useModalDialog`, Modal refactor, CSS Modules), `messages.tsx`, `admin.ts`; `tests/browser/fixture/src/DrawerFixture.tsx`, `main.tsx`, `tests/browser/drawer.spec.ts`, `data.spec.ts`, `playwright.config.ts`.
+
+**Review:** 37 findings across four layers: 31 patched, 0 deferred, 6 rejected, each with its reason in the triage log.
+
+**Follow-up review:** recommended. Many medium patches change menu focus handling and drawer scroll detection, which only the new browser tests prove.
+
+**Verification:** see the PR screenshot; the full suite passes in the `tests` container.
+
+**Residual risks:** tested in Chromium only. Who may see raw event detail is the server's decision (Story 7.5).

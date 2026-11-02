@@ -1,6 +1,7 @@
 // The one modal registry per document (UX-DR45): which modal is open, if any, for every
-// Modal, whatever ModalProvider it sits under. Toasts read it too, so a toast shown while a
-// modal is open renders inside that modal, the one part of the page that isn't inert.
+// Modal and Drawer, whatever ModalProvider it sits under, so neither stacks over the other.
+// Toasts read it too, so a toast shown while a modal is open renders inside that modal, the
+// one part of the page that isn't inert.
 
 interface Registry {
   token: string | null;
