@@ -50,6 +50,16 @@ Date: 2026-11-02. Raised by Esm during Story 1.11. Mode: batch. Approved by Esm 
 | Story 1.11 | "...never exposed publicly", "served only on the VPN interface" | "...reached only through its own hostname, never through a Tenant host", "served only on the Admin hostname" |
 | UX `EXPERIENCE.md` | "VPN only", "over VPN" | removed |
 
+## 4a. Addendum: Cloudflare Tunnel (Esm, 2026-11-02)
+
+The Admin panel is reached through a Cloudflare Tunnel, which provides its TLS certificate and DNS.
+
+- **How it works:** a `cloudflared` container connects outbound to Cloudflare and forwards the Admin hostname to `Host.Admin` over an internal network. It publishes no port. Caddy serves only the Tenant zone and has no route to `Host.Admin`.
+- **Tunnel token:** it's a Compose secret, and it's a credential: anyone holding it can attach their own connector and receive Admin traffic.
+- **Cloudflare sees the traffic:** Cloudflare terminates Admin TLS, so it sees Admin traffic in plaintext.
+- **Depends on Cloudflare:** Admin access needs Cloudflare, a cloud service outside FR-1's core runtime. Everything else still runs without it, but with no tunnel the Admin panel can't be reached from outside.
+- **Amended:** the AD-26 Caddy line, the deployment diagram, AR-13 and Story 1.11's first criterion.
+
 ## 5. Implementation handoff
 
 **Scope: minor to moderate.** The work is done within Story 1.11, with the threat model updated in the same pull request.
