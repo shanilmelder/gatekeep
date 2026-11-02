@@ -49,3 +49,15 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-1-6-scrub-logs-and-scan-for-canaries.md`
   summary: Scan a real host process stdout in the canary scan.
   evidence: The scan reads what the console provider hands its formatter from test-sent records, because no flow exists yet.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-7-hold-keys-in-openbao-behind-ikeycustody.md`
+  summary: Add a moving-clock test for the adapter logging in at three quarters of the lease.
+  evidence: Both Story 1.7 expiry tests freeze the clock. Do it when Story 1.10 wires hosts.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-7-hold-keys-in-openbao-behind-ikeycustody.md`
+  summary: Decide mlock for OpenBao under the hardened unit, and whether swap is encrypted.
+  evidence: The unit drops CAP_IPC_LOCK and the config does not set disable_mlock; needs a Linux host (G-10).
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-7-hold-keys-in-openbao-behind-ikeycustody.md`
+  summary: Rotate the OpenBao audit log and decide on a second audit device.
+  evidence: A full disk under the only audit device blocks every request. Belongs with shipping the audit log off the server.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-7-hold-keys-in-openbao-behind-ikeycustody.md`
+  summary: Set a secret ID lifetime and write the replacement procedure for one leaked secret ID.
+  evidence: Story 1.7 setup uses secret_id_ttl=0. Story 1.10 delivers secret IDs.

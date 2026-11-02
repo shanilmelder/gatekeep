@@ -22,6 +22,7 @@
   </Folder>
   <Folder Name="/src/Adapters/">
     <Project Path="src/Adapters/Logging/Gatekeep.Adapters.Logging.csproj" />
+    <Project Path="src/Adapters/OpenBao/Gatekeep.Adapters.OpenBao.csproj" />
     <Project Path="src/Adapters/Postgres/Gatekeep.Adapters.Postgres.csproj" />
   </Folder>
   <Folder Name="/tests/">

@@ -25,6 +25,7 @@ flowchart TD
   Notifications[Notifications]
   Audit[Audit]
   TestsIsolation[Tests.Isolation]
+  AdaptersOpenBao[Adapters.OpenBao]
   HostHosted --> Protocol
   HostHosted --> Authentication
   HostHosted --> Identity
@@ -78,6 +79,7 @@ flowchart TD
   Notifications --> Tenancy
   Admins --> Notifications
   TestsIsolation --> AdaptersLogging
+  TestsIsolation --> AdaptersOpenBao
   TestsIsolation --> AdaptersPostgres
   TestsIsolation --> Audit
   TestsIsolation --> Cli

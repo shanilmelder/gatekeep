@@ -1,0 +1,4 @@
+# Files that run or are read on Linux keep LF on every checkout.
+*.sh      text eol=lf
+*.hcl     text eol=lf
+*.service text eol=lf

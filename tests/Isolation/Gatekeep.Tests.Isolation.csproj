@@ -13,6 +13,7 @@
     <PackageReference Include="Microsoft.NET.Test.Sdk" />
     <PackageReference Include="Npgsql" />
     <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" />
+    <PackageReference Include="Testcontainers" />
     <PackageReference Include="Testcontainers.PostgreSql" />
     <PackageReference Include="xunit.runner.visualstudio" />
     <PackageReference Include="xunit.v3" />
@@ -21,6 +22,7 @@
   <ItemGroup>
     <ProjectReference Include="../../src/Gatekeep.Kernel/Gatekeep.Kernel.csproj" />
     <ProjectReference Include="../../src/Adapters/Logging/Gatekeep.Adapters.Logging.csproj" />
+    <ProjectReference Include="../../src/Adapters/OpenBao/Gatekeep.Adapters.OpenBao.csproj" />
     <ProjectReference Include="../../src/Adapters/Postgres/Gatekeep.Adapters.Postgres.csproj" />
     <ProjectReference Include="../../src/Gatekeep.Cli/Gatekeep.Cli.csproj" />
     <ProjectReference Include="../../src/Modules/Audit/Gatekeep.Modules.Audit.csproj" />
