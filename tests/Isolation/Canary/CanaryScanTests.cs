@@ -1,6 +1,4 @@
 using System.Net;
-using System.Text;
-using Gatekeep.Adapters.Logging;
 using Gatekeep.Adapters.Postgres.Schema;
 using Gatekeep.Kernel.Audit;
 using Gatekeep.Kernel.Persistence;
@@ -8,8 +6,6 @@ using Gatekeep.Kernel.Secrets;
 using Gatekeep.Modules.Audit.Contracts;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Logging.Abstractions;
-using Microsoft.Extensions.Logging.Console;
 using Npgsql;
 using Xunit;
 
@@ -33,7 +29,7 @@ public sealed class CanaryScanTests(PostgresFixture postgres)
         await AppendThroughTheAppenderAsync(database);
 
         var captured = new CapturedConsole();
-        using (var logging = RealLogging(captured))
+        using (var logging = CapturedLogging.Create(captured))
         {
             var logger = logging.GetRequiredService<ILoggerFactory>().CreateLogger("Canary");
             foreach (var canary in CanaryScanner.Canaries)
@@ -112,7 +108,7 @@ public sealed class CanaryScanTests(PostgresFixture postgres)
     public void Console_capture_sees_what_the_sink_receives()
     {
         var captured = new CapturedConsole();
-        using (var logging = RealLogging(captured))
+        using (var logging = CapturedLogging.Create(captured))
         {
             logging.GetRequiredService<ILoggerFactory>().CreateLogger("Canary").LogInformation("Started {Host}", "gatekeep");
         }
@@ -188,52 +184,4 @@ public sealed class CanaryScanTests(PostgresFixture postgres)
 
     private Task<IReadOnlyList<CanarySource>> AuditSourcesAsync(string database) =>
         CanaryScanner.AuditSourcesAsync(postgres.SuperuserConnection(database), Cancellation);
-
-    /// <summary>The hosts' own logging call, ending at a console formatter this test reads.</summary>
-    private static ServiceProvider RealLogging(CapturedConsole captured)
-    {
-        var services = new ServiceCollection();
-        services.AddLogging(logging => logging.AddGatekeepLogging());
-        services.AddSingleton<ConsoleFormatter>(captured);
-        services.Configure<ConsoleLoggerOptions>(options => options.FormatterName = captured.Name);
-        return services.BuildServiceProvider();
-    }
-
-    /// <summary>
-    /// Sees the real console provider's output on the logging thread. Writing nothing to the
-    /// console itself keeps test output clean, and needs no process-wide redirect.
-    /// </summary>
-    private sealed class CapturedConsole() : ConsoleFormatter("capture")
-    {
-        private readonly StringBuilder _text = new();
-        private readonly Lock _lock = new();
-
-        public string Text
-        {
-            get
-            {
-                lock (_lock)
-                {
-                    return _text.ToString();
-                }
-            }
-        }
-
-        public void Plant(string raw)
-        {
-            lock (_lock)
-            {
-                _text.AppendLine(raw);
-            }
-        }
-
-        public override void Write<TState>(
-            in LogEntry<TState> logEntry,
-            IExternalScopeProvider? scopeProvider,
-            TextWriter textWriter)
-        {
-            Plant(logEntry.Formatter(logEntry.State, logEntry.Exception));
-            scopeProvider?.ForEachScope((scope, _) => Plant(scope?.ToString() ?? string.Empty), (object?)null);
-        }
-    }
 }

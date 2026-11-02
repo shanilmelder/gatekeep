@@ -74,6 +74,11 @@ public sealed class CatalogueTests(PostgresFixture postgres)
     [InlineData("ALTER TABLE tenant_settings NO FORCE ROW LEVEL SECURITY", "tenant_settings: FORCE ROW LEVEL SECURITY is false")]
     [InlineData("ALTER TABLE tenant_settings DISABLE ROW LEVEL SECURITY", "tenant_settings: ENABLE ROW LEVEL SECURITY is false")]
     [InlineData("ALTER TABLE tenant ENABLE ROW LEVEL SECURITY", "tenant: ENABLE ROW LEVEL SECURITY is true")]
+    // Persistence: the counter table made logged, or a logged table made unlogged.
+    [InlineData("ALTER TABLE admin_attempt SET LOGGED", "admin_attempt: is logged, but the registry says UNLOGGED.")]
+    [InlineData("ALTER TABLE migration_history SET UNLOGGED", "migration_history: is UNLOGGED, but the registry says logged.")]
+    [InlineData("GRANT UPDATE (policy) ON admin_attempt TO gk_admin", "Grant not in the registry: public.admin_attempt.policy gk_admin UPDATE.")]
+    [InlineData("GRANT SELECT ON admin_attempt TO gk_hosted", "Grant not in the registry: public.admin_attempt gk_hosted SELECT.")]
     // Policies weakened or added.
     [InlineData("DROP POLICY tenant_settings_tenant ON tenant_settings", "tenant_settings: policies are")]
     [InlineData(
@@ -136,6 +141,24 @@ public sealed class CatalogueTests(PostgresFixture postgres)
             """,
             "child_row_parent_fkey: foreign key between tenant tables isn't composite on tenant_id.",
             [.. TableRegistry.Tables, parent, child]);
+    }
+
+    [Fact]
+    public async Task Catalogue_refuses_a_single_column_foreign_key_into_a_reserved_name_tenant_table()
+    {
+        // regclass would print the parent as "user", in quotes, and the check would miss it.
+        await AssertDriftReportedAsync(
+            TableRegistry.Migrator,
+            """
+            CREATE UNIQUE INDEX user_id_only ON "user" (id);
+            CREATE TABLE child_row (
+              id uuid PRIMARY KEY,
+              tenant_id uuid NOT NULL,
+              user_id uuid NOT NULL CONSTRAINT child_row_user_fkey REFERENCES "user" (id) ON DELETE RESTRICT
+            );
+            """,
+            "child_row_user_fkey: foreign key between tenant tables isn't composite on tenant_id.",
+            [.. TableRegistry.Tables, Entry("child_row", TableClass.Tenant)]);
     }
 
     [Fact]

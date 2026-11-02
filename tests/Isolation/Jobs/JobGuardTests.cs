@@ -206,7 +206,7 @@ public sealed class JobGuardTests(PostgresFixture postgres)
         var database = await CreateAsync(postgres, registry: null);
 
         var error = await Assert.ThrowsAsync<PostgresException>(
-            () => database.InScopeAsync(TableRegistry.Dispatch, TenantA, $"SELECT 1 FROM {table} LIMIT 1"));
+            () => database.InScopeAsync(TableRegistry.Dispatch, TenantA, $"SELECT 1 FROM \"{table}\" LIMIT 1"));
 
         Assert.Equal(PermissionDenied, error.SqlState);
     }

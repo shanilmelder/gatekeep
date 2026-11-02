@@ -1,5 +1,5 @@
 #!/bin/sh
-# Stack check (Stories 1.10 and 1.11). Runs inside the stack container of deploy/compose.test.yaml,
+# Stack check (Stories 1.10, 1.11 and 1.20). Runs inside the stack container of deploy/compose.test.yaml,
 # never on the machine itself:
 #
 #   GATEKEEP_HOST_REPO=<this repository's path on the Docker host> \
@@ -212,16 +212,18 @@ expect_edge() {
     case "$got" in $want) ;; *) fail "edge $*: got '$got', want '$want'." ;; esac
 }
 
-# Each site reaches its host and only it, with HSTS: both hosts answer 404 with no body for
-# now, so stopping one proves which one answers.
+# Each site reaches its host and only it, with HSTS: Host.Hosted answers 404 with no body for
+# now, and Host.Admin the Admin Dashboard's index.html (Story 1.20), so stopping one proves
+# which one answers.
+ADMIN_OK="0 200 [1-9]* 0 1 "
 say "the Tenant zone reaches Host.Hosted and the Admin hostname Host.Admin, over HTTPS."
 expect_edge "0 404 0 0 1 " https "acme.$ZONE"
-expect_edge "0 404 0 0 1 " https "$ADMIN_HOST"
+expect_edge "$ADMIN_OK" https "$ADMIN_HOST"
 for stopped in hosted admin; do
     $C stop "$stopped" > /dev/null
     if [ "$stopped" = hosted ]; then
         expect_edge "0 502 0 0 ? " https "acme.$ZONE"
-        expect_edge "0 404 0 0 1 " https "$ADMIN_HOST"
+        expect_edge "$ADMIN_OK" https "$ADMIN_HOST"
     else
         expect_edge "0 404 0 0 1 " https "acme.$ZONE"
         expect_edge "0 502 0 0 ? " https "$ADMIN_HOST"
@@ -233,7 +235,33 @@ done
 say "a Host header with a port, or in another case, is still the TLS name's own site."
 expect_edge "0 404 0 0 1 " https "acme.$ZONE" -H "Host: acme.$ZONE:443"
 expect_edge "0 404 0 0 1 " https "acme.$ZONE" -H "Host: ACME.$(echo "$ZONE" | tr 'a-z' 'A-Z')"
-expect_edge "0 404 0 0 1 " https "$ADMIN_HOST" -H "Host: $ADMIN_HOST:443"
+expect_edge "$ADMIN_OK" https "$ADMIN_HOST" -H "Host: $ADMIN_HOST:443"
+
+# The response headers of GET https://$ADMIN_HOST/ through Caddy, CRs removed.
+admin_headers() {
+    docker run --rm --add-host host.docker.internal:host-gateway -e CA_PEM="$CA_PEM" \
+        -e HTTPS_PORT="$HTTPS_PORT" "$TOOLS" sh -c '
+        printf "%s\n" "$CA_PEM" > /tmp/ca.pem
+        ip="$(getent ahostsv4 host.docker.internal | awk "NR == 1 { print \$1 }")"
+        curl -s --max-time 10 --cacert /tmp/ca.pem --resolve "$1:$HTTPS_PORT:$ip" -o /dev/null -D - "https://$1:$HTTPS_PORT/" | tr -d "\r"' \
+        sh "$ADMIN_HOST"
+}
+
+say "the Admin Dashboard arrives through Caddy with the AD-21 CSP, no referrer and framing denied (Story 1.20)."
+ADMIN_CSP="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; font-src 'self'; connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
+heads="$(admin_headers)"
+echo "$heads" | head -n 1 | grep -q "^HTTP/[0-9.]* 200" || fail "GET https://$ADMIN_HOST/ isn't 200: $heads"
+for expected in \
+    "content-security-policy: $ADMIN_CSP" \
+    "referrer-policy: no-referrer" \
+    "x-frame-options: DENY" \
+    "x-content-type-options: nosniff"; do
+    name="${expected%%:*}"
+    got="$(echo "$heads" | grep -i "^$name:" || true)"
+    [ "$(echo "$got" | grep -c .)" = 1 ] || fail "GET https://$ADMIN_HOST/ sends $name other than once: $heads"
+    [ "$(echo "$got" | sed 's/^[^:]*: *//')" = "${expected#*: }" ] \
+        || fail "GET https://$ADMIN_HOST/ sends '$got', want '$expected'."
+done
 
 say "other names, the zone apex, nested names and no TLS name at all get no TLS."
 # A failed handshake is curl exit 35, with no response, even when the certificate is ignored.

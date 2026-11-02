@@ -11,6 +11,11 @@
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
   </ItemGroup>
 
+  <!-- The audit catalogue reader and the FR-40 class list, shared with the generator. -->
+  <ItemGroup>
+    <Compile Include="../Architecture/Generator/AuditCatalogue.cs" Link="Audit/AuditCatalogue.cs" />
+  </ItemGroup>
+
   <ItemGroup>
     <PackageReference Include="Microsoft.AspNetCore.TestHost" />
     <PackageReference Include="Microsoft.EntityFrameworkCore" />
@@ -33,8 +38,11 @@
     <ProjectReference Include="../../src/Adapters/OpenBao/Gatekeep.Adapters.OpenBao.csproj" />
     <ProjectReference Include="../../src/Adapters/Postgres/Gatekeep.Adapters.Postgres.csproj" />
     <ProjectReference Include="../../src/Gatekeep.Cli/Gatekeep.Cli.csproj" />
+    <ProjectReference Include="../../src/Modules/Admins/Gatekeep.Modules.Admins.csproj" />
     <ProjectReference Include="../../src/Modules/Audit/Gatekeep.Modules.Audit.csproj" />
+    <ProjectReference Include="../../src/Modules/Authentication/Gatekeep.Modules.Authentication.csproj" />
     <ProjectReference Include="../../src/Modules/Operations/Gatekeep.Modules.Operations.csproj" />
+    <ProjectReference Include="../../src/Modules/Sessions/Gatekeep.Modules.Sessions.csproj" />
   </ItemGroup>
 
 </Project>

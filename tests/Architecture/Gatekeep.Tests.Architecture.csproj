@@ -10,6 +10,7 @@
   <ItemGroup>
     <Compile Remove="Generator/**" />
     <Compile Include="Generator/EdgeList.cs" Link="EdgeList.cs" />
+    <Compile Include="Generator/AuditCatalogue.cs" Link="AuditCatalogue.cs" />
   </ItemGroup>
 
   <ItemGroup>

@@ -111,7 +111,7 @@ internal sealed class AuditVerifier : IAuditVerifier
                 }
 
                 // Only a checkpoint whose own hash holds can account for deleted rows.
-                if (hashMatches && envelope.TypeCode == AuditRetention.CheckpointType && envelope.CheckpointSeq is { } seq)
+                if (hashMatches && envelope.TypeCode == AuditEvents.RetentionCheckpoint.Code.Value && envelope.CheckpointSeq is { } seq)
                 {
                     checkpoints.Add(new Named(envelope.CheckpointEpoch, seq, envelope.CheckpointHash));
                 }
@@ -150,7 +150,7 @@ internal sealed class AuditVerifier : IAuditVerifier
         await using var command = context.CreateCommand();
         command.CommandText = tenantId is null ? DeploymentUnsealedCheckpoints : TenantUnsealedCheckpoints;
         AddTenant(command, tenantId);
-        ChainLock.Add(command, "checkpoint", AuditRetention.CheckpointType);
+        ChainLock.Add(command, "checkpoint", AuditEvents.RetentionCheckpoint.Code.Value);
 
         var named = new List<Named>();
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);

@@ -14,7 +14,8 @@ public sealed record ColumnGrant(string Privilege, IReadOnlyList<string> Columns
 
 /// <summary>
 /// One table: its class, its one owning module, every privilege per role, on the table
-/// and per column, and the triggers it must have.
+/// and per column, the triggers it must have, and whether it is <c>UNLOGGED</c>. Only
+/// counters a crash may reset are unlogged (AD-14); every other table must be logged.
 /// </summary>
 public sealed record TableEntry(
     string Name,
@@ -22,7 +23,8 @@ public sealed record TableEntry(
     string Owner,
     IReadOnlyDictionary<string, IReadOnlyList<string>> Grants,
     IReadOnlyDictionary<string, IReadOnlyList<ColumnGrant>>? ColumnGrants = null,
-    IReadOnlyList<string>? Triggers = null);
+    IReadOnlyList<string>? Triggers = null,
+    bool Unlogged = false);
 
 /// <summary>
 /// The AD-3 and AD-27 source of truth. A table not listed here, or a privilege
@@ -214,6 +216,43 @@ public static class TableRegistry
                 [Cli] = [new ColumnGrant(Update, StepRetryColumns)],
             },
             ["operation_step_guard_insert"]),
+
+        // AD-12 and AD-13. Only the Hosted request path reaches these yet: sign-in reads Users,
+        // and writes Sessions, transactions and OpenIddict's entities. No role deletes.
+        new("user", TableClass.Tenant, "Identity", new Dictionary<string, IReadOnlyList<string>>
+        {
+            [Hosted] = [Select],
+        }),
+        new("user_session", TableClass.Tenant, "Sessions", new Dictionary<string, IReadOnlyList<string>>
+        {
+            [Hosted] = [Select, Insert, Update],
+        }),
+        new("authorization", TableClass.Tenant, "Sessions", new Dictionary<string, IReadOnlyList<string>>
+        {
+            [Hosted] = [Select, Insert, Update],
+        }),
+        new("token", TableClass.Tenant, "Sessions", new Dictionary<string, IReadOnlyList<string>>
+        {
+            [Hosted] = [Select, Insert, Update],
+        }),
+        new("signin_transaction", TableClass.Tenant, "Authentication", new Dictionary<string, IReadOnlyList<string>>
+        {
+            [Hosted] = [Select, Insert, Update],
+        }),
+        new(
+            "admin_attempt",
+            TableClass.Control,
+            "Admins",
+            new Dictionary<string, IReadOnlyList<string>>
+            {
+                [Admin] = [Select, Insert],
+            },
+            new Dictionary<string, IReadOnlyList<ColumnGrant>>
+            {
+                // Counting: the window and the count. Never the policy or the subject.
+                [Admin] = [new ColumnGrant(Update, ["window_start", "attempts"])],
+            },
+            Unlogged: true),
     ];
 
     private static IReadOnlyList<string> EventTriggers(string table) =>

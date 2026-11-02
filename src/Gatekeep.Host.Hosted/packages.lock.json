@@ -11,7 +11,10 @@
         }
       },
       "gatekeep.adapters.logging": {
-        "type": "Project"
+        "type": "Project",
+        "dependencies": {
+          "Gatekeep.Kernel": "[0.1.0, )"
+        }
       },
       "gatekeep.adapters.openbao": {
         "type": "Project",

@@ -12,12 +12,14 @@ internal sealed class HostProcess : IDisposable
 
     private readonly Process _process;
     private readonly StringBuilder _output = new();
+    private readonly StringBuilder _standardOutput = new();
+    private readonly StringBuilder _standardError = new();
     private readonly Task _reading;
 
     private HostProcess(Process process)
     {
         _process = process;
-        _reading = Task.WhenAll(Pump(process.StandardOutput), Pump(process.StandardError));
+        _reading = Task.WhenAll(Pump(process.StandardOutput, _standardOutput), Pump(process.StandardError, _standardError));
     }
 
     public bool HasExited => _process.HasExited;
@@ -71,7 +73,7 @@ internal sealed class HostProcess : IDisposable
         }
         catch (TimeoutException)
         {
-            _process.Kill(entireProcessTree: true);
+            Kill();
             throw;
         }
 
@@ -88,6 +90,39 @@ internal sealed class HostProcess : IDisposable
                 return _output.ToString();
             }
         }
+    }
+
+    /// <summary>What the host wrote to standard output alone.</summary>
+    public string StandardOutput
+    {
+        get
+        {
+            lock (_output)
+            {
+                return _standardOutput.ToString();
+            }
+        }
+    }
+
+    /// <summary>What the host wrote to standard error alone, where an unhandled exception goes.</summary>
+    public string StandardError
+    {
+        get
+        {
+            lock (_output)
+            {
+                return _standardError.ToString();
+            }
+        }
+    }
+
+    /// <summary>Stops a running host and waits until everything it wrote has been read.</summary>
+    public async Task StopAsync(TimeSpan timeout, CancellationToken cancellationToken)
+    {
+        Kill();
+
+        await _process.WaitForExitAsync(cancellationToken).WaitAsync(timeout, cancellationToken);
+        await _reading.WaitAsync(timeout, cancellationToken);
     }
 
     /// <summary>GETs <paramref name="path"/> on <paramref name="port"/>, retrying until the host listens.</summary>
@@ -116,12 +151,24 @@ internal sealed class HostProcess : IDisposable
 
     public void Dispose()
     {
-        if (!_process.HasExited)
-        {
-            _process.Kill(entireProcessTree: true);
-        }
+        Kill();
 
         _process.Dispose();
+    }
+
+    /// <summary>Kills the host if it's running. It may exit between the check and the kill, which is fine.</summary>
+    private void Kill()
+    {
+        try
+        {
+            if (!_process.HasExited)
+            {
+                _process.Kill(entireProcessTree: true);
+            }
+        }
+        catch (InvalidOperationException)
+        {
+        }
     }
 
     /// <summary>A port free right now. Another process could take it first, which is rare enough here.</summary>
@@ -132,7 +179,7 @@ internal sealed class HostProcess : IDisposable
         return ((IPEndPoint)listener.LocalEndpoint).Port;
     }
 
-    private async Task Pump(StreamReader reader)
+    private async Task Pump(StreamReader reader, StringBuilder stream)
     {
         var buffer = new char[4096];
         int read;
@@ -141,6 +188,7 @@ internal sealed class HostProcess : IDisposable
             lock (_output)
             {
                 _output.Append(buffer, 0, read);
+                stream.Append(buffer, 0, read);
             }
         }
     }

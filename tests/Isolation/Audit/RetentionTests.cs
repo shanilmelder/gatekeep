@@ -131,7 +131,7 @@ public sealed class RetentionTests(PostgresFixture postgres)
         await chains.SealAsync(TenantA);
 
         Assert.Equal([3L, 4L], await chains.SeqsAsync(TenantA));
-        Assert.Equal(1, await chains.ScalarAsync<long>($"SELECT count(*) FROM audit_event WHERE type_code = '{AuditContract.CheckpointTypeCode}'"));
+        Assert.Equal(1, await chains.ScalarAsync<long>($"SELECT count(*) FROM audit_event WHERE type_code = '{AuditEvents.RetentionCheckpoint.Code.Value}'"));
         Assert.True((await chains.VerifyAsync(TenantA)).Intact);
 
         // The checkpoint is new, but it's retention's own record: the purge goes ahead.
@@ -149,7 +149,7 @@ public sealed class RetentionTests(PostgresFixture postgres)
         await chains.SealAsync(TenantA);
 
         Assert.Equal(0, await chains.ApplyRetentionAsync(TenantA));
-        Assert.Equal(1, await chains.ScalarAsync<long>($"SELECT count(*) FROM audit_event WHERE type_code = '{AuditContract.CheckpointTypeCode}'"));
+        Assert.Equal(1, await chains.ScalarAsync<long>($"SELECT count(*) FROM audit_event WHERE type_code = '{AuditEvents.RetentionCheckpoint.Code.Value}'"));
     }
 
     [Fact]
@@ -218,7 +218,7 @@ public sealed class RetentionTests(PostgresFixture postgres)
         await using var command = new NpgsqlCommand(
             $"""
             SELECT checkpoint_epoch, checkpoint_seq, checkpoint_hash, seq IS NOT NULL, actor_kind, target_kind
-            FROM {EventTable(tenantId)} WHERE {TenantFilter(tenantId)} type_code = '{AuditContract.CheckpointTypeCode}'
+            FROM {EventTable(tenantId)} WHERE {TenantFilter(tenantId)} type_code = '{AuditEvents.RetentionCheckpoint.Code.Value}'
             """,
             connection);
         await using var reader = await command.ExecuteReaderAsync(Cancellation);
