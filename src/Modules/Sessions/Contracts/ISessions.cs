@@ -1,3 +1,4 @@
+using Gatekeep.Kernel.Audit;
 using Gatekeep.Kernel.Persistence;
 using Gatekeep.Kernel.Secrets;
 
@@ -35,4 +36,34 @@ public interface ISessions
     /// <remarks>A User not in the context's Tenant fails on the foreign key, and the caller's scope must be discarded.</remarks>
     [StateChanging]
     Task<StartedSession> StartAsync(CommandContext context, NewSession session, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// The one revocation path (AD-13, AR-23). Logout, every FR-48 trigger, refresh reuse, code
+    /// replay, Application deletion and Tenant deletion all end access here, in the caller's
+    /// context and only in its Tenant:
+    /// <list type="bullet">
+    /// <item><see cref="RevocationScope.Authorization"/>: that Token Family is set to <c>revoked</c>, with its tokens. No Session ends.</item>
+    /// <item><see cref="RevocationScope.Session"/>: the Session ends, and every family anchored to it is revoked, with its tokens.</item>
+    /// <item><see cref="RevocationScope.User"/>: every live Session of the User ends, and every family anchored to the User's
+    /// Sessions is revoked, with its tokens. <paramref name="exceptSessionId"/>, the acting Session, and its families are left alone.</item>
+    /// <item><see cref="RevocationScope.Application"/>: every family and every token of the Application is revoked. No Session ends.</item>
+    /// <item><see cref="RevocationScope.Tenant"/>: every live Session ends, and every family and token is revoked.</item>
+    /// </list>
+    /// An ended Session gets <c>ended_at</c> and <paramref name="reason"/>'s code. A revoked family or token gets a new
+    /// concurrency token, so an OpenIddict store holding the old row sees a conflict. Rows already ended or revoked
+    /// don't change, so a repeated call returns zeros. Every call writes one <c>sessions.access.revoked</c> audit
+    /// event by <paramref name="actor"/>, whose target is the User for User scope and absent otherwise. Access tokens
+    /// are not revocable beyond their row's status. The method can run as the effect that a refused request keeps
+    /// once the rest of its work is undone.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The context has no Tenant. Nothing is written.</exception>
+    /// <exception cref="ArgumentException"><paramref name="exceptSessionId"/> is given with a scope other than User, or is empty.</exception>
+    [StateChanging]
+    Task<RevocationOutcome> RevokeAccessAsync(
+        CommandContext context,
+        RevocationScope scope,
+        Guid? exceptSessionId,
+        RevocationReason reason,
+        Actor actor,
+        CancellationToken cancellationToken);
 }

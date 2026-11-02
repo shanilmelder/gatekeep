@@ -39,7 +39,7 @@ internal static class AuditCatalogue
         new("EmailChange", "Email changes", "16.8"),
         new("Factor", "Factor events", "6.1"),
         new("RecoveryCode", "Recovery Code events", "6.8"),
-        new("SessionRevocation", "Session and token revocation", "2.7"),
+        new("SessionRevocation", "Session and token revocation", null),
         new("AdminChange", "Admin changes", "8.2"),
         new("KeyOperation", "Key operations", "9.2"),
         new("ManagementApiGrant", "Management API grants", "17.2"),
