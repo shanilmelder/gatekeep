@@ -103,7 +103,7 @@ flowchart TD
 - **Prevents:** an internet-facing flaw reaching Admin functions or changing Tenant security configuration.
 - **Rule:**
   - `Host.Hosted` serves Tenant Subdomains only: OIDC endpoints, Hosted Login and the Account Portal.
-  - `Host.Admin` serves the Admin Dashboard and Management API, and listens only on the private network.
+  - `Host.Admin` serves the Admin Dashboard and Management API, reachable only through Caddy's Admin site on its own public hostname. **Amended 2026-11-02 (public Admin, `sprint-change-proposal-2026-11-02-public-admin.md`):** the Admin surface faces the internet; WebAuthn-only sign-in, fresh assertions, rate limits, CSP and CSRF checks are its controls, and an internet-facing flaw in `Host.Admin` is no longer stopped by network position.
   - `Host.Worker` has no inbound port except health. `Gatekeep.Cli` runs only as the `cli` Compose service, with its own role and no published port.
   - Admin routes aren't registered in `Host.Hosted`, and Hosted Login routes aren't registered in `Host.Admin`.
   - Database grants are an allow-list per table and column in the AD-3 registry. A grant not listed fails the catalogue test.
@@ -430,7 +430,7 @@ stateDiagram-v2
 - **Rule:** One Docker host running Docker Compose. `[DECISION: Docker only, 2026-11-02]`
   - Every Gatekeep process runs in a container: the hosts, PostgreSQL, OpenBao, Caddy, the CLI, setup and key generation, and the test suite. Nothing is installed on the host but Docker, with pinned, signed images per release. Disk encryption, the host firewall and host access control are host requirements in the install docs, not something Gatekeep sets up.
   - Environments are local (`*.gatekeep.localhost`), CI and production, sharing one Compose definition with different values.
-  - Caddy has two sites: the public zone wildcard, and the Admin hostname on the VPN interface, with a certificate from Caddy's internal CA trusted on Admin devices. `[ASSUMPTION]` Certificate private keys are readable only by Caddy.
+  - Caddy has two sites: the public Tenant zone wildcard, and the public Admin hostname outside that zone. Both certificates come by ACME DNS-01 through Cloudflare DNS, with a token limited to a validation-only zone. `[DECISION: Caddy for both sites, Cloudflare DNS, 2026-11-02]` Certificate private keys are readable only by Caddy.
   - The public DNS credential covers only validation records, by delegating `_acme-challenge` to a validation-only zone. CAA records are set. Certificate Transparency monitoring raises Security Alerts.
   - Only Caddy publishes ports, and the install docs require a host firewall allowing just those. Application egress is limited to `Host.Hosted`, `Host.Worker` and `Gatekeep.Cli`, through one `EgressHttp` handler that blocks private addresses. Infrastructure egress is limited to named endpoints: Caddy to its ACME and DNS providers, and pgBackRest and OpenBao's snapshot and audit shipping to their off-server targets. Social provider endpoints are code-owned constants, never Tenant input.
   - Startup refuses missing or default secrets. Every host exposes `/healthz` on a private port. Operational logs are JSON to stdout, carrying W3C trace IDs, which are the IDs shown to Users.
@@ -551,7 +551,7 @@ Verified against vendor pages on 2026-11-02.
 ```mermaid
 flowchart LR
   U[Users and Applications] -->|TLS| C[Caddy public site]
-  AD[Admins and Management clients] -->|VPN| CA[Caddy Admin site]
+  AD[Admins and Management clients] -->|HTTPS| CA[Caddy Admin site]
   subgraph Server
     C --> HH[Host.Hosted]
     CA --> HA[Host.Admin]

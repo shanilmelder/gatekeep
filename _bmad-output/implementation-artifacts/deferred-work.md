@@ -85,3 +85,12 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-1-10-run-the-stack-under-compose-with-safe-secrets.md`
   summary: Check each host's AppRole login at startup, so a wrong or revoked secret ID stops the host instead of reporting healthy.
   evidence: Story 1.10 health checks only sys/health, which needs no token.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-11-route-traffic-through-caddy-and-default-deny-networks.md`
+  summary: Decide forwarded-header trust behind Caddy so rate limits see real client addresses.
+  evidence: Story 1.11 review; Story 1.20 owns the rate limiter.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-11-route-traffic-through-caddy-and-default-deny-networks.md`
+  summary: Decide whether Caddy keeps an access log, with query values scrubbed.
+  evidence: Story 1.11 review: T-42.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-11-route-traffic-through-caddy-and-default-deny-networks.md`
+  summary: Prove Caddy's cloudflare mode issues real certificates on the first real install.
+  evidence: Story 1.11 validated it offline only.

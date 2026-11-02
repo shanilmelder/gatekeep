@@ -1,0 +1,75 @@
+# Caddy, the only service that publishes ports (AD-2, AD-26). Two sites:
+#   *.<zone>        the Tenant zone wildcard, proxied to Host.Hosted
+#   <admin host>    the Admin hostname, proxied to Host.Admin
+# It shares a network with those two hosts only, and none with the worker, PostgreSQL or
+# OpenBao. Hosts listen for health on loopback only, so no health port is reachable either.
+#
+# Everything else gets no content: an unknown name fails the TLS handshake, because Caddy
+# holds no certificate for it; a Host header that isn't the name the TLS handshake was for
+# gets an empty 421, so one site's connection never reaches the other; plain HTTP redirects
+# only the two sites, with no body, and closes every other request with no response.
+#
+# Settings, from the caddy service's environment (deploy/compose.yaml), checked by start.sh
+# before Caddy starts:
+#   GATEKEEP_TENANT_ZONE  the Tenant zone; *.<zone> is served, the zone apex is not.
+#   GATEKEEP_ADMIN_HOST   the Admin hostname, never under the zone.
+#   GATEKEEP_TLS_MODE     internal (Caddy's local CA, for local and CI) or cloudflare, set
+#                         only by deploy/compose.cloudflare.yaml
+#                         (production: publicly trusted certificates by ACME DNS-01 through
+#                         Cloudflare DNS, tls-cloudflare.caddy).
+#
+# Caddy listens on 8080 and 8443 inside the container, so it needs no capability to bind;
+# Compose publishes them as the host's 80 and 443.
+
+{
+	# No admin API, and no config written back to disk.
+	admin off
+	persist_config off
+
+	http_port 8080
+	https_port 8443
+
+	# Redirects are written below, so that they carry no port and cover the two sites only.
+	auto_https disable_redirects
+	# The internal CA's root stays in Caddy's data volume: never installed anywhere.
+	skip_install_trust
+
+	servers {
+		# Only TCP 443 is published, so no HTTP/3 advertisement.
+		protocols h1 h2
+		# The Host header must be the name the TLS handshake was for: 421 otherwise.
+		strict_sni_host on
+	}
+}
+
+# Defines the tenant-tls and admin-tls snippets for the chosen mode.
+import tls-{$GATEKEEP_TLS_MODE}.caddy
+
+# Each host reaches Caddy over its own edge network, so a request from the other host's
+# edge subnet (fixed in deploy/compose.yaml) is code in that host using Caddy as a bridge:
+# the connection closes with no response. Host.Hosted can't reach Host.Admin through Caddy,
+# nor Host.Admin a Tenant site.
+https://*.{$GATEKEEP_TENANT_ZONE} {
+	import tenant-tls
+	@from_admin_edge remote_ip 10.201.2.0/24
+	abort @from_admin_edge
+	header Strict-Transport-Security "max-age=31536000"
+	reverse_proxy hosted:8080
+}
+
+https://{$GATEKEEP_ADMIN_HOST} {
+	import admin-tls
+	@from_hosted_edge remote_ip 10.201.1.0/24
+	abort @from_hosted_edge
+	header Strict-Transport-Security "max-age=31536000"
+	reverse_proxy admin:8080
+}
+
+http://*.{$GATEKEEP_TENANT_ZONE}, http://{$GATEKEEP_ADMIN_HOST} {
+	redir https://{host}{uri} 308
+}
+
+# Any other name over plain HTTP: the connection closes with no response.
+http:// {
+	abort
+}

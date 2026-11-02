@@ -1,5 +1,5 @@
 #!/bin/sh
-# Stack check (Story 1.10). Runs inside the stack container of deploy/compose.test.yaml,
+# Stack check (Stories 1.10 and 1.11). Runs inside the stack container of deploy/compose.test.yaml,
 # never on the machine itself:
 #
 #   GATEKEEP_HOST_REPO=<this repository's path on the Docker host> \
@@ -7,8 +7,11 @@
 #
 # It installs the stack exactly as docs/install.md says, checks every service healthy,
 # then checks what a unit test can't reach: the Master Key in no volume, image or
-# environment; the hardening each container really runs with; no egress; PostgreSQL
-# stopped; OpenBao stopped; the Master Key missing. It always tears down, volumes and
+# environment; the hardening each container really runs with; no egress; the edge (Story
+# 1.11): both of Caddy's sites over HTTPS through its published ports and every refusal,
+# which container can reach which, Caddy's key files and its settings checks; PostgreSQL
+# stopped; OpenBao stopped; the Master Key missing. Nothing here calls Cloudflare: Caddy
+# uses its internal CA, and cloudflare mode is only validated, with no network. It always tears down, volumes and
 # secrets included. Every wait polls for a defined state, with a deadline.
 set -eu
 
@@ -30,7 +33,13 @@ BUSYBOX=busybox:1.37.0@sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694b
 # This container's own image: it has Node, for HTTP checks and the key search.
 TOOLS=gatekeep/tests:local
 HOSTS="hosted admin worker"
-BUILT="gatekeep/openbao:local gatekeep/hosted:local gatekeep/admin:local gatekeep/worker:local gatekeep/cli:local"
+BUILT="gatekeep/openbao:local gatekeep/hosted:local gatekeep/admin:local gatekeep/worker:local gatekeep/cli:local gatekeep/caddy:local"
+# Caddy's two sites, as deploy/compose.yaml defaults them, and the host ports it publishes.
+ZONE=gatekeep.localhost
+ADMIN_HOST=admin.gatekeep-admin.localhost
+HTTP_PORT="${GATEKEEP_HTTP_PORT:-80}"
+HTTPS_PORT="${GATEKEEP_HTTPS_PORT:-443}"
+unset GATEKEEP_TENANT_ZONE GATEKEEP_ADMIN_HOST
 
 say() { echo "stack-check: $*"; }
 fail() { echo "stack-check: FAIL $*" >&2; $C ps -a >&2 || true; $C logs --tail 40 >&2 || true; exit 1; }
@@ -131,7 +140,7 @@ for id in $(docker ps -aq --filter "label=com.docker.compose.project=$COMPOSE_PR
 done
 
 say "hardening of each running container."
-for service in $HOSTS; do
+for service in $HOSTS caddy; do
     id="$(container "$service")"
     user="$(docker inspect --format '{{.Config.User}}' "$id")"
     case "$user" in "" | 0 | 0:* | root | root:*) fail "$service runs as root." ;; esac
@@ -142,8 +151,13 @@ for service in $HOSTS; do
     if docker inspect --format '{{range .Mounts}}{{.Source}} {{end}}' "$id" | grep -q 'docker.sock'; then
         fail "$service has the Docker socket."
     fi
-    [ "$(docker inspect --format '{{len .NetworkSettings.Ports}}' "$id")" = 0 ] || fail "$service publishes a port."
 done
+for id in $(docker ps -aq --no-trunc --filter "label=com.docker.compose.project=$COMPOSE_PROJECT_NAME"); do
+    [ "$id" = "$(container caddy)" ] && continue
+    [ "$(docker inspect --format '{{len .HostConfig.PortBindings}}' "$id")" = 0 ] || fail "container $id publishes a port."
+done
+[ "$(docker inspect --format '{{range $p, $b := .HostConfig.PortBindings}}{{$p}}={{range $b}}{{.HostPort}}{{end}} {{end}}' "$(container caddy)")" \
+    = "8080/tcp=$HTTP_PORT 8443/tcp=$HTTPS_PORT " ] || fail "caddy publishes other than $HTTP_PORT and $HTTPS_PORT."
 [ "$(docker inspect --format '{{.HostConfig.NetworkMode}}' "$(container openbao)")" = none ] || fail "openbao is on a network."
 
 say "no egress from any host."
@@ -154,6 +168,245 @@ for service in $HOSTS; do
             .catch(() => console.log("refused"))')"
     [ "$reached" = refused ] || fail "$service reached the internet."
 done
+
+# --- The edge (Story 1.11) ---
+
+# Caddy's internal root certificate, which is public, so the client can verify both sites.
+CA_PEM="$(docker exec "$(container caddy)" cat /data/caddy/pki/authorities/local/root.crt)" \
+    || fail "caddy has no internal root certificate."
+
+# One request from a client container through the host's published ports, with the TLS
+# name and Caddy's address pinned by --resolve. Arguments: scheme, name (or @ip, to connect
+# by address with no TLS name), then any curl options. Prints
+# "<curl exit> <status> <body bytes> <Set-Cookie count> <HSTS count> <Location>".
+edge() {
+    docker run --rm --add-host host.docker.internal:host-gateway -e CA_PEM="$CA_PEM" \
+        -e HTTP_PORT="$HTTP_PORT" -e HTTPS_PORT="$HTTPS_PORT" "$TOOLS" sh -c '
+        scheme="$1" name="$2"
+        shift 2
+        printf "%s\n" "$CA_PEM" > /tmp/ca.pem
+        ip="$(getent ahostsv4 host.docker.internal | awk "NR == 1 { print \$1 }")"
+        [ -n "$ip" ] || { echo "no address for host.docker.internal"; exit 0; }
+        if [ "$scheme" = https ]; then port="$HTTPS_PORT"; else port="$HTTP_PORT"; fi
+        if [ "$name" = @ip ]; then
+            url="$scheme://$ip:$port/"
+        else
+            url="$scheme://$name:$port/"
+            set -- --resolve "$name:$port:$ip" "$@"
+        fi
+        status="$(curl -s --max-time 10 --cacert /tmp/ca.pem -o /tmp/body -D /tmp/head -w "%{http_code}" "$url" "$@")"
+        code=$?
+        touch /tmp/body /tmp/head
+        echo "$code $status $(wc -c < /tmp/body) $(grep -ci "^set-cookie:" /tmp/head) $(grep -ci "^strict-transport-security: max-age=31536000.\$" /tmp/head) $(sed -n "s/^[Ll]ocation: *//p" /tmp/head | tr -d "\r")"' \
+        sh "$@"
+}
+
+# Fails unless "edge ..." prints what the first argument, a case pattern, says.
+expect_edge() {
+    want="$1"
+    shift
+    got="$(edge "$@")"
+    case "$got" in $want) ;; *) fail "edge $*: got '$got', want '$want'." ;; esac
+}
+
+# Each site reaches its host and only it, with HSTS: both hosts answer 404 with no body for
+# now, so stopping one proves which one answers.
+say "the Tenant zone reaches Host.Hosted and the Admin hostname Host.Admin, over HTTPS."
+expect_edge "0 404 0 0 1 " https "acme.$ZONE"
+expect_edge "0 404 0 0 1 " https "$ADMIN_HOST"
+for stopped in hosted admin; do
+    $C stop "$stopped" > /dev/null
+    if [ "$stopped" = hosted ]; then
+        expect_edge "0 502 0 0 ? " https "acme.$ZONE"
+        expect_edge "0 404 0 0 1 " https "$ADMIN_HOST"
+    else
+        expect_edge "0 404 0 0 1 " https "acme.$ZONE"
+        expect_edge "0 502 0 0 ? " https "$ADMIN_HOST"
+    fi
+    $C start "$stopped" > /dev/null
+    until_true 120 host_health_is "$stopped" healthy || fail "$stopped didn't come back."
+done
+
+say "a Host header with a port, or in another case, is still the TLS name's own site."
+expect_edge "0 404 0 0 1 " https "acme.$ZONE" -H "Host: acme.$ZONE:443"
+expect_edge "0 404 0 0 1 " https "acme.$ZONE" -H "Host: ACME.$(echo "$ZONE" | tr 'a-z' 'A-Z')"
+expect_edge "0 404 0 0 1 " https "$ADMIN_HOST" -H "Host: $ADMIN_HOST:443"
+
+say "other names, the zone apex, nested names and no TLS name at all get no TLS."
+# A failed handshake is curl exit 35, with no response, even when the certificate is ignored.
+for name in evil.example "$ZONE" "a.b.$ZONE" "x.$ADMIN_HOST" @ip; do
+    expect_edge "35 000 0 0 0 " https "$name"
+    expect_edge "35 000 0 0 0 " https "$name" --insecure
+done
+expect_edge "35 000 0 0 0 " https @ip --insecure -H "Host: $ADMIN_HOST"
+
+say "a Host header other than the TLS name gets an empty 421: one site never reaches the other."
+for host in "$ADMIN_HOST" "$(echo "$ADMIN_HOST" | tr 'a-z' 'A-Z')" evil.example "$ZONE" "b.$ZONE"; do
+    expect_edge "0 421 0 0 0 " https "acme.$ZONE" -H "Host: $host"
+done
+for host in "acme.$ZONE" evil.example; do
+    expect_edge "0 421 0 0 0 " https "$ADMIN_HOST" -H "Host: $host"
+done
+
+say "plain HTTP: a bare redirect for the two sites, nothing for any other name."
+expect_edge "0 308 0 0 0 https://acme.$ZONE/" http "acme.$ZONE"
+expect_edge "0 308 0 0 0 https://$ADMIN_HOST/" http "$ADMIN_HOST"
+# The connection closes with no response: curl exit 52.
+for name in evil.example "$ZONE" "a.b.$ZONE" "x.$ADMIN_HOST" @ip; do
+    expect_edge "52 000 0 0 0 " http "$name"
+done
+
+# A request from inside one host's container to Caddy on its edge network, for the other
+# host's site, with that site's TLS name and Host header. Prints like edge.
+bridge() {
+    docker run --rm --network "container:$(container "$1")" -e CA_PEM="$CA_PEM" "$TOOLS" sh -c '
+        printf "%s\n" "$CA_PEM" > /tmp/ca.pem
+        ip="$(getent ahostsv4 caddy | awk "NR == 1 { print \$1 }")"
+        [ -n "$ip" ] || { echo "no address for caddy"; exit 0; }
+        status="$(curl -s --max-time 10 --cacert /tmp/ca.pem --resolve "$1:8443:$ip" \
+            -o /tmp/body -D /tmp/head -w "%{http_code}" "https://$1:8443/")"
+        code=$?
+        touch /tmp/body /tmp/head
+        echo "$code $status $(wc -c < /tmp/body) $(grep -ci "^set-cookie:" /tmp/head)"' sh "$2"
+}
+
+say "neither host reaches the other's site through Caddy."
+got="$(bridge hosted "$ADMIN_HOST")"
+case "$got" in [1-9]*" 000 0 0") ;; *) fail "hosted got an answer from the Admin site through Caddy: '$got'." ;; esac
+got="$(bridge admin "acme.$ZONE")"
+case "$got" in [1-9]*" 000 0 0") ;; *) fail "admin got an answer from the Tenant site through Caddy: '$got'." ;; esac
+# Each host's own site, through the same path, answers: the refusal is the other host's subnet.
+[ "$(bridge hosted "acme.$ZONE")" = "0 404 0 0" ] || fail "hosted can't reach its own site through Caddy: '$(bridge hosted "acme.$ZONE")'."
+
+# "open" or "closed": a TCP connection to host:port, from a container on the given --network.
+reach() {
+    docker run --rm --network "$1" "$TOOLS" node -e '
+        const s = require("net").connect({ host: process.argv[1], port: +process.argv[2], timeout: 3000 });
+        s.on("connect", () => { console.log("open"); s.destroy(); });
+        s.on("timeout", () => { console.log("closed"); s.destroy(); });
+        s.on("error", () => console.log("closed"));' "$2" "$3"
+}
+
+addresses() { docker inspect --format '{{range .NetworkSettings.Networks}}{{.IPAddress}} {{end}}' "$(container "$1")"; }
+
+# Each service:port target, by name and by every address it has on any network, must be
+# closed from the given --network.
+expect_closed() {
+    from="$1"
+    shift
+    for target in "$@"; do
+        service="${target%:*}" port="${target#*:}"
+        for address in "$service" $(addresses "$service"); do
+            [ "$(reach "$from" "$address" "$port")" = closed ] || fail "$from reaches $address:$port ($service)."
+        done
+    done
+}
+
+say "Host.Hosted can't reach Host.Admin."
+expect_closed "container:$(container hosted)" admin:8080 admin:8081
+
+say "Caddy reaches the two public ports and nothing else."
+for target in hosted admin; do
+    [ "$(reach "container:$(container caddy)" "$target" 8080)" = open ] || fail "caddy can't reach $target:8080."
+done
+expect_closed "container:$(container caddy)" hosted:8081 admin:8081 worker:8080 worker:8081 postgres:5432 openbao:8200
+
+say "Caddy's keys and config are its own."
+caddy_id="$(container caddy)"
+[ -n "$(docker exec "$caddy_id" find /data -name '*.key')" ] || fail "caddy holds no private key."
+loose="$(docker exec "$caddy_id" sh -c 'find /data /config ! -user 10005; find /data /config -type d -perm /077; find /data /config -type f -perm /077')"
+[ -z "$loose" ] || fail "caddy-data or caddy-config isn't Caddy's alone: $loose"
+for id in $(docker ps -aq --no-trunc --filter "label=com.docker.compose.project=$COMPOSE_PROJECT_NAME"); do
+    [ "$id" = "$caddy_id" ] && continue
+    if docker inspect --format '{{range .Mounts}}{{.Name}} {{end}}' "$id" | grep -q 'caddy-'; then
+        fail "container $id mounts a Caddy volume."
+    fi
+done
+
+# Caddy's image, run alone with no network: only its settings checks and configuration.
+# Secrets go on a tmpfs at the real path, so the shipped files run unchanged.
+caddy_alone() {
+    docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges:true \
+        --tmpfs /data:uid=10005 --tmpfs /config:uid=10005 --tmpfs /tmp --tmpfs /run/secrets:uid=10005 "$@"
+}
+
+NAMES="-e GATEKEEP_TENANT_ZONE=id.gatekeep.invalid -e GATEKEEP_ADMIN_HOST=admin.gatekeep.invalid"
+CLOUDFLARE="-e GATEKEEP_TLS_MODE=cloudflare -e GATEKEEP_ACME_EMAIL=ops@gatekeep.invalid
+    -e GATEKEEP_ACME_CHALLENGE_DOMAIN=zone.validation.invalid -e GATEKEEP_ADMIN_ACME_CHALLENGE_DOMAIN=admin.validation.invalid"
+# The provider checks only the token's shape: 40 letters and digits.
+WITH_TOKEN='echo notarealtokennotarealtokennotarealtoken0 > /run/secrets/cloudflare_dns_token && exec sh /etc/caddy/start.sh "$@"'
+
+# Fails unless start.sh refuses the settings that follow the setting's name, naming it.
+expect_refused() {
+    setting="$1"
+    shift
+    # $NAMES and $CLOUDFLARE are split on purpose; a later -e wins over an earlier one.
+    # shellcheck disable=SC2086
+    if output="$(caddy_alone $NAMES "$@" gatekeep/caddy:local validate 2>&1)"; then
+        fail "caddy accepted $setting from: $* ($output)"
+    fi
+    case "$output" in *"refusing to start"*"$setting"*) ;; *) fail "caddy refused without naming $setting: $output" ;; esac
+}
+
+say "Caddy refuses a bad setting before it runs, naming it."
+LABEL63="$(printf '%063d' 0 | tr 0 a)"
+INTERNAL="-e GATEKEEP_TLS_MODE=internal"
+# shellcheck disable=SC2086
+{
+    for admin in "admin.$ZONE" "$ZONE" "a.b.$ZONE"; do
+        expect_refused GATEKEEP_ADMIN_HOST $INTERNAL -e GATEKEEP_TENANT_ZONE="$ZONE" -e GATEKEEP_ADMIN_HOST="$admin"
+    done
+    expect_refused GATEKEEP_ADMIN_HOST $INTERNAL -e GATEKEEP_ADMIN_HOST=admin.id.gatekeep.invalid
+    for bad in Admin.gatekeep.invalid localhost "$(printf 'a.invalid\nb.invalid')" "{env.HOME}.invalid" 10.0.0.1 \
+        "$LABEL63.$LABEL63.$LABEL63.$LABEL63.invalid" "a.-b.invalid" ""; do
+        expect_refused GATEKEEP_ADMIN_HOST $INTERNAL -e GATEKEEP_ADMIN_HOST="$bad"
+    done
+    expect_refused GATEKEEP_TENANT_ZONE $INTERNAL -e GATEKEEP_TENANT_ZONE=x.admin.gatekeep.invalid
+    expect_refused GATEKEEP_TENANT_ZONE $INTERNAL -e GATEKEEP_TENANT_ZONE="$(printf 'id.gatekeep.invalid\n}')"
+    expect_refused GATEKEEP_TLS_MODE -e GATEKEEP_TLS_MODE=public
+    expect_refused GATEKEEP_TLS_MODE -e GATEKEEP_TLS_MODE=
+    for email in "" ops@ @gatekeep.invalid "ops@gatekeep" "a b@gatekeep.invalid" "a{b}@gatekeep.invalid" \
+        "ops@gatekeep.invalid@x.invalid" "$(printf 'ops@gatekeep.invalid\nx')"; do
+        expect_refused GATEKEEP_ACME_EMAIL $CLOUDFLARE -e GATEKEEP_ACME_EMAIL="$email"
+    done
+    expect_refused GATEKEEP_ACME_CHALLENGE_DOMAIN $CLOUDFLARE -e GATEKEEP_ACME_CHALLENGE_DOMAIN=
+    expect_refused GATEKEEP_ACME_CHALLENGE_DOMAIN $CLOUDFLARE -e GATEKEEP_ACME_CHALLENGE_DOMAIN=x.id.gatekeep.invalid
+    expect_refused GATEKEEP_ACME_CHALLENGE_DOMAIN $CLOUDFLARE -e GATEKEEP_ACME_CHALLENGE_DOMAIN=admin.gatekeep.invalid
+    expect_refused GATEKEEP_ADMIN_ACME_CHALLENGE_DOMAIN $CLOUDFLARE -e GATEKEEP_ADMIN_ACME_CHALLENGE_DOMAIN=
+    expect_refused GATEKEEP_ADMIN_ACME_CHALLENGE_DOMAIN $CLOUDFLARE -e GATEKEEP_ADMIN_ACME_CHALLENGE_DOMAIN=x.admin.gatekeep.invalid
+    expect_refused GATEKEEP_ADMIN_ACME_CHALLENGE_DOMAIN $CLOUDFLARE -e GATEKEEP_ADMIN_ACME_CHALLENGE_DOMAIN=id.gatekeep.invalid
+    expect_refused "are the same" $CLOUDFLARE -e GATEKEEP_ADMIN_ACME_CHALLENGE_DOMAIN=zone.validation.invalid
+    # No token file at all, then one holding only whitespace.
+    expect_refused cloudflare_dns_token $CLOUDFLARE
+    if output="$(caddy_alone $NAMES $CLOUDFLARE --entrypoint sh gatekeep/caddy:local -c \
+        'printf " \n\t\n" > /run/secrets/cloudflare_dns_token && exec sh /etc/caddy/start.sh validate' 2>&1)"; then
+        fail "caddy accepted a DNS token of whitespace: $output"
+    fi
+    case "$output" in *"refusing to start"*cloudflare_dns_token*) ;; *) fail "caddy refused a whitespace token without naming it: $output" ;; esac
+}
+
+say "Caddy's cloudflare mode validates offline, with a placeholder token at the real path."
+# shellcheck disable=SC2086
+output="$(caddy_alone $NAMES $CLOUDFLARE --entrypoint sh gatekeep/caddy:local -c "$WITH_TOKEN" sh validate 2>&1)" \
+    || fail "Caddy's cloudflare mode doesn't validate: $output"
+# Each site's policy writes its challenge records under its own validation-only name.
+# shellcheck disable=SC2086
+config="$(caddy_alone $NAMES $CLOUDFLARE --entrypoint sh gatekeep/caddy:local -c "$WITH_TOKEN" sh adapt 2> /dev/null)" \
+    || fail "Caddy's cloudflare mode doesn't adapt."
+policies="$(echo "$config" | docker run --rm -i "$TOOLS" node -e '
+    let input = "";
+    process.stdin.on("data", d => input += d).on("end", () => {
+        const policies = JSON.parse(input).apps.tls.automation.policies;
+        for (const p of policies) {
+            const domains = [...new Set(p.issuers.map(i => i.challenges.dns.override_domain))];
+            const tokens = [...new Set(p.issuers.map(i => i.challenges.dns.provider.api_token))];
+            console.log(`${p.subjects.join(",")}=${domains.join(",")}:${tokens.join(",")}`);
+        }
+    });')"
+expected="*.id.gatekeep.invalid=zone.validation.invalid:{file./run/secrets/cloudflare_dns_token}
+admin.gatekeep.invalid=admin.validation.invalid:{file./run/secrets/cloudflare_dns_token}"
+[ "$(echo "$policies" | sort)" = "$(echo "$expected" | sort)" ] \
+    || fail "cloudflare mode's TLS policies aren't one per site with its own challenge domain: $policies"
 
 say "PostgreSQL stopped."
 $C stop postgres > /dev/null

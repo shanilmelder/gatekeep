@@ -2,3 +2,5 @@
 *.sh      text eol=lf
 *.hcl     text eol=lf
 *.service text eol=lf
+Caddyfile text eol=lf
+*.caddy   text eol=lf

@@ -49,4 +49,8 @@ services:
     environment:
       GATEKEEP_HOST_REPO: ${GATEKEEP_HOST_REPO:-}
       GATEKEEP_SECRETS_DIR: ${GATEKEEP_SECRETS_DIR:-}
+      # The host ports Caddy publishes, 80 and 443 unless set: a machine where they are taken
+      # (Windows often holds 80) runs the check on others.
+      GATEKEEP_HTTP_PORT: ${GATEKEEP_HTTP_PORT:-}
+      GATEKEEP_HTTPS_PORT: ${GATEKEEP_HTTPS_PORT:-}
     entrypoint: ["sh", "deploy/ci/stack-check.sh"]

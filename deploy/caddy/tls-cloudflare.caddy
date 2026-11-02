@@ -1,0 +1,23 @@
+# GATEKEEP_TLS_MODE=cloudflare (production): publicly trusted certificates from ACME for the
+# *.<zone> wildcard and the Admin hostname, validated by DNS-01 through Cloudflare DNS.
+#
+# NFR-21: _acme-challenge.<zone> and _acme-challenge.<admin host> are CNAMEs to names in a
+# separate validation-only Cloudflare zone, GATEKEEP_ACME_CHALLENGE_DOMAIN and
+# GATEKEEP_ADMIN_ACME_CHALLENGE_DOMAIN, and Caddy writes its challenge records there only.
+# The API token is scoped to that validation zone. It arrives only as the Compose secret
+# cloudflare_dns_token and is read from its file at startup (deploy/compose.cloudflare.yaml).
+# docs/install.md has the DNS setup.
+(cloudflare-dns-01) {
+	tls {$GATEKEEP_ACME_EMAIL} {
+		dns cloudflare {file./run/secrets/cloudflare_dns_token}
+		dns_challenge_override_domain {args[0]}
+	}
+}
+
+(tenant-tls) {
+	import cloudflare-dns-01 {$GATEKEEP_ACME_CHALLENGE_DOMAIN}
+}
+
+(admin-tls) {
+	import cloudflare-dns-01 {$GATEKEEP_ADMIN_ACME_CHALLENGE_DOMAIN}
+}
