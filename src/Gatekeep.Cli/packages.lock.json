@@ -163,7 +163,8 @@
           "Gatekeep.Modules.Keys": "[0.1.0, )",
           "Gatekeep.Modules.Notifications": "[0.1.0, )",
           "Gatekeep.Modules.Sessions": "[0.1.0, )",
-          "Gatekeep.Modules.Tenancy": "[0.1.0, )"
+          "Gatekeep.Modules.Tenancy": "[0.1.0, )",
+          "Npgsql": "[10.0.3, )"
         }
       },
       "gatekeep.modules.sessions": {

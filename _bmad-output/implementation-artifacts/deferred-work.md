@@ -61,3 +61,15 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-1-7-hold-keys-in-openbao-behind-ikeycustody.md`
   summary: Set a secret ID lifetime and write the replacement procedure for one leaked secret ID.
   evidence: Story 1.7 setup uses secret_id_ttl=0. Story 1.10 delivers secret IDs.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-8-run-tenant-scoped-jobs.md`
+  summary: Decide job retention for dead jobs and for Tenant deletion, since job and job_payload keys are ON DELETE RESTRICT.
+  evidence: Story 1.8 purges only done jobs.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-8-run-tenant-scoped-jobs.md`
+  summary: Guard who may attach a job_payload row, so only the enqueuing transaction can.
+  evidence: Story 1.8 review: the enqueuing roles cannot read job and SECURITY DEFINER is banned.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-8-run-tenant-scoped-jobs.md`
+  summary: Bound a credential job's attempts and backoff by the credential's lifetime.
+  evidence: Needed by the first credential job type (reset links).
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-8-run-tenant-scoped-jobs.md`
+  summary: Give operations.job.dead a job reference, and raise the Security Alert.
+  evidence: G-17.

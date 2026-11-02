@@ -68,3 +68,4 @@ dependency Tests.Isolation -> Adapters.OpenBao
 dependency Tests.Isolation -> Adapters.Postgres
 dependency Tests.Isolation -> Audit
 dependency Tests.Isolation -> Cli
+dependency Tests.Isolation -> Operations

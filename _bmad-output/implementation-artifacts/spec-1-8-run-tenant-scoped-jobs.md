@@ -2,14 +2,57 @@
 title: 'Story 1.8: Run Tenant-scoped jobs'
 type: 'feature'
 created: '2026-11-02'
-status: 'ready-for-dev'
+status: 'done'
+baseline_revision: '13604f6cfad9fe85f7cb3b4bd0b9d07b8da5e676'
 review_loop_iteration: 0
-followup_review_recommended: false
+followup_review_recommended: true
 context:
   - '{project-root}/_bmad-output/planning-artifacts/architecture/architecture-gatekeep-2026-11-02/ARCHITECTURE-SPINE.md'
   - '{project-root}/docs/threat-model.md'
 warnings: [oversized]
-deferred: []
+deferred:
+  - summary: >-
+      Concurrent schedule ticks are untested.
+    evidence: |-
+      Only sequential ticks are tested; one Worker runs per Deployment today.
+    location: >-
+      src/Modules/Operations/Core/JobScheduleRunner.cs
+    severity: low
+  - summary: >-
+      Dead jobs are never purged, and RESTRICT keys then block Tenant deletion.
+    evidence: |-
+      operations.job.purge deletes only done rows. The Tenant deletion Operation must decide.
+    location: >-
+      src/Modules/Operations/Core/ProductionJobs.cs
+    severity: medium
+  - summary: >-
+      operations.job.dead names no job.
+    evidence: |-
+      Audit targets have no job kind. G-17.
+    location: >-
+      src/Modules/Operations/Core/JobRunner.cs
+    severity: medium
+  - summary: >-
+      A credential ciphertext lives across retries.
+    evidence: |-
+      The first credential type must bound attempts and backoff by its lifetime.
+    location: >-
+      src/Modules/Operations/Contracts/JobRegistry.cs
+    severity: medium
+  - summary: >-
+      No lease heartbeat for long bodies.
+    evidence: |-
+      No body runs near the 5-minute lease yet.
+    location: >-
+      src/Modules/Operations/Core/JobRunner.cs
+    severity: low
+  - summary: >-
+      job_payload has no guard on who attaches a payload.
+    evidence: |-
+      Enqueuing roles cannot read job, SECURITY DEFINER is banned. A payload on a done job also blocks the purge. Recorded under T-26.
+    location: >-
+      src/Adapters/Postgres/Migrations/Migration20261102020000CreateJobTables.cs
+    severity: medium
 ---
 
 <intent-contract>
@@ -77,14 +120,14 @@ deferred: []
 ## Tasks & Acceptance
 
 **Execution:**
-- [ ] `src/Gatekeep.Kernel/Jobs/IJobEnqueuer.cs`, `JobType.cs`, `JobPayload.cs` -- `[StateChanging] EnqueueAsync(CommandContext, JobType, JobPayload?, DateTimeOffset? runAfter, CancellationToken)` plus a Deployment-wide overload taking an optional `operationId`; `JobPayload` holds named IDs and an optional `Secret<byte[]>` credential.
-- [ ] `src/Modules/Operations/Core/` -- registry types, the production registry (one Deployment-wide type, `operations.job.purge`, which deletes `done` jobs older than 30 days, with its review recorded as "Story 1.8 build review" and the reason), guard SQL renderer, enqueuer, runner (claim, run, back off, dead), schedule runner.
-- [ ] `src/Modules/Operations/Contracts/OperationsContract.cs` -- factories for the enqueuer, runner and schedule runner, and the registry render for tests.
-- [ ] `src/Adapters/Postgres/Migrations/Migration20261102020000CreateJobTables.cs`, `TableRegistry.cs` -- tables, CHECK, indexes, guard and notify triggers, grants.
-- [ ] `src/Gatekeep.Host.Worker/Program.cs`, `JobSchedule.cs` -- code-owned schedule (purge daily) and hosted services for the runner and schedule.
-- [ ] `tests/Isolation/Jobs/` -- every matrix row except the last, using a test registry and a fake `IKeyCustody`; a test that the migration's guard equals the production render; a role × type matrix against the production guard.
-- [ ] `tests/Architecture/JobRegistryRuleTests.cs` -- Deployment-wide types need a review; `gk_hosted` only `notifications.*`, `gk_sealer` only `alerts.*`; type codes match the audit code pattern; run-as is one of the three roles.
-- [ ] `docs/threat-model.md`, module diagram, edges -- record what is built and open.
+- [x] `src/Gatekeep.Kernel/Jobs/IJobEnqueuer.cs`, `JobType.cs`, `JobPayload.cs` -- `[StateChanging] EnqueueAsync(CommandContext, JobType, JobPayload?, DateTimeOffset? runAfter, CancellationToken)` plus a Deployment-wide overload taking an optional `operationId`; `JobPayload` holds named IDs and an optional `Secret<byte[]>` credential.
+- [x] `src/Modules/Operations/Core/` -- registry types, the production registry (one Deployment-wide type, `operations.job.purge`, which deletes `done` jobs older than 30 days, with its review recorded as "Story 1.8 build review" and the reason), guard SQL renderer, enqueuer, runner (claim, run, back off, dead), schedule runner.
+- [x] `src/Modules/Operations/Contracts/OperationsContract.cs` -- factories for the enqueuer, runner and schedule runner, and the registry render for tests.
+- [x] `src/Adapters/Postgres/Migrations/Migration20261102020000CreateJobTables.cs`, `TableRegistry.cs` -- tables, CHECK, indexes, guard and notify triggers, grants.
+- [x] `src/Gatekeep.Host.Worker/Program.cs`, `JobSchedule.cs` -- code-owned schedule (purge daily) and hosted services for the runner and schedule.
+- [x] `tests/Isolation/Jobs/` -- every matrix row except the last, using a test registry and a fake `IKeyCustody`; a test that the migration's guard equals the production render; a role × type matrix against the production guard.
+- [x] `tests/Architecture/JobRegistryRuleTests.cs` -- Deployment-wide types need a review; `gk_hosted` only `notifications.*`, `gk_sealer` only `alerts.*`; type codes match the audit code pattern; run-as is one of the three roles.
+- [x] `docs/threat-model.md`, module diagram, edges -- record what is built and open.
 
 **Acceptance Criteria:**
 - Given `gk_dispatch`, when it reads `job_payload` or any tenant table, then permission is refused.
@@ -94,6 +137,50 @@ deferred: []
 ## Spec Change Log
 
 ## Review Triage Log
+
+### 2026-11-02 — Review pass
+- verdicts: 40 findings — high 0, medium 20, low 17, false 3, maybe-false 0
+- findings:
+  - `[medium]` `[patch]` Gap: the `timed_out` lease path never runs — test with a 1 s lease.
+  - `[medium]` `[patch]` Gap: `unknown_type` and `lease_expired` are untested — one test each, including that a reclaim past the last attempt doesn't run the body.
+  - `[medium]` `[patch]` Gap: `custody_failed` with no custody, as `Host.Worker` is wired, is untested — test added.
+  - `[low]` `[patch]` Gap: a ciphertext on an IDs-only type is never shown to stay undecryptable at run time — test inserts one directly and checks no decrypt.
+  - `[medium]` `[patch]` Gap: `RunAsync`, LISTEN and the notify trigger never run — test shows a notification wakes the runner before its poll, and cancel returns.
+  - `[medium]` `[patch]` Gap: `Host.Worker` is tested only when refusing — configured start runs the purge to `done`.
+  - `[low]` `[defer]` Gap: the schedule's advisory lock is never tested with two ticks at once — one Worker runs per Deployment and the purge is idempotent; close it when a second Worker or scheduled type appears.
+  - `[low]` `[patch]` Gap: `JobPayload` and enqueuer refusals are untested — tests added.
+  - `[medium]` `[patch]` Gap: a dead Deployment-wide job is untested — test checks one `system` event in `deployment_audit_event`.
+  - `[medium]` `[patch]` Blind: the migration comment says to paste a new render into an applied, forward-only migration — a registry change now adds a new migration, and the test reads the latest rendered guard.
+  - `[medium]` `[defer]` Blind: `dead` jobs are never purged, and `ON DELETE RESTRICT` then blocks deleting that Tenant — belongs to the Tenant deletion Operation, which must decide job retention.
+  - `[medium]` `[patch]` Blind: a connection string for the wrong role is retried forever with nothing done — the role check now stops the host, and the schedule runner checks its role too.
+  - `[low]` `[patch]` Blind: TB-6 omits `gk_worker`'s `DELETE` on `job` — stated.
+  - `[medium]` `[patch]` Blind: several failure codes have no test — same fix as the Gap rows.
+  - `[medium]` `[patch]` Blind: the Deployment-wide dead path is untested — same fix as the Gap row.
+  - `[medium]` `[defer]` Blind: `operations.job.dead` names no job — audit targets have no job kind; G-17 records it with the missing alert.
+  - `[low]` `[patch]` Blind: rules don't stop `gk_hosted` enqueuing a Deployment-wide type, or tie never-dead to `alerts.*` — both rules added.
+  - `[false]` `[reject]` Blind: Operations references Npgsql directly — the spec chose this for `LISTEN`; the package is centrally pinned and the module owns its tables.
+  - `[medium]` `[patch]` Blind: shutdown leaves a claim stuck for its lease and burns an attempt — the claim is returned on host cancellation; a heartbeat waits for a body that needs one.
+  - `[low]` `[patch]` Blind: `job_payload.ids` isn't bounded in the schema — CHECK limits it to 16 keys.
+  - `[low]` `[patch]` Blind: `dead`'s failure code commits apart from the mark, and the schedule lock uses the single-key space — set inside the finishing transaction; two-key lock with a fixed namespace.
+  - `[medium]` `[defer]` Blind: a credential's ciphertext lives across retries, possibly past its own lifetime — no credential type exists yet; the first one (reset links) must bound its attempts and backoff by the credential's lifetime.
+  - `[medium]` `[defer]` Intent: `job_payload` has no guard, so any role with insert can attach a payload to another job in its Tenant that has none; a payload on a `done` job also blocks the purge — the enqueuing roles can't read `job` and `SECURITY DEFINER` is banned, so the fix needs a design decision; handlers already re-check state and never trust the payload. Recorded under T-26.
+  - `[low]` `[patch]` Intent: a ciphertext can be stored on an IDs-only type by direct insert — the runner never decrypts it; same test as the Gap row.
+  - `[false]` `[reject]` Intent: the `gk_hosted` and `gk_sealer` limits live only in an architecture test — the spec says so, and the matrix row expects the architecture test to fail.
+  - `[low]` `[reject]` Intent: `gk_dispatch` and `gk_retention` are refused by grants (`42501`), not the trigger (`P0001`) — a missing grant refuses earlier and more strongly; the test pins the split.
+  - `[low]` `[reject]` Intent: only the schedule tick keeps one pending purge — the rule is the schedule's, and only `gk_worker` can enqueue the purge.
+  - `[medium]` `[patch]` Intent: the running host is never tested — same fix as the Gap row.
+  - `[low]` `[patch]` Intent: `failure_code` is written outside the finishing transaction — same fix as the Blind row.
+  - `[low]` `[patch]` Intent: `gk_retention` as run-as is untested — added.
+  - `[low]` `[reject]` Intent: "decrypts once" is the handler's count, not a runner limit — handlers decrypt at the moment of use, and AD-10 sets no count.
+  - `[false]` `[reject]` Intent: the purge type is a scope addition — the spec names it.
+  - `[low]` `[reject]` Edge: a finish that keeps failing reclaims forever — needs the audit append or payload delete to fail on every run, and a cap adds branches for an unshown state.
+  - `[medium]` `[patch]` Edge: shutdown on the last attempt burns it — same fix as the Blind shutdown row.
+  - `[medium]` `[defer]` Edge: a payload added to a `done` job blocks the purge on the RESTRICT key — same root as the `job_payload` guard row.
+  - `[medium]` `[defer]` Edge: a dead job blocks Tenant deletion forever — same as the Blind dead-job row.
+  - `[low]` `[patch]` Edge: an oversized ciphertext aborts the caller's transaction — `ArgumentException` before any insert.
+  - `[low]` `[patch]` Edge: one failing schedule entry stops the later ones — each entry has its own catch.
+  - `[low]` `[reject]` Edge: a null `ScheduleEntry.Type` throws `NullReferenceException` — nullable reference types warn, and the schedule is code-owned.
+  - `[medium]` `[patch]` Edge: a wrong-role connection keeps the Worker idle — same fix as the Blind row.
 
 ## Design Notes
 
@@ -110,3 +197,19 @@ deferred: []
 - `dotnet test tests/Architecture --no-build` -- expected: all pass.
 - `dotnet test tests/Isolation --no-build` -- expected: all pass, including `Jobs`.
 - `dotnet run --project tests/Architecture/Generator` -- expected: no diff after committing the diagram.
+
+## Auto Run Result
+
+Status: done
+
+**Summary:** added `job` and `job_payload` with a CHECK and a registry-rendered insert guard, the Kernel `IJobEnqueuer` port, the Operations registry, enqueuer, runner and schedule runner, and `Host.Worker` wiring that refuses to start without its four connection settings.
+
+**Files:** `src/Gatekeep.Kernel/Jobs/`; `src/Modules/Operations/Contracts/` and `Core/`; the job migration and `TableRegistry.cs`; `src/Gatekeep.Host.Worker/`; `tests/Isolation/Jobs/`; `tests/Architecture/JobRegistryRuleTests.cs`; `docs/threat-model.md`; the module diagram and edges.
+
+**Review:** 40 findings across four layers: 25 patched, 7 deferred, 8 rejected, each with its reason in the triage log.
+
+**Follow-up review:** recommended. Several medium patches change the runner's claim return on shutdown and the finishing transaction, which only the new runner tests exercise; a second pass should check them.
+
+**Verification:** see the PR screenshot; restore, build, Architecture, Isolation and the diagram generator all pass on SDK 10.0.403 and Node 26.13.0.
+
+**Residual risks:** any role with insert on `job_payload` can attach a payload to another job of its Tenant that has none. Dead jobs block Tenant deletion until a retention rule exists. A dead job raises no alert (G-17). Handlers must be idempotent, as delivery is at-least-once.
