@@ -249,6 +249,7 @@ public sealed class BuildEnforcementTests : IDisposable
 
         CopyTree("apps");
         CopyTree("packages");
+        CopyTree("tests/browser");
     }
 
     private void AddNpmDependency(string name, string version)

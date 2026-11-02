@@ -11,6 +11,9 @@ bin/
 obj/
 node_modules/
 dist/
+# Playwright output.
+/tests/browser/test-results/
+/tests/browser/playwright-report/
 
 # Secrets.
 .env*

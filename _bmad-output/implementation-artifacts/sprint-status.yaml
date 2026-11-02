@@ -48,7 +48,7 @@ development_status:
   1-10-run-the-stack-under-compose-with-safe-secrets: done
   1-11-route-traffic-through-caddy-and-default-deny-networks: done
   1-12-document-installation: done
-  1-13-generate-design-tokens-and-bundle-fonts: backlog
+  1-13-generate-design-tokens-and-bundle-fonts: done
   1-14-build-shared-form-and-action-components: backlog
   1-15-build-data-display-components: backlog
   1-16-build-overlay-and-feedback-components: backlog

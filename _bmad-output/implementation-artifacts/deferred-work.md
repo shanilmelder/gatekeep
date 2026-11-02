@@ -94,3 +94,12 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-1-11-route-traffic-through-caddy-and-default-deny-networks.md`
   summary: Prove Caddy's cloudflare mode issues real certificates on the first real install.
   evidence: Story 1.11 validated it offline only.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-13-generate-design-tokens-and-bundle-fonts.md`
+  summary: Prove fonts and same-origin requests through Caddy once the stack serves the apps.
+  evidence: Story 1.13 proved them on vite preview.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-13-generate-design-tokens-and-bundle-fonts.md`
+  summary: Make Hosted Login follow prefers-color-scheme (DESIGN.md line 579).
+  evidence: Story 1.13 review; surface stories 1.18 and 1.25.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-13-generate-design-tokens-and-bundle-fonts.md`
+  summary: Add a prefers-reduced-motion override for motion tokens.
+  evidence: Story 1.13 review; Story 1.16.
