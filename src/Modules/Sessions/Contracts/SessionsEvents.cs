@@ -12,4 +12,10 @@ public static class SessionsEvents
     public static readonly AuditEventDefinition SessionStarted = new(
         new AuditTypeCode("sessions.session.started"),
         "A User's Session started. Names the User only: the Session ID is stored only as its hash.");
+
+    /// <summary>Written once by every <c>ISessions.RevokeAccessAsync</c> call, the one revocation path (AD-13).</summary>
+    public static readonly AuditEventDefinition AccessRevoked = new(
+        new AuditTypeCode("sessions.access.revoked"),
+        "Sessions in scope ended and their Token Families and tokens were revoked. User scope targets the User.",
+        TenantLogClass.SessionRevocation);
 }

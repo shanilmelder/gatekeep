@@ -1,5 +1,10 @@
 using System.Text.RegularExpressions;
+using Gatekeep.Adapters.Postgres.Schema;
 using Gatekeep.Kernel.Audit;
+using Gatekeep.Kernel.Persistence;
+using Gatekeep.Modules.Audit.Contracts;
+using Gatekeep.Modules.Sessions.Contracts;
+using Npgsql;
 using Gatekeep.Tests.Architecture;
 using Xunit;
 
@@ -22,7 +27,10 @@ public sealed class EventClassTests(PostgresFixture postgres)
     /// database and the Tenant whose Log must hold the class's code. A story that maps a class to a
     /// code adds its proof here, and removes the class's pending story in <see cref="AuditCatalogue"/>.
     /// </summary>
-    private static readonly Dictionary<TenantLogClass, Func<PostgresFixture, Task<(string Database, Guid TenantId)>>> Proofs = [];
+    private static readonly Dictionary<TenantLogClass, Func<PostgresFixture, Task<(string Database, Guid TenantId)>>> Proofs = new()
+    {
+        [TenantLogClass.SessionRevocation] = ProveSessionRevocationAsync,
+    };
 
     [Fact]
     public void Every_class_is_proved_by_a_catalogued_code_or_pending_on_a_story()
@@ -193,4 +201,27 @@ public sealed class EventClassTests(PostgresFixture postgres)
         StatusLine.Matches(yaml.ReplaceLineEndings("\n"))
             .Where(m => Regex.IsMatch(m.Groups["key"].Value, @"\A\d+-\d+-"))
             .ToDictionary(m => m.Groups["key"].Value, m => m.Groups["status"].Value, StringComparer.Ordinal);
+
+    /// <summary>Story 2.7: a Tenant-scope <c>RevokeAccessAsync</c> as <c>gk_hosted</c> writes <c>sessions.access.revoked</c>.</summary>
+    private static async Task<(string Database, Guid TenantId)> ProveSessionRevocationAsync(PostgresFixture postgres)
+    {
+        var database = await postgres.NewMigratedDatabaseAsync();
+        var tenantId = Guid.CreateVersion7();
+        await PostgresFixture.ExecuteAsync(postgres.SuperuserConnection(database), $"INSERT INTO tenant (id) VALUES ('{tenantId}');");
+
+        await using var source = NpgsqlDataSource.Create(postgres.RoleConnection(TableRegistry.Hosted, database));
+        await using var scope = await TenantScope.BeginAsync(source, tenantId, CancellationToken.None);
+        var sessions = SessionsContract.CreateSessions(AuditContract.CreateAppender(), TimeProvider.System);
+
+        await sessions.RevokeAccessAsync(
+            scope.CreateCommandContext(),
+            new RevocationScope.Tenant(),
+            exceptSessionId: null,
+            RevocationReason.AdminRevoke,
+            Actor.System,
+            CancellationToken.None);
+        await scope.CommitAsync(CancellationToken.None);
+
+        return (database, tenantId);
+    }
 }
