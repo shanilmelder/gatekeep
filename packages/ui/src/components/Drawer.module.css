@@ -1,0 +1,107 @@
+/*
+ * The drawer (DESIGN.md, components.drawer): a full-height panel on sf against the inline
+ * end of the window, with a bd edge, 440px wide and at most half the window (DESIGN.md,
+ * Admin shell). It sits over the modal scrim, because the page behind is inert. The header
+ * and footer stay put and the body scrolls on its own.
+ */
+
+.drawer {
+  box-sizing: border-box;
+  position: fixed;
+  inset-block: 0;
+  inset-inline-start: auto;
+  inset-inline-end: 0;
+  width: min(var(--gk-drawer-width), 50vw);
+  max-width: none;
+  height: 100dvh;
+  max-height: none;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  border-inline-start: 1px solid var(--gk-drawer-border);
+  background: var(--gk-drawer-background);
+  color: var(--gk-color-tx);
+  font: var(--gk-font-body);
+}
+
+/* Below the supported width (NFR-17), half the window is too narrow to read: keep a gutter instead. */
+@media (max-width: 767px) {
+  .drawer {
+    width: min(var(--gk-drawer-width), calc(100vw - var(--gk-space-16)));
+  }
+}
+
+/* The dialog itself takes focus only when it has nothing focusable; it draws no ring then. */
+.drawer:focus-visible {
+  outline: none;
+}
+
+/* Only while open: a closed dialog keeps the browser's display: none. */
+.drawer[open] {
+  display: flex;
+  flex-direction: column;
+}
+
+.drawer::backdrop {
+  background: var(--gk-modal-scrim);
+  animation: scrimIn var(--gk-motion-duration-max) var(--gk-motion-easing) both;
+}
+
+@keyframes scrimIn {
+  from {
+    opacity: 0;
+  }
+}
+
+.header {
+  display: flex;
+  flex: none;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--gk-space-12);
+  padding: var(--gk-space-16) var(--gk-space-20);
+  border-bottom: 1px solid var(--gk-drawer-border);
+}
+
+.title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--gk-space-8);
+  min-width: 0;
+  margin: 0;
+  font: var(--gk-font-section);
+  color: var(--gk-color-tx);
+  overflow-wrap: anywhere;
+}
+
+.close {
+  flex: none;
+}
+
+.body {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: var(--gk-space-16);
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--gk-space-16) var(--gk-space-20) var(--gk-space-20);
+  color: var(--gk-color-tx2);
+}
+
+/* The focus ring sits inside, where the scrolling edge can't clip it. */
+.body:focus-visible {
+  outline-offset: calc(var(--gk-focus-ring-outline-width) * -1);
+}
+
+.footer {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--gk-space-8);
+  padding: var(--gk-space-12) var(--gk-space-20);
+  border-top: 1px solid var(--gk-drawer-border);
+}

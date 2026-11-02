@@ -71,6 +71,16 @@ export interface Messages {
   revealCloseHint: string;
   /** What a one-time reveal shows once its value has been closed. It never repeats the value. */
   revealGone: string;
+  /** A drawer's Close button. */
+  closeDrawer: string;
+  /** Names a drawer's body while it scrolls, as a region a keyboard can scroll. */
+  drawerBody: string;
+  /** An event drawer's raw JSON heading, which also names the JSON viewer. */
+  rawEvent: string;
+  /** What an event drawer's Copy copies, as its name says: "Copy JSON". Placeholder for `copyNamed`. */
+  rawEventCopy: string;
+  /** The note an event drawer shows in place of the raw detail for a role that can't see it (FR-39). */
+  rawEventLimited: string;
 }
 
 export const defaultMessages: Readonly<Messages> = Object.freeze({
@@ -110,6 +120,11 @@ export const defaultMessages: Readonly<Messages> = Object.freeze({
   revealAcknowledge: "I've copied this",
   revealCloseHint: "Tick \"I've copied this\" to close.",
   revealGone: "This value can't be shown again. Create a new one if you need it.",
+  closeDrawer: 'Close',
+  drawerBody: 'Details',
+  rawEvent: 'Raw event',
+  rawEventCopy: 'JSON',
+  rawEventLimited: "Raw detail is limited by role, and yours can't see it.",
 });
 
 /**

@@ -1,0 +1,79 @@
+/*
+ * The menu (DESIGN.md, components.menu): a popup on sf with a bd border, radius card and
+ * shadow sh, whose items take sf2 on hover and focus. It's placed from script, fixed below
+ * its trigger and inside the viewport: place() sets its max-width from the viewport with the
+ * scrollbar excluded, and its max-height when the viewport is short, so it scrolls. Closed,
+ * the browser's popover rule hides it, but it stays in the page, so a link item's navigation
+ * still runs as it closes.
+ */
+
+.wrapper {
+  display: inline-flex;
+}
+
+.menu {
+  box-sizing: border-box;
+  position: fixed;
+  inset: auto;
+  min-width: calc(var(--gk-space-48) * 4);
+  width: max-content;
+  height: auto;
+  margin: 0;
+  padding: var(--gk-space-4);
+  overflow-y: auto;
+  list-style: none;
+  border: 1px solid var(--gk-menu-border);
+  border-radius: var(--gk-menu-radius);
+  background: var(--gk-menu-background);
+  color: var(--gk-color-tx);
+  box-shadow: var(--gk-menu-shadow);
+  font: var(--gk-font-body);
+}
+
+.menu:focus-visible {
+  outline: none;
+}
+
+.item {
+  display: flex;
+  align-items: center;
+  box-sizing: border-box;
+  width: 100%;
+  min-height: var(--gk-space-control-h);
+  margin: 0;
+  padding: 0 var(--gk-space-8);
+  border: 0;
+  border-radius: var(--gk-radius-control-sm);
+  background: transparent;
+  color: var(--gk-color-tx);
+  font: inherit;
+  text-align: start;
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+/* Hover focuses an item, so focus is the one highlight the pointer and keyboard share. */
+.item:focus:not([aria-disabled='true']) {
+  background: var(--gk-menu-item-hover);
+}
+
+/* The ring sits inside, where the popup's rounded, scrolling edge can't clip it. */
+.item:focus-visible {
+  outline-offset: calc(var(--gk-focus-ring-outline-width) * -1);
+}
+
+.destructive {
+  color: var(--gk-color-bad);
+}
+
+.item[aria-disabled='true'] {
+  color: var(--gk-color-tx3);
+  cursor: not-allowed;
+}
+
+.separator {
+  height: 1px;
+  margin: var(--gk-space-4) calc(var(--gk-space-4) * -1);
+  background: var(--gk-menu-border);
+}
