@@ -1,0 +1,95 @@
+/*
+ * DESIGN.md's badge-status and badge-mono tokens. Every badge has a 1px border in its own
+ * fill, so the outlined Draft badge lines up with the filled ones. Heights are min-heights,
+ * so text at 200% doesn't clip.
+ */
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--gk-space-4);
+  box-sizing: border-box;
+  min-height: var(--gk-badge-status-height);
+  padding: 0 var(--gk-space-8);
+  border: 1px solid transparent;
+  border-radius: var(--gk-badge-status-radius);
+  font: var(--gk-badge-status-typography);
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+/* The 6px dot, in the badge's text colour. Decorative: the text carries the status. */
+.dot {
+  flex: none;
+  width: calc(var(--gk-space-12) / 2);
+  height: calc(var(--gk-space-12) / 2);
+  border-radius: var(--gk-radius-full);
+  background: currentColor;
+}
+
+.active {
+  background: var(--gk-color-ok-sf);
+  color: var(--gk-color-ok);
+}
+
+.pending {
+  background: var(--gk-color-warn-sf);
+  color: var(--gk-color-warn);
+}
+
+.blocked {
+  background: var(--gk-color-bad-sf);
+  color: var(--gk-color-bad);
+}
+
+.protocol {
+  background: var(--gk-color-info-sf);
+  color: var(--gk-color-info);
+}
+
+.draft {
+  background: transparent;
+  color: var(--gk-color-tx2);
+  border-color: var(--gk-color-bd2);
+}
+
+.mono {
+  min-height: var(--gk-badge-mono-height);
+  border-radius: var(--gk-badge-mono-radius);
+  font-family: var(--gk-badge-mono-font-family);
+  font-size: var(--gk-badge-mono-font-size);
+}
+
+/* Environments mark risk: Prod bad, Staging warn, Dev info (DESIGN.md, Prod treatment). */
+.prod {
+  background: var(--gk-color-bad-sf);
+  color: var(--gk-color-bad);
+}
+
+.staging {
+  background: var(--gk-color-warn-sf);
+  color: var(--gk-color-warn);
+}
+
+.dev {
+  background: var(--gk-color-info-sf);
+  color: var(--gk-color-info);
+}
+
+/* Log codes: success on sf2, failure on bad-sf (DESIGN.md, Badges). */
+.success {
+  background: var(--gk-color-sf2);
+  color: var(--gk-color-tx2);
+}
+
+.failure {
+  background: var(--gk-color-bad-sf);
+  color: var(--gk-color-bad);
+}
+
+/* Forced colours drop the fills, so every badge keeps a visible edge. */
+@media (forced-colors: active) {
+  .badge {
+    border-color: CanvasText;
+  }
+}

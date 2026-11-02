@@ -1,0 +1,76 @@
+/*
+ * DESIGN.md's json-viewer tokens: sf, with an sf2 gutter of line numbers. The numbers use
+ * tx2, which passes on sf2, and stay put while the code scrolls sideways.
+ */
+
+.viewer {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  min-width: 0;
+  overflow: auto;
+  background: var(--gk-json-viewer-background);
+  color: var(--gk-color-tx);
+  border: 1px solid var(--gk-color-bd);
+  border-radius: var(--gk-json-viewer-radius);
+  font: var(--gk-font-code);
+}
+
+/* The focus ring sits inside, where the rounded, scrolling edge can't clip it. */
+.viewer:focus-visible {
+  outline-offset: calc(var(--gk-focus-ring-outline-width) * -1);
+}
+
+.gutter {
+  position: sticky;
+  left: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  padding: var(--gk-space-12) var(--gk-space-8);
+  background: var(--gk-json-viewer-gutter);
+  color: var(--gk-color-tx2);
+  user-select: none;
+}
+
+.code {
+  margin: 0;
+  padding: var(--gk-space-12) var(--gk-space-16);
+  font: inherit;
+}
+
+.code code {
+  font: inherit;
+}
+
+.key {
+  color: var(--gk-json-viewer-key);
+}
+
+.string {
+  color: var(--gk-json-viewer-string);
+}
+
+.number {
+  color: var(--gk-json-viewer-number);
+}
+
+/* DESIGN.md defines no literal colour for json-viewer, so null and booleans share the key colour. */
+.literal {
+  color: var(--gk-json-viewer-key);
+}
+
+/* Long payloads scroll inside the viewer: 24 lines and its padding at most. */
+.viewer {
+  max-height: calc(var(--gk-font-code-line-height) * 24 + var(--gk-space-12) * 2);
+}
+
+.unavailable {
+  display: block;
+}
+
+.message {
+  margin: 0;
+  padding: var(--gk-space-12) var(--gk-space-16);
+  font: var(--gk-font-body);
+  color: var(--gk-color-tx2);
+}

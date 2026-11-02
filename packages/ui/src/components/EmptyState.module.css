@@ -1,0 +1,30 @@
+/* DESIGN.md's empty-state tokens: a dashed bd2 card, a 32px icon tile, one line, one small button. */
+
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--gk-space-12);
+  padding: var(--gk-empty-state-padding);
+  border: 1px var(--gk-empty-state-border-style) var(--gk-empty-state-border);
+  border-radius: var(--gk-empty-state-radius);
+  text-align: center;
+}
+
+.icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--gk-space-32);
+  height: var(--gk-space-32);
+  border-radius: var(--gk-radius-control);
+  background: var(--gk-color-sf2);
+  color: var(--gk-color-tx2);
+}
+
+.message {
+  margin: 0;
+  font: var(--gk-font-body);
+  font-weight: var(--gk-font-section-weight);
+  color: var(--gk-color-tx);
+}

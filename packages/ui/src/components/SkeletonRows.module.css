@@ -1,0 +1,62 @@
+/*
+ * DESIGN.md's skeleton tokens: sf2 bars, tag radius, in rows of the table's own heights, so
+ * the skeleton measures what the table will: a 32px head and 38px rows with their dividers.
+ */
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: var(--gk-space-24);
+  box-sizing: border-box;
+  height: var(--gk-table-row-height);
+  padding: 0 var(--gk-space-12);
+  border-bottom: 1px solid var(--gk-table-divider);
+}
+
+/* The last row, as in the table, has no divider of its own; the footer draws one above it. */
+.row:not(:has(+ .row)) {
+  border-bottom-color: transparent;
+}
+
+.headRow {
+  height: var(--gk-table-head-height);
+  background: var(--gk-table-head-background);
+}
+
+.bar {
+  flex: 1 1 0;
+  height: var(--gk-space-8);
+  background: var(--gk-skeleton-background);
+  border-radius: var(--gk-skeleton-radius);
+}
+
+/* The head's bars sit on sf2 already, so they take the next surface step. */
+.headRow .bar {
+  background: var(--gk-color-sf3);
+}
+
+/* Before the delay the height is held, and nothing is drawn. */
+.waiting {
+  visibility: hidden;
+}
+
+/* Forced colours drop the fills, so the bars keep an edge. */
+@media (forced-colors: active) {
+  .bar {
+    border: 1px solid CanvasText;
+  }
+}
+
+/* The caption's bar sits in a line of the caption's own type, so it takes the caption's height. */
+.captionBar {
+  display: inline-block;
+  width: calc(var(--gk-space-48) * 2);
+  vertical-align: middle;
+}
+
+/* The footer's bar is a small button's height, which sets the footer's. */
+.button {
+  flex: none;
+  width: calc(var(--gk-space-48) * 2);
+  height: var(--gk-ui-button-sm-height);
+}
