@@ -8,10 +8,10 @@ namespace Gatekeep.Modules.Sessions.Contracts;
 /// </summary>
 public static class SessionsEvents
 {
-    /// <summary>Written by <c>ISessions.StartAsync</c> with the User as Actor and target.</summary>
+    /// <summary>Written when a User's Session starts, with the User as Actor and target.</summary>
     public static readonly AuditEventDefinition SessionStarted = new(
         new AuditTypeCode("sessions.session.started"),
-        "A User Session started. Only the hash of its identifier is stored.");
+        "A User's Session started. Names the User only: the Session ID is stored only as its hash.");
 
     /// <summary>Written once by every <c>ISessions.RevokeAccessAsync</c> call, the one revocation path (AD-13).</summary>
     public static readonly AuditEventDefinition AccessRevoked = new(

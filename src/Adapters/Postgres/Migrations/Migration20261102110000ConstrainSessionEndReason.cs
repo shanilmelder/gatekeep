@@ -10,8 +10,8 @@ namespace Gatekeep.Adapters.Postgres.Migrations;
 /// Application-scope revocation. It adds no grant.
 /// </summary>
 [DbContext(typeof(MigrationsContext))]
-[Migration("20261102100000_ConstrainSessionEndReason")]
-public sealed class Migration20261102100000ConstrainSessionEndReason : Migration
+[Migration("20261102110000_ConstrainSessionEndReason")]
+public sealed class Migration20261102110000ConstrainSessionEndReason : Migration
 {
     protected override void Up(MigrationBuilder migrationBuilder) =>
         migrationBuilder.Sql(

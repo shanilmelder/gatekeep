@@ -97,7 +97,7 @@ It writes one audit event and returns counts. A source-scan test proves no other
 - `src/Modules/Sessions/Contracts/ISessions.cs` -- add `RevokeAccessAsync` and the records `RevocationScope`, `RevocationReason` and `RevocationOutcome` (new files in `Contracts/` are fine).
 - `src/Modules/Sessions/Core/SessionService.cs` -- has the `StartAsync` pattern to follow: Tenant guard, microsecond truncation, `context.CreateCommand()`, the `Add` helper and the audit append. Put revocation in a new `Core/SessionRevocation.cs` (the one file the scan test allows), called from `SessionService`.
 - `src/Adapters/Postgres/Migrations/Migration20261102090000CreateSessionTables.cs` -- the `user_session`, `"authorization"` and `token` columns. `"authorization"` is quoted, and `token.authorization_id` has a composite FK. Read-only.
-- `src/Adapters/Postgres/Migrations/` -- the new migration `Migration20261102100000ConstrainSessionEndReason.cs` follows the same attributes and has a forward-only `Down`.
+- `src/Adapters/Postgres/Migrations/` -- the new migration `Migration20261102110000ConstrainSessionEndReason.cs` follows the same attributes and has a forward-only `Down`.
 - `tests/Isolation/MigrateCommandTests.cs:20,28,43,78` -- the migration count becomes 8.
 - `src/Gatekeep.Kernel/Persistence/FailureContext.cs:17` -- `CommitAfterRollbackAsync(CommandScope failedScope, Func<CommandContext, CancellationToken, Task> effect)`. The pattern test is `tests/Isolation/FailureContextTests.cs:21`.
 - `src/Gatekeep.Kernel/Audit/AuditEvent.cs:3-18` and `Actor` -- the audit envelope.
@@ -113,7 +113,7 @@ It writes one audit event and returns counts. A source-scan test proves no other
 **Execution:**
 - `src/Modules/Sessions/Contracts/` -- add `RevocationScope`, `RevocationReason` (with its `Code`), `RevocationOutcome`, and `RevokeAccessAsync` on `ISessions` with XML docs stating the scope effects -- the contract.
 - `src/Modules/Sessions/Core/SessionRevocation.cs` and `SessionService.cs` -- the scoped UPDATE statements in the caller's context, the counts and the audit event -- the one path.
-- `src/Adapters/Postgres/Migrations/Migration20261102100000ConstrainSessionEndReason.cs` -- add the `end_reason` CHECK -- reasons are a closed set.
+- `src/Adapters/Postgres/Migrations/Migration20261102110000ConstrainSessionEndReason.cs` -- add the `end_reason` CHECK -- reasons are a closed set.
 - `tests/Isolation/MigrateCommandTests.cs` -- set the migration count to 8.
 - `tests/Isolation/Sessions/RevokeAccessTests.cs` -- one test per I/O matrix row.
 - `tests/Architecture/RevocationPathTests.cs` -- the source scan, plus a positive control showing the scan finds the patterns in `SessionRevocation.cs`.
@@ -179,7 +179,7 @@ It writes one audit event and returns counts. A source-scan test proves no other
 **Files changed**
 - `src/Modules/Sessions/Contracts/Revocation.cs` and `ISessions.cs`: `RevocationScope`, `RevocationReason`, `RevocationOutcome` and `RevokeAccessAsync`.
 - `src/Modules/Sessions/Core/SessionRevocation.cs` and `SessionService.cs`: the scoped UPDATEs, the acting-Session check and the audit event.
-- `src/Adapters/Postgres/Migrations/Migration20261102100000ConstrainSessionEndReason.cs`: the `end_reason` CHECK and the `(tenant_id, application_id)` indexes.
+- `src/Adapters/Postgres/Migrations/Migration20261102110000ConstrainSessionEndReason.cs`: the `end_reason` CHECK and the `(tenant_id, application_id)` indexes.
 - `tests/Architecture/RevocationPathTests.cs`: the one-path scan, its positive control and the detection cases.
 - `tests/Isolation/Sessions/RevokeAccessTests.cs`: every I/O matrix row, plus the review's edge cases.
 - `tests/Isolation/MigrateCommandTests.cs`: the migration count is now 8.

@@ -124,3 +124,12 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-2-7-build-the-one-revocation-path.md`
   summary: In Story 2.9, record every revocation OpenIddict asks the stores for (token store `RevokeByAuthorizationIdAsync`, authorization-store revokes, and any `UpdateAsync` that sets a revoked status) on the request, route it through `ISessions.RevokeAccessAsync`, and replay it through `FailureContext` at endpoint end, including the unhandled-exception path.
   evidence: The spike 2.2 carry-over gave this capture to Story 2.7, but 2.7 has no stores to capture from. It proved only that `RevokeAccessAsync` commits inside `CommitAfterRollbackAsync`.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-20-add-the-rate-limiter-and-admin-csp.md`
+  summary: Purge expired `admin_attempt` rows with a job.
+  evidence: Story 1.20 never deletes a row: an elapsed window is reset in place by the next attempt, so a subject that never returns keeps its row until a crash empties the `UNLOGGED` table. `gk_admin` has no `DELETE` on it, so the purge needs its own grant and job type.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-20-add-the-rate-limiter-and-admin-csp.md`
+  summary: Add the `rate_usage` roll-up job (AD-14).
+  evidence: Story 1.20 builds the counters only; nothing rolls them up yet.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-20-add-the-rate-limiter-and-admin-csp.md`
+  summary: Decide which forwarded headers `Host.Admin` trusts, so the limiter's subject is the real client address and not Caddy's.
+  evidence: `docs/threat-model.md` T-47 named this as Story 1.20's decision, but the limiter has no caller until Story 1.21, which first needs a source address.

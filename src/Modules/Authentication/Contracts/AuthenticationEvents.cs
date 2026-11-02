@@ -8,8 +8,8 @@ namespace Gatekeep.Modules.Authentication.Contracts;
 /// </summary>
 public static class AuthenticationEvents
 {
-    /// <summary>Written by <c>IAuthentication.BeginAsync</c> with an anonymous Actor.</summary>
+    /// <summary>Written when a sign-in transaction begins, with an anonymous Actor: nobody is signed in yet.</summary>
     public static readonly AuditEventDefinition SignInTransactionStarted = new(
         new AuditTypeCode("authentication.signin_transaction.started"),
-        "A sign-in transaction began, bound to a browser value, the Tenant and an Application.");
+        "A sign-in transaction began for an Application. The caller is anonymous, so no person is named.");
 }
