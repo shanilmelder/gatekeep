@@ -1,5 +1,10 @@
 using Gatekeep.Adapters.Postgres.Schema;
+using Gatekeep.Kernel.Audit;
+using Gatekeep.Kernel.Persistence;
+using Gatekeep.Modules.Audit.Contracts;
+using Gatekeep.Tests.Isolation.Audit;
 using Gatekeep.Tests.Isolation.Hosting;
+using Npgsql;
 using Xunit;
 
 namespace Gatekeep.Tests.Isolation.Jobs;
@@ -14,6 +19,10 @@ public sealed class WorkerStartupTests(PostgresFixture postgres) : IDisposable
     private const string Canary = "canary-connection-value-91d2";
 
     private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(60);
+
+    private static readonly Guid TenantId = Guid.Parse("01900000-0000-7000-8000-0000000002a1");
+
+    private const string SealLoopStarted = "Audit seal loop started.";
 
     private readonly string _directory = Directory.CreateTempSubdirectory("gatekeep-worker-").FullName;
     private readonly FakeOpenBaoSocket _openBao = new();
@@ -79,6 +88,51 @@ public sealed class WorkerStartupTests(PostgresFixture postgres) : IDisposable
 
         Assert.Contains("Job runner started with key custody.", process.Output);
         Assert.DoesNotContain("without key custody", process.Output);
+    }
+
+    [Fact]
+    public async Task Configured_worker_seals_an_appended_event_within_5_seconds()
+    {
+        var database = await postgres.NewMigratedDatabaseAsync();
+        await PostgresFixture.ExecuteAsync(postgres.SuperuserConnection(database), $"INSERT INTO tenant (id) VALUES ('{TenantId}')");
+
+        using var process = HostProcess.Start("Worker", Configured(database));
+
+        // Startup isn't part of the 5 seconds: the clock starts once the seal loop says it has begun.
+        var started = DateTimeOffset.UtcNow + Timeout;
+        while (!process.Output.Contains(SealLoopStarted, StringComparison.Ordinal)
+            && !process.HasExited
+            && DateTimeOffset.UtcNow < started)
+        {
+            await Task.Delay(TimeSpan.FromMilliseconds(100), Cancellation);
+        }
+
+        Assert.False(process.HasExited, "Host.Worker stopped instead of running.");
+        Assert.Contains(SealLoopStarted, process.Output);
+
+        await using (var source = NpgsqlDataSource.Create(postgres.RoleConnection(TableRegistry.Admin, database)))
+        await using (var scope = await TenantScope.BeginAsync(source, TenantId, Cancellation))
+        {
+            await AuditContract.CreateAppender().AppendAsync(
+                scope.CreateCommandContext(),
+                new AuditEvent(new AuditTypeCode("tenancy.settings.updated"), Actor.System, AuditTargetKind.Tenant, TenantId),
+                detail: null,
+                Cancellation);
+            await scope.CommitAsync(Cancellation);
+        }
+
+        var deadline = DateTimeOffset.UtcNow + TimeSpan.FromSeconds(5);
+        var rows = new List<SealedRow>();
+        while (rows.Count == 0 && DateTimeOffset.UtcNow < deadline)
+        {
+            await Task.Delay(TimeSpan.FromMilliseconds(100), Cancellation);
+            rows = await ChainCheck.ReadAsync(postgres.SuperuserConnection(database), TenantId);
+        }
+
+        var row = Assert.Single(rows);
+        ChainCheck.AssertLinked(rows);
+        Assert.Equal(1, row.Envelope.Epoch);
+        Assert.Equal(1, row.Envelope.Seq);
     }
 
     public void Dispose()

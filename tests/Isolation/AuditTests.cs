@@ -339,13 +339,13 @@ public sealed class AuditTests(PostgresFixture postgres)
     public async Task Sealer_seals_once_and_cant_reseal(string table)
     {
         var database = await EventDatabaseAsync();
-        var seal = $"UPDATE {table} SET seq = 1, prev_hash = '\\x00', hash = '\\x01'";
+        var seal = $"UPDATE {table} SET epoch = 1, seq = 1, hash = '\\x01'";
 
         await RunScopedAsync(TableRegistry.Sealer, database, seal);
         Assert.Equal("1", await TextAsync(database, $"SELECT seq::text FROM {table}"));
 
         var error = await RunScopedExpectingErrorAsync(
-            TableRegistry.Sealer, database, $"UPDATE {table} SET seq = 2, hash = '\\x02'");
+            TableRegistry.Sealer, database, $"UPDATE {table} SET epoch = 1, seq = 2, prev_hash = '\\x01', hash = '\\x02'");
 
         Assert.Equal(RaisedByTrigger, error.SqlState);
         Assert.Contains("already sealed", error.MessageText);
@@ -416,6 +416,10 @@ public sealed class AuditTests(PostgresFixture postgres)
     [InlineData("deployment_audit_event", "hash = '\\x01'")]
     [InlineData("deployment_audit_event", "prev_hash = '\\x00'")]
     [InlineData("deployment_audit_event", "prev_hash = '\\x00', hash = '\\x01'")]
+    [InlineData("audit_event", "epoch = 1")]
+    [InlineData("audit_event", "seq = 1, hash = '\\x01'")]
+    [InlineData("deployment_audit_event", "epoch = 1")]
+    [InlineData("deployment_audit_event", "seq = 1, hash = '\\x01'")]
     public async Task Partial_seal_is_refused(string table, string assignment)
     {
         var database = await EventDatabaseAsync();
@@ -432,9 +436,45 @@ public sealed class AuditTests(PostgresFixture postgres)
     {
         var database = await EventDatabaseAsync();
 
-        await RunScopedAsync(TableRegistry.Sealer, database, $"UPDATE {table} SET seq = 1, hash = '\\x01'");
+        await RunScopedAsync(TableRegistry.Sealer, database, $"UPDATE {table} SET epoch = 1, seq = 1, hash = '\\x01'");
 
         Assert.Equal("1", await TextAsync(database, $"SELECT seq::text FROM {table}"));
+    }
+
+    [Theory]
+    [InlineData("audit_event", "epoch = 1, seq = 1, prev_hash = '\\x00', hash = '\\x01'")]
+    [InlineData("audit_event", "epoch = 1, seq = 2, hash = '\\x01'")]
+    [InlineData("audit_event", "epoch = 1, seq = 0, prev_hash = '\\x00', hash = '\\x01'")]
+    [InlineData("audit_event", "epoch = 0, seq = 2, prev_hash = '\\x00', hash = '\\x01'")]
+    [InlineData("deployment_audit_event", "epoch = 1, seq = 1, prev_hash = '\\x00', hash = '\\x01'")]
+    [InlineData("deployment_audit_event", "epoch = 1, seq = 2, hash = '\\x01'")]
+    [InlineData("deployment_audit_event", "epoch = 1, seq = 0, prev_hash = '\\x00', hash = '\\x01'")]
+    [InlineData("deployment_audit_event", "epoch = 0, seq = 2, prev_hash = '\\x00', hash = '\\x01'")]
+    public async Task Seal_off_the_chain_shape_is_refused(string table, string assignment)
+    {
+        var database = await EventDatabaseAsync();
+
+        var error = await RunScopedExpectingErrorAsync(TableRegistry.Sealer, database, $"UPDATE {table} SET {assignment}");
+
+        Assert.Equal(CheckViolation, error.SqlState);
+    }
+
+    [Theory]
+    [InlineData("audit_event", "epoch = 2")]
+    [InlineData("audit_event", "seq = 2")]
+    [InlineData("audit_event", "hash = '\\x02'")]
+    [InlineData("deployment_audit_event", "epoch = 2")]
+    [InlineData("deployment_audit_event", "seq = 2")]
+    [InlineData("deployment_audit_event", "hash = '\\x02'")]
+    public async Task Sealer_cant_change_a_seal_column_once_sealed(string table, string assignment)
+    {
+        var database = await EventDatabaseAsync();
+        await SealAsync(database, table);
+
+        var error = await RunScopedExpectingErrorAsync(TableRegistry.Sealer, database, $"UPDATE {table} SET {assignment}");
+
+        Assert.Equal(RaisedByTrigger, error.SqlState);
+        Assert.Contains("already sealed", error.MessageText);
     }
 
     [Theory]
@@ -444,6 +484,8 @@ public sealed class AuditTests(PostgresFixture postgres)
     [InlineData("deployment_audit_event", "seq", "1")]
     [InlineData("deployment_audit_event", "prev_hash", "'\\x00'")]
     [InlineData("deployment_audit_event", "hash", "'\\x01'")]
+    [InlineData("audit_event", "epoch", "1")]
+    [InlineData("deployment_audit_event", "epoch", "1")]
     public async Task Insert_with_a_seal_column_is_refused(string table, string column, string value)
     {
         var database = await TenantDatabaseAsync();
@@ -475,8 +517,8 @@ public sealed class AuditTests(PostgresFixture postgres)
     }
 
     [Theory]
-    [InlineData("audit_event", "tenant_id,id,occurred_at,type_code,actor_kind,actor_id,target_kind,target_id,seq,prev_hash,hash")]
-    [InlineData("deployment_audit_event", "id,occurred_at,type_code,actor_kind,actor_id,target_kind,target_id,seq,prev_hash,hash")]
+    [InlineData("audit_event", "tenant_id,id,occurred_at,type_code,actor_kind,actor_id,target_kind,target_id,seq,prev_hash,hash,epoch")]
+    [InlineData("deployment_audit_event", "id,occurred_at,type_code,actor_kind,actor_id,target_kind,target_id,seq,prev_hash,hash,epoch")]
     public async Task Event_tables_have_exactly_these_columns(string table, string columns)
     {
         var database = await postgres.NewMigratedDatabaseAsync();
@@ -866,7 +908,7 @@ public sealed class AuditTests(PostgresFixture postgres)
     }
 
     private Task SealAsync(string database, string table) =>
-        RunScopedAsync(TableRegistry.Sealer, database, $"UPDATE {table} SET seq = 1, prev_hash = '\\x00', hash = '\\x01'");
+        RunScopedAsync(TableRegistry.Sealer, database, $"UPDATE {table} SET epoch = 1, seq = 1, hash = '\\x01'");
 
     private async Task AppendOnChainAsync(string database, string eventTable, AuditEvent auditEvent, AuditDetail? detail)
     {

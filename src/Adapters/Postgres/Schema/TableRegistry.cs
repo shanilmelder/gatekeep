@@ -51,7 +51,7 @@ public static class TableRegistry
     private static readonly IReadOnlyDictionary<string, IReadOnlyList<ColumnGrant>> SealColumns =
         new Dictionary<string, IReadOnlyList<ColumnGrant>>
         {
-            [Sealer] = [new ColumnGrant(Update, ["seq", "prev_hash", "hash"])],
+            [Sealer] = [new ColumnGrant(Update, ["epoch", "seq", "prev_hash", "hash"])],
         };
 
     private static readonly IReadOnlyList<string> OperationStatusColumns = ["status", "updated_at", "finished_at"];
@@ -66,6 +66,11 @@ public static class TableRegistry
             [Admin] = [Select, Insert],
             [Worker] = [Select],
             [Cli] = [Select],
+        },
+        new Dictionary<string, IReadOnlyList<ColumnGrant>>
+        {
+            // The seal loop lists the Tenant chains, so it reads the IDs only.
+            [Sealer] = [new ColumnGrant(Select, ["id"])],
         }),
         new("tenant_host", TableClass.Control, "Tenancy", new Dictionary<string, IReadOnlyList<string>>
         {

@@ -176,7 +176,7 @@ public sealed class TenantBehaviourTests(PostgresFixture postgres)
     [InlineData(TableRegistry.Admin, "DELETE FROM tenant_settings")]
     [InlineData(TableRegistry.Cli, "SELECT * FROM tenant_settings")]
     [InlineData(TableRegistry.Dispatch, "SELECT * FROM tenant_settings")]
-    [InlineData(TableRegistry.Sealer, "SELECT * FROM tenant")]
+    [InlineData(TableRegistry.Sealer, "SELECT * FROM tenant_settings")]
     [InlineData(TableRegistry.Retention, "SELECT * FROM tenant_host")]
     public async Task Grants_limit_a_role_that_sets_any_Tenant(string role, string statement)
     {

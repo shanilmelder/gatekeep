@@ -59,6 +59,13 @@ public static class OperationsContract
         new JobScheduleRunner(registry, entries, workerDatabase, logger);
 
     /// <summary>
+    /// The audit seal loop (AD-16). <paramref name="sealerDatabase"/> must connect as
+    /// <c>gk_sealer</c>: the first pass checks it, and a wrong role stops the loop.
+    /// </summary>
+    public static IAuditSealLoop CreateSealLoop(string sealerDatabase, TimeSpan interval, ILogger? logger) =>
+        new AuditSealLoop(sealerDatabase, interval, logger);
+
+    /// <summary>
     /// The SQL that replaces <c>job_guard_insert()</c> with one checking <paramref name="registry"/>.
     /// The migration holds the render of <see cref="ProductionRegistry"/>, and a test compares them.
     /// </summary>
