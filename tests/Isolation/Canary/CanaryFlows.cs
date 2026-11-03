@@ -196,6 +196,13 @@ internal static class CanaryFlows
                 new(SurfaceKind.Route, "/api/v1/deployment/credentials/registration/complete"),
             ],
             CredentialRegistrationAsync),
+        new(
+            "admin.signin",
+            [
+                new(SurfaceKind.Route, "/api/v1/deployment/signin"),
+                new(SurfaceKind.Route, "/api/v1/deployment/signin/complete"),
+            ],
+            SignInAsync),
 
         // No production type carries a credential yet, so this flow takes the runner's credential
         // path with a test type: enqueue, decrypt, run, retry and dead, as every one will.
@@ -662,6 +669,70 @@ internal static class CanaryFlows
 
         run.Plant("admin-session-id", cookie);
         run.Plant("admin-csrf-token", csrf);
+
+        await host.StopAsync();
+        run.Capture("Admin output", host.Output);
+        Assert.Matches(@"""LogLevel"":""(?:Trace|Debug)""", host.Output);
+    }
+
+    /// <summary>
+    /// Story 1.23's Admin sign-in on the real Host.Admin at Trace, with a software authenticator.
+    /// Normally an Admin with two credentials signs in and out; failing, an assertion with a bad
+    /// signature and a malformed body are refused. The binding cookie, the new Session ID and its
+    /// CSRF token, planted once issued, must appear in no log or table, and no captured response
+    /// may echo them.
+    /// </summary>
+    private static async Task SignInAsync(CanaryFlowContext context, FlowRun run, bool failing)
+    {
+        await using var host = await Admins.AdminHost.StartAsync(context.Postgres, null, DebugArguments);
+        run.Database = host.Database;
+        run.Plant("role-password", PostgresFixture.Password);
+        using var first = new Admins.SoftwareAuthenticator();
+        using var second = new Admins.SoftwareAuthenticator();
+        var (setup, _) = await host.AdminWithCredentialsAsync(first, second);
+        run.Plant("admin-setup-session-id", setup);
+
+        // The begin's response holds the binding by design, so only its body is captured.
+        var (begin, options, binding) = await host.BeginSignInAsync();
+        using (begin)
+        {
+            Assert.Equal(HttpStatusCode.OK, begin.StatusCode);
+            run.Capture("sign-in options", await begin.Content.ReadAsStringAsync(CanaryFlowContext.Cancellation));
+        }
+
+        run.Plant("admin-signin-binding", binding!);
+        if (failing)
+        {
+            using var forged = await host.CompleteSignInAsync(binding, first.Assert(options, Admins.AdminHost.Origin, new Admins.AssertionTweaks { OtherKey = true }));
+            run.Capture("refused sign-in response", await ResponseTextAsync(forged));
+            Assert.Equal(HttpStatusCode.BadRequest, forged.StatusCode);
+
+            var (again, _, rebound) = await host.BeginSignInAsync();
+            again.Dispose();
+            run.Plant("admin-signin-second-binding", rebound!);
+            using var malformed = await host.CompleteSignInAsync(rebound, $$"""{"id":"{{rebound}}","rawId":"!","type":"public-key"}""");
+            run.Capture("malformed sign-in response", await ResponseTextAsync(malformed));
+            Assert.Equal(HttpStatusCode.BadRequest, malformed.StatusCode);
+        }
+        else
+        {
+            string cookie;
+            string csrf;
+            using (var complete = await host.CompleteSignInAsync(binding, first.Assert(options, Admins.AdminHost.Origin)))
+            {
+                Assert.Equal(HttpStatusCode.OK, complete.StatusCode);
+                cookie = Admins.AdminHost.CookieValue(complete, Admins.AdminHost.Cookie)!;
+                using var json = System.Text.Json.JsonDocument.Parse(await complete.Content.ReadAsStringAsync(CanaryFlowContext.Cancellation));
+                csrf = json.RootElement.GetProperty("csrfToken").GetString()!;
+            }
+
+            using var signOut = await host.SendAsync(HttpMethod.Delete, "/api/v1/deployment/session", cookie, csrf, Admins.AdminHost.Origin);
+            run.Capture("sign-out response", await ResponseTextAsync(signOut));
+            Assert.Equal(HttpStatusCode.NoContent, signOut.StatusCode);
+
+            run.Plant("admin-session-id", cookie);
+            run.Plant("admin-csrf-token", csrf);
+        }
 
         await host.StopAsync();
         run.Capture("Admin output", host.Output);

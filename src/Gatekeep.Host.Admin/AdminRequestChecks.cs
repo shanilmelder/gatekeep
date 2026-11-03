@@ -42,6 +42,16 @@ internal sealed class BootstrapClaimEndpoint
 }
 
 /// <summary>
+/// Marks Admin sign-in's begin and complete (Story 1.23): there is no session yet, so they are
+/// exempt from the session and CSRF checks, but they still need the exact Origin. Until bootstrap
+/// is complete there is no Admin to sign in, and they are the unknown-path 404.
+/// </summary>
+internal sealed class SignInEndpoint
+{
+    public static readonly SignInEndpoint Instance = new();
+}
+
+/// <summary>
 /// The one server-side gate in front of every <c>/api/v1/deployment</c> endpoint (NFR-5), in order:
 /// an endpoint under the prefix without the <see cref="DeploymentApiEndpoint"/> marker is the
 /// unknown-path 404, so a route mapped there by mistake is never reached unchecked; a
@@ -56,6 +66,9 @@ internal static class AdminRequestChecks
     public const string Prefix = "/api/v1/deployment";
 
     public const string SessionCookie = "__Host-gk-admin";
+
+    /// <summary>The cookie binding a pending sign-in's challenge to the browser that began it (Story 1.23).</summary>
+    public const string SignInCookie = "__Host-gk-admin-signin";
 
     public const string CsrfHeader = "X-Gatekeep-CSRF";
 
@@ -179,6 +192,25 @@ internal static class AdminRequestChecks
                 return false;
             }
 
+            if (!origin.Matches(SingleValue(request.Headers.Origin)))
+            {
+                await AdminResponses.ForbiddenAsync(context);
+                return false;
+            }
+
+            return true;
+        }
+
+        if (endpoint.Metadata.GetMetadata<SignInEndpoint>() is not null)
+        {
+            // Not there before bootstrap, whatever the request carries: the unknown-path 404.
+            if (!await services.IsBootstrapCompleteAsync(cancellationToken))
+            {
+                await AdminResponses.NotFoundAsync(context);
+                return false;
+            }
+
+            // No session to carry a CSRF token: the exact Origin refuses a cross-site post.
             if (!origin.Matches(SingleValue(request.Headers.Origin)))
             {
                 await AdminResponses.ForbiddenAsync(context);

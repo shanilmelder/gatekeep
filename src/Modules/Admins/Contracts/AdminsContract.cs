@@ -29,6 +29,25 @@ public static class AdminsContract
         SecurityLimits.CredentialRegistrationWindow);
 
     /// <summary>
+    /// Admin sign-in begins (Story 1.23): 20 per client in a fixed 15-minute window, counted in
+    /// <c>admin_attempt</c> in their own committed transaction before the begin runs.
+    /// </summary>
+    public static readonly RateLimitPolicy SignInBeginPolicy = new(
+        "admins.signin.begin",
+        SecurityLimits.AdminSignInBeginAttempts,
+        SecurityLimits.AdminSignInWindow);
+
+    /// <summary>
+    /// Admin sign-in completes (Story 1.23): 10 per client in a fixed 15-minute window, counted in
+    /// <c>admin_attempt</c> in their own committed transaction before the complete runs. Every
+    /// complete counts, a success too, and nothing resets the window.
+    /// </summary>
+    public static readonly RateLimitPolicy SignInCompletePolicy = new(
+        "admins.signin.complete",
+        SecurityLimits.AdminSignInCompleteAttempts,
+        SecurityLimits.AdminSignInWindow);
+
+    /// <summary>
     /// The WebAuthn credentials an Admin registers before they can do anything else: two, so
     /// losing one device can't lock them out (FR-2, FR-46).
     /// </summary>
@@ -66,8 +85,27 @@ public static class AdminsContract
         return new BootstrapClaimer(appender, lockTimeout);
     }
 
-    /// <summary>Admin Sessions (Story 1.21). They run as <c>gk_admin</c>, in a Deployment scope.</summary>
-    public static IAdminSessions CreateSessions() => new AdminSessions();
+    /// <summary>
+    /// Admin Sessions (Story 1.21). They run as <c>gk_admin</c>, in a Deployment scope, and write
+    /// the sign-out event (Story 1.23) through <paramref name="appender"/>.
+    /// </summary>
+    public static IAdminSessions CreateSessions(IAuditAppender appender)
+    {
+        ArgumentNullException.ThrowIfNull(appender);
+        return new AdminSessions(appender);
+    }
+
+    /// <summary>
+    /// Admin sign-in with WebAuthn (Story 1.23). It runs as <c>gk_admin</c>, in a Deployment
+    /// scope, verifies through <paramref name="verifier"/>, and writes its events through
+    /// <paramref name="appender"/>.
+    /// </summary>
+    public static IAdminSignIn CreateSignIn(IAuditAppender appender, IWebAuthnVerifier verifier)
+    {
+        ArgumentNullException.ThrowIfNull(appender);
+        ArgumentNullException.ThrowIfNull(verifier);
+        return new AdminSignIn(appender, verifier);
+    }
 
     /// <summary>
     /// Admin WebAuthn credential registration (Story 1.22). It runs as <c>gk_admin</c>, in a

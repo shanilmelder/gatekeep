@@ -259,14 +259,14 @@ test('a second click or Enter while the claim is pending sends no second claim',
   expect(claims).toHaveLength(1);
 });
 
-test('credential setup without a Session goes to /bootstrap and never shows the setup text', async ({ page, baseURL }) => {
-  await servePage(page, baseURL!);
+test('credential setup without a Session goes to /signin and never shows the setup text', async ({ page }) => {
   const sessions = await answerSession(page, 401);
 
   await page.goto('/setup/credentials');
 
-  await expect(page).toHaveURL(/\/bootstrap$/);
-  await expect(tokenField(page)).toBeVisible();
+  // Story 1.23: an ended or missing Session signs in again; bootstrap is long gone by then.
+  await expect(page).toHaveURL(/\/signin$/);
+  await expect(page.getByRole('button', { name: 'Sign in' })).toBeVisible();
   expect(sessions).toHaveLength(1);
   await expect(page.getByTestId('credential-setup')).toHaveCount(0);
   await expect(page.getByText('Set up your credentials')).toHaveCount(0);

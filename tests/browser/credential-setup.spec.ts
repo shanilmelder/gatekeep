@@ -110,7 +110,7 @@ async function answerApi(page: Page, baseURL: string, { credentials = 0, kind, b
         ],
         timeout: 300000,
         attestation: 'none',
-        authenticatorSelection: { residentKey: 'preferred', userVerification: 'required' },
+        authenticatorSelection: { residentKey: 'required', userVerification: 'required' },
         excludeCredentials: state.ids.map((id) => ({ type: 'public-key', id, transports: ['usb'] })),
       }),
     });
@@ -297,16 +297,38 @@ test('the same authenticator a second time shows how to go on, and sends no comp
   expect(api.completes).toHaveLength(1);
 });
 
-test('a 401 from the complete goes to /bootstrap', async ({ page, baseURL }) => {
+test('a 401 from the complete goes to /signin', async ({ page, baseURL }) => {
   const { add } = await authenticator(page);
   await add();
   await answerApi(page, baseURL!, { completeAnswer: (route) => route.fulfill({ status: 401 }) });
-  await page.route((url) => url.pathname === '/bootstrap', (route) => route.fulfill({ status: 200, contentType: 'text/html', body: '<p>bootstrap</p>' }));
+  await page.route((url) => url.pathname === '/signin', (route) => route.fulfill({ status: 200, contentType: 'text/html', body: '<p>signin</p>' }));
 
   await page.goto('/setup/credentials');
   await registerButton(page).click();
 
-  await expect(page).toHaveURL(/\/bootstrap$/);
+  await expect(page).toHaveURL(/\/signin$/);
+});
+
+test('a 401 from the begin goes to /signin', async ({ page, baseURL }) => {
+  const { add } = await authenticator(page);
+  await add();
+  const api = await answerApi(page, baseURL!, { beginAnswer: (route) => route.fulfill({ status: 401 }) });
+  await page.route((url) => url.pathname === '/signin', (route) => route.fulfill({ status: 200, contentType: 'text/html', body: '<p>signin</p>' }));
+
+  await page.goto('/setup/credentials');
+  await registerButton(page).click();
+
+  await expect(page).toHaveURL(/\/signin$/);
+  expect(api.completes).toHaveLength(0);
+});
+
+test('a 401 for the Session on load goes to /signin', async ({ page }) => {
+  await page.route(path(SESSION), (route) => route.fulfill({ status: 401 }));
+  await page.route((url) => url.pathname === '/signin', (route) => route.fulfill({ status: 200, contentType: 'text/html', body: '<p>signin</p>' }));
+
+  await page.goto('/setup/credentials');
+
+  await expect(page).toHaveURL(/\/signin$/);
 });
 
 test('a rate-limited begin shows Generic error with rate_limited and sends no complete', async ({ page, baseURL }) => {

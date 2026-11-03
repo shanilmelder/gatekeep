@@ -64,6 +64,9 @@ internal sealed class AdminHost : IAsyncDisposable
 
     public string Superuser => _postgres.SuperuserConnection(Database);
 
+    /// <summary>The host's own <c>gk_admin</c> connection, for calling the Admins module directly.</summary>
+    public string AdminConnection => _postgres.RoleConnection(TableRegistry.Admin, Database);
+
     private static CancellationToken Cancellation => TestContext.Current.CancellationToken;
 
     /// <summary>Starts Host.Admin on a fresh migrated database, or on <paramref name="database"/>, and waits until it's healthy.</summary>
@@ -270,6 +273,100 @@ internal sealed class AdminHost : IAsyncDisposable
     }
 
     public const string RegistrationPath = "/api/v1/deployment/credentials/registration";
+
+    public const string SignInPath = "/api/v1/deployment/signin";
+
+    public const string SignInCookie = "__Host-gk-admin-signin";
+
+    /// <summary>
+    /// Begins a sign-in with the Admin Origin unless another is given, sending
+    /// <paramref name="binding"/> as the binding cookie when there is one. Returns the options and
+    /// the new binding cookie's value, when it was a 200.
+    /// </summary>
+    public async Task<(HttpResponseMessage Response, JsonElement Options, string? Binding)> BeginSignInAsync(
+        string? binding = null,
+        string? origin = Origin,
+        IEnumerable<(string, string)>? headers = null)
+    {
+        var response = await SendAsync(HttpMethod.Post, SignInPath, origin: origin, headers: Cookies(binding, null).Concat(headers ?? []));
+        if (response.StatusCode != HttpStatusCode.OK)
+        {
+            return (response, default, null);
+        }
+
+        var options = JsonDocument.Parse(await response.Content.ReadAsStringAsync(Cancellation)).RootElement.Clone();
+        return (response, options, CookieValue(response, SignInCookie));
+    }
+
+    /// <summary>Completes a sign-in with <paramref name="body"/>, the page's JSON, the binding cookie and any Session cookie the browser holds.</summary>
+    public Task<HttpResponseMessage> CompleteSignInAsync(
+        string? binding,
+        string body,
+        string? session = null,
+        string contentType = "application/json",
+        string? origin = Origin,
+        IEnumerable<(string, string)>? headers = null) =>
+        SendAsync(
+            HttpMethod.Post,
+            SignInPath + "/complete",
+            origin: origin,
+            body: body,
+            headers: Cookies(binding, session).Concat(headers ?? []),
+            contentType: contentType);
+
+    /// <summary>Begins and completes one sign-in with <paramref name="authenticator"/>, which must succeed. Returns the new Session's cookie and CSRF token.</summary>
+    public async Task<(string Cookie, string Csrf)> SignInAsync(SoftwareAuthenticator authenticator, string? session = null)
+    {
+        var (begin, options, binding) = await BeginSignInAsync();
+        using (begin)
+        {
+            Assert.Equal(HttpStatusCode.OK, begin.StatusCode);
+        }
+
+        using var complete = await CompleteSignInAsync(binding, authenticator.Assert(options, Origin), session);
+        Assert.Equal(HttpStatusCode.OK, complete.StatusCode);
+        using var json = JsonDocument.Parse(await complete.Content.ReadAsStringAsync(Cancellation));
+        return (CookieValue(complete, Cookie)!, json.RootElement.GetProperty("csrfToken").GetString()!);
+    }
+
+    /// <summary>
+    /// A claimed bootstrap whose Admin has registered <paramref name="authenticators"/>, so the
+    /// Deployment has an Admin who can sign in. Returns the setup Session's cookie and the Admin.
+    /// </summary>
+    public async Task<(string Cookie, Guid AdminId)> AdminWithCredentialsAsync(params SoftwareAuthenticator[] authenticators)
+    {
+        var (cookie, csrf, adminId) = await ClaimedAsync();
+        foreach (var authenticator in authenticators)
+        {
+            await RegisterAsync(cookie, csrf, authenticator);
+        }
+
+        return (cookie, adminId);
+    }
+
+    /// <summary>The value a response's <c>Set-Cookie</c> gives <paramref name="name"/>, or null when it sets none.</summary>
+    public static string? CookieValue(HttpResponseMessage response, string name) =>
+        response.Headers.TryGetValues("Set-Cookie", out var values)
+            ? values.Where(v => v.StartsWith(name + "=", StringComparison.Ordinal))
+                .Select(v => v[(name.Length + 1)..v.IndexOf(';', StringComparison.Ordinal)])
+                .FirstOrDefault()
+            : null;
+
+    private static IEnumerable<(string, string)> Cookies(string? binding, string? session)
+    {
+        var pairs = new List<string>();
+        if (binding is not null)
+        {
+            pairs.Add($"{SignInCookie}={binding}");
+        }
+
+        if (session is not null)
+        {
+            pairs.Add($"{Cookie}={session}");
+        }
+
+        return pairs.Count == 0 ? [] : [("Cookie", string.Join("; ", pairs))];
+    }
 
     /// <summary>A well-formed secret nobody issued.</summary>
     public static string Unissued() => Base64Url.EncodeToString(RandomNumberGenerator.GetBytes(32));

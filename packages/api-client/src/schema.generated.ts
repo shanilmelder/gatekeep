@@ -24,6 +24,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/deployment/signin": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Begin an Admin sign-in with WebAuthn: the options for navigator.credentials.get.
+         * @description Sessionless: needs the exact Admin Origin, and has no session or CSRF check. Returns request options for the Admin RP ID with user verification required and no allowed credentials listed: the credential is discoverable, so no username is asked for and no credential ID is sent. Sets the __Host-gk-admin-signin cookie that binds the challenge to this browser; it can be answered once, within 5 minutes, and a new begin replaces it. Each begin is counted per client: the 21st in 15 minutes is 429. Before bootstrap completes it is the unknown-path 404.
+         */
+        post: operations["BeginSignIn"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/deployment/signin/complete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Complete an Admin sign-in with the browser's WebAuthn assertion, and start a full Admin Session.
+         * @description Sessionless: needs the exact Admin Origin and the __Host-gk-admin-signin cookie from the begin. Once the call is counted, the challenge that cookie names is taken before the body is read, so it is used up whatever follows, and every response clears the cookie. A 429, or a 503 for a missing client address, comes before that and leaves the challenge live. Verifies the assertion against the Admin RP ID, the exact Admin origin and the registered credential it names, with user verification, the credential owner's user handle and a signature counter that advances. Every refusal is the same 400 signin_refused, with no Session. A sign-in starts a full Session; an Admin without two credentials still reaches only setup. A live Session this browser held is ended as superseded. Each complete is counted per client, a success too: the 11th in 15 minutes is 429. Before bootstrap completes it is the unknown-path 404.
+         */
+        post: operations["CompleteSignIn"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/deployment/session": {
         parameters: {
             query?: never;
@@ -40,7 +80,7 @@ export interface paths {
         post?: never;
         /**
          * Sign out: end the current Admin Session.
-         * @description Ends the Session as signed_out and clears the cookie. Not setup-allowed: a setup Session signing out would leave the Deployment Owner unable to finish setup.
+         * @description Ends the Session as signed_out, writes admin.session.signed_out, and clears the cookie. Not setup-allowed: a setup Session signing out would leave the Deployment Owner unable to finish setup.
          */
         delete: operations["EndSession"];
         options?: never;
@@ -59,7 +99,7 @@ export interface paths {
         put?: never;
         /**
          * Begin registering a WebAuthn credential: the options for navigator.credentials.create.
-         * @description Setup-allowed. Returns creation options for the Admin RP ID and origin, with no attestation, user verification required, a resident key preferred, ES256 and RS256, and the Admin's credentials excluded. Its challenge can be answered for 5 minutes, by the next complete call only; a new begin replaces it. Refused with 403 once the Admin has two credentials. Each begin and complete counts towards 10 per Session in 15 minutes, then 429.
+         * @description Setup-allowed. Returns creation options for the Admin RP ID and origin, with no attestation, user verification required, a resident key required, ES256 and RS256, and the Admin's credentials excluded. Its challenge can be answered for 5 minutes, by the next complete call only; a new begin replaces it. Refused with 403 once the Admin has two credentials. Each begin and complete counts towards 10 per Session in 15 minutes, then 429.
          */
         post: operations["BeginCredentialRegistration"];
         delete?: never;
@@ -123,9 +163,36 @@ export interface components {
             credentials: number;
             csrfToken: string;
         };
+        AdminSignInOptionsResponse: {
+            challenge: string;
+            rpId: string;
+            /** Format: int64 */
+            timeout: number;
+            /** @enum {string} */
+            userVerification: "required";
+            allowCredentials: components["schemas"]["RegistrationExcludedCredential"][];
+        };
+        AdminSignInRequest: {
+            id: string;
+            rawId: string;
+            /** @enum {string} */
+            type: "public-key";
+            response: {
+                clientDataJSON: string;
+                authenticatorData: string;
+                signature: string;
+                userHandle?: null | string;
+            };
+        };
+        AdminSignInResponse: {
+            /** Format: uuid */
+            adminId: string;
+            csrfToken: string;
+            setupComplete: boolean;
+        };
         ApiProblem: {
             /** @enum {string} */
-            code: "bootstrap_refused" | "credential_refused" | "rate_limited";
+            code: "bootstrap_refused" | "credential_refused" | "signin_refused" | "rate_limited";
             traceId: string;
         };
         BootstrapClaimRequest: {
@@ -169,7 +236,7 @@ export interface components {
         };
         RegistrationAuthenticatorSelection: {
             /** @enum {string} */
-            residentKey: "preferred";
+            residentKey: "required";
             /** @enum {string} */
             userVerification: "required";
         };
@@ -254,6 +321,127 @@ export interface operations {
             429: {
                 headers: {
                     /** @description Whole seconds until this client's claim window ends and it may claim again. */
+                    "Retry-After": number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    BeginSignIn: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    /** @description The sign-in binding: __Host-gk-admin-signin={43 base64url characters}; Path=/; Secure; HttpOnly; SameSite=Strict; Max-Age=300. The complete call must carry it. */
+                    "Set-Cookie"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminSignInOptionsResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    /** @description Whole seconds until the rate-limit window allows another request. */
+                    "Retry-After": number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    CompleteSignIn: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminSignInRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    /** @description The Admin Session: __Host-gk-admin={43 base64url characters}; Path=/; Secure; HttpOnly; SameSite=Strict, a browser session cookie with no Domain, Expires or Max-Age. And __Host-gk-admin-signin cleared with Max-Age=0, as on every complete. */
+                    "Set-Cookie"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminSignInResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    /** @description Whole seconds until the rate-limit window allows another request. */
                     "Retry-After": number;
                     [name: string]: unknown;
                 };

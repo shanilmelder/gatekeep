@@ -1,8 +1,14 @@
 // The browser's own WebAuthn API and nothing else (Story 1.22): the server's JSON options become
 // the PublicKeyCredentialCreationOptions navigator.credentials.create takes, and the credential it
-// returns becomes the JSON the server verifies. Binary values cross as base64url with no padding.
+// returns becomes the JSON the server verifies; and for sign-in (Story 1.23) the request options and
+// the assertion get returns. Binary values cross as base64url with no padding.
 
-import type { CredentialCreationOptionsResponse, CredentialRegistrationRequest } from '@gatekeep/api-client';
+import type {
+  AdminSignInOptionsResponse,
+  AdminSignInRequest,
+  CredentialCreationOptionsResponse,
+  CredentialRegistrationRequest,
+} from '@gatekeep/api-client';
 
 export function fromBase64Url(value: string): ArrayBuffer {
   const base64 = value.replace(/-/g, '+').replace(/_/g, '/');
@@ -63,4 +69,34 @@ export function isCancelled(error: unknown): boolean {
 /** The authenticator already holds a credential the options excluded: this device is already registered. */
 export function isAlreadyRegistered(error: unknown): boolean {
   return error instanceof DOMException && error.name === 'InvalidStateError';
+}
+
+/**
+ * The server's sign-in options, as navigator.credentials.get takes them (Story 1.23). No
+ * credential is listed: the authenticator offers the Admin's discoverable one.
+ */
+export function requestOptions(options: AdminSignInOptionsResponse): PublicKeyCredentialRequestOptions {
+  return {
+    challenge: fromBase64Url(options.challenge),
+    rpId: options.rpId,
+    timeout: Number(options.timeout),
+    userVerification: options.userVerification as UserVerificationRequirement,
+    allowCredentials: [],
+  };
+}
+
+/** The credential get returned, as the server's sign-in complete call takes it. */
+export function assertionRequest(credential: PublicKeyCredential): AdminSignInRequest {
+  const response = credential.response as AuthenticatorAssertionResponse;
+  return {
+    id: credential.id,
+    rawId: toBase64Url(credential.rawId),
+    type: 'public-key',
+    response: {
+      clientDataJSON: toBase64Url(response.clientDataJSON),
+      authenticatorData: toBase64Url(response.authenticatorData),
+      signature: toBase64Url(response.signature),
+      userHandle: response.userHandle ? toBase64Url(response.userHandle) : null,
+    },
+  };
 }

@@ -9,7 +9,7 @@ namespace Gatekeep.Tests.Isolation.Admins;
 /// <summary>
 /// Story 1.22: registering the first Admin's two WebAuthn credentials on the real
 /// <c>Host.Admin</c> and PostgreSQL, with a software authenticator. The options carry the Admin
-/// RP ID, no attestation, required user verification, a preferred resident key, ES256 and RS256,
+/// RP ID, no attestation, required user verification, a required resident key, ES256 and RS256,
 /// the Admin's random user handle and their credentials as the exclude list. The challenge is
 /// stored as its SHA-256 for 5 minutes and used up by the finish. The second credential makes the
 /// Session full and completes setup in its own transaction; until then nothing but setup is
@@ -43,7 +43,7 @@ public sealed class CredentialRegistrationTests(PostgresFixture postgres)
         Assert.Equal("Gatekeep", options.GetProperty("rp").GetProperty("name").GetString());
         Assert.Equal("none", options.GetProperty("attestation").GetString());
         Assert.Equal("required", options.GetProperty("authenticatorSelection").GetProperty("userVerification").GetString());
-        Assert.Equal("preferred", options.GetProperty("authenticatorSelection").GetProperty("residentKey").GetString());
+        Assert.Equal("required", options.GetProperty("authenticatorSelection").GetProperty("residentKey").GetString());
         Assert.Equal([-7, -257], options.GetProperty("pubKeyCredParams").EnumerateArray().Select(p => p.GetProperty("alg").GetInt32()));
         Assert.All(options.GetProperty("pubKeyCredParams").EnumerateArray(), p => Assert.Equal("public-key", p.GetProperty("type").GetString()));
         Assert.Empty(options.GetProperty("excludeCredentials").EnumerateArray());

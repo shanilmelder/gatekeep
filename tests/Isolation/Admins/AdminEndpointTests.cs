@@ -39,6 +39,8 @@ public sealed class AdminEndpointTests : IDisposable
                 "/api/v1/deployment/credentials/registration/complete",
                 "/api/v1/deployment/session",
                 "/api/v1/deployment/session",
+                "/api/v1/deployment/signin",
+                "/api/v1/deployment/signin/complete",
             ],
             deployment.Select(e => e.RoutePattern.RawText!).Order(StringComparer.Ordinal));
         foreach (var endpoint in deployment)

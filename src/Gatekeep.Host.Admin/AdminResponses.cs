@@ -6,7 +6,7 @@ namespace Gatekeep.Host.Admin;
 /// <summary>A refusal's body: a fixed code and the trace ID support asks for, and nothing else.</summary>
 public sealed class ApiProblem
 {
-    /// <summary>A fixed code: <c>bootstrap_refused</c>, <c>credential_refused</c> or <c>rate_limited</c>.</summary>
+    /// <summary>A fixed code: <c>bootstrap_refused</c>, <c>credential_refused</c>, <c>signin_refused</c> or <c>rate_limited</c>.</summary>
     public required string Code { get; init; }
 
     /// <summary>The request's W3C trace ID, which the host's log line for the refusal carries too.</summary>
@@ -24,12 +24,39 @@ internal static class AdminResponses
 
     public const string CredentialRefused = "credential_refused";
 
+    /// <summary>Every refused Admin sign-in complete (Story 1.23), whatever the reason: nothing says why.</summary>
+    public const string SignInRefused = "signin_refused";
+
     /// <summary>Every problem code a body can carry, for the OpenAPI document.</summary>
-    public static readonly IReadOnlyList<string> ProblemCodes = [BootstrapRefused, CredentialRefused, RateLimited];
+    public static readonly IReadOnlyList<string> ProblemCodes = [BootstrapRefused, CredentialRefused, SignInRefused, RateLimited];
 
     /// <summary>The Session cookie, expired: sent with a sign-out and a 401 for a stale cookie.</summary>
     public static readonly string ClearedSessionCookie =
         $"{AdminRequestChecks.SessionCookie}=; Path=/; Secure; HttpOnly; SameSite=Strict; Max-Age=0";
+
+    /// <summary>
+    /// The key a sign-in complete sets in <see cref="HttpContext.Items"/> once it has taken the
+    /// challenge, so that even a 503 after it still clears the binding cookie.
+    /// </summary>
+    public const string SignInChallengeTaken = "Gatekeep:SignInChallengeTaken";
+
+    /// <summary>The sign-in binding cookie, expired: every sign-in complete sends it once the challenge is taken, whatever the outcome.</summary>
+    public static readonly string ClearedSignInCookie =
+        $"{AdminRequestChecks.SignInCookie}=; Path=/; Secure; HttpOnly; SameSite=Strict; Max-Age=0";
+
+    /// <summary>
+    /// The sign-in binding cookie for <paramref name="binding"/>: host-only by its prefix, sent only
+    /// over HTTPS, only same-site and never to script, for as long as the challenge lives.
+    /// </summary>
+    public static string SignInCookie(string binding) =>
+        $"{AdminRequestChecks.SignInCookie}={binding}; Path=/; Secure; HttpOnly; SameSite=Strict; Max-Age={(long)Gatekeep.Kernel.Limits.SecurityLimits.WebAuthnChallengeLifetime.TotalSeconds}";
+
+    /// <summary>
+    /// An Admin Session cookie: a browser session cookie (no Domain, Expires or Max-Age), host-only
+    /// by its prefix, sent only over HTTPS, only same-site and never to script.
+    /// </summary>
+    public static string SessionCookie(string token) =>
+        $"{AdminRequestChecks.SessionCookie}={token}; Path=/; Secure; HttpOnly; SameSite=Strict";
 
     /// <summary>The request's trace ID: the W3C one when there is an Activity, Kestrel's otherwise.</summary>
     public static string TraceId(HttpContext context) =>
@@ -79,6 +106,13 @@ internal static class AdminResponses
         var headers = context.Response.Headers;
         headers.Remove("Set-Cookie");
         headers.Remove("Retry-After");
+
+        // A sign-in's challenge, once taken, is gone whatever failed after: its cookie goes too.
+        if (context.Items.ContainsKey(SignInChallengeTaken))
+        {
+            headers.SetCookie = ClearedSignInCookie;
+        }
+
         headers.ContentType = default;
         headers.ContentLength = null;
         headers.CacheControl = "no-store";

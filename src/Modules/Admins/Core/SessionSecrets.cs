@@ -41,6 +41,43 @@ internal static class SessionSecrets
         }
     }
 
+    /// <summary>
+    /// A fresh 256-bit value of the same form, such as a sign-in's binding cookie (Story 1.23),
+    /// and the SHA-256 to store. No CSRF token goes with it.
+    /// </summary>
+    public static (Secret<string> Token, byte[] Hash) GenerateValue()
+    {
+        Span<byte> raw = stackalloc byte[Bytes];
+        try
+        {
+            RandomNumberGenerator.Fill(raw);
+            return (new Secret<string>(Base64Url.EncodeToString(raw)), SHA256.HashData(raw));
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(raw);
+        }
+    }
+
+    /// <summary>The SHA-256 of a value in this form, or null when it isn't one.</summary>
+    public static byte[]? TryHash(Secret<string>? value)
+    {
+        if (value is null)
+        {
+            return null;
+        }
+
+        var raw = new byte[Bytes];
+        try
+        {
+            return value.Use(token => TryDecode(token, raw)) ? SHA256.HashData(raw) : null;
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(raw);
+        }
+    }
+
     /// <summary>The CSRF token's bytes for the Session ID <paramref name="id"/>.</summary>
     public static byte[] DeriveCsrf(ReadOnlySpan<byte> id)
     {

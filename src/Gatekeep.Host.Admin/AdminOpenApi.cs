@@ -26,9 +26,10 @@ internal static class AdminOpenApi
                     Title = "Gatekeep Admin API",
                     Version = "v1",
                     Description =
-                        "The Admin Dashboard's API on Host.Admin. Every /api/v1/deployment endpoint but the bootstrap claim needs the " +
-                        "__Host-gk-admin Session cookie; every state-changing one also needs the exact Admin Origin and the Session's " +
-                        "X-Gatekeep-CSRF token. A refusal's body is only a fixed code and the trace ID.",
+                        "The Admin Dashboard's API on Host.Admin. Every /api/v1/deployment endpoint but the bootstrap claim and Admin " +
+                        "sign-in needs the __Host-gk-admin Session cookie; every state-changing one also needs the exact Admin Origin " +
+                        "and the Session's X-Gatekeep-CSRF token. The claim and sign-in need the exact Admin Origin only. A refusal's " +
+                        "body is only a fixed code and the trace ID.",
                 };
 
                 // The stand-in server's address isn't part of the contract.
@@ -68,11 +69,21 @@ internal static class AdminOpenApi
                 }
                 else if (type == typeof(RegistrationAuthenticatorSelection))
                 {
-                    Enumerate(schema, "residentKey", ["preferred"]);
+                    Enumerate(schema, "residentKey", ["required"]);
                     Enumerate(schema, "userVerification", ["required"]);
                 }
+                else if (type == typeof(AdminSignInOptionsResponse))
+                {
+                    Enumerate(schema, "userVerification", ["required"]);
+
+                    // Always empty: no credential ID goes to a caller who hasn't signed in.
+                    if (schema.Properties?.TryGetValue("allowCredentials", out var allowed) == true && allowed is OpenApiSchema list)
+                    {
+                        list.MaxItems = 0;
+                    }
+                }
                 else if (type == typeof(RegistrationPublicKeyParameter) || type == typeof(RegistrationExcludedCredential)
-                    || type == typeof(CredentialRegistrationRequest))
+                    || type == typeof(CredentialRegistrationRequest) || type == typeof(AdminSignInRequest))
                 {
                     Enumerate(schema, "type", ["public-key"]);
                 }
@@ -164,6 +175,28 @@ internal static class AdminOpenApi
                         Required = true,
                         Schema = new OpenApiSchema { Type = JsonSchemaType.Integer, Minimum = "1" },
                     };
+                }
+
+                if (metadata.OfType<SignInEndpoint>().Any())
+                {
+                    // No session yet: sign-in needs only the exact Origin, and its cookies.
+                    operation.Security = [];
+                    if (operation.Responses?.TryGetValue("200", out var ok) == true && ok is OpenApiResponse okResponse)
+                    {
+                        okResponse.Headers ??= new Dictionary<string, IOpenApiHeader>();
+                        okResponse.Headers["Set-Cookie"] = new OpenApiHeader
+                        {
+                            Description = metadata.OfType<JsonRequestBody>().Any()
+                                ? "The Admin Session: __Host-gk-admin={43 base64url characters}; Path=/; Secure; HttpOnly; SameSite=Strict, a " +
+                                  "browser session cookie with no Domain, Expires or Max-Age. And __Host-gk-admin-signin cleared with Max-Age=0, " +
+                                  "as on every complete."
+                                : "The sign-in binding: __Host-gk-admin-signin={43 base64url characters}; Path=/; Secure; HttpOnly; " +
+                                  "SameSite=Strict; Max-Age=300. The complete call must carry it.",
+                            Schema = new OpenApiSchema { Type = JsonSchemaType.String },
+                        };
+                    }
+
+                    return;
                 }
 
                 var requirement = new OpenApiSecurityRequirement

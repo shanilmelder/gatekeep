@@ -1,5 +1,6 @@
 using System.Data.Common;
 using System.Security.Cryptography;
+using Gatekeep.Kernel.Audit;
 using Gatekeep.Kernel.Limits;
 using Gatekeep.Kernel.Persistence;
 using Gatekeep.Kernel.Secrets;
@@ -12,7 +13,7 @@ namespace Gatekeep.Modules.Admins.Core;
 /// (Story 1.22), which decides what the Session may reach. Every time comes from one
 /// <c>clock_timestamp()</c> per statement, and the idle expiry never passes the absolute one.
 /// </summary>
-internal sealed class AdminSessions : IAdminSessions
+internal sealed class AdminSessions(IAuditAppender appender) : IAdminSessions
 {
     private const string Insert =
         """
@@ -43,6 +44,18 @@ internal sealed class AdminSessions : IAdminSessions
 
     private const string SignOut =
         "UPDATE admin_session SET ended_at = clock_timestamp(), end_reason = 'signed_out' WHERE id = @id AND ended_at IS NULL";
+
+    private const string Supersede =
+        """
+        UPDATE admin_session SET ended_at = clock_timestamp(), end_reason = 'superseded'
+        WHERE id_hash = @id_hash AND ended_at IS NULL
+          AND idle_expires_at > clock_timestamp() AND absolute_expires_at > clock_timestamp()
+        RETURNING admin_id
+        """;
+
+    private static readonly AuditTypeCode SignedOut = AdminsEvents.SessionSignedOut.Code;
+
+    private static readonly AuditTypeCode Superseded = AdminsEvents.SessionSuperseded.Code;
 
     /// <summary>Starts a Session for <paramref name="adminId"/>, in the caller's transaction.</summary>
     public static async Task<AdminSessionGrant> StartAsync(
@@ -139,15 +152,61 @@ internal sealed class AdminSessions : IAdminSessions
         return expired ? null : session;
     }
 
-    public async Task EndAsync(CommandContext context, AdminSession session, CancellationToken cancellationToken)
+    public async Task<bool> EndAsync(CommandContext context, AdminSession session, CancellationToken cancellationToken)
     {
         RequireDeployment(context);
         ArgumentNullException.ThrowIfNull(session);
 
+        await using (var command = context.CreateCommand())
+        {
+            command.CommandText = SignOut;
+            Add(command, "id", session.Id);
+            if (await command.ExecuteNonQueryAsync(cancellationToken) != 1)
+            {
+                // Ended already, by another tab or an expiry: nothing happened here to audit.
+                return false;
+            }
+        }
+
+        await appender.AppendAsync(
+            context,
+            new AuditEvent(SignedOut, Actor.Admin(session.AdminId), AuditTargetKind.Admin, session.AdminId),
+            detail: null,
+            cancellationToken);
+        return true;
+    }
+
+    /// <summary>
+    /// Ends with <c>superseded</c> the live Session whose ID is <paramref name="sessionToken"/>, if
+    /// there is one, and appends <see cref="AdminsEvents.SessionSuperseded"/> for it, in the caller's
+    /// transaction: a sign-in by <paramref name="actorAdminId"/> in a browser that holds one replaces
+    /// it. A malformed, unknown, ended or expired one changes nothing and audits nothing.
+    /// </summary>
+    public static async Task SupersedeAsync(
+        CommandContext context,
+        IAuditAppender appender,
+        Secret<string> sessionToken,
+        Guid actorAdminId,
+        CancellationToken cancellationToken)
+    {
+        if (SessionSecrets.TryHash(sessionToken) is not { } idHash)
+        {
+            return;
+        }
+
         await using var command = context.CreateCommand();
-        command.CommandText = SignOut;
-        Add(command, "id", session.Id);
-        await command.ExecuteNonQueryAsync(cancellationToken);
+        command.CommandText = Supersede;
+        Add(command, "id_hash", idHash);
+        if (await command.ExecuteScalarAsync(cancellationToken) is not Guid owner)
+        {
+            return;
+        }
+
+        await appender.AppendAsync(
+            context,
+            new AuditEvent(Superseded, Actor.Admin(actorAdminId), AuditTargetKind.Admin, owner),
+            detail: null,
+            cancellationToken);
     }
 
     internal static void RequireDeployment(CommandContext context)

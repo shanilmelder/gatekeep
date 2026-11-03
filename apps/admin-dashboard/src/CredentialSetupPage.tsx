@@ -55,7 +55,7 @@ export function CredentialSetupPage() {
           }
           setState({ kind: 'ready', credentials: Math.max(0, Math.min(REQUIRED - 1, result.data.credentials ?? 0)) });
         } else if (result.status === 401) {
-          window.location.replace('/bootstrap');
+          window.location.replace('/signin');
         } else {
           setState({ kind: 'failed', failure: failure(null) });
         }
@@ -82,7 +82,7 @@ export function CredentialSetupPage() {
       const begin = await api.beginCredentialRegistration();
       if (!begin.ok || !begin.data) {
         if (begin.status === 401) {
-          window.location.replace('/bootstrap');
+          window.location.replace('/signin');
           return;
         }
         done();
@@ -118,7 +118,7 @@ export function CredentialSetupPage() {
       const complete = await api.completeCredentialRegistration(registrationRequest(credential));
       if (!complete.ok || !complete.data) {
         if (complete.status === 401) {
-          window.location.replace('/bootstrap');
+          window.location.replace('/signin');
           return;
         }
         done();

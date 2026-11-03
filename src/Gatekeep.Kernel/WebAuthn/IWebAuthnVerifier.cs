@@ -4,8 +4,9 @@ namespace Gatekeep.Kernel.WebAuthn;
 /// WebAuthn ceremonies (AD-31, AD-24), behind one port so that no module holds a WebAuthn library
 /// and every call says which Relying Party it is for. The adapter is stateless: it keeps no RP
 /// ID, origin or challenge between calls, and knows no User or Admin types. Registration asks
-/// for no attestation, requires user verification, prefers a resident key, and allows ES256 and
-/// RS256 only.
+/// for no attestation, requires user verification and a resident key (a discoverable credential,
+/// so sign-in needs no username), and allows ES256 and RS256 only. An assertion requires user
+/// verification and lists no credentials.
 /// </summary>
 public interface IWebAuthnVerifier
 {
@@ -25,6 +26,25 @@ public interface IWebAuthnVerifier
     /// credential.
     /// </summary>
     Task<WebAuthnRegistrationResult> FinishRegistrationAsync(WebAuthnRegistrationFinish request, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// The request options for <c>navigator.credentials.get</c>, carrying the caller's
+    /// <see cref="WebAuthnAssertionBegin.Challenge"/>, which the caller stores (as its SHA-256)
+    /// until the assertion finishes. <c>allowCredentials</c> is always empty: the credential is
+    /// discoverable, so no credential ID goes to a caller who hasn't authenticated.
+    /// </summary>
+    /// <exception cref="ArgumentException">The request is malformed, such as a challenge under 16 bytes.</exception>
+    WebAuthnRequestOptions BeginAssertion(WebAuthnAssertionBegin request);
+
+    /// <summary>
+    /// Verifies an assertion response against the Relying Party, the challenge and the stored
+    /// credential in <paramref name="request"/>. A response the ceremony refuses is a refused
+    /// result, never an exception: one for another RP ID or origin, a cross-origin one, one
+    /// without user presence and verification, one whose challenge isn't the stored one, one
+    /// whose user handle isn't the credential's owner's, one with a bad signature, and one whose
+    /// signature counter doesn't advance past a non-zero stored one.
+    /// </summary>
+    Task<WebAuthnAssertionResult> FinishAssertionAsync(WebAuthnAssertionFinish request, CancellationToken cancellationToken);
 }
 
 /// <summary>
@@ -106,13 +126,56 @@ public sealed record WebAuthnRegisteredCredential(
     IReadOnlyList<string> Transports,
     bool UserVerified);
 
-/// <summary>Why a registration was refused. A fixed set, so nothing from the response reaches a log.</summary>
+/// <summary>One assertion's start: the Relying Party, and the challenge the caller made and stores.</summary>
+public sealed record WebAuthnAssertionBegin(WebAuthnRelyingParty RelyingParty, byte[] Challenge);
+
+/// <summary>
+/// The request options as plain data, in WebAuthn's own terms: <c>challenge</c>, <c>rpId</c>,
+/// <c>timeout</c>, <c>userVerification</c> and <c>allowCredentials</c>, which is always empty.
+/// </summary>
+public sealed record WebAuthnRequestOptions(
+    byte[] Challenge,
+    string RpId,
+    uint TimeoutMilliseconds,
+    string UserVerification,
+    IReadOnlyList<WebAuthnCredentialDescriptor> AllowCredentials);
+
+/// <summary>
+/// One assertion's end. <see cref="ChallengeSha256"/> is the stored challenge, as it is stored:
+/// the SHA-256 of the bytes <see cref="IWebAuthnVerifier.BeginAssertion"/> sent.
+/// <see cref="Credential"/> is the stored credential the assertion's ID names.
+/// </summary>
+public sealed record WebAuthnAssertionFinish(
+    WebAuthnRelyingParty RelyingParty,
+    byte[] ChallengeSha256,
+    WebAuthnAssertion Assertion,
+    WebAuthnStoredCredential Credential);
+
+/// <summary>
+/// An assertion response from the browser, decoded from base64url: the credential's raw ID, the
+/// client data JSON, the authenticator data, the signature and the user handle, which a
+/// discoverable credential always returns, null when it was absent.
+/// </summary>
+public sealed record WebAuthnAssertion(
+    byte[] CredentialId,
+    byte[] ClientDataJson,
+    byte[] AuthenticatorData,
+    byte[] Signature,
+    byte[]? UserHandle);
+
+/// <summary>
+/// A credential as the caller stored it at registration: its ID, its COSE public key, its last
+/// signature counter, and the user handle of the account that owns it.
+/// </summary>
+public sealed record WebAuthnStoredCredential(byte[] CredentialId, byte[] PublicKey, uint SignCount, byte[] UserHandle);
+
+/// <summary>Why a ceremony was refused. A fixed set, so nothing from the response reaches a log.</summary>
 public enum WebAuthnRefusal
 {
     /// <summary>The response couldn't be parsed, or is inconsistent with itself.</summary>
     Malformed,
 
-    /// <summary>The client data isn't a <c>webauthn.create</c>.</summary>
+    /// <summary>The client data isn't the ceremony's type: <c>webauthn.create</c> to register, <c>webauthn.get</c> to assert.</summary>
     WrongType,
 
     /// <summary>The client data's challenge isn't the stored one.</summary>
@@ -136,8 +199,17 @@ public enum WebAuthnRefusal
     /// <summary>The authenticator returned a credential that was excluded.</summary>
     ExcludedCredential,
 
-    /// <summary>Verification failed for another reason, such as a bad attestation statement.</summary>
+    /// <summary>Verification failed for another reason, such as a bad attestation statement or a bad signature.</summary>
     Invalid,
+
+    /// <summary>
+    /// An assertion's signature counter isn't greater than the stored one, and they aren't both
+    /// 0: the sign of a cloned authenticator.
+    /// </summary>
+    SignCountRegressed,
+
+    /// <summary>An assertion's user handle is absent, or isn't the stored credential's owner's.</summary>
+    UserHandleMismatch,
 }
 
 /// <summary>A registration's outcome: the credential, or why it was refused.</summary>
@@ -164,4 +236,47 @@ public sealed record WebAuthnRegistrationResult
     }
 
     public static WebAuthnRegistrationResult Refused(WebAuthnRefusal refusal) => new(null, refusal);
+}
+
+/// <summary>
+/// An assertion's outcome: when verified, the authenticator's new signature counter and whether
+/// the UV flag was set (assertions require it, so a verified one always has it); when refused, why,
+/// and whether the signature over the stored key had verified first. Only a refusal after a
+/// verified signature proves the credential's holder made the response; any other could come from
+/// anyone who knows a credential ID.
+/// </summary>
+public sealed record WebAuthnAssertionResult
+{
+    private WebAuthnAssertionResult(uint signCount, bool userVerified, WebAuthnRefusal? refusal, bool signatureVerified)
+    {
+        SignCount = signCount;
+        UserVerified = userVerified;
+        Refusal = refusal;
+        SignatureVerified = signatureVerified;
+    }
+
+    /// <summary>The authenticator's new signature counter, when verified.</summary>
+    public uint SignCount { get; }
+
+    /// <summary>Whether the authenticator data's UV flag was set, when verified.</summary>
+    public bool UserVerified { get; }
+
+    /// <summary>Why it wasn't verified, when it wasn't.</summary>
+    public WebAuthnRefusal? Refusal { get; }
+
+    /// <summary>
+    /// Whether the signature over the stored public key verified: always when verified, and for a
+    /// refusal only when it came after the signature, such as <see cref="WebAuthnRefusal.SignCountRegressed"/>.
+    /// </summary>
+    public bool SignatureVerified { get; }
+
+    public bool Verified => Refusal is null;
+
+    public static WebAuthnAssertionResult Asserted(uint signCount, bool userVerified) => new(signCount, userVerified, null, signatureVerified: true);
+
+    /// <summary>A refusal before the signature verified, or with no signature verified at all.</summary>
+    public static WebAuthnAssertionResult Refused(WebAuthnRefusal refusal) => new(0, false, refusal, signatureVerified: false);
+
+    /// <summary>A refusal of a response whose signature over the stored key had verified.</summary>
+    public static WebAuthnAssertionResult RefusedAfterSignature(WebAuthnRefusal refusal) => new(0, false, refusal, signatureVerified: true);
 }

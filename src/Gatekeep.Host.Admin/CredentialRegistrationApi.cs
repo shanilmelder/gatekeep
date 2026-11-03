@@ -62,7 +62,7 @@ public sealed class RegistrationPublicKeyParameter
     public required int Alg { get; init; }
 }
 
-/// <summary>A resident key is preferred and user verification required.</summary>
+/// <summary>A resident key and user verification are both required: every Admin credential is discoverable, for sign-in.</summary>
 public sealed class RegistrationAuthenticatorSelection
 {
     public required string ResidentKey { get; init; }
@@ -298,7 +298,7 @@ internal static class CredentialRegistrationApi
         }
 
         Logger(context).LogInformation(
-            "A credential registration was refused with {Code}, trace {TraceId}.",
+            "A credential registration was refused with {Problem}, trace {TraceId}.",
             AdminResponses.RateLimited,
             AdminResponses.TraceId(context));
         context.Response.Headers.RetryAfter = Math.Max(1, (long)Math.Ceiling(decision.RetryAfter.TotalSeconds))
@@ -311,7 +311,7 @@ internal static class CredentialRegistrationApi
     {
         // The reason is a fixed name: nothing from the response reaches the log.
         Logger(context).LogInformation(
-            "A credential registration was refused with {Code} ({Refusal}), trace {TraceId}.",
+            "A credential registration was refused with {Problem} ({Refusal}), trace {TraceId}.",
             AdminResponses.CredentialRefused,
             refusal?.ToString() ?? "constraint",
             AdminResponses.TraceId(context));

@@ -2,10 +2,10 @@
 title: 'Story 1.23: Sign in as an Admin with WebAuthn'
 type: 'feature'
 created: '2026-11-03'
-status: 'ready-for-dev'
+status: 'done'
 baseline_revision: 'e0b41c48e902e05310dd7abc643e7b5e2711f4a9'
 review_loop_iteration: 0
-followup_review_recommended: false
+followup_review_recommended: true
 context:
   - '{project-root}/_bmad-output/planning-artifacts/architecture/architecture-gatekeep-2026-11-02/ARCHITECTURE-SPINE.md'
   - '{project-root}/_bmad-output/planning-artifacts/ux-designs/ux-gatekeep-2026-11-01/EXPERIENCE.md'
@@ -13,7 +13,21 @@ context:
   - '{project-root}/_bmad-output/implementation-artifacts/spec-1-22-register-admin-webauthn-credentials.md'
   - '{project-root}/docs/threat-model.md'
 warnings: [oversized]
-deferred: []
+deferred:
+  - summary: >-
+      An Owner whose setup Session expires before registering any credential is locked out.
+    evidence: |-
+      Bootstrap is closed and sign-in needs a credential. Story 1.32 recovers Admin access from the host.
+    location: >-
+      apps/admin-dashboard/src/CredentialSetupPage.tsx
+    severity: high
+  - summary: >-
+      No test for sign-in or bootstrap claims with no client address.
+    evidence: |-
+      The real-Kestrel test host cannot produce a null remote address.
+    location: >-
+      src/Gatekeep.Host.Admin/SignInApi.cs
+    severity: low
 ---
 
 <intent-contract>
@@ -63,7 +77,7 @@ deferred: []
 - **Ceremony state:**
   - **Begin:** inserts a row with a fresh 32-byte CSPRNG challenge and a fresh 256-bit binding value. In the same transaction it deletes every expired row (a bounded sweep, so no purge job is needed) and the row for any binding cookie the request already carried.
   - **Begin's cookie:** sets `__Host-gk-admin-signin=<binding>; Path=/; Secure; HttpOnly; SameSite=Strict; Max-Age=300`.
-  - **Complete:** first takes the row with `DELETE … WHERE binding_hash = @h AND expires_at > clock_timestamp() RETURNING challenge_sha256`, in a transaction of its own, committed before anything is verified. A challenge therefore answers at most once, whatever happens next.
+  - **Complete:** once the attempt is counted, and before the body is read, takes the row with `DELETE … WHERE binding_hash = @h RETURNING challenge_sha256, expires_at > clock_timestamp()`: an expired row is deleted too, and only a live one's hash is used. The take is a transaction of its own, committed with `CancellationToken.None` before anything is verified, so a client abort can't roll it back. A challenge therefore answers at most once, whatever happens next. Only a 429, or a 503 for a missing client address, returns before the take and leaves the challenge live.
   - **Complete's cookie:** always clears the binding cookie (`Max-Age=0`).
   - A complete with no cookie, an unknown or expired binding, or a used one is refused.
 - **Endpoints** (sessionless, marked with a new `SignInEndpoint` metadata class, like `BootstrapClaimEndpoint`):
@@ -223,13 +237,13 @@ deferred: []
 ## Tasks & Acceptance
 
 **Execution:**
-- [ ] Kernel: the assertion records, methods and refusals. Fido2 adapter: the assertion ceremony, the pre-checks, the user-handle and sign-count rules, and registration `residentKey: required`. Adapter tests.
-- [ ] Migration and registry: `admin_signin_challenge` (`UNLOGGED`, CHECKs, exact grants including `DELETE`), with catalogue and `AdminApiRuleTests` updates.
-- [ ] Admins: `IAdminSignIn` (begin with sweep, take, finish with the counter compare-and-set, Session start, supersede and audit); the sign-out audit in `EndAsync`; the policies, limits and events.
-- [ ] Host.Admin: `SignInEndpoint` checks, the two endpoints with their cookies, rate limits and the `signin_refused` problem, the audited sign-out, then OpenAPI and client regeneration.
-- [ ] Dashboard: `SignInPage`, the `webauthn.ts` assertion helpers, Sign out on the root, the 401 redirects to `/signin`, and the catalogue strings.
-- [ ] Tests: Isolation for every matrix row with `SoftwareAuthenticator`, plus CSRF and Origin refusals; browser `signin.spec.ts` (no fields, cancel, failure banner, success to `/`, sign-out to `/signin`, axe, CSP); the architecture isolation proof; the updated 1.22 tests.
-- [ ] Docs: the threat model (G-8, T-11, T-50, rows), `audit-events.md`, and `deferred-work.md` (out-of-scope items and the AD-27 table note).
+- [x] Kernel: the assertion records, methods and refusals. Fido2 adapter: the assertion ceremony, the pre-checks, the user-handle and sign-count rules, and registration `residentKey: required`. Adapter tests.
+- [x] Migration and registry: `admin_signin_challenge` (`UNLOGGED`, CHECKs, exact grants including `DELETE`), with catalogue and `AdminApiRuleTests` updates.
+- [x] Admins: `IAdminSignIn` (begin with sweep, take, finish with the counter compare-and-set, Session start, supersede and audit); the sign-out audit in `EndAsync`; the policies, limits and events.
+- [x] Host.Admin: `SignInEndpoint` checks, the two endpoints with their cookies, rate limits and the `signin_refused` problem, the audited sign-out, then OpenAPI and client regeneration.
+- [x] Dashboard: `SignInPage`, the `webauthn.ts` assertion helpers, Sign out on the root, the 401 redirects to `/signin`, and the catalogue strings.
+- [x] Tests: Isolation for every matrix row with `SoftwareAuthenticator`, plus CSRF and Origin refusals; browser `signin.spec.ts` (no fields, cancel, failure banner, success to `/`, sign-out to `/signin`, axe, CSP); the architecture isolation proof; the updated 1.22 tests.
+- [x] Docs: the threat model (G-8, T-11, T-50, rows), `audit-events.md`, and `deferred-work.md` (out-of-scope items and the AD-27 table note).
 
 **Acceptance Criteria:**
 - Given the Admin sign-in screen, when it loads, then it shows no email or password field, and the RP ID is the Admin hostname.
@@ -242,7 +256,34 @@ deferred: []
 
 ## Spec Change Log
 
+- 2026-11-04, Story 1.23 review: the complete takes the challenge before reading the body and commits the take with `CancellationToken.None`; the take deletes any row the binding names, then flags whether it was live. Only signature-verified refusals are audited (`admin.signin.failed` is kept, documented for the defence-in-depth compare-and-set). New event `admin.session.superseded`. The counter-race note is corrected: under the row lock a racing lower counter is reported as a regression.
+
 ## Review Triage Log
+
+### 2026-11-02 — Review pass
+- verdicts: 21 findings — high 2, medium 8, low 11, false 0, maybe-false 0
+- findings:
+  - `[high]` `[patch]` Blind: the "race, not a clone" branch is unreachable under `FOR UPDATE`, so a racing lower counter is reported as a clone — docs describe the real behaviour and a test pins it; the compare-and-set stays as defence in depth.
+  - `[high]` `[defer]` Blind: an Owner whose setup Session expires before registering any credential can never sign in — recovery is Story 1.32; recorded in the threat model.
+  - `[medium]` `[reject]` Blind: credentials registered under 1.22 with `residentKey: preferred` may not be discoverable — no Deployment holds 1.22 credentials.
+  - `[medium]` `[reject]` Blind: `NotAllowedError` is silent on timeout or no passkey — the spec keeps the screen unchanged on cancel, and browsers blur the cases on purpose.
+  - `[medium]` `[patch]` Blind: the root page shows a bare placeholder when the Session read fails — Generic error with a way back.
+  - `[medium]` `[patch]` Blind: anyone with a credential ID can write `admin.signin.failed` against a chosen Admin — only signature-verified failures are audited; the rest are logged.
+  - `[low]` `[patch]` Blind: "the challenge is used up whatever the outcome" is false for 429s and aborted body reads — the challenge is taken before the body, and the description is accurate.
+  - `[low]` `[patch]` Blind: superseding another Session writes no event — `admin.session.superseded` added.
+  - `[low]` `[patch]` Blind: missing tests for double sign-out, a NULL user handle, supersede over an ended Session and an empty begin answer — added.
+  - `[low]` `[reject]` Blind: before bootstrap every sign-in POST opens a transaction to answer 404 — the window is short and the endpoint answers nothing useful.
+  - `[medium]` `[patch]` Edge: a client abort during the body read or before the take commits leaves the challenge live — taken first and committed with `CancellationToken.None`.
+  - `[low]` `[patch]` Edge: a Session without a CSRF token shows a Sign out that can never work — guarded.
+  - `[low]` `[reject]` Edge: non-discoverable 1.22 credentials — same as the Blind row.
+  - `[medium]` `[patch]` Gap: the log line for unattributable refusals is never asserted — tests check the refusal name and trace ID in the host output.
+  - `[low]` `[patch]` Gap: `EndAsync` on an already-ended Session is never run — covered.
+  - `[medium]` `[patch]` Gap: a 401 from the credential-setup begin going to `/signin` is unpinned — browser test added.
+  - `[low]` `[defer]` Gap: no test for a missing client address on sign-in — the test host can't produce one; close with the bootstrap claim's same gap.
+  - `[low]` `[patch]` Intent: the take SQL deletes expired rows too, unlike the contract text — the stricter behaviour is kept and the spec updated.
+  - `[low]` `[patch]` Intent: the restricted Admin's redirect to setup after sign-in is untested in the browser — added.
+  - `[low]` `[patch]` Intent: an unused `SignInAllowedCredential` type and an unreachable `InvalidSignCount` mapping — cleaned up.
+  - `[medium]` `[patch]` Verification: every Admin refusal log line since 1.21 named its problem in a `{Code}` placeholder, which the log scrubber masks as a sensitive name — renamed `{Problem}`; the sign-in and bootstrap tests now assert the code in the log.
 
 ## Design Notes
 
@@ -256,7 +297,9 @@ deferred: []
 - **Discoverable-only:** with no username, the server learns which Admin is signing in from the credential ID and checks it against `userHandle`. Listing credential IDs in `allowCredentials` would hand them to anyone on the public Admin hostname (T-47). Registration therefore requires a resident key. Credentials already registered in test databases are rebuilt by the tests, and no production Deployment exists yet.
 - **One refusal for every failure:** the API answers every failure with the same 400 `signin_refused`, and the UI shows one message. A probe can't tell an unknown credential from a bad signature or a missing challenge. The fixed `WebAuthnRefusal` name reaches only the log.
 - **Counting:** each begin and each complete is counted per client in its own committed transaction before it runs, as bootstrap claims are. A refused attempt's count is therefore never rolled back, and parallel attempts can't exceed the limit. `admin_attempt` has no `DELETE` grant, so success doesn't reset the window. 10 completes per 15 minutes leaves room for normal use. Counting per Admin as well was rejected: no credential ID is public, so it would add a lockout route and no protection.
-- **Counter race:** the counter update is a compare-and-set on the value that was verified. When two assertions from one authenticator race, only one Session is created. The other is a refusal with `admin.signin.failed`, not a clone report.
+- **Taking the challenge:** a complete takes it straight after it is counted, before reading the body, so a slow, oversized or malformed body uses it up too, and every response after the take clears the binding cookie (a 503 included). The take deletes any row the binding names and only then flags whether it was live, which is stricter than deleting live rows only: asking with an expired binding uses that row up as well.
+- **Counter race:** the finish locks the credential's row and its Admin's `FOR UPDATE`, so sign-ins with one credential run one at a time. Under that serialisation an assertion with a lower counter after one with a higher counter is indistinguishable from a clone, and is reported as `admin.credential.sign_count_regressed`. The counter update stays a compare-and-set on the verified value as defence in depth; under the lock it can't lose, and if it ever did it would be refused with `admin.signin.failed`.
+- **What is audited (review):** only refusals after the signature verified over a registered credential: a counter regression, or the compare-and-set losing. Anything refused before the signature (a bad signature, another user handle or RP ID, a missing flag, an Admin with no handle, an unknown credential) is logged only, because anyone with a credential ID could otherwise write `admin.signin.failed` against a chosen Admin. Every attempt is still counted. A sign-in that supersedes a live Session writes `admin.session.superseded` in its transaction.
 - **Signing in while signed in:** the new Session supersedes the one the browser presented (`end_reason = 'superseded'` already exists in the CHECK). One browser therefore holds at most one live Admin Session.
 - **Restricted Admins:** the Session is always `full`. What it may reach is still decided by the credential count (Story 1.22's gate), so a one-credential Admin who signs in can only finish setup. `admin.signin.succeeded` is still written.
 - **Bootstrap gating:** before bootstrap completes there's no Admin to sign in, so both endpoints are the unknown-path 404. This mirrors `/bootstrap` disappearing afterwards and keeps the pre-bootstrap surface to the claim alone.
@@ -271,3 +314,19 @@ deferred: []
   - the browser, Architecture and Isolation tests pass, including the 1.22 tests updated for `residentKey: required`.
 
   Nothing runs on the host.
+
+## Auto Run Result
+
+Status: done
+
+**Summary:** an Admin signs in with a discoverable WebAuthn credential and nothing else. A single-use challenge lives in a short-lived table bound to a strict cookie and is used up before the response body is read. The stateless Fido2 adapter verifies the assertion against the Admin hostname and exact origin. A counter that doesn't advance is refused and audited as a possible clone. Success starts a full Admin Session in the same transaction as the counter update and its audit event. Sign-out ends the row and returns to sign-in. Tenant User credentials can't authenticate, because no table or flow is shared.
+
+**Files:** `src/Gatekeep.Kernel/WebAuthn/`; `src/Adapters/Fido2/`; the sign-in challenge migration and `TableRegistry`; `src/Modules/Admins/` (sign-in, sessions, events); `src/Gatekeep.Host.Admin/` (sign-in API, request checks, OpenAPI); `docs/api/openapi-v1.json`, `packages/api-client/`; `apps/admin-dashboard/src/` (sign-in page, root, credential setup); `tests/Isolation/Admins/`, the canary flows, `tests/Architecture/AdminCredentialIsolationTests.cs`, `tests/browser/signin.spec.ts`; `docs/audit-events.md` and the threat model.
+
+**Review:** 21 findings across four layers: 15 patched, 2 deferred, 4 rejected, each with its reason in the triage log.
+
+**Follow-up review:** recommended. The challenge ordering and the audit rules changed in review, with new tests as the only proof.
+
+**Verification:** see the PR screenshot; the full suite passes in the `tests` container.
+
+**Residual risks:** an Owner who loses the setup Session before registering a credential needs Story 1.32's recovery. Two sign-ins racing with one authenticator are reported as a possible clone. Admin credentials must be discoverable, so security keys that can't store resident credentials can't be used.

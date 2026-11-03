@@ -43,7 +43,9 @@ test('renders under the Admin CSP with no violation, loading only from its own o
 
   const response = await page.goto('/');
   expect(response!.status()).toBe(200);
-  await expect(page.getByText('Admin Dashboard')).toBeVisible();
+  // Cookieless, the root's Session request is a 401, which sends it on to sign in (Story 1.23).
+  await expect(page).toHaveURL(/\/signin$/);
+  await expect(page.getByRole('heading', { level: 1, name: 'Sign in' })).toBeVisible();
 
   // The body rule brings in Geist from the bundle, which font-src 'self' must allow.
   const geistLoaded = await page.evaluate(async () => {

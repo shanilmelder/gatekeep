@@ -157,3 +157,39 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-1-22-register-admin-webauthn-credentials.md`
   summary: Database guard for the two-credential cap and a race test for duplicate credential IDs.
   evidence: Story 1.22 review.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-23-sign-in-as-an-admin-with-webauthn.md`
+  summary: Audit refused and rate-limited bootstrap claims (Epic 7).
+  evidence: Story 1.23 audits Admin sign-in and sign-out only; the rest of the Story 1.21 item stays open.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-23-sign-in-as-an-admin-with-webauthn.md`
+  summary: Audit Admin Session expiry, and show the expiry banner (Epic 7, and Story 1.25's shell).
+  evidence: Story 1.23 out of scope. An expired Session is ended as `expired` with no event, and the dashboard only goes to `/signin` on the 401.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-23-sign-in-as-an-admin-with-webauthn.md`
+  summary: Store and use the WebAuthn BE/BS backup flags for Admin credentials (credential management).
+  evidence: Story 1.23 out of scope; carries on the Story 1.22 item. A synced passkey that reports a 0 counter gives no clone signal.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-23-sign-in-as-an-admin-with-webauthn.md`
+  summary: Disable the credential, or raise a Security Alert, on a sign-count regression (Security Alerts story).
+  evidence: Story 1.23 refuses the one sign-in and writes `admin.credential.sign_count_regressed`; the credential stays usable (threat model T-52).
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-23-sign-in-as-an-admin-with-webauthn.md`
+  summary: Fresh assertions for sensitive Admin actions (FR-46 re-authentication).
+  evidence: Story 1.23 out of scope; threat model T-22 and G-5.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-23-sign-in-as-an-admin-with-webauthn.md`
+  summary: Admin Recovery Codes, and the "Use a recovery code" link on Admin sign-in.
+  evidence: Story 1.23 omits the EXPERIENCE link until Admin Recovery Codes exist.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-23-sign-in-as-an-admin-with-webauthn.md`
+  summary: End-to-end WebAuthn test, registration and sign-in: real browser, real dashboard, real server.
+  evidence: Deferred from Story 1.22 and still open: `signin.spec.ts` intercepts the API, and the Isolation tests use a software authenticator.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-23-sign-in-as-an-admin-with-webauthn.md`
+  summary: Purge `admin_attempt` rows.
+  evidence: Story 1.23 adds two more policies counted there, per client; carries on the Story 1.20 item.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-23-sign-in-as-an-admin-with-webauthn.md`
+  summary: Catch `ARCHITECTURE-SPINE.md` up with Story 1.23: add `admin_signin_challenge` to AD-27's Admins table list.
+  evidence: Story 1.23 adds the `UNLOGGED` `control` table `admin_signin_challenge`, owned by Admins, which AD-27 doesn't name yet.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-23-sign-in-as-an-admin-with-webauthn.md`
+  summary: Recover a Deployment Owner whose setup Session ended before they registered any credential (Story 1.32, `gatekeep recover-admin`).
+  evidence: Story 1.23 review. WebAuthn sign-in needs a registered credential, so an Owner with none can never sign in once the setup Session expires; threat model T-51.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-23-sign-in-as-an-admin-with-webauthn.md`
+  summary: Recover an Owner locked out before registering any credential.
+  evidence: Story 1.23 review; Story 1.32.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-23-sign-in-as-an-admin-with-webauthn.md`
+  summary: Test the no-client-address 503 on sign-in and the bootstrap claim.
+  evidence: Story 1.23 review.

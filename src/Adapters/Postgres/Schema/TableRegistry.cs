@@ -15,7 +15,8 @@ public sealed record ColumnGrant(string Privilege, IReadOnlyList<string> Columns
 /// <summary>
 /// One table: its class, its one owning module, every privilege per role, on the table
 /// and per column, the triggers it must have, and whether it is <c>UNLOGGED</c>. Only
-/// counters a crash may reset are unlogged (AD-14); every other table must be logged.
+/// counters a crash may reset (AD-14), and pending sign-in challenges a crash may drop
+/// (Story 1.23), are unlogged; every other table must be logged.
 /// </summary>
 public sealed record TableEntry(
     string Name,
@@ -340,6 +341,21 @@ public static class TableRegistry
                 // The signature counter and last use. Never the credential, its key or its Admin.
                 [Admin] = [new ColumnGrant(Update, ["sign_count", "last_used_at"])],
             }),
+
+        // Story 1.23: each pending Admin sign-in's challenge, as its SHA-256, bound to the browser
+        // that began it by the SHA-256 of its cookie. The first Admins table with DELETE, and the
+        // only one: taking a challenge deletes its row, so it can never answer twice, and a begin
+        // sweeps the expired rows. No role updates one. Losing them in a crash only makes an
+        // Admin press Sign in again, so it is UNLOGGED.
+        new(
+            "admin_signin_challenge",
+            TableClass.Control,
+            "Admins",
+            new Dictionary<string, IReadOnlyList<string>>
+            {
+                [Admin] = [Select, Insert, Delete],
+            },
+            Unlogged: true),
     ];
 
     private static IReadOnlyList<string> EventTriggers(string table) =>
