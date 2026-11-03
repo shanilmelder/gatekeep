@@ -59,7 +59,7 @@ development_status:
   1-21-claim-bootstrap-and-create-the-first-admin: done
   1-22-register-admin-webauthn-credentials: done
   1-23-sign-in-as-an-admin-with-webauthn: done
-  1-24-enforce-capabilities-and-tenant-scoped-routes: backlog
+  1-24-enforce-capabilities-and-tenant-scoped-routes: in-progress
   1-25-open-the-admin-shell: backlog
   1-26-confirm-sensitive-actions-and-manage-admin-credentials: backlog
   1-27-create-tenants-with-permanent-subdomains: backlog
