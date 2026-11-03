@@ -17,6 +17,18 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      # The tests image, its build cache and the Testcontainers images outgrow the hosted
+      # runner's free disk, which then crashes the runner itself. The job needs only Docker
+      # and Git, so drop the preinstalled toolchains it never uses.
+      - name: Free runner disk space
+        run: |
+          df -h /
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup \
+            /opt/hostedtoolcache/CodeQL /usr/share/swift /usr/local/share/powershell \
+            /usr/local/share/chromium /usr/local/lib/node_modules
+          docker image prune --all --force
+          df -h /
+
       # The image build restores from lockfiles in locked mode, which is also the NuGet
       # critical audit: a critical advisory is NU1904, which TreatWarningsAsErrors turns
       # into a restore failure naming the package. pnpm installs with scripts disabled.
