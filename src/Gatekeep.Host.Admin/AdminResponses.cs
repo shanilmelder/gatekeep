@@ -6,7 +6,7 @@ namespace Gatekeep.Host.Admin;
 /// <summary>A refusal's body: a fixed code and the trace ID support asks for, and nothing else.</summary>
 public sealed class ApiProblem
 {
-    /// <summary>A fixed code: <c>bootstrap_refused</c> or <c>rate_limited</c>.</summary>
+    /// <summary>A fixed code: <c>bootstrap_refused</c>, <c>credential_refused</c> or <c>rate_limited</c>.</summary>
     public required string Code { get; init; }
 
     /// <summary>The request's W3C trace ID, which the host's log line for the refusal carries too.</summary>
@@ -22,8 +22,10 @@ internal static class AdminResponses
 
     public const string RateLimited = "rate_limited";
 
+    public const string CredentialRefused = "credential_refused";
+
     /// <summary>Every problem code a body can carry, for the OpenAPI document.</summary>
-    public static readonly IReadOnlyList<string> ProblemCodes = [BootstrapRefused, RateLimited];
+    public static readonly IReadOnlyList<string> ProblemCodes = [BootstrapRefused, CredentialRefused, RateLimited];
 
     /// <summary>The Session cookie, expired: sent with a sign-out and a 401 for a stale cookie.</summary>
     public static readonly string ClearedSessionCookie =

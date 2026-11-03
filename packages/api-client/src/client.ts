@@ -10,6 +10,9 @@ export type ApiProblem = components['schemas']['ApiProblem'];
 export type BootstrapClaimResponse = components['schemas']['BootstrapClaimResponse'];
 export type AdminSessionResponse = components['schemas']['AdminSessionResponse'];
 export type CapabilitiesResponse = components['schemas']['CapabilitiesResponse'];
+export type CredentialCreationOptionsResponse = components['schemas']['CredentialCreationOptionsResponse'];
+export type CredentialRegistrationRequest = components['schemas']['CredentialRegistrationRequest'];
+export type CredentialRegistrationResponse = components['schemas']['CredentialRegistrationResponse'];
 
 /** A path the committed OpenAPI document has, so a removed endpoint fails to compile. */
 export type ApiPath = keyof paths;
@@ -122,6 +125,11 @@ export function createApiClient(options: ApiClientOptions = {}) {
     endSession: () => request('/api/v1/deployment/session', 'delete'),
     /** The Deployment capabilities the current Admin holds. */
     getCapabilities: () => request('/api/v1/deployment/capabilities', 'get'),
+    /** Begins a WebAuthn credential registration: the options for navigator.credentials.create. */
+    beginCredentialRegistration: () => request('/api/v1/deployment/credentials/registration', 'post'),
+    /** Completes it with the browser's attestation response, in WebAuthn's JSON form. */
+    completeCredentialRegistration: (credential: CredentialRegistrationRequest) =>
+      request('/api/v1/deployment/credentials/registration/complete', 'post', credential),
   };
 }
 

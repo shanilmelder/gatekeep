@@ -115,8 +115,16 @@ export interface Messages {
   bootstrapUnavailableBody: string;
   /** Admin credential setup's heading. */
   credentialSetupTitle: string;
-  /** Admin credential setup's placeholder text until Story 1.22 registers credentials. */
-  credentialSetupBody: string;
+  /** Which of the two registrations this is. Placeholders: {step}, {total}. */
+  credentialSetupStep: string;
+  /** Credential setup's subtitle before the first credential: why two. */
+  credentialSetupFirst: string;
+  /** Credential setup's subtitle before the second credential: on another device. */
+  credentialSetupSecond: string;
+  /** Credential setup's one primary action, which opens the browser's passkey sheet. */
+  credentialSetupRegister: string;
+  /** Shown when the authenticator already holds one of the Admin's credentials, with what to do instead. */
+  credentialSetupAlreadyRegistered: string;
 }
 
 export const defaultMessages: Readonly<Messages> = Object.freeze({
@@ -178,7 +186,11 @@ export const defaultMessages: Readonly<Messages> = Object.freeze({
   bootstrapUnavailableTitle: "This Deployment can't be claimed here",
   bootstrapUnavailableBody: 'There is no bootstrap to claim at this address.',
   credentialSetupTitle: 'Set up your credentials',
-  credentialSetupBody: "Next, you register two passkeys or security keys. Nothing else is available until you have.",
+  credentialSetupStep: 'Step {step} of {total}',
+  credentialSetupFirst: "Register a passkey or security key. You'll register two, so losing one device can't lock you out. Nothing else is available until you have.",
+  credentialSetupSecond: 'Now register a second one, on another device or security key.',
+  credentialSetupRegister: 'Register passkey',
+  credentialSetupAlreadyRegistered: 'This passkey or security key is already registered. Use a different security key or device.',
 });
 
 /**

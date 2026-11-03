@@ -21,6 +21,7 @@
     <Project Path="src/Modules/Operations/Gatekeep.Modules.Operations.csproj" />
   </Folder>
   <Folder Name="/src/Adapters/">
+    <Project Path="src/Adapters/Fido2/Gatekeep.Adapters.Fido2.csproj" />
     <Project Path="src/Adapters/Hosting/Gatekeep.Adapters.Hosting.csproj" />
     <Project Path="src/Adapters/Logging/Gatekeep.Adapters.Logging.csproj" />
     <Project Path="src/Adapters/OpenBao/Gatekeep.Adapters.OpenBao.csproj" />

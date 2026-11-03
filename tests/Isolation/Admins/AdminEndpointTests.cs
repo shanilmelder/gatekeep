@@ -32,7 +32,14 @@ public sealed class AdminEndpointTests : IDisposable
             .ToList();
 
         Assert.Equal(
-            ["/api/v1/deployment/bootstrap", "/api/v1/deployment/capabilities", "/api/v1/deployment/session", "/api/v1/deployment/session"],
+            [
+                "/api/v1/deployment/bootstrap",
+                "/api/v1/deployment/capabilities",
+                "/api/v1/deployment/credentials/registration",
+                "/api/v1/deployment/credentials/registration/complete",
+                "/api/v1/deployment/session",
+                "/api/v1/deployment/session",
+            ],
             deployment.Select(e => e.RoutePattern.RawText!).Order(StringComparer.Ordinal));
         foreach (var endpoint in deployment)
         {

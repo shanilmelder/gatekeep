@@ -6,6 +6,8 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- Story 1.22: WebAuthn verification behind the Kernel IWebAuthnVerifier port, in src/Adapters/Fido2 only. -->
+    <PackageVersion Include="Fido2" Version="4.3.2" />
     <!-- Story 1.21: Host.Admin's OpenAPI document, generated at build time (docs/api/openapi-v1.json). -->
     <PackageVersion Include="Microsoft.AspNetCore.OpenApi" Version="10.0.14" />
     <PackageVersion Include="Microsoft.AspNetCore.TestHost" Version="10.0.14" />

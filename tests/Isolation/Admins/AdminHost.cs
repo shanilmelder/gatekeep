@@ -3,6 +3,7 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using Gatekeep.Adapters.Postgres.Schema;
 using Gatekeep.Kernel.Persistence;
 using Gatekeep.Kernel.Secrets;
@@ -143,7 +144,8 @@ internal sealed class AdminHost : IAsyncDisposable
         string? csrf = null,
         string? origin = null,
         string? body = null,
-        IEnumerable<(string Name, string Value)>? headers = null)
+        IEnumerable<(string Name, string Value)>? headers = null,
+        string contentType = "application/json")
     {
         using var request = new HttpRequestMessage(method, path);
         if (cookie is not null)
@@ -168,7 +170,7 @@ internal sealed class AdminHost : IAsyncDisposable
 
         if (body is not null)
         {
-            request.Content = new StringContent(body, Encoding.UTF8, new MediaTypeHeaderValue("application/json"));
+            request.Content = new StringContent(body, Encoding.UTF8, new MediaTypeHeaderValue(contentType));
         }
 
         var response = await Http.SendAsync(request, Cancellation);
@@ -207,9 +209,10 @@ internal sealed class AdminHost : IAsyncDisposable
 
     /// <summary>
     /// A <c>full</c> Session, inserted as the superuser since sign-in is Story 1.23's, for an Admin
-    /// who isn't the Owner. Returns its cookie value and CSRF token.
+    /// who isn't the Owner, with <paramref name="credentials"/> WebAuthn credentials: two unless
+    /// said, so that the Session isn't held to setup. Returns its cookie value and CSRF token.
     /// </summary>
-    public async Task<(string Cookie, string Csrf, Guid SessionId)> InsertFullSessionAsync()
+    public async Task<(string Cookie, string Csrf, Guid SessionId)> InsertFullSessionAsync(int credentials = 2)
     {
         var raw = RandomNumberGenerator.GetBytes(32);
         var sessionId = Guid.CreateVersion7();
@@ -220,17 +223,53 @@ internal sealed class AdminHost : IAsyncDisposable
             WITH a AS (INSERT INTO admin (id, deployment_owner) VALUES (@admin, false) RETURNING id)
             INSERT INTO admin_session (id, id_hash, admin_id, kind, created_at, idle_expires_at, absolute_expires_at)
             SELECT @id, @hash, a.id, 'full', now(), now() + interval '30 minutes', now() + interval '8 hours'
-            FROM a
+            FROM a;
+
+            INSERT INTO admin_credential (id, admin_id, credential_id, public_key, sign_count, aaguid)
+            SELECT gen_random_uuid(), s.admin_id, decode(md5(random()::text || n), 'hex'), '\x01', 0, gen_random_uuid()
+            FROM admin_session AS s, generate_series(1, @credentials) AS n
+            WHERE s.id = @id
             """,
             connection);
         command.Parameters.AddWithValue("admin", Guid.CreateVersion7());
         command.Parameters.AddWithValue("id", sessionId);
         command.Parameters.AddWithValue("hash", SHA256.HashData(raw));
+        command.Parameters.AddWithValue("credentials", credentials);
         await command.ExecuteNonQueryAsync(Cancellation);
 
         var cookie = Base64Url.EncodeToString(raw);
         return (cookie, Csrf(cookie), sessionId);
     }
+
+    /// <summary>Begins a credential registration for the Session, with its CSRF token and the Admin Origin.</summary>
+    public async Task<(HttpResponseMessage Response, JsonElement Options)> BeginRegistrationAsync(string cookie, string csrf)
+    {
+        var response = await SendAsync(HttpMethod.Post, RegistrationPath, cookie, csrf, Origin);
+        var options = response.StatusCode == HttpStatusCode.OK
+            ? JsonDocument.Parse(await response.Content.ReadAsStringAsync(Cancellation)).RootElement.Clone()
+            : default;
+        return (response, options);
+    }
+
+    /// <summary>Completes a credential registration with <paramref name="body"/>, the page's JSON.</summary>
+    public Task<HttpResponseMessage> CompleteRegistrationAsync(string cookie, string csrf, string body, string contentType = "application/json") =>
+        SendAsync(HttpMethod.Post, RegistrationPath + "/complete", cookie, csrf, Origin, body, contentType: contentType);
+
+    /// <summary>Begins and completes one registration with <paramref name="authenticator"/>, which must succeed.</summary>
+    public async Task<JsonElement> RegisterAsync(string cookie, string csrf, SoftwareAuthenticator authenticator)
+    {
+        var (begin, options) = await BeginRegistrationAsync(cookie, csrf);
+        using (begin)
+        {
+            Assert.Equal(HttpStatusCode.OK, begin.StatusCode);
+        }
+
+        using var complete = await CompleteRegistrationAsync(cookie, csrf, authenticator.Attest(options, Origin));
+        Assert.Equal(HttpStatusCode.OK, complete.StatusCode);
+        return JsonDocument.Parse(await complete.Content.ReadAsStringAsync(Cancellation)).RootElement.Clone();
+    }
+
+    public const string RegistrationPath = "/api/v1/deployment/credentials/registration";
 
     /// <summary>A well-formed secret nobody issued.</summary>
     public static string Unissued() => Base64Url.EncodeToString(RandomNumberGenerator.GetBytes(32));

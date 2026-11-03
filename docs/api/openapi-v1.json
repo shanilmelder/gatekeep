@@ -150,6 +150,142 @@
         "x-gatekeep-setup-allowed": false
       }
     },
+    "/api/v1/deployment/credentials/registration": {
+      "post": {
+        "tags": [
+          "Deployment"
+        ],
+        "summary": "Begin registering a WebAuthn credential: the options for navigator.credentials.create.",
+        "description": "Setup-allowed. Returns creation options for the Admin RP ID and origin, with no attestation, user verification required, a resident key preferred, ES256 and RS256, and the Admin's credentials excluded. Its challenge can be answered for 5 minutes, by the next complete call only; a new begin replaces it. Refused with 403 once the Admin has two credentials. Each begin and complete counts towards 10 per Session in 15 minutes, then 429.",
+        "operationId": "BeginCredentialRegistration",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CredentialCreationOptionsResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "429": {
+            "description": "Too Many Requests",
+            "headers": {
+              "Retry-After": {
+                "description": "Whole seconds until the rate-limit window allows another request.",
+                "required": true,
+                "schema": {
+                  "minimum": 1,
+                  "type": "integer"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "adminSession": [ ],
+            "csrf": [ ]
+          }
+        ],
+        "x-gatekeep-setup-allowed": true
+      }
+    },
+    "/api/v1/deployment/credentials/registration/complete": {
+      "post": {
+        "tags": [
+          "Deployment"
+        ],
+        "summary": "Complete a WebAuthn credential registration with the browser's attestation response.",
+        "description": "Setup-allowed. Verifies the response against the pending challenge, the Admin RP ID and the exact Admin origin, and stores the credential. The challenge is used up whatever the outcome. A response for another RP ID or origin, a cross-origin one, one without user verification, one with no live challenge and one returning an existing credential are 400 credential_refused, with nothing stored. The second credential completes setup: the Session becomes full. Refused with 403 once the Admin has two credentials.",
+        "operationId": "CompleteCredentialRegistration",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CredentialRegistrationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CredentialRegistrationResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "429": {
+            "description": "Too Many Requests",
+            "headers": {
+              "Retry-After": {
+                "description": "Whole seconds until the rate-limit window allows another request.",
+                "required": true,
+                "schema": {
+                  "minimum": 1,
+                  "type": "integer"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "adminSession": [ ],
+            "csrf": [ ]
+          }
+        ],
+        "x-gatekeep-setup-allowed": true
+      }
+    },
     "/api/v1/deployment/capabilities": {
       "get": {
         "tags": [
@@ -196,6 +332,7 @@
           "kind",
           "deploymentOwner",
           "setupComplete",
+          "credentials",
           "csrfToken"
         ],
         "type": "object",
@@ -217,6 +354,10 @@
           "setupComplete": {
             "type": "boolean"
           },
+          "credentials": {
+            "type": "integer",
+            "format": "int32"
+          },
           "csrfToken": {
             "type": "string"
           }
@@ -232,6 +373,7 @@
           "code": {
             "enum": [
               "bootstrap_refused",
+              "credential_refused",
               "rate_limited"
             ],
             "type": "string"
@@ -279,6 +421,217 @@
             "items": {
               "type": "string"
             }
+          }
+        }
+      },
+      "CredentialCreationOptionsResponse": {
+        "required": [
+          "rp",
+          "user",
+          "challenge",
+          "pubKeyCredParams",
+          "timeout",
+          "attestation",
+          "authenticatorSelection",
+          "excludeCredentials"
+        ],
+        "type": "object",
+        "properties": {
+          "rp": {
+            "$ref": "#/components/schemas/RegistrationRelyingParty"
+          },
+          "user": {
+            "$ref": "#/components/schemas/RegistrationUser"
+          },
+          "challenge": {
+            "type": "string"
+          },
+          "pubKeyCredParams": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RegistrationPublicKeyParameter"
+            }
+          },
+          "timeout": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "attestation": {
+            "enum": [
+              "none"
+            ],
+            "type": "string"
+          },
+          "authenticatorSelection": {
+            "$ref": "#/components/schemas/RegistrationAuthenticatorSelection"
+          },
+          "excludeCredentials": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RegistrationExcludedCredential"
+            }
+          }
+        }
+      },
+      "CredentialRegistrationRequest": {
+        "required": [
+          "id",
+          "rawId",
+          "type",
+          "response"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "rawId": {
+            "type": "string"
+          },
+          "type": {
+            "enum": [
+              "public-key"
+            ],
+            "type": "string"
+          },
+          "response": {
+            "required": [
+              "clientDataJSON",
+              "attestationObject"
+            ],
+            "type": "object",
+            "properties": {
+              "clientDataJSON": {
+                "type": "string"
+              },
+              "attestationObject": {
+                "type": "string"
+              },
+              "transports": {
+                "type": [
+                  "null",
+                  "array"
+                ],
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      "CredentialRegistrationResponse": {
+        "required": [
+          "credentials",
+          "setupComplete"
+        ],
+        "type": "object",
+        "properties": {
+          "credentials": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "setupComplete": {
+            "type": "boolean"
+          }
+        }
+      },
+      "RegistrationAuthenticatorSelection": {
+        "required": [
+          "residentKey",
+          "userVerification"
+        ],
+        "type": "object",
+        "properties": {
+          "residentKey": {
+            "enum": [
+              "preferred"
+            ],
+            "type": "string"
+          },
+          "userVerification": {
+            "enum": [
+              "required"
+            ],
+            "type": "string"
+          }
+        }
+      },
+      "RegistrationExcludedCredential": {
+        "required": [
+          "type",
+          "id",
+          "transports"
+        ],
+        "type": "object",
+        "properties": {
+          "type": {
+            "enum": [
+              "public-key"
+            ],
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "transports": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "RegistrationPublicKeyParameter": {
+        "required": [
+          "type",
+          "alg"
+        ],
+        "type": "object",
+        "properties": {
+          "type": {
+            "enum": [
+              "public-key"
+            ],
+            "type": "string"
+          },
+          "alg": {
+            "type": "integer",
+            "format": "int32"
+          }
+        }
+      },
+      "RegistrationRelyingParty": {
+        "required": [
+          "id",
+          "name"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        }
+      },
+      "RegistrationUser": {
+        "required": [
+          "id",
+          "name",
+          "displayName"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "displayName": {
+            "type": "string"
           }
         }
       }

@@ -30,4 +30,16 @@ public static class SecurityLimits
 
     /// <summary>The fixed window bootstrap claims are counted in: 15 minutes (Story 1.21).</summary>
     public static readonly TimeSpan BootstrapClaimWindow = TimeSpan.FromMinutes(15);
+
+    /// <summary>
+    /// Credential registration attempts one Admin Session may make in
+    /// <see cref="CredentialRegistrationWindow"/>: 10 (Story 1.22). Each begin and each finish counts.
+    /// </summary>
+    public const int CredentialRegistrationAttempts = 10;
+
+    /// <summary>The fixed window credential registration attempts are counted in: 15 minutes (Story 1.22).</summary>
+    public static readonly TimeSpan CredentialRegistrationWindow = TimeSpan.FromMinutes(15);
+
+    /// <summary>How long a WebAuthn registration challenge may be answered: 5 minutes (Story 1.22).</summary>
+    public static readonly TimeSpan WebAuthnChallengeLifetime = TimeSpan.FromMinutes(5);
 }

@@ -13,10 +13,23 @@ internal sealed class DeploymentApiEndpoint
     public static readonly DeploymentApiEndpoint Instance = new();
 }
 
-/// <summary>Marks an endpoint a setup Admin Session may call. Every other one refuses it with 403.</summary>
+/// <summary>
+/// Marks an endpoint a setup Admin Session, or an Admin without their two credentials, may call.
+/// Every other one refuses them with 403.
+/// </summary>
 internal sealed class SetupAllowed
 {
     public static readonly SetupAllowed Instance = new();
+}
+
+/// <summary>
+/// The JSON body an endpoint takes, for the OpenAPI document only. The endpoint reads the body
+/// itself, so a body of another type reaches it, to be refused and counted, rather than being
+/// turned away by routing.
+/// </summary>
+internal sealed class JsonRequestBody(Type type)
+{
+    public Type Type { get; } = type;
 }
 
 /// <summary>
@@ -35,8 +48,8 @@ internal sealed class BootstrapClaimEndpoint
 /// state-changing request needs an <c>Origin</c> exactly equal to the Admin origin (403); then a
 /// live Admin Session from the <c>__Host-gk-admin</c> cookie (401, clearing a stale cookie, and an
 /// expired Session is ended), whose idle expiry slides; a state-changing request's
-/// <c>X-Gatekeep-CSRF</c> must be the Session's (403); and a setup Session reaches only
-/// setup-allowed endpoints (403).
+/// <c>X-Gatekeep-CSRF</c> must be the Session's (403); and a setup Session, or any Session of an
+/// Admin with fewer than two WebAuthn credentials, reaches only setup-allowed endpoints (403).
 /// </summary>
 internal static class AdminRequestChecks
 {
@@ -209,7 +222,8 @@ internal static class AdminRequestChecks
             return false;
         }
 
-        if (session.Kind == AdminSessionKind.Setup && endpoint.Metadata.GetMetadata<SetupAllowed>() is null)
+        // A setup Session, and any Session of an Admin without their two credentials (FR-2, FR-46).
+        if (session.Restricted && endpoint.Metadata.GetMetadata<SetupAllowed>() is null)
         {
             await AdminResponses.ForbiddenAsync(context);
             return false;

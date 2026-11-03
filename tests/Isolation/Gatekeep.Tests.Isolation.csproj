@@ -33,6 +33,7 @@
 
   <ItemGroup>
     <ProjectReference Include="../../src/Gatekeep.Kernel/Gatekeep.Kernel.csproj" />
+    <ProjectReference Include="../../src/Adapters/Fido2/Gatekeep.Adapters.Fido2.csproj" />
     <ProjectReference Include="../../src/Adapters/Hosting/Gatekeep.Adapters.Hosting.csproj" />
     <ProjectReference Include="../../src/Adapters/Logging/Gatekeep.Adapters.Logging.csproj" />
     <ProjectReference Include="../../src/Adapters/OpenBao/Gatekeep.Adapters.OpenBao.csproj" />

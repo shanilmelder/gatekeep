@@ -2,6 +2,7 @@ using System.Buffers;
 using System.Data.Common;
 using System.Security.Cryptography;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Gatekeep.Kernel.Secrets;
 using Gatekeep.Modules.Admins.Contracts;
 
@@ -31,7 +32,11 @@ public sealed class AdminSessionResponse
 
     public required bool DeploymentOwner { get; init; }
 
+    /// <summary>Whether the Admin has registered their two WebAuthn credentials. Until then only setup is reachable.</summary>
     public required bool SetupComplete { get; init; }
+
+    /// <summary>The WebAuthn credentials the Admin has registered: credential setup's step is this plus one.</summary>
+    public required int Credentials { get; init; }
 
     public required string CsrfToken { get; init; }
 }
@@ -64,6 +69,9 @@ internal static class AdminApi
     public static IServiceCollection AddAdminApi(this IServiceCollection services)
     {
         services.AddSingleton<AdminApiServices>();
+
+        // The document's numbers are numbers: the endpoints write their own JSON, and never as strings.
+        services.ConfigureHttpJsonOptions(static options => options.SerializerOptions.NumberHandling = JsonNumberHandling.Strict);
         services.AddAdminOpenApi();
         return services;
     }
@@ -95,6 +103,40 @@ internal static class AdminApi
             .WithDescription("Setup-allowed and read-only: the CSRF token is the Session's, the same each time and in every tab.")
             .Produces<AdminSessionResponse>(StatusCodes.Status200OK)
             .Produces(StatusCodes.Status401Unauthorized)
+            .Produces(StatusCodes.Status503ServiceUnavailable);
+
+        app.MapPost("/api/v1/deployment/credentials/registration", static (HttpContext context, AdminApiServices services) => CredentialRegistrationApi.BeginAsync(context, services))
+            .WithMetadata(DeploymentApiEndpoint.Instance, SetupAllowed.Instance)
+            .WithName("BeginCredentialRegistration")
+            .WithTags(Tag)
+            .WithSummary("Begin registering a WebAuthn credential: the options for navigator.credentials.create.")
+            .WithDescription(
+                "Setup-allowed. Returns creation options for the Admin RP ID and origin, with no attestation, user verification " +
+                "required, a resident key preferred, ES256 and RS256, and the Admin's credentials excluded. Its challenge can be " +
+                "answered for 5 minutes, by the next complete call only; a new begin replaces it. Refused with 403 once the Admin " +
+                "has two credentials. Each begin and complete counts towards 10 per Session in 15 minutes, then 429.")
+            .Produces<CredentialCreationOptionsResponse>(StatusCodes.Status200OK)
+            .Produces(StatusCodes.Status401Unauthorized)
+            .Produces(StatusCodes.Status403Forbidden)
+            .Produces<ApiProblem>(StatusCodes.Status429TooManyRequests, AdminResponses.ProblemContentType)
+            .Produces(StatusCodes.Status503ServiceUnavailable);
+
+        app.MapPost("/api/v1/deployment/credentials/registration/complete", static (HttpContext context, AdminApiServices services) => CredentialRegistrationApi.CompleteAsync(context, services))
+            .WithMetadata(DeploymentApiEndpoint.Instance, SetupAllowed.Instance, new JsonRequestBody(typeof(CredentialRegistrationRequest)))
+            .WithName("CompleteCredentialRegistration")
+            .WithTags(Tag)
+            .WithSummary("Complete a WebAuthn credential registration with the browser's attestation response.")
+            .WithDescription(
+                "Setup-allowed. Verifies the response against the pending challenge, the Admin RP ID and the exact Admin origin, " +
+                "and stores the credential. The challenge is used up whatever the outcome. A response for another RP ID or origin, " +
+                "a cross-origin one, one without user verification, one with no live challenge and one returning an existing " +
+                "credential are 400 credential_refused, with nothing stored. The second credential completes setup: the Session " +
+                "becomes full. Refused with 403 once the Admin has two credentials.")
+            .Produces<CredentialRegistrationResponse>(StatusCodes.Status200OK)
+            .Produces<ApiProblem>(StatusCodes.Status400BadRequest, AdminResponses.ProblemContentType)
+            .Produces(StatusCodes.Status401Unauthorized)
+            .Produces(StatusCodes.Status403Forbidden)
+            .Produces<ApiProblem>(StatusCodes.Status429TooManyRequests, AdminResponses.ProblemContentType)
             .Produces(StatusCodes.Status503ServiceUnavailable);
 
         app.MapDelete("/api/v1/deployment/session", static (HttpContext context, AdminApiServices services) => EndSessionAsync(context, services))
@@ -290,8 +332,8 @@ internal static class AdminApi
         }
     }
 
-    /// <summary>Whether the claim's <c>Content-Type</c> is <c>application/json</c>, with any parameters.</summary>
-    private static bool IsJson(HttpRequest request) =>
+    /// <summary>Whether a request's <c>Content-Type</c> is <c>application/json</c>, with any parameters.</summary>
+    internal static bool IsJson(HttpRequest request) =>
         Microsoft.Net.Http.Headers.MediaTypeHeaderValue.TryParse(request.ContentType, out var type)
         && type.MediaType.Equals("application/json", StringComparison.OrdinalIgnoreCase);
 
@@ -305,6 +347,7 @@ internal static class AdminApi
             Kind = session.Kind == AdminSessionKind.Setup ? "setup" : "full",
             DeploymentOwner = session.DeploymentOwner,
             SetupComplete = session.SetupComplete,
+            Credentials = session.Credentials,
             CsrfToken = session.CsrfToken.Use(static t => t),
         });
     }
