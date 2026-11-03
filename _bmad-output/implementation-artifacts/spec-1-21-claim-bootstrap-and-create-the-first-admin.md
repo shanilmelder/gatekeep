@@ -2,16 +2,23 @@
 title: 'Story 1.21: Claim bootstrap and create the first Admin'
 type: 'feature'
 created: '2026-11-03'
-status: 'in-review'
+status: 'done'
 baseline_revision: '627bf49ee180c8d615f471feb465478238a34bb2'
 review_loop_iteration: 0
-followup_review_recommended: false
+followup_review_recommended: true
 context:
   - '{project-root}/_bmad-output/planning-artifacts/architecture/architecture-gatekeep-2026-11-02/ARCHITECTURE-SPINE.md'
   - '{project-root}/_bmad-output/planning-artifacts/ux-designs/ux-gatekeep-2026-11-01/EXPERIENCE.md'
   - '{project-root}/_bmad-output/implementation-artifacts/spec-1-19-initialise-a-deployment.md'
 warnings: [oversized]
-deferred: []
+deferred:
+  - summary: >-
+      Refused and rate-limited bootstrap claims, Admin sign-outs and expiries write no audit event.
+    evidence: |-
+      Only bootstrap.admin.created is audited. Belongs with Admin sign-in (1.23) and the security events (Epic 7).
+    location: >-
+      src/Gatekeep.Host.Admin/AdminApi.cs
+    severity: medium
 ---
 
 <intent-contract>
@@ -167,7 +174,46 @@ deferred: []
 
 ## Spec Change Log
 
+- **2026-11-03, review:** the CSRF token is derived from the session ID and does not rotate, with no stored CSRF hash, as the Design Notes record. That departs from the Always list's separate rotating token, and was accepted at review because the token is bound to the HttpOnly session and reveals nothing (raised with Esm). Review fixes: claim body read and rate counted before a slot is taken, response written after commit regardless of the client, JSON-only claims, startup validation of the lock timeout, and UI handling of missing or failed sessions.
+
 ## Review Triage Log
+
+### 2026-11-02 — Review pass
+- verdicts: 33 findings — high 3, medium 15, low 15, false 0, maybe-false 0
+- findings:
+  - `[high]` `[patch]` Blind: slow senders can hold every claim slot — body read under a deadline and rate-limit count before the slot.
+  - `[low]` `[reject]` Blind: the open-state check per request is outside the slot cap — completion is cached after the first read, and the public `/bootstrap` page answers the same question anyway.
+  - `[medium]` `[defer]` Blind: refused and rate-limited claims, sign-outs and expiries write no audit event — belongs with the Admin sign-in and security-event work (Stories 1.23, 7.x); the threat model records it.
+  - `[low]` `[patch]` Blind: rate-limit and registry comments contradict the code — corrected.
+  - `[low]` `[patch]` Blind: `Retry-After` isn't in the API contract or the client — declared and exposed.
+  - `[medium]` `[patch]` Blind: the claim accepts any Content-Type — `application/json` required.
+  - `[medium]` `[patch]` Blind: credential setup ignores a failed session read — handled.
+  - `[medium]` `[patch]` Blind: missing UI and origin-normalisation tests — added.
+  - `[low]` `[reject]` Blind: the CSRF token leaves its `Secret<>` wrapper and its bytes aren't zeroed — the token must be serialised into the response; it's derived from an HttpOnly session ID and grants nothing alone.
+  - `[low]` `[patch]` Blind: smaller gaps — `typecheck` script, `ended_at >= created_at` CHECK and `no-store` on 503 added; retention and the tool-name check left as low value.
+  - `[medium]` `[reject]` Intent: the CSRF token is derived and doesn't rotate, with no stored hash, against the Always bullets — the spec's Ask First delegated the call and its Design Notes record the decision; the token is bound to the HttpOnly session and reveals nothing. Raised with Esm.
+  - `[low]` `[reject]` Intent: no `Host.Admin → Adapters.Postgres` edge — Host.Admin reaches the database through Npgsql directly, as the other hosts do; no adapter type is used.
+  - `[low]` `[reject]` Intent: `/capabilities` returns an object, not an array — an object leaves room for later fields; the contract and tests pin it.
+  - `[low]` `[reject]` Intent: every claim is counted, not only refusals — counting before the comparison is what stops guessing; documented.
+  - `[medium]` `[patch]` Intent: browser tests mock a rotating token the server no longer has — mocks follow the real contract.
+  - `[medium]` `[patch]` Intent: a returning setup Session isn't sent to credential setup — `/` routes it there.
+  - `[low]` `[patch]` Intent: 404 card and 403 path untested in the browser — added.
+  - `[high]` `[patch]` Gap: Admin origin normalisation (`:443`, case) untested though Compose relies on it — Isolation test added.
+  - `[medium]` `[patch]` Gap: IPv6 clients counted per /64 untested — test added.
+  - `[medium]` `[patch]` Gap: Bootstrap page 404, 403, 503 and network failure untested — added.
+  - `[low]` `[patch]` Gap: double submit untested — added.
+  - `[medium]` `[patch]` Gap (other): a bad lock-timeout setting fails per request with 500 — validated at startup.
+  - `[medium]` `[patch]` Edge: a disconnect after commit loses the only session cookie — response written after commit regardless; Story 1.32 recovers a stranded Owner.
+  - `[medium]` `[patch]` Edge: a commit failure after the server applied it answers 503 — state re-read first.
+  - `[high]` `[patch]` Edge: slow bodies hold every slot — same fix as the Blind row.
+  - `[low]` `[patch]` Edge: trailing JSON content accepted — refused.
+  - `[medium]` `[patch]` Edge: bad lock-timeout setting — same fix as the Gap row.
+  - `[low]` `[reject]` Edge: 403 versus 404 reveals whether bootstrap is open — the public `/bootstrap` page reveals the same; the spec orders the 404 first.
+  - `[low]` `[patch]` Edge: null client address shares one bucket — refused with 503.
+  - `[medium]` `[patch]` Edge: a 2xx without a token leaves the button pending — falls through to the failure path.
+  - `[medium]` `[patch]` Edge: credential setup without a session — same fix as the Blind row.
+  - `[low]` `[patch]` Edge: `api-contract.sh --write .` writes to the wrong path — made absolute.
+  - `[low]` `[patch]` Edge (claim): registry comment says the CSRF hash is stored — corrected.
 
 ## Design Notes
 
@@ -200,3 +246,19 @@ deferred: []
   - **`packages/api-client`:** typed from the generated `paths`. `openapi-typescript` needs the TypeScript 5 compiler API, so it uses a TypeScript 5.9.3 catalog that only `packages/api-client` takes.
   - **OpenAPI document:** carries enums, documented 503s and the `Set-Cookie`, plus an `x-gatekeep-setup-allowed` extension for Story 1.22.
 - **Residual risk:** if the browser never receives the 201, or the setup session is lost before two credentials are registered, the Deployment needs `gatekeep recover-admin` (Story 1.32). Bootstrap can't be reopened.
+
+## Auto Run Result
+
+Status: done
+
+**Summary:** the Deployment Owner claims a fresh Deployment with the server-only bootstrap token. The claim creates the Owner, completes bootstrap and starts a setup Session in one transaction, rate-limited per client and capped per process. Admin Sessions use an HttpOnly cookie with a derived CSRF token, exact-Origin checks and a setup-only restriction. The OpenAPI document and generated `packages/api-client` are checked for drift. The dashboard has the Bootstrap and credential-setup placeholder pages.
+
+**Files:** `src/Gatekeep.Host.Admin/` (API, request checks, responses, OpenAPI, bootstrap page gate); `src/Modules/Admins/`; the admin migration and `TableRegistry`; `src/Adapters/Hosting/`; `docs/api/openapi-v1.json`, `packages/api-client/`, `deploy/docker/api-contract.sh`, `run-tests.sh`; `apps/admin-dashboard/src/`; `tests/Isolation/Admins/`, canary flows, `tests/Architecture/AdminApiRuleTests.cs`, `tests/browser/bootstrap.spec.ts`; `docs/audit-events.md`, the threat model and module diagram.
+
+**Review:** 33 findings across four layers: 25 patched, 1 deferred, 7 rejected, each with its reason in the triage log.
+
+**Follow-up review:** recommended. High findings (slot exhaustion by slow senders, untested origin normalisation) were patched, with new tests as the only proof.
+
+**Verification:** see the PR screenshot; the full suite passes in the `tests` container.
+
+**Residual risks:** the CSRF token is derived from the session ID and doesn't rotate, a recorded departure from the spec's Always list. Refused claims and session endings aren't audited yet. A stranded Owner after a lost response needs Story 1.32's recovery.

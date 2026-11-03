@@ -145,3 +145,6 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-1-18-build-the-hosted-component-entry-and-screen-package.md`
   summary: Bidi isolation for Tenant names (NFR-19, Story 18.3)
   evidence: Story 1.18 review: RTL Tenant names in LTR templates.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-21-claim-bootstrap-and-create-the-first-admin.md`
+  summary: Audit refused and rate-limited bootstrap claims, Admin sign-outs and Session expiries.
+  evidence: Story 1.21 review; Stories 1.23 and Epic 7.
