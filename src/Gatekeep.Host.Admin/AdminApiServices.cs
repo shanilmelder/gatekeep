@@ -1,4 +1,5 @@
 using System.Globalization;
+using Gatekeep.Adapters.Fido2;
 using Gatekeep.Adapters.Hosting;
 using Gatekeep.Kernel.Persistence;
 using Gatekeep.Kernel.RateLimiting;
@@ -38,6 +39,7 @@ internal sealed class AdminApiServices : IAsyncDisposable
     {
         _dataSource = new(() => NpgsqlDataSource.Create(databases["Admin"]));
         Claimer = AdminsContract.CreateBootstrapClaimer(AuditContract.CreateAppender(), LockTimeout(configuration));
+        Registration = AdminsContract.CreateCredentialRegistration(AuditContract.CreateAppender(), Fido2WebAuthn.Create());
     }
 
     public IRateLimiter Limiter { get; } = AdminsContract.CreateAttemptLimiter();
@@ -45,6 +47,9 @@ internal sealed class AdminApiServices : IAsyncDisposable
     public IAdminSessions Sessions { get; } = AdminsContract.CreateSessions();
 
     public IBootstrapClaimer Claimer { get; }
+
+    /// <summary>Admin WebAuthn credential registration (Story 1.22), verified by the stateless Fido2 adapter.</summary>
+    public IAdminCredentialRegistration Registration { get; }
 
     /// <summary>The claims in flight in this process: <see cref="MaxConcurrentClaims"/> slots.</summary>
     public SemaphoreSlim ClaimSlots { get; } = new(MaxConcurrentClaims, MaxConcurrentClaims);

@@ -7,8 +7,8 @@ import { navigate, usePath } from './navigation';
 import { api, setCsrfToken } from './session';
 
 /**
- * The root, a placeholder until the Admin shell (Story 1.25). It asks for the Session, so a
- * returning setup Session goes on to credential setup.
+ * The root, a placeholder until the Admin shell (Story 1.25). It asks for the Session, so an
+ * Admin without their two credentials goes back to credential setup, which they can't leave.
  */
 function RootPage() {
   useEffect(() => {
@@ -16,7 +16,7 @@ function RootPage() {
     api
       .getSession()
       .then((result) => {
-        if (!current || !result.ok || result.data?.kind !== 'setup') return;
+        if (!current || !result.ok || !result.data || result.data.setupComplete) return;
         if (typeof result.data.csrfToken === 'string') setCsrfToken(result.data.csrfToken);
         navigate('/setup/credentials');
       })

@@ -23,6 +23,7 @@ dependency Host.Admin -> Admins
 dependency Host.Admin -> Audit
 dependency Host.Admin -> Adapters.Logging
 dependency Host.Admin -> Adapters.Hosting
+composition Host.Admin -> Adapters.Fido2
 dependency Host.Worker -> Operations
 dependency Host.Worker -> Adapters.Logging
 dependency Host.Worker -> Adapters.Hosting
@@ -70,6 +71,7 @@ dependency Sessions -> Tenancy
 dependency Notifications -> Tenancy
 dependency Admins -> Notifications
 dependency Adapters.Hosting -> Adapters.OpenBao
+dependency Tests.Isolation -> Adapters.Fido2
 dependency Tests.Isolation -> Adapters.Hosting
 dependency Tests.Isolation -> Adapters.Logging
 dependency Tests.Isolation -> Adapters.OpenBao

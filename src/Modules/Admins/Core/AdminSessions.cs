@@ -8,7 +8,8 @@ using Gatekeep.Modules.Admins.Contracts;
 namespace Gatekeep.Modules.Admins.Core;
 
 /// <summary>
-/// Admin Sessions over <c>admin_session</c> (Story 1.21). Every time comes from one
+/// Admin Sessions over <c>admin_session</c> (Story 1.21), with the Admin's credential count
+/// (Story 1.22), which decides what the Session may reach. Every time comes from one
 /// <c>clock_timestamp()</c> per statement, and the idle expiry never passes the absolute one.
 /// </summary>
 internal sealed class AdminSessions : IAdminSessions
@@ -25,7 +26,8 @@ internal sealed class AdminSessions : IAdminSessions
         """
         SELECT s.id, s.admin_id, s.kind, s.ended_at IS NOT NULL,
                c.t >= s.idle_expires_at OR c.t >= s.absolute_expires_at,
-               a.deployment_owner, a.setup_completed_at IS NOT NULL
+               a.deployment_owner,
+               (SELECT count(*)::int FROM admin_credential AS c WHERE c.admin_id = s.admin_id)
         FROM admin_session AS s
         JOIN admin AS a ON a.id = s.admin_id
         CROSS JOIN (SELECT clock_timestamp() AS t) AS c
@@ -111,7 +113,7 @@ internal sealed class AdminSessions : IAdminSessions
                 reader.GetGuid(1),
                 ParseKind(reader.GetString(2)),
                 reader.GetBoolean(5),
-                reader.GetBoolean(6),
+                reader.GetInt32(6),
                 csrf);
             ended = reader.GetBoolean(3);
             expired = reader.GetBoolean(4);

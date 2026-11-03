@@ -189,6 +189,13 @@ internal static class CanaryFlows
                 new(SurfaceKind.Route, "/api/v1/deployment/capabilities"),
             ],
             BootstrapClaimAsync),
+        new(
+            "admin.credentials",
+            [
+                new(SurfaceKind.Route, "/api/v1/deployment/credentials/registration"),
+                new(SurfaceKind.Route, "/api/v1/deployment/credentials/registration/complete"),
+            ],
+            CredentialRegistrationAsync),
 
         // No production type carries a credential yet, so this flow takes the runner's credential
         // path with a test type: enqueue, decrypt, run, retry and dead, as every one will.
@@ -596,6 +603,65 @@ internal static class CanaryFlows
             run.Plant("admin-csrf-token", csrf);
             run.Plant("admin-rotated-csrf-token", rotated);
         }
+
+        await host.StopAsync();
+        run.Capture("Admin output", host.Output);
+        Assert.Matches(@"""LogLevel"":""(?:Trace|Debug)""", host.Output);
+    }
+
+    /// <summary>
+    /// Story 1.22's credential registration on the real Host.Admin at Trace, with a software
+    /// authenticator. Normally the setup Session registers two credentials, which completes setup;
+    /// failing, a response for another origin and a malformed body are refused. The Session ID and
+    /// CSRF token, planted once they're issued, must appear in no log or table, and no response
+    /// may echo them but where they're designed to be.
+    /// </summary>
+    private static async Task CredentialRegistrationAsync(CanaryFlowContext context, FlowRun run, bool failing)
+    {
+        await using var host = await Admins.AdminHost.StartAsync(context.Postgres, null, DebugArguments);
+        run.Database = host.Database;
+        run.Plant("role-password", PostgresFixture.Password);
+        var (cookie, csrf, _) = await host.ClaimedAsync();
+        using var first = new Admins.SoftwareAuthenticator();
+        using var second = new Admins.SoftwareAuthenticator();
+
+        var (begin, options) = await host.BeginRegistrationAsync(cookie, csrf);
+        using (begin)
+        {
+            run.Capture("registration options response", await ResponseTextAsync(begin));
+            Assert.Equal(HttpStatusCode.OK, begin.StatusCode);
+        }
+
+        if (failing)
+        {
+            using var foreign = await host.CompleteRegistrationAsync(
+                cookie,
+                csrf,
+                first.Attest(options, Admins.AdminHost.Origin, new Admins.AttestationTweaks { Origin = "https://elsewhere.test" }));
+            run.Capture("refused registration response", await ResponseTextAsync(foreign));
+            Assert.Equal(HttpStatusCode.BadRequest, foreign.StatusCode);
+
+            using var malformed = await host.CompleteRegistrationAsync(cookie, csrf, $$"""{"id":"{{csrf}}","rawId":"!","type":"public-key"}""");
+            run.Capture("malformed registration response", await ResponseTextAsync(malformed));
+            Assert.Equal(HttpStatusCode.BadRequest, malformed.StatusCode);
+        }
+        else
+        {
+            using (var complete = await host.CompleteRegistrationAsync(cookie, csrf, first.Attest(options, Admins.AdminHost.Origin)))
+            {
+                run.Capture("first registration response", await ResponseTextAsync(complete));
+                Assert.Equal(HttpStatusCode.OK, complete.StatusCode);
+            }
+
+            var (again, more) = await host.BeginRegistrationAsync(cookie, csrf);
+            again.Dispose();
+            using var last = await host.CompleteRegistrationAsync(cookie, csrf, second.Attest(more, Admins.AdminHost.Origin));
+            run.Capture("second registration response", await ResponseTextAsync(last));
+            Assert.Equal(HttpStatusCode.OK, last.StatusCode);
+        }
+
+        run.Plant("admin-session-id", cookie);
+        run.Plant("admin-csrf-token", csrf);
 
         await host.StopAsync();
         run.Capture("Admin output", host.Output);

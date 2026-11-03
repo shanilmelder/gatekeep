@@ -70,7 +70,7 @@ async function answerSession(page: Page, status = 200) {
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
-      body: JSON.stringify({ adminId: ADMIN_ID, kind: 'setup', deploymentOwner: true, setupComplete: false, csrfToken: CSRF }),
+      body: JSON.stringify({ adminId: ADMIN_ID, kind: 'setup', deploymentOwner: true, setupComplete: false, credentials: 0, csrfToken: CSRF }),
     });
   });
   return requests;

@@ -17,5 +17,8 @@ export {
   type ApiResult,
   type BootstrapClaimResponse,
   type CapabilitiesResponse,
+  type CredentialCreationOptionsResponse,
+  type CredentialRegistrationRequest,
+  type CredentialRegistrationResponse,
 } from './client';
 export type { components, paths } from './schema.generated';

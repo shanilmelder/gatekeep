@@ -13,6 +13,7 @@
 // Story 1.20: the built Admin Dashboard is also served by the built Host.Admin itself, because
 // the CSP and the other AD-21 headers under test are the host's own (admin-csp.spec.ts).
 // Story 1.21: the Bootstrap screen on that same host, with its API intercepted (bootstrap.spec.ts).
+// Story 1.22: credential setup on that same host, with a virtual authenticator (credential-setup.spec.ts).
 
 import { existsSync } from 'node:fs';
 import path from 'node:path';
@@ -50,7 +51,7 @@ export default defineConfig({
       name,
       // Every spec that isn't another project's own, so a new spec runs by default.
       testMatch: '*.spec.ts',
-      testIgnore: ['admin-csp.spec.ts', 'bootstrap.spec.ts', 'controls.spec.ts', 'data.spec.ts', 'overlay.spec.ts', 'drawer.spec.ts', 'hosted.spec.ts'],
+      testIgnore: ['admin-csp.spec.ts', 'bootstrap.spec.ts', 'credential-setup.spec.ts', 'controls.spec.ts', 'data.spec.ts', 'overlay.spec.ts', 'drawer.spec.ts', 'hosted.spec.ts'],
       use: { baseURL: `http://127.0.0.1:${port}` },
     })),
     { name: fixture.name, testMatch: 'controls.spec.ts', use: { baseURL: `http://127.0.0.1:${fixture.port}` } },
@@ -72,6 +73,14 @@ export default defineConfig({
       name: 'bootstrap',
       testMatch: 'bootstrap.spec.ts',
       use: { baseURL: `http://127.0.0.1:${adminHost.port}` },
+    },
+    // Admin credential setup (Story 1.22), on the same host with its API intercepted, from
+    // localhost: WebAuthn takes no IP address as an RP ID. A Chromium virtual authenticator
+    // answers the browser's own passkey sheet.
+    {
+      name: 'credential-setup',
+      testMatch: 'credential-setup.spec.ts',
+      use: { baseURL: `http://localhost:${adminHost.port}` },
     },
   ],
   webServer: [

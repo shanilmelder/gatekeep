@@ -296,9 +296,12 @@ public static class TableRegistry
             },
             new Dictionary<string, IReadOnlyList<ColumnGrant>>
             {
-                // Completing credential setup (Story 1.22). Never the ID or ownership.
-                [Admin] = [new ColumnGrant(Update, ["setup_completed_at"])],
-            }),
+                // Completing credential setup, and the WebAuthn user handle (Story 1.22), each
+                // written once by the trigger. Never the ID or ownership. setup_completed_at is a
+                // set-once stamp only: the count of admin_credential rows decides access.
+                [Admin] = [new ColumnGrant(Update, ["setup_completed_at", "webauthn_handle"])],
+            },
+            ["admin_guard_update"]),
         new(
             "admin_session",
             TableClass.Control,
@@ -309,11 +312,34 @@ public static class TableRegistry
             },
             new Dictionary<string, IReadOnlyList<ColumnGrant>>
             {
-                // Sliding the idle expiry and ending. Never the ID, its Admin, its kind or its
-                // absolute expiry. The trigger makes an ending final.
-                [Admin] = [new ColumnGrant(Update, ["idle_expires_at", "ended_at", "end_reason"])],
+                // Sliding the idle expiry and ending; the pending registration challenge's hash and
+                // expiry, and setup to full once the second credential is stored (Story 1.22).
+                // Never the ID, its Admin or its absolute expiry. The trigger makes an ending
+                // final and lets the kind go only from setup to full.
+                [Admin] =
+                [
+                    new ColumnGrant(
+                        Update,
+                        ["idle_expires_at", "ended_at", "end_reason", "kind", "registration_challenge_sha256", "registration_challenge_expires_at"]),
+                ],
             },
             ["admin_session_guard_update"]),
+
+        // Story 1.22: Admin WebAuthn credentials, public material only. Host.Admin registers them
+        // and, from Story 1.23, updates the counter and last use at sign-in. No role deletes one.
+        new(
+            "admin_credential",
+            TableClass.Control,
+            "Admins",
+            new Dictionary<string, IReadOnlyList<string>>
+            {
+                [Admin] = [Select, Insert],
+            },
+            new Dictionary<string, IReadOnlyList<ColumnGrant>>
+            {
+                // The signature counter and last use. Never the credential, its key or its Admin.
+                [Admin] = [new ColumnGrant(Update, ["sign_count", "last_used_at"])],
+            }),
     ];
 
     private static IReadOnlyList<string> EventTriggers(string table) =>

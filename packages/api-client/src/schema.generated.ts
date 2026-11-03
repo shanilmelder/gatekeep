@@ -48,6 +48,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/deployment/credentials/registration": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Begin registering a WebAuthn credential: the options for navigator.credentials.create.
+         * @description Setup-allowed. Returns creation options for the Admin RP ID and origin, with no attestation, user verification required, a resident key preferred, ES256 and RS256, and the Admin's credentials excluded. Its challenge can be answered for 5 minutes, by the next complete call only; a new begin replaces it. Refused with 403 once the Admin has two credentials. Each begin and complete counts towards 10 per Session in 15 minutes, then 429.
+         */
+        post: operations["BeginCredentialRegistration"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/deployment/credentials/registration/complete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Complete a WebAuthn credential registration with the browser's attestation response.
+         * @description Setup-allowed. Verifies the response against the pending challenge, the Admin RP ID and the exact Admin origin, and stores the credential. The challenge is used up whatever the outcome. A response for another RP ID or origin, a cross-origin one, one without user verification, one with no live challenge and one returning an existing credential are 400 credential_refused, with nothing stored. The second credential completes setup: the Session becomes full. Refused with 403 once the Admin has two credentials.
+         */
+        post: operations["CompleteCredentialRegistration"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/deployment/capabilities": {
         parameters: {
             query?: never;
@@ -79,11 +119,13 @@ export interface components {
             kind: "setup" | "full";
             deploymentOwner: boolean;
             setupComplete: boolean;
+            /** Format: int32 */
+            credentials: number;
             csrfToken: string;
         };
         ApiProblem: {
             /** @enum {string} */
-            code: "bootstrap_refused" | "rate_limited";
+            code: "bootstrap_refused" | "credential_refused" | "rate_limited";
             traceId: string;
         };
         BootstrapClaimRequest: {
@@ -96,6 +138,61 @@ export interface components {
         };
         CapabilitiesResponse: {
             capabilities: string[];
+        };
+        CredentialCreationOptionsResponse: {
+            rp: components["schemas"]["RegistrationRelyingParty"];
+            user: components["schemas"]["RegistrationUser"];
+            challenge: string;
+            pubKeyCredParams: components["schemas"]["RegistrationPublicKeyParameter"][];
+            /** Format: int64 */
+            timeout: number;
+            /** @enum {string} */
+            attestation: "none";
+            authenticatorSelection: components["schemas"]["RegistrationAuthenticatorSelection"];
+            excludeCredentials: components["schemas"]["RegistrationExcludedCredential"][];
+        };
+        CredentialRegistrationRequest: {
+            id: string;
+            rawId: string;
+            /** @enum {string} */
+            type: "public-key";
+            response: {
+                clientDataJSON: string;
+                attestationObject: string;
+                transports?: null | string[];
+            };
+        };
+        CredentialRegistrationResponse: {
+            /** Format: int32 */
+            credentials: number;
+            setupComplete: boolean;
+        };
+        RegistrationAuthenticatorSelection: {
+            /** @enum {string} */
+            residentKey: "preferred";
+            /** @enum {string} */
+            userVerification: "required";
+        };
+        RegistrationExcludedCredential: {
+            /** @enum {string} */
+            type: "public-key";
+            id: string;
+            transports: string[];
+        };
+        RegistrationPublicKeyParameter: {
+            /** @enum {string} */
+            type: "public-key";
+            /** Format: int32 */
+            alg: number;
+        };
+        RegistrationRelyingParty: {
+            id: string;
+            name: string;
+        };
+        RegistrationUser: {
+            id: string;
+            name: string;
+            displayName: string;
         };
     };
     responses: never;
@@ -236,6 +333,123 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    BeginCredentialRegistration: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CredentialCreationOptionsResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    /** @description Whole seconds until the rate-limit window allows another request. */
+                    "Retry-After": number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    CompleteCredentialRegistration: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CredentialRegistrationRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CredentialRegistrationResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    /** @description Whole seconds until the rate-limit window allows another request. */
+                    "Retry-After": number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
             };
             /** @description Service Unavailable */
             503: {

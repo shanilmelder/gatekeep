@@ -62,6 +62,20 @@ internal static class AdminOpenApi
                 {
                     Enumerate(schema, "kind", ["setup", "full"]);
                 }
+                else if (type == typeof(CredentialCreationOptionsResponse))
+                {
+                    Enumerate(schema, "attestation", ["none"]);
+                }
+                else if (type == typeof(RegistrationAuthenticatorSelection))
+                {
+                    Enumerate(schema, "residentKey", ["preferred"]);
+                    Enumerate(schema, "userVerification", ["required"]);
+                }
+                else if (type == typeof(RegistrationPublicKeyParameter) || type == typeof(RegistrationExcludedCredential)
+                    || type == typeof(CredentialRegistrationRequest))
+                {
+                    Enumerate(schema, "type", ["public-key"]);
+                }
                 else if (type == typeof(ApiProblem))
                 {
                     Enumerate(schema, "code", AdminResponses.ProblemCodes);
@@ -123,6 +137,33 @@ internal static class AdminOpenApi
                     }
 
                     return;
+                }
+
+                if (metadata.OfType<JsonRequestBody>().FirstOrDefault() is { } body)
+                {
+                    // Read by the endpoint itself, like the claim's: another type is refused there.
+                    var name = body.Type.Name;
+                    var schema = await context.GetOrCreateSchemaAsync(body.Type, null, cancellationToken);
+                    context.Document?.AddComponent(name, schema);
+                    operation.RequestBody = new OpenApiRequestBody
+                    {
+                        Required = true,
+                        Content = new Dictionary<string, OpenApiMediaType>
+                        {
+                            ["application/json"] = new OpenApiMediaType { Schema = new OpenApiSchemaReference(name, context.Document) },
+                        },
+                    };
+                }
+
+                if (operation.Responses?.TryGetValue("429", out var tooMany) == true && tooMany is OpenApiResponse tooManyResponse)
+                {
+                    tooManyResponse.Headers ??= new Dictionary<string, IOpenApiHeader>();
+                    tooManyResponse.Headers["Retry-After"] = new OpenApiHeader
+                    {
+                        Description = "Whole seconds until the rate-limit window allows another request.",
+                        Required = true,
+                        Schema = new OpenApiSchema { Type = JsonSchemaType.Integer, Minimum = "1" },
+                    };
                 }
 
                 var requirement = new OpenApiSecurityRequirement

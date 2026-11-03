@@ -6,8 +6,8 @@ using Gatekeep.Modules.Admins.Core;
 namespace Gatekeep.Modules.Admins.Contracts;
 
 /// <summary>
-/// An Admin Session's kind. A setup Session may call only setup-allowed endpoints until the
-/// Admin's credentials are registered (Story 1.22). A full Session comes from sign-in (Story 1.23).
+/// An Admin Session's kind. A setup Session may call only setup-allowed endpoints. Registering
+/// the Admin's second credential makes it full (Story 1.22); sign-in starts a full one (Story 1.23).
 /// </summary>
 public enum AdminSessionKind
 {
@@ -24,13 +24,13 @@ public sealed class AdminSession
 {
     private readonly byte[] _csrf;
 
-    internal AdminSession(Guid id, Guid adminId, AdminSessionKind kind, bool deploymentOwner, bool setupComplete, byte[] csrf)
+    internal AdminSession(Guid id, Guid adminId, AdminSessionKind kind, bool deploymentOwner, int credentials, byte[] csrf)
     {
         Id = id;
         AdminId = adminId;
         Kind = kind;
         DeploymentOwner = deploymentOwner;
-        SetupComplete = setupComplete;
+        Credentials = credentials;
         _csrf = csrf;
     }
 
@@ -42,7 +42,22 @@ public sealed class AdminSession
 
     public bool DeploymentOwner { get; }
 
-    public bool SetupComplete { get; }
+    /// <summary>The WebAuthn credentials the Admin had when the Session was authenticated.</summary>
+    public int Credentials { get; }
+
+    /// <summary>
+    /// Whether the Admin has registered the <see cref="AdminsContract.RequiredCredentials"/> they
+    /// need (FR-2, FR-46). The count of <c>admin_credential</c> rows is authoritative for this and
+    /// for <see cref="Restricted"/>; <c>admin.setup_completed_at</c> is only a set-once stamp of
+    /// when setup completed, for the record, and nothing reads it to decide access.
+    /// </summary>
+    public bool SetupComplete => Credentials >= AdminsContract.RequiredCredentials;
+
+    /// <summary>
+    /// Whether the Session may reach only setup-allowed endpoints: a setup Session, and any
+    /// Session of an Admin who hasn't registered their credentials, whatever its kind.
+    /// </summary>
+    public bool Restricted => Kind == AdminSessionKind.Setup || !SetupComplete;
 
     /// <summary>The Session's CSRF token, for the Session endpoint to return.</summary>
     public Secret<string> CsrfToken => new(SessionSecrets.Encode(_csrf));

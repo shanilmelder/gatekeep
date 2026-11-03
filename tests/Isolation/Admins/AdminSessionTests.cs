@@ -36,11 +36,12 @@ public sealed class AdminSessionTests(PostgresFixture postgres)
             Assert.False(response.Headers.Contains("Set-Cookie"));
             using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync(Cancellation));
             var root = body.RootElement;
-            Assert.Equal(["adminId", "kind", "deploymentOwner", "setupComplete", "csrfToken"], root.EnumerateObject().Select(p => p.Name));
+            Assert.Equal(["adminId", "kind", "deploymentOwner", "setupComplete", "credentials", "csrfToken"], root.EnumerateObject().Select(p => p.Name));
             Assert.Equal(adminId, root.GetProperty("adminId").GetGuid());
             Assert.Equal("setup", root.GetProperty("kind").GetString());
             Assert.True(root.GetProperty("deploymentOwner").GetBoolean());
             Assert.False(root.GetProperty("setupComplete").GetBoolean());
+            Assert.Equal(0, root.GetProperty("credentials").GetInt32());
             Assert.Equal(csrf, root.GetProperty("csrfToken").GetString());
         }
 

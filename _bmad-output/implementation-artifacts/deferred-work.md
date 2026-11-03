@@ -148,3 +148,12 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-1-21-claim-bootstrap-and-create-the-first-admin.md`
   summary: Audit refused and rate-limited bootstrap claims, Admin sign-outs and Session expiries.
   evidence: Story 1.21 review; Stories 1.23 and Epic 7.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-22-register-admin-webauthn-credentials.md`
+  summary: Store WebAuthn backup-eligible and backed-up flags for Admin credentials.
+  evidence: Story 1.22 review; credential management.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-22-register-admin-webauthn-credentials.md`
+  summary: End-to-end WebAuthn registration test: real browser, real dashboard, real server.
+  evidence: Story 1.22 review.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-22-register-admin-webauthn-credentials.md`
+  summary: Database guard for the two-credential cap and a race test for duplicate credential IDs.
+  evidence: Story 1.22 review.

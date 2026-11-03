@@ -18,6 +18,7 @@ flowchart TD
   Management[Management]
   Admins[Admins]
   Audit[Audit]
+  AdaptersFido2[Adapters.Fido2]
   HostWorker[Host.Worker]
   Operations[Operations]
   Cli[Cli]
@@ -39,6 +40,7 @@ flowchart TD
   HostAdmin --> Audit
   HostAdmin --> AdaptersLogging
   HostAdmin --> AdaptersHosting
+  HostAdmin -.-> AdaptersFido2
   HostWorker --> Operations
   HostWorker --> AdaptersLogging
   HostWorker --> AdaptersHosting
@@ -86,6 +88,7 @@ flowchart TD
   Notifications --> Tenancy
   Admins --> Notifications
   AdaptersHosting --> AdaptersOpenBao
+  TestsIsolation --> AdaptersFido2
   TestsIsolation --> AdaptersHosting
   TestsIsolation --> AdaptersLogging
   TestsIsolation --> AdaptersOpenBao

@@ -6,6 +6,8 @@ Every audit type code Gatekeep writes, declared in its module's contract. Codes 
 
 | Code | Module | Summary | FR-40 class |
 | --- | --- | --- | --- |
+| `admin.credential.registered` | Admins | An Admin registered a WebAuthn credential. Holds no credential ID, public key, challenge or user handle. | None |
+| `admin.setup.completed` | Admins | An Admin registered their second WebAuthn credential, which completed setup and made their Session full. | None |
 | `audit.retention.checkpoint` | Audit | Retention deleted a chain's sealed prefix past the Log period. Names the last deleted row's epoch, seq and hash. | None |
 | `authentication.signin_transaction.started` | Authentication | A sign-in transaction began for an Application. The caller is anonymous, so no person is named. | None |
 | `bootstrap.admin.created` | Admins | The bootstrap token was claimed: the first Admin was created as Deployment Owner and bootstrap completed. Holds no token or hash. | None |

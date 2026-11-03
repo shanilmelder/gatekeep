@@ -34,4 +34,22 @@ public static class AdminsEvents
     public static readonly AuditEventDefinition BootstrapAdminCreated = new(
         new AuditTypeCode("bootstrap.admin.created"),
         "The bootstrap token was claimed: the first Admin was created as Deployment Owner and bootstrap completed. Holds no token or hash.");
+
+    /// <summary>
+    /// Written on the Deployment chain once per WebAuthn credential an Admin registers (Story 1.22),
+    /// in the transaction that stores it. The Actor and the target are that Admin. Holds no
+    /// credential ID, public key, challenge or user handle.
+    /// </summary>
+    public static readonly AuditEventDefinition CredentialRegistered = new(
+        new AuditTypeCode("admin.credential.registered"),
+        "An Admin registered a WebAuthn credential. Holds no credential ID, public key, challenge or user handle.");
+
+    /// <summary>
+    /// Written on the Deployment chain when an Admin's second credential completes setup (Story
+    /// 1.22, FR-2), in that credential's transaction, after its <see cref="CredentialRegistered"/>:
+    /// the Session becomes full there too. The Actor and the target are that Admin.
+    /// </summary>
+    public static readonly AuditEventDefinition SetupCompleted = new(
+        new AuditTypeCode("admin.setup.completed"),
+        "An Admin registered their second WebAuthn credential, which completed setup and made their Session full.");
 }

@@ -1,6 +1,7 @@
 using Gatekeep.Kernel.Audit;
 using Gatekeep.Kernel.Limits;
 using Gatekeep.Kernel.RateLimiting;
+using Gatekeep.Kernel.WebAuthn;
 using Gatekeep.Modules.Admins.Core;
 
 namespace Gatekeep.Modules.Admins.Contracts;
@@ -16,6 +17,22 @@ public static class AdminsContract
         "admins.bootstrap.claim",
         SecurityLimits.BootstrapClaimAttempts,
         SecurityLimits.BootstrapClaimWindow);
+
+    /// <summary>
+    /// Credential registration (Story 1.22): 10 attempts per Admin Session in a fixed 15-minute
+    /// window, each begin and each finish, counted in <c>admin_attempt</c> in their own
+    /// transaction before the attempt runs. The subject is the Session's ID.
+    /// </summary>
+    public static readonly RateLimitPolicy CredentialRegistrationPolicy = new(
+        "admins.credential.register",
+        SecurityLimits.CredentialRegistrationAttempts,
+        SecurityLimits.CredentialRegistrationWindow);
+
+    /// <summary>
+    /// The WebAuthn credentials an Admin registers before they can do anything else: two, so
+    /// losing one device can't lock them out (FR-2, FR-46).
+    /// </summary>
+    public const int RequiredCredentials = 2;
 
     /// <summary>
     /// The Kernel <see cref="IRateLimiter"/> for Admin attempts, such as bootstrap claims and
@@ -51,4 +68,16 @@ public static class AdminsContract
 
     /// <summary>Admin Sessions (Story 1.21). They run as <c>gk_admin</c>, in a Deployment scope.</summary>
     public static IAdminSessions CreateSessions() => new AdminSessions();
+
+    /// <summary>
+    /// Admin WebAuthn credential registration (Story 1.22). It runs as <c>gk_admin</c>, in a
+    /// Deployment scope, verifies through <paramref name="verifier"/>, and writes its events
+    /// through <paramref name="appender"/>.
+    /// </summary>
+    public static IAdminCredentialRegistration CreateCredentialRegistration(IAuditAppender appender, IWebAuthnVerifier verifier)
+    {
+        ArgumentNullException.ThrowIfNull(appender);
+        ArgumentNullException.ThrowIfNull(verifier);
+        return new AdminCredentialRegistration(appender, verifier);
+    }
 }

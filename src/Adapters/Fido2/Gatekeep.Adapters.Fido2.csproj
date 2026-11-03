@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- The Kernel IWebAuthnVerifier port over fido2-net-lib (AD-31). Stateless: every call carries
+       its Relying Party, and nothing here knows a module, User or Admin. -->
+  <ItemGroup>
+    <PackageReference Include="Fido2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../Gatekeep.Kernel/Gatekeep.Kernel.csproj" />
+  </ItemGroup>
+
+</Project>

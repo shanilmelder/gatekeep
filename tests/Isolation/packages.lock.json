@@ -170,6 +170,19 @@
           "Docker.DotNet.Enhanced.Handler.Abstractions": "4.3.3"
         }
       },
+      "Fido2.Models": {
+        "type": "Transitive",
+        "resolved": "4.3.2",
+        "contentHash": "N9kvnuAtRXhezfs3cOo+eqI6MeQDr///s75NQUHPizM1/RkPahY9HmHbEzmr8B9gVESo9uyVorjvtrAqVeUz/w==",
+        "dependencies": {
+          "Microsoft.Bcl.Memory": "9.0.14"
+        }
+      },
+      "libsodium": {
+        "type": "Transitive",
+        "resolved": "1.0.20.1",
+        "contentHash": "pkiceEqJDQFHjbga3k/oPfTVX9g+GKJZ1VrkuiLhaymt9YNw1Dr7cX9hNuZuNaWcr9WD0moW55k4pMwzQ7JaZQ=="
+      },
       "Microsoft.ApplicationInsights": {
         "type": "Transitive",
         "resolved": "2.23.0",
@@ -184,6 +197,11 @@
         "type": "Transitive",
         "resolved": "10.0.2",
         "contentHash": "LG9Yll3B5aNpxv0+D47g6LiOiKBIlodhcHdQwcYzo8VeexFLGqx5ymetmA2aBRyo9cCcWsQWrFsdbsr8LvmWDw=="
+      },
+      "Microsoft.Bcl.Memory": {
+        "type": "Transitive",
+        "resolved": "9.0.14",
+        "contentHash": "laQCcjTM2FnbyznkAu9hwBuQh3z2/OtJKwjGkJOUevylFpFXZIUVq/+MU2jM0HQm1n5wsjjwtLIDOiWJ6Nai3A=="
       },
       "Microsoft.CodeCoverage": {
         "type": "Transitive",
@@ -277,6 +295,14 @@
         "type": "Transitive",
         "resolved": "5.0.0",
         "contentHash": "dDoKi0PnDz31yAyETfRntsLArTlVAVzUzCIvvEDsDsucrl33Dl8pIJG06ePTJTI3tGpeyHS9Cq7Foc/s4EeKcg=="
+      },
+      "NSec.Cryptography": {
+        "type": "Transitive",
+        "resolved": "25.4.0",
+        "contentHash": "Z3wPpG0xefMLmhn9T+Ka/EzAmMQPT0THL/5E4lf9cXI/N9rbGH0G23ZFpRcPnD0ast2k7ieG6QSVNIjmfPCXBQ==",
+        "dependencies": {
+          "libsodium": "[1.0.20.1, 1.0.21)"
+        }
       },
       "OpenIddict.Abstractions": {
         "type": "Transitive",
@@ -392,6 +418,13 @@
           "Gatekeep.Modules.Operations": "[0.1.0, )"
         }
       },
+      "gatekeep.adapters.fido2": {
+        "type": "Project",
+        "dependencies": {
+          "Fido2": "[4.3.2, )",
+          "Gatekeep.Kernel": "[0.1.0, )"
+        }
+      },
       "gatekeep.adapters.hosting": {
         "type": "Project",
         "dependencies": {
@@ -505,6 +538,17 @@
         "type": "Project",
         "dependencies": {
           "Gatekeep.Kernel": "[0.1.0, )"
+        }
+      },
+      "Fido2": {
+        "type": "CentralTransitive",
+        "requested": "[4.3.2, )",
+        "resolved": "4.3.2",
+        "contentHash": "HcMs7cmzy+pvhUZr/LkJiLZzJHFKUrT4Ky5QH320phEHjukKxvTozC4FK7fAbwmcg3oe4naUUYaG7FkgUzm1GQ==",
+        "dependencies": {
+          "Fido2.Models": "4.3.2",
+          "Microsoft.IdentityModel.JsonWebTokens": "8.2.0",
+          "NSec.Cryptography": "25.4.0"
         }
       }
     }

@@ -93,6 +93,31 @@ describe('api-client', () => {
     }
   });
 
+  it('begins a credential registration with the CSRF header and no body, and completes it with the credential', async () => {
+    const { calls, fetch } = fakeFetch(200, JSON.stringify({ credentials: 1, setupComplete: false }));
+    const client = createApiClient({ fetch, csrfToken: () => 'csrf-1' });
+    const credential = {
+      id: 'AQ',
+      rawId: 'AQ',
+      type: 'public-key',
+      response: { clientDataJSON: 'e30', attestationObject: 'oA', transports: ['usb'] },
+    };
+
+    await client.beginCredentialRegistration();
+    const result = await client.completeCredentialRegistration(credential);
+
+    assert.equal(calls[0].input, '/api/v1/deployment/credentials/registration');
+    assert.equal(calls[0].init.method, 'POST');
+    assert.equal(calls[0].init.body, undefined);
+    assert.equal(calls[0].init.headers[CSRF_HEADER], 'csrf-1');
+    assert.equal(calls[1].input, '/api/v1/deployment/credentials/registration/complete');
+    assert.equal(calls[1].init.method, 'POST');
+    assert.equal(calls[1].init.body, JSON.stringify(credential));
+    assert.equal(calls[1].init.headers['Content-Type'], 'application/json');
+    assert.equal(calls[1].init.headers[CSRF_HEADER], 'csrf-1');
+    assert.deepEqual(result.data, { credentials: 1, setupComplete: false });
+  });
+
   it('parses only a string code, and a missing trace ID as empty', () => {
     assert.equal(parseProblem(null), null);
     assert.equal(parseProblem('x'), null);

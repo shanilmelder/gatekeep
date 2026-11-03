@@ -23,11 +23,12 @@ public class AdminApiRuleTests
     private static readonly string[] StateChanging = ["post", "put", "patch", "delete"];
 
     [Theory]
-    [InlineData("admin", new[] { "gk_admin INSERT", "gk_admin SELECT", "gk_cli SELECT" }, new[] { "gk_admin UPDATE setup_completed_at" })]
+    [InlineData("admin", new[] { "gk_admin INSERT", "gk_admin SELECT", "gk_cli SELECT" }, new[] { "gk_admin UPDATE setup_completed_at,webauthn_handle" })]
     [InlineData(
         "admin_session",
         new[] { "gk_admin INSERT", "gk_admin SELECT" },
-        new[] { "gk_admin UPDATE end_reason,ended_at,idle_expires_at" })]
+        new[] { "gk_admin UPDATE end_reason,ended_at,idle_expires_at,kind,registration_challenge_expires_at,registration_challenge_sha256" })]
+    [InlineData("admin_credential", new[] { "gk_admin INSERT", "gk_admin SELECT" }, new[] { "gk_admin UPDATE last_used_at,sign_count" })]
     public void Registry_lists_the_Admins_tables_with_exactly_their_grants(string table, string[] grants, string[] columns)
     {
         var entry = Entry(table);
@@ -110,7 +111,7 @@ public class AdminApiRuleTests
             .Where(r => r.Name.StartsWith('4'))
             .ToList();
 
-        Assert.Equal(["400", "429"], refusals.Select(r => r.Name).Order(StringComparer.Ordinal));
+        Assert.Equal(["400", "429"], refusals.Select(r => r.Name).Distinct().Order(StringComparer.Ordinal));
         foreach (var refusal in refusals)
         {
             Assert.Equal(
@@ -132,11 +133,12 @@ public class AdminApiRuleTests
             Assert.Contains("DeploymentApiEndpoint.Instance", map.Groups["rest"].Value);
         }
 
-        // Setup-allowed is the reviewed short list: GET of the Session endpoint only, until Story 1.22.
-        // Sign-out (DELETE) is deliberately not setup-allowed: it would strand the only Owner.
+        // Setup-allowed is the reviewed short list: GET of the Session endpoint, and credential
+        // registration's begin and complete (Story 1.22). Sign-out (DELETE) is deliberately not
+        // setup-allowed: it would strand the only Owner.
         Assert.Equal(
-            ["/api/v1/deployment/session"],
-            maps.Where(m => m.Groups["rest"].Value.Contains("SetupAllowed.Instance")).Select(m => m.Groups["route"].Value));
+            ["/api/v1/deployment/credentials/registration", "/api/v1/deployment/credentials/registration/complete", "/api/v1/deployment/session"],
+            maps.Where(m => m.Groups["rest"].Value.Contains("SetupAllowed.Instance")).Select(m => m.Groups["route"].Value).Order(StringComparer.Ordinal));
     }
 
     private static JsonDocument Load() => JsonDocument.Parse(File.ReadAllText(Path.Combine(Root, Document)));
