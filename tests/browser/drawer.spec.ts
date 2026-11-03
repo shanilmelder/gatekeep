@@ -44,7 +44,9 @@ const activeInside = (locator: Locator) => locator.evaluate((element) => element
 
 /** Waits for every running animation to finish, so axe reads final colours. */
 const still = (page: Page) =>
-  page.evaluate(() => Promise.all(document.getAnimations().map((animation) => animation.finished)).then(() => undefined));
+  // allSettled: an animation cancelled meanwhile (a closing dialog, a re-render) rejects its
+  // finished promise with an AbortError, and that animation is done as well.
+  page.evaluate(() => Promise.allSettled(document.getAnimations().map((animation) => animation.finished)).then(() => undefined));
 
 const eventDrawer = (page: Page) => page.getByTestId('event-drawer');
 /** A menu's trigger, inside the wrapper the testid marks. */

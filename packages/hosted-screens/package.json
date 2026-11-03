@@ -12,7 +12,16 @@
   "scripts": {
     "build": "tsc -p tsconfig.json"
   },
+  "dependencies": {
+    "@gatekeep/ui": "workspace:*"
+  },
+  "peerDependencies": {
+    "react": "catalog:"
+  },
   "devDependencies": {
-    "typescript": "catalog:"
+    "@types/react": "catalog:",
+    "react": "catalog:",
+    "typescript": "catalog:",
+    "vite": "catalog:"
   }
 }

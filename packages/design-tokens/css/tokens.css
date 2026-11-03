@@ -3,13 +3,16 @@
  * change DESIGN.md and run `pnpm --filter @gatekeep/design-tokens generate`.
  *
  * :root carries the default (light) theme. [data-gk-theme] starts a themed subtree, such as a
- * preview, and [data-gk-scheme="dark"] switches that subtree to the dark values. Component
- * variables are declared on every scope, so their references resolve against its scheme.
+ * preview, and [data-gk-scheme="dark"] switches that subtree to the dark values.
+ * [data-gk-scheme="auto"] follows the device, with no script: the light values, and the dark
+ * ones under prefers-color-scheme: dark (Hosted Login). Component variables are declared on
+ * every scope, so their references resolve against its scheme.
  */
 
 :root,
 [data-gk-theme],
-[data-gk-scheme="light"] {
+[data-gk-scheme="light"],
+[data-gk-scheme="auto"] {
   color-scheme: light;
   --gk-color-bg: #f6f6f4;
   --gk-color-sf: #ffffff;
@@ -63,6 +66,36 @@
   --gk-color-code-bg: #0a0b0c;
   --gk-color-code-tx: #e4e4e1;
   --gk-elevation-sh: 0 1px 2px rgba(0,0,0,.4), 0 10px 30px rgba(0,0,0,.5);
+}
+
+@media (prefers-color-scheme: dark) {
+  [data-gk-scheme="auto"] {
+    color-scheme: dark;
+    --gk-color-bg: #0d0e10;
+    --gk-color-sf: #141518;
+    --gk-color-sf2: #1a1b1f;
+    --gk-color-sf3: #222328;
+    --gk-color-bd: #25262b;
+    --gk-color-bd2: #34353b;
+    --gk-color-tx: #ededef;
+    --gk-color-tx2: #a3a3aa;
+    --gk-color-tx3: #6f6f78;
+    --gk-color-ac: #2ec29a;
+    --gk-color-ac-sf: #0e2a21;
+    --gk-color-ac-tx: #5fd8b3;
+    --gk-color-on-ac: #03130e;
+    --gk-color-ok: #4cc38a;
+    --gk-color-ok-sf: #0f261a;
+    --gk-color-warn: #e5a63a;
+    --gk-color-warn-sf: #2a1f0b;
+    --gk-color-bad: #f16a6a;
+    --gk-color-bad-sf: #2c1213;
+    --gk-color-info: #7ca3ff;
+    --gk-color-info-sf: #141d33;
+    --gk-color-code-bg: #0a0b0c;
+    --gk-color-code-tx: #e4e4e1;
+    --gk-elevation-sh: 0 1px 2px rgba(0,0,0,.4), 0 10px 30px rgba(0,0,0,.5);
+  }
 }
 
 :root,

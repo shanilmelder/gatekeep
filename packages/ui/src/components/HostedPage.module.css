@@ -1,0 +1,23 @@
+/*
+ * The Hosted Login page (DESIGN.md, Layout & Spacing): one card centred on bg, with a
+ * min-height, so a tall card makes the page scroll rather than clip. On a phone the card
+ * fills the width less 16px on each side, which is this page's inline padding.
+ */
+
+.page {
+  box-sizing: border-box;
+  display: flex;
+  min-height: 100dvh;
+  padding: var(--gk-space-32) var(--gk-space-16);
+  background: var(--gk-color-bg);
+  color: var(--gk-color-tx);
+  font: var(--gk-font-hosted-body);
+}
+
+/* margin: auto centres it, and unlike align-items: center never pushes a tall card off the top. */
+.main {
+  display: flex;
+  justify-content: center;
+  width: 100%;
+  margin: auto;
+}

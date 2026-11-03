@@ -43,6 +43,14 @@ describe('Raw hex', () => {
     assert.deepEqual(await lint(root), [message('apps/hosted-login/src/main.tsx', 1, '#0b7d62')]);
   });
 
+  it('lints packages/hosted-screens/src too', async () => {
+    const root = await fixture('screens', {
+      'packages/hosted-screens/src/GenericErrorScreen.tsx': "const accent = 'rgb(11, 125, 98)';\n",
+      'packages/hosted-screens/package.json': '{ "description": "#0b7d62" }\n',
+    });
+    assert.deepEqual(await lint(root), [message('packages/hosted-screens/src/GenericErrorScreen.tsx', 1, 'rgb(11, 125, 98)')]);
+  });
+
   it('lints every text file whatever its extension, and skips binaries', async () => {
     const root = await fixture('extensions', {
       'packages/ui/src/notes': 'accent #abcdef\n',

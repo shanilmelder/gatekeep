@@ -8,6 +8,7 @@
     "test": "playwright test"
   },
   "dependencies": {
+    "@gatekeep/hosted-screens": "workspace:*",
     "@gatekeep/ui": "workspace:*",
     "react": "catalog:",
     "react-dom": "catalog:"

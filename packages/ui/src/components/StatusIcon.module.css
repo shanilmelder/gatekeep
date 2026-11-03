@@ -1,0 +1,34 @@
+/*
+ * The status icon (DESIGN.md, components.status-icon): a circle on a status -sf surface,
+ * the glyph in the status colour, which passes 4.5:1 on its -sf pair in both schemes.
+ * Blocked shares error's bad pair, as the Blocked badge does.
+ */
+
+.icon {
+  box-sizing: border-box;
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: var(--gk-status-icon-size);
+  height: var(--gk-status-icon-size);
+  border-radius: var(--gk-status-icon-radius);
+  font: var(--gk-font-page-title);
+  line-height: 1;
+}
+
+.success {
+  background: var(--gk-color-ok-sf);
+  color: var(--gk-color-ok);
+}
+
+.warning {
+  background: var(--gk-color-warn-sf);
+  color: var(--gk-color-warn);
+}
+
+.error,
+.blocked {
+  background: var(--gk-color-bad-sf);
+  color: var(--gk-color-bad);
+}

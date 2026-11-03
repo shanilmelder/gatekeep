@@ -8,7 +8,17 @@ import os from 'node:os';
 import path from 'node:path';
 import { after, describe, it } from 'node:test';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { ENTRY_POINTS, check, checkEntry, checkManifest, importsIn, packageOf, stripComments } from './check-dependencies.mjs';
+import {
+  ENTRY_POINTS,
+  SCREENS,
+  check,
+  checkEntry,
+  checkManifest,
+  checkScreens,
+  importsIn,
+  packageOf,
+  stripComments,
+} from './check-dependencies.mjs';
 
 const script = fileURLToPath(new URL('./check-dependencies.mjs', import.meta.url));
 const repository = path.resolve(path.dirname(script), '../../..');
@@ -50,8 +60,9 @@ const banned = (entry, file, specifier) =>
   `${entry}: src/${file} imports ${specifier}. Only React, React DOM and declared @gatekeep packages are allowed.`;
 
 describe('No third party', () => {
-  it('passes on the repository as it is', async () => {
+  it('passes on the repository as it is, packages/hosted-screens included', async () => {
     assert.deepEqual(await check(repository), []);
+    assert.deepEqual(await checkScreens(repository), []);
   });
 
   it('passes the command on the repository', () => {
@@ -80,13 +91,26 @@ describe('No third party', () => {
     assert.deepEqual(await checkManifest({ devDependencies: { vite: '8.3.5', '@radix-ui/react-switch': '1.0.0' } }, workspace), []);
   });
 
-  it('allows a first-party workspace package only while it has no runtime dependencies', async () => {
+  it('allows a first-party workspace package only while it brings nothing third party but React, all the way down', async () => {
     assert.deepEqual(await checkManifest({ dependencies: { '@gatekeep/design-tokens': 'workspace:*' } }, workspace), []);
     const heavy = async () => ({ name: '@gatekeep/design-tokens', dependencies: { 'react-aria': '3.0.0' } });
     assert.match(
       (await checkManifest({ dependencies: { '@gatekeep/design-tokens': 'workspace:*' } }, heavy))[0],
       /brings runtime dependencies of its own: react-aria/,
     );
+    // @gatekeep/ui, as hosted-screens uses it: React peers and a clean first-party package are fine.
+    const nested = async (name) => (name === manifest.name ? manifest : name === tokens.name ? tokens : null);
+    assert.deepEqual(await checkManifest({ dependencies: { '@gatekeep/ui': 'workspace:*' } }, nested), []);
+    // A third-party package two levels down is still caught, and named.
+    const deep = async (name) =>
+      name === manifest.name ? manifest : name === tokens.name ? { ...tokens, dependencies: { qrcode: '1.5.4' } } : null;
+    assert.match(
+      (await checkManifest({ dependencies: { '@gatekeep/ui': 'workspace:*' } }, deep))[0],
+      /@gatekeep\/ui brings runtime dependencies of its own: qrcode\./,
+    );
+    // A cycle between workspace packages ends.
+    const cycle = async (name) => ({ name, dependencies: { '@gatekeep/ui': 'workspace:*', '@gatekeep/design-tokens': 'workspace:*' } });
+    assert.deepEqual(await checkManifest({ dependencies: { '@gatekeep/ui': 'workspace:*' } }, cycle), []);
     // A published package under the @gatekeep scope is still third party.
     assert.match((await checkManifest({ dependencies: { '@gatekeep/other': '1.0.0' } }, workspace))[0], /is a runtime dependency/);
   });
@@ -177,5 +201,115 @@ describe('No third party', () => {
     assert.deepEqual(importsIn("@import url('six/x.css');\n.a { composes: b c from \"eight\"; }", 'css').sort(), ['eight', 'six/x.css']);
     assert.equal(packageOf('@scope/name/deep'), '@scope/name');
     assert.equal(packageOf('react/jsx-runtime'), 'react');
+  });
+});
+
+
+describe('Entry allowlists', () => {
+  it('keeps both allowlists empty: Hosted for good, since R-8 encodes QR codes on the server', () => {
+    // Architecture review R-8: the server encodes TOTP QR codes and returns SVG path data, so
+    // the hosted entry needs no client encoder and its allowlist stays empty.
+    assert.deepEqual(ENTRY_POINTS.hosted.allow, []);
+    assert.deepEqual(ENTRY_POINTS.admin.allow, []);
+    assert.ok(Object.isFrozen(ENTRY_POINTS.hosted.allow));
+  });
+
+  it('names a first-party package with no workspace manifest, however deep', async () => {
+    const ghostly = { ...manifest, dependencies: { ...manifest.dependencies, '@gatekeep/ghost': 'workspace:*' } };
+    const lookup = async (name) => (name === manifest.name ? ghostly : name === tokens.name ? tokens : null);
+    assert.deepEqual(await checkManifest({ dependencies: { '@gatekeep/ui': 'workspace:*' } }, lookup), [
+      '@gatekeep/ui brings runtime dependencies of its own: @gatekeep/ghost.',
+    ]);
+  });
+});
+
+// The Dependency check row of the Story 1.18 matrix: packages/hosted-screens may use React and
+// @gatekeep/ui's hosted entry at runtime, and nothing else, judged by what it reaches.
+describe('Hosted screens', () => {
+  const ui = { ...manifest, exports: { './hosted': './src/hosted.ts', './admin': './src/admin.ts', './styles.css': './src/styles.css' } };
+  const screensManifest = {
+    name: '@gatekeep/hosted-screens',
+    dependencies: { '@gatekeep/ui': 'workspace:*' },
+    peerDependencies: { react: '19.3.1' },
+    devDependencies: { typescript: '7.0.2', vite: '8.3.5' },
+  };
+  const screen = "import { HostedCard } from '@gatekeep/ui/hosted';\nimport { useId } from 'react';\n";
+  const file = 'packages/hosted-screens/src/GenericErrorScreen.tsx';
+  const reach = (specifier) => `hosted-screens: src/GenericErrorScreen.tsx imports ${specifier}`;
+  const onlyHosted = (specifier) => `${reach(specifier)}. Of @gatekeep/ui, only @gatekeep/ui/hosted may be imported.`;
+
+  async function screens(name, { manifest: own = screensManifest, files = {}, uiManifest = ui, uiFiles = {} } = {}) {
+    const all = {
+      'packages/hosted-screens/package.json': JSON.stringify(own),
+      'packages/hosted-screens/src/index.ts': "export { GenericErrorScreen } from './GenericErrorScreen';\n",
+      [file]: screen,
+      ...files,
+    };
+    return fixture(name, uiFiles, uiManifest, Object.fromEntries(Object.entries(all).filter(([, text]) => text !== null)));
+  }
+
+  it('checks packages/hosted-screens with its own entry, allowing nothing extra, following what it reaches', () => {
+    assert.equal(SCREENS.dir, 'packages/hosted-screens');
+    const entry = SCREENS.entries['hosted-screens'];
+    assert.deepEqual(entry.files, ['src/index.ts']);
+    assert.deepEqual(entry.allow, []);
+    assert.deepEqual(entry.only, { '@gatekeep/ui': ['@gatekeep/ui/hosted'] });
+    assert.equal(entry.follow, true);
+  });
+
+  it('passes screens that use React and the hosted entry', async () => {
+    assert.deepEqual(await checkScreens(await screens('screens-clean')), []);
+  });
+
+  it('fails on a third-party runtime dependency added to hosted-screens', async () => {
+    const own = { ...screensManifest, dependencies: { ...screensManifest.dependencies, qrcode: '1.5.4' } };
+    assert.deepEqual(await checkScreens(await screens('screens-manifest', { manifest: own })), [
+      'qrcode is a runtime dependency. Only react and react-dom are allowed.',
+    ]);
+  });
+
+  it('fails on a third-party import a screen reaches', async () => {
+    const root = await screens('screens-third-party', { files: { [file]: `${screen}import QRCode from 'qrcode';\n` } });
+    assert.deepEqual(await checkScreens(root), [banned('hosted-screens', 'GenericErrorScreen.tsx', 'qrcode')]);
+  });
+
+  it('allows only the hosted entry of @gatekeep/ui: not admin, the bare package or its files', async () => {
+    for (const specifier of ['@gatekeep/ui/admin', '@gatekeep/ui', '@gatekeep/ui/src/components/Modal', '@gatekeep/ui/styles.css']) {
+      const root = await screens(`screens-only-${specifier.replace(/\W+/g, '-')}`, { files: { [file]: `${screen}import '${specifier}';\n` } });
+      assert.deepEqual(await checkScreens(root), [onlyHosted(specifier)], specifier);
+    }
+  });
+
+  it('fails on a relative import that leaves the package', async () => {
+    const root = await screens('screens-escape', {
+      files: { [file]: `${screen}import { Modal } from '../../ui/src/admin';\n` },
+    });
+    assert.deepEqual(await checkScreens(root), [`${reach('../../ui/src/admin')}, which is outside its package.`]);
+  });
+
+  it('follows the hosted entry into @gatekeep/ui, so what that reaches counts', async () => {
+    const root = await screens('screens-follow', { uiFiles: { 'Button.tsx': "import { useId } from 'react';\nimport 'react-aria';\n" } });
+    assert.deepEqual(await checkScreens(root), [
+      'hosted-screens: @gatekeep/ui/src/Button.tsx imports react-aria. Only React, React DOM and declared @gatekeep packages are allowed.',
+    ]);
+  });
+
+  it("ignores a dependency @gatekeep/ui declares for its admin entry alone, which the screens don't reach", async () => {
+    const headless = { ...ui, dependencies: { ...ui.dependencies, 'react-aria': '3.0.0' } };
+    const root = await screens('screens-admin-only', {
+      uiManifest: headless,
+      uiFiles: { 'admin.ts': "export * from './index';\nimport 'react-aria';\n" },
+    });
+    assert.deepEqual(await checkScreens(root), []);
+  });
+
+  it('fails when a reached package does not export the specifier as a file', async () => {
+    const root = await screens('screens-unexported', { uiManifest: { ...ui, exports: { './admin': './src/admin.ts' } } });
+    assert.deepEqual(await checkScreens(root), [`${reach('@gatekeep/ui/hosted')}, which @gatekeep/ui doesn't export as a file.`]);
+  });
+
+  it('fails when the screens entry is missing', async () => {
+    const root = await screens('screens-missing', { files: { 'packages/hosted-screens/src/index.ts': null } });
+    assert.deepEqual(await checkScreens(root), ['hosted-screens: entry src/index.ts does not exist.']);
   });
 });

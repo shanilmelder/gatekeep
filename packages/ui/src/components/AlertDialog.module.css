@@ -1,0 +1,62 @@
+/*
+ * The Hosted alert dialog: the hosted-card look (sf, bd border, radius modal, sh) as a modal
+ * over the scrim, the card's width at most and a 16px margin on each side on a phone. Title
+ * in tx, body in tx2, the primary action at full width. It scrolls when text at 200% makes it
+ * taller than the window.
+ */
+
+.dialog {
+  box-sizing: border-box;
+  width: min(var(--gk-hosted-card-width), calc(100% - 2 * var(--gk-space-16)));
+  max-width: calc(100% - 2 * var(--gk-space-16));
+  max-height: calc(100dvh - 2 * var(--gk-space-32));
+  margin: auto;
+  padding: var(--gk-space-24);
+  overflow-y: auto;
+  border: 1px solid var(--gk-hosted-card-border);
+  border-radius: var(--gk-hosted-card-radius);
+  background: var(--gk-hosted-card-background);
+  color: var(--gk-color-tx);
+  box-shadow: var(--gk-hosted-card-shadow);
+  font: var(--gk-font-hosted-body);
+}
+
+/* The dialog itself takes focus only when it has nothing focusable; it draws no ring then. */
+.dialog:focus-visible {
+  outline: none;
+}
+
+.dialog[open] {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gk-space-12);
+}
+
+.dialog::backdrop {
+  background: var(--gk-modal-scrim);
+}
+
+.title {
+  margin: 0;
+  font: var(--gk-font-section);
+  color: var(--gk-color-tx);
+}
+
+.body {
+  color: var(--gk-color-tx2);
+}
+
+.body > p {
+  margin: 0;
+}
+
+.actions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gk-space-8);
+  margin-top: var(--gk-space-8);
+}
+
+.actions > * {
+  width: 100%;
+}

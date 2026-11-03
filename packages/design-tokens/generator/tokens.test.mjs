@@ -76,7 +76,8 @@ describe('Generate', () => {
     const ts = outputs[OUTPUT_PATHS.ts];
     const cs = outputs[OUTPUT_PATHS.cs];
     for (const name of SCHEME_COLORS) {
-      assert.equal(css.split('\n').filter((l) => l.trim().startsWith(`--gk-color-${name}:`)).length, 2, name);
+      // Light, dark, and dark again for the auto scope under a dark preference.
+      assert.equal(css.split('\n').filter((l) => l.trim().startsWith(`--gk-color-${name}:`)).length, 3, name);
       assert.ok(ts.includes(`"${name}": "${model.schemes.dark[name]}"`), name);
     }
     assert.ok(cs.includes('internal const string AcSf = "#e2f3ec";'));
@@ -247,11 +248,24 @@ describe('Bad source', () => {
 });
 
 describe('Scope', () => {
-  it('declares light on :root and [data-gk-theme], and dark on [data-gk-scheme="dark"] only', () => {
+  it('declares light on :root and [data-gk-theme], and dark on [data-gk-scheme="dark"] and dark-preferring auto only', () => {
     const css = renderAll(design)[OUTPUT_PATHS.css];
-    assert.ok(css.includes(':root,\n[data-gk-theme],\n[data-gk-scheme="light"] {\n  color-scheme: light;\n  --gk-color-bg: #f6f6f4;'));
+    assert.ok(
+      css.includes(':root,\n[data-gk-theme],\n[data-gk-scheme="light"],\n[data-gk-scheme="auto"] {\n  color-scheme: light;\n  --gk-color-bg: #f6f6f4;'),
+    );
     assert.ok(css.includes('[data-gk-scheme="dark"] {\n  color-scheme: dark;\n  --gk-color-bg: #0d0e10;'));
-    assert.equal(css.match(/--gk-color-bg: #0d0e10;/g).length, 1);
+    // Auto follows the device with no script: the dark values only under a dark preference.
+    assert.ok(
+      css.includes('@media (prefers-color-scheme: dark) {\n  [data-gk-scheme="auto"] {\n    color-scheme: dark;\n    --gk-color-bg: #0d0e10;'),
+    );
+    assert.equal(css.match(/--gk-color-bg: #0d0e10;/g).length, 2);
+    const media = css.slice(css.indexOf('@media'));
+    assert.equal(media.slice(0, media.indexOf('\n}\n')).match(/^ {4}--gk-color-[\w-]+: /gm).length, SCHEME_COLORS.length);
+    // A hand edit inside the auto scope is drift too, named by its scope.
+    const edited = css.replace(/(\[data-gk-scheme="auto"\] \{\n {4}color-scheme: dark;\n {4}--gk-color-bg: )#0d0e10;/, '$1#000000;');
+    assert.notEqual(edited, css);
+    const [problem] = compareOutput(OUTPUT_PATHS.css, css, edited);
+    assert.match(problem, /token @media \(prefers-color-scheme: dark\) \[data-gk-scheme="auto"\] --gk-color-bg is/);
     // Component variables resolve on every scope, so a dark subtree gets a dark focus ring.
     assert.ok(css.includes(':root,\n[data-gk-theme],\n[data-gk-scheme] {\n'));
     assert.ok(/\[data-gk-scheme\] \{[^}]*--gk-focus-ring-outline-color: var\(--gk-color-ac\);/.test(css));

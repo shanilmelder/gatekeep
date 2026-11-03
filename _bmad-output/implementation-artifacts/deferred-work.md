@@ -136,3 +136,12 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-1-20-add-the-rate-limiter-and-admin-csp.md`
   summary: Decide which forwarded headers `Host.Admin` trusts, so the limiter's subject is the real client address and not Caddy's.
   evidence: `docs/threat-model.md` T-47 named this as Story 1.20's decision, but the limiter has no caller until Story 1.21, which first needs a source address.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-18-build-the-hosted-component-entry-and-screen-package.md`
+  summary: Session-expiry alert precedence over an open dialog (the session-expiry story)
+  evidence: Story 1.18 review: AlertDialog is refused while a Modal or Drawer holds the registry.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-18-build-the-hosted-component-entry-and-screen-package.md`
+  summary: Tenant font family token (Story 15.1)
+  evidence: Story 1.18 review: composite --gk-font-* tokens bake in Geist.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-18-build-the-hosted-component-entry-and-screen-package.md`
+  summary: Bidi isolation for Tenant names (NFR-19, Story 18.3)
+  evidence: Story 1.18 review: RTL Tenant names in LTR templates.

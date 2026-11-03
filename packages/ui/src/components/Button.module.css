@@ -13,11 +13,14 @@
   box-sizing: border-box;
   min-height: var(--gk-ui-button-height);
   margin: 0;
-  padding: 0 var(--gk-ui-button-padding);
+  padding: var(--gk-ui-button-padding-block, 0) var(--gk-ui-button-padding);
   border: 1px solid transparent;
   border-radius: var(--gk-ui-button-radius);
   font: var(--gk-ui-button-font);
-  white-space: nowrap;
+  text-align: center;
+  /* A ButtonLink is an <a> drawn as a button: no underline. */
+  text-decoration: none;
+  white-space: var(--gk-ui-button-white-space, nowrap);
   cursor: pointer;
 }
 
