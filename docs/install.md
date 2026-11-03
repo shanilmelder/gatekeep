@@ -19,7 +19,7 @@ Gatekeep can't check any of these. They're the host owner's job, and the securit
 | **The secrets directory stays out of backups** and is never committed | It holds the Master Key, recovery keys, AppRole IDs and database passwords. Escrow the Master Key and recovery keys offline instead (`docs/key-custody.md`). |
 | **Linux containers** | Every image is Linux. |
 
-The secrets directory is `deploy/secrets` unless `GATEKEEP_SECRETS_DIR` says otherwise; a relative value is resolved against `deploy/`. Set it the same way for every command. It has four subdirectories: `master/` (the Master Key), `postgres/` (database passwords), `recovery/` (OpenBao recovery keys, until escrowed) and `approle/` (each role's AppRole IDs), and in production a fifth, `cloudflare/`, holding the Cloudflare DNS token (see "Hostnames and TLS"). Each setup tool mounts only the subdirectories it writes.
+The secrets directory is `deploy/secrets` unless `GATEKEEP_SECRETS_DIR` says otherwise; a relative value is resolved against `deploy/`. Set it the same way for every command. It has five subdirectories: `master/` (the Master Key), `postgres/` (database passwords), `recovery/` (OpenBao recovery keys, until escrowed), `approle/` (each role's AppRole IDs) and `bootstrap/` (the one-time bootstrap token, see step 11), and in production a sixth, `cloudflare/`, holding the Cloudflare DNS token (see "Hostnames and TLS"). Each setup tool mounts only the subdirectories it writes.
 
 ## Steps
 
@@ -43,10 +43,11 @@ The secrets directory is `deploy/secrets` unless `GATEKEEP_SECRETS_DIR` says oth
 
 4. **Escrow the Master Key offline** now, before anything is sealed with it: `docs/key-custody.md`, step 3.
 
-5. **Make the database passwords.** The `passwords` service writes a random password for the PostgreSQL superuser and each login role into `postgres/`, and keeps any that exists and isn't empty.
+5. **Make the database passwords and the bootstrap directory.** The `passwords` service writes a random password for the PostgreSQL superuser and each login role into `postgres/`, and keeps any that exists and isn't empty. The `bootstrap-dir` service makes `bootstrap/`, where step 11 writes the bootstrap token, with mode `0700` and the `cli` service's uid, `10004`, as owner. `bootstrap/` must be a real directory, not a symbolic link; running `bootstrap-dir` again changes nothing. Compose never creates it, so `cli init` fails until this step has run.
 
    ```sh
    docker compose -f deploy/compose.yaml run --rm passwords
+   docker compose -f deploy/compose.yaml run --rm bootstrap-dir
    ```
 
 6. **Start OpenBao and set it up.** OpenBao has no network. `openbao-setup` waits for its socket, initializes it, writes the policies, AppRoles and Deployment keys, writes the recovery keys into `recovery/` and each AppRole's IDs into `approle/`, and revokes the root token.
@@ -75,6 +76,20 @@ The secrets directory is `deploy/secrets` unless `GATEKEEP_SECRETS_DIR` says oth
     ```sh
     docker compose -f deploy/compose.yaml ps -a
     ```
+
+11. **Initialise the Deployment.** `gatekeep init` runs in the `cli` container. It first makes sure the Deployment's own keys exist in OpenBao (`dep-email`, `dep-payload`, `dep-hmac` and `dep-records`, which sign off-server records), leaving any that exist unchanged. Then, as `gk_cli`, it writes a fresh one-time bootstrap token, 64 hex characters, to `bootstrap/bootstrap-token` in the secrets directory, mode `0600` in the `0700` directory, and stores only the token's SHA-256 in the database with an expiry 15 minutes later. It prints the file's place and the expiry in UTC, never the token. It refuses, changing nothing, if bootstrap is already complete, or if the token directory is a symbolic link, isn't owned by uid `10004` or is writable by anyone else: run `bootstrap-dir` again to fix it. Until the new token is committed, the previous token file stays in place.
+
+    ```sh
+    docker compose -f deploy/compose.yaml run --rm cli init
+    ```
+
+    Read the token on the Docker host as root: `sudo cat deploy/secrets/bootstrap/bootstrap-token`, with the default secrets directory. Only root, or whoever holds uid `10004`, can read it there, and that's all "root-only" means on a Docker host: root and Docker access are full control anyway (T-29). Docker access reads it too, through the setup service that made its directory. That prints the token in that container's output, so run it only at a terminal nobody records:
+
+    ```sh
+    docker compose -f deploy/compose.yaml run --rm --entrypoint cat bootstrap-dir /secrets/bootstrap/bootstrap-token
+    ```
+
+    Finish bootstrap within 15 minutes. If the token expires first, run `init` again: each run replaces the token and voids the one before, until bootstrap is complete, after which `init` refuses and exits `1`. The token file is never copied into an image, a volume or a backup; keep the secrets directory out of backups as for every other secret. Bootstrap itself, which consumes the token, is Story 1.21 and isn't built yet.
 
 ## Verifying the audit chains
 
@@ -180,7 +195,7 @@ The steps above build every image from source. To run a published release instea
    docker compose -f deploy/compose.yaml -f deploy/compose.release.yaml --env-file deploy/release.env --profile release run --rm release-verify
    ```
 
-4. **Install** with steps 3 to 10 above, adding the overlay and the env file to every command. Skip step 2: nothing is built, and Compose refuses to start if any image variable is missing rather than build one. For example:
+4. **Install** with steps 3 to 11 above, adding the overlay and the env file to every command. Skip step 2: nothing is built, and Compose refuses to start if any image variable is missing rather than build one. For example:
 
    ```sh
    docker compose -f deploy/compose.yaml -f deploy/compose.release.yaml --env-file deploy/release.env run --rm keygen
@@ -207,7 +222,7 @@ docker compose -f deploy/compose.yaml up -d --wait --force-recreate
 
 ## What the stack enforces
 
-- **Secrets only as files.** Each secret reaches only the containers that need it, as a Compose secret under `/run/secrets`. No secret is in an image, an environment variable or `compose.yaml`. Only `keygen` can see `master/`; `passwords` sees only `postgres/`, and `openbao-setup` only `recovery/` and `approle/`. All three have no network.
+- **Secrets only as files.** Each secret reaches only the containers that need it, as a Compose secret under `/run/secrets`. No secret is in an image, an environment variable or `compose.yaml`. Only `keygen` can see `master/`; `passwords` sees only `postgres/`, `bootstrap-dir` only `bootstrap/`, and `openbao-setup` only `recovery/` and `approle/`. All four have no network. The `cli` service mounts `bootstrap/` alone of them, to write the bootstrap token.
 - **Refusal of missing or default secrets.** Each host refuses to start if a required setting is missing, empty, a known default such as `changeme` or `postgres`, or a password under 16 characters. That includes its key custody settings: every host uses OpenBao. It logs the setting's name, never its value, and exits non-zero, so Compose shows it restarting. `gatekeep migrate` refuses an unsafe password the same way.
 - **Hardened containers.** `Host.Hosted`, `Host.Admin`, `Host.Worker` and `cli` run as their own non-root user, with a read-only root filesystem, every capability dropped and `no-new-privileges`, as do PostgreSQL and OpenBao. Every service has a process limit and rotated logs. No runtime service has the Docker socket.
 - **One way in.** Only Caddy publishes ports, 80 and 443. It runs as its own non-root user, read-only, with every capability dropped and no admin API.

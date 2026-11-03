@@ -90,6 +90,19 @@ internal sealed class CanaryFlowContext(PostgresFixture postgres, string directo
         return path;
     }
 
+    /// <summary>A fresh, empty, owner-only folder under the scratch folder.</summary>
+    public string NewDirectory()
+    {
+        var path = Path.Combine(directory, Guid.NewGuid().ToString("N"));
+        System.IO.Directory.CreateDirectory(path);
+        if (!OperatingSystem.IsWindows())
+        {
+            System.IO.File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        }
+
+        return path;
+    }
+
     public FakeOpenBaoSocket Socket(int status = 200)
     {
         var socket = new FakeOpenBaoSocket(status);
@@ -130,7 +143,7 @@ internal static class CanaryFlows
 {
     private const string HealthEndpoint = "/healthz";
 
-    /// <summary>The <c>migrate</c> and <c>audit verify</c> commands, from the Cli's <c>args switch</c>.</summary>
+    /// <summary>The <c>migrate</c>, <c>audit verify</c> and <c>init</c> commands, from the Cli's <c>args switch</c>.</summary>
     private const string CliProgram = "src/Gatekeep.Cli/Program.cs";
 
     private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(60);
@@ -164,6 +177,7 @@ internal static class CanaryFlows
     [
         new("cli.migrate", [new(SurfaceKind.CliCommand, "migrate")], MigrateAsync),
         new("cli.audit-verify", [new(SurfaceKind.CliCommand, "audit verify")], AuditVerifyAsync),
+        new("cli.init", [new(SurfaceKind.CliCommand, "init")], InitAsync),
         new("host.hosted", [new(SurfaceKind.HostStartup, "Hosted"), new(SurfaceKind.Route, HealthEndpoint)], HostAsync("Hosted")),
         new("host.admin", [new(SurfaceKind.HostStartup, "Admin"), new(SurfaceKind.Route, HealthEndpoint)], HostAsync("Admin")),
         new("host.worker", [new(SurfaceKind.HostStartup, "Worker"), new(SurfaceKind.Route, HealthEndpoint)], HostAsync("Worker")),
@@ -417,6 +431,57 @@ internal static class CanaryFlows
         run.Capture("audit verify", result);
 
         Assert.True(result.ExitCode == (failing ? 1 : 0), result.StandardOutput + result.StandardError);
+    }
+
+    /// <summary>
+    /// <c>gatekeep init</c> at Trace, with a canary AppRole secret ID and OpenBao token on the
+    /// stand-in socket, as <c>gk_cli</c>. The token it issues is read back from its file and
+    /// scanned for too. Failing, the database refuses the connection after the keys are ensured.
+    /// </summary>
+    private static async Task InitAsync(CanaryFlowContext context, FlowRun run, bool failing)
+    {
+        var secretId = run.Plant("approle-secret-id");
+        var token = run.Plant("openbao-token");
+        var socket = context.Socket();
+        // One body answers the AppRole login and every key creation, the signing key's included.
+        const string Keys = """{"keys":{"1":{"public_key":"-----BEGIN PUBLIC KEY-----\nQ05SWQ==\n-----END PUBLIC KEY-----\n"}}}""";
+        socket.Body = $$"""{"auth":{"client_token":"{{token.Value}}","lease_duration":900},"data":""" + Keys + "}";
+
+        string connection;
+        Canary password;
+        if (failing)
+        {
+            password = run.Plant("password-file");
+            connection = RefusedConnection(TableRegistry.Cli);
+        }
+        else
+        {
+            run.Database = await context.Postgres.NewMigratedDatabaseAsync();
+            password = run.Plant("role-password", PostgresFixture.Password);
+            connection = Passwordless(context.Postgres.RoleConnection(TableRegistry.Cli, run.Database));
+        }
+
+        var directory = context.NewDirectory();
+        var environment = new Dictionary<string, string>(DebugEnvironment)
+        {
+            ["GATEKEEP_CLI_CONNECTION_FILE"] = context.File(connection),
+            ["GATEKEEP_CLI_PASSWORD_FILE"] = context.File(password.Value + "\n"),
+            ["GATEKEEP_CUSTODY_SOCKET"] = socket.Path,
+            ["GATEKEEP_CUSTODY_ROLE_ID_FILE"] = context.File(Guid.NewGuid().ToString()),
+            ["GATEKEEP_CUSTODY_SECRET_ID_FILE"] = context.File(secretId.Value + "\n"),
+        };
+
+        var result = await CliProcess.RunCapturedAsync(environment, "init", "--token-dir", directory);
+        run.Capture("init", result);
+
+        Assert.True(result.ExitCode == (failing ? 1 : 0), result.StandardOutput + result.StandardError);
+
+        var file = Path.Combine(directory, "bootstrap-token");
+        Assert.Equal(!failing, File.Exists(file));
+        if (!failing)
+        {
+            run.Plant("bootstrap-token", (await File.ReadAllTextAsync(file, CanaryFlowContext.Cancellation)).TrimEnd('\n'));
+        }
     }
 
     /// <summary>

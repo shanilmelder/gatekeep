@@ -2,10 +2,10 @@
 title: 'Story 1.19: Initialise a Deployment'
 type: 'feature'
 created: '2026-11-03'
-status: 'draft'
-baseline_revision: ''
+status: 'done'
+baseline_revision: '759896cb13a90d3313a78f43d5d07b6f3df2778f'
 review_loop_iteration: 0
-followup_review_recommended: false
+followup_review_recommended: true
 context:
   - '{project-root}/_bmad-output/planning-artifacts/architecture/architecture-gatekeep-2026-11-02/ARCHITECTURE-SPINE.md'
   - '{project-root}/docs/threat-model.md'
@@ -114,11 +114,11 @@ It can be run again to reissue the token until bootstrap is complete.
 ## Tasks & Acceptance
 
 **Execution:**
-- [ ] Migration, table registry and grants for `control.bootstrap_state`.
-- [ ] Admins: the bootstrap issue service, plus the `bootstrap.token.issued` event and the regenerated catalogue.
-- [ ] `Gatekeep.Cli`: the `init` command, the token file writer and the key ensuring.
-- [ ] Compose bind mount, secrets-dir setup, and the install and threat-model docs.
-- [ ] Isolation and Architecture tests for every matrix row.
+- [x] Migration, table registry and grants for `control.bootstrap_state`.
+- [x] Admins: the bootstrap issue service, plus the `bootstrap.token.issued` event and the regenerated catalogue.
+- [x] `Gatekeep.Cli`: the `init` command, the token file writer and the key ensuring.
+- [x] Compose bind mount, secrets-dir setup, and the install and threat-model docs.
+- [x] Isolation and Architecture tests for every matrix row.
 
 **Acceptance Criteria:**
 - Given `gatekeep init`, when it runs, then it writes a one-time 256-bit token to a root-only file, and stores only its SHA-256 with a 15-minute expiry.
@@ -128,7 +128,95 @@ It can be run again to reissue the token until bootstrap is complete.
 
 ## Review Triage Log
 
+### 2026-11-02 — Review pass
+- verdicts: 50 findings — high 3, medium 19, low 22, false 6, maybe-false 0
+- findings:
+  - `[medium]` `[patch]` Intent: `gk_cli` can reopen a completed bootstrap — column grants and a trigger that freezes a completed row.
+  - `[medium]` `[patch]` Intent: the decisions that changed the spec's contract aren't recorded — Design Notes updated.
+  - `[medium]` `[patch]` Intent: Story 1.21 has nowhere to find the hash input — `BootstrapToken.Hash` in the Admins contract.
+  - `[low]` `[patch]` Intent: the CLI chmods the directory before OpenBao is checked — no chmod; precheck first.
+  - `[low]` `[patch]` Intent: stdout always names the default path — real path printed.
+  - `[low]` `[patch]` Intent: no read-only directory test — run as a non-root uid.
+  - `[low]` `[patch]` Intent: TB-9 and the bootstrap row are stale — threat model updated; AD-31 amended.
+  - `[low]` `[patch]` Intent: usage omits the custody variables; the secret files aren't validated — both fixed.
+  - `[low]` `[patch]` Intent: the docker-cat route prints the token to a container's output — noted in the install doc.
+  - `[low]` `[reject]` Intent: a separate `bootstrap-dir` service, not the existing setup — each setup tool mounts only its own directory; recorded.
+  - `[false]` `[reject]` Intent: two audit codes and no expiry in the event — the envelope holds only code, actor and IDs; recorded.
+  - `[false]` `[reject]` Intent: `Actor.System` — no cli actor kind exists; recorded.
+  - `[false]` `[reject]` Intent: the `Cli -> Adapters.OpenBao` edge — the CLI is a composition root; recorded.
+  - `[false]` `[reject]` Intent: stack-check runs `cli init` — it checks modes and owner without printing the token.
+  - `[false]` `[reject]` Intent: scope creep into Story 1.21 — none; an Architecture test enforces it.
+  - `[false]` `[reject]` Intent: ordering and atomicity — match the spec.
+  - `[medium]` `[patch]` Blind: `gk_cli` can clear `completed_at` — same fix as the Intent row.
+  - `[medium]` `[patch]` Blind: `gk_admin` can plant its own hash — `gk_admin` may update only `completed_at`.
+  - `[medium]` `[patch]` Blind: a failed commit destroys the valid token file — the previous token is kept and restored.
+  - `[medium]` `[patch]` Blind: the rename isn't durable — directory fsynced.
+  - `[medium]` `[patch]` Blind: times come from transaction start — `clock_timestamp()` in the upsert; tests order by chain seq.
+  - `[low]` `[patch]` Blind: snapshot taken before the lock under stricter isolation — READ COMMITTED enforced; the upsert takes the lock.
+  - `[low]` `[patch]` Blind: keys created before the refusal check — read-only precheck first.
+  - `[low]` `[patch]` Blind: output names the default path — same fix as the Intent row.
+  - `[low]` `[patch]` Blind: `CheckDirectory` chmods whatever it is given and follows symlinks — refuses instead.
+  - `[low]` `[patch]` Blind: leftover temp files hold a live token — swept.
+  - `[low]` `[patch]` Blind: the token is an immutable string — zeroable buffers.
+  - `[low]` `[patch]` Blind: setup script aborts before its warning; symlinked dir — fixed.
+  - `[low]` `[patch]` Blind: the short bind creates a root-owned directory — `create_host_path: false`, error names `bootstrap-dir`.
+  - `[low]` `[patch]` Blind: the concurrency test doesn't force overlap — a held lock forces it.
+  - `[low]` `[patch]` Blind: the mode and key-version tests prove nothing — rewritten.
+  - `[low]` `[patch]` Blind: architecture regexes miss forms — widened, more file types.
+  - `[high]` `[patch]` Gap: the keys-absent path never runs — fixture without the dep keys.
+  - `[high]` `[patch]` Gap: the audit event differs from the spec and tests lock it in — decision recorded; same-transaction proof added.
+  - `[high]` `[patch]` Gap: a database failure after staging is untested — trigger-forced failure tested.
+  - `[medium]` `[patch]` Gap: commit failure after the rename is untested — deferred trigger tested, with restore.
+  - `[medium]` `[patch]` Gap: same-transaction event unproven — `xmin` compared.
+  - `[medium]` `[patch]` Gap: concurrency overlap not forced — same fix as the Blind row.
+  - `[medium]` `[patch]` Gap: "not writable" untested and vacuous as root — non-root runs.
+  - `[medium]` `[patch]` Gap: the directory-mode assertion is vacuous — new refusal rules tested.
+  - `[medium]` `[patch]` Gap: "0600 from creation" unproven — inode change and a source assertion.
+  - `[medium]` `[patch]` Gap: the database clock is unproven — source assertion on `clock_timestamp()`.
+  - `[low]` `[patch]` Gap: missing custody settings untested; regex blind spots; hash not a canary; setup script and stack check thin — all added.
+  - `[medium]` `[patch]` Edge: a kill leaves token-bearing temp files; no signal handling — swept; SIGINT and SIGTERM cancel cleanly.
+  - `[medium]` `[patch]` Edge: lock wait shortens the window; no lock timeout — `clock_timestamp()` and a 30-second timeout.
+  - `[medium]` `[reject]` Edge: a wrong-typed existing `dep-*` key passes — `setup.sh` fixes the types and `cli.hcl` denies the parameters; only OpenBao root could do it.
+  - `[medium]` `[patch]` Edge: whole-table grants — same fix as the Intent row.
+  - `[low]` `[patch]` Edge: root hides permission bugs; group- or world-writable dirs only warn; short bind syntax; no directory fsync; ambiguous commit message; default path printed; symlinked host directory; stale probe — all fixed.
+  - `[low]` `[patch]` Edge: SHARE ROW EXCLUSIVE doesn't block readers — the Story 1.21 consumer must `SELECT … FOR UPDATE`, written in the contract.
+  - `[low]` `[patch]` Edge: spec drift on the event — same fix as the Intent row.
+
 ## Design Notes
 
 - **Root-only, Docker-only:** Gatekeep has no host access (the Docker-only proposal). The token sits in the host secrets directory beside the Master Key's directory, with `0700`/`0600` and the cli uid as owner. On the host that means root, or whoever holds that uid, can read it. Root and Docker access already count as full compromise (UJ-6, T-20).
 - **Atomic file and row:** the row lock is held across the file rename, so whatever the file holds was issued under that lock, and a failure after the rename leaves only an unusable token.
+- **Decisions made while building and reviewing:**
+  - **Audit events:** two codes, `bootstrap.token.issued` and `bootstrap.token.reissued`, written as `Actor.System`. The audit envelope holds only a code, an actor and IDs, and there is no cli actor kind. The exact expiry lives in `bootstrap_state.expires_at`, and the event summary defines it as the issue time plus 15 minutes.
+  - **Token hash:** SHA-256 over the 64 lowercase ASCII hex characters, with no newline. Story 1.21 hashes the submitted token with `BootstrapToken.Hash`, which trims surrounding whitespace first, and claims the row with `SELECT … FOR UPDATE`.
+  - **Grants are column grants.**
+    - `gk_cli` may update only the hash and the times, and may never set `completed_at`.
+    - `gk_admin` may update only `completed_at`.
+    - A trigger freezes a completed row.
+    - The upsert's row lock (`INSERT … ON CONFLICT … WHERE completed_at IS NULL`) serialises concurrent runs, so no table lock is needed.
+    - The upsert takes its times from `clock_timestamp()` and sets a 30-second lock timeout.
+  - **Previous token kept until commit:** the previous token stays valid until the new one commits. A failure after the rename restores it, and the directory is fsynced after each rename.
+  - **Directory checks:**
+    - `init` refuses a symlinked directory or token, or a directory it doesn't own or that is group- or world-writable.
+    - It changes no modes. The new `bootstrap-dir` setup service (`deploy/cli/prepare-bootstrap-dir.sh`) creates the directory as `0700`, owned by uid 10004.
+    - The `cli` bind uses `create_host_path: false`.
+  - **Custody settings:** the `cli` service reaches OpenBao through the `GATEKEEP_CUSTODY_*` variables and a new `Cli -> Adapters.OpenBao` edge. `src` may not name OpenBao paths outside the adapter.
+  - **Install doc:** fenced commands must start with `docker` or `git`, so the doc reads the token through a `docker compose run` of `bootstrap-dir`, with `sudo cat` given inline.
+  - **Stack check:** runs `bootstrap-dir` and `cli init` twice under the real uid, and checks modes and owner without printing the token.
+  - **Not done:** checking the types of existing `dep-*` keys. `setup.sh` fixes the types, and `cli.hcl` denies the exportable and plaintext-backup parameters, so only OpenBao root could create a wrong-typed key.
+
+## Auto Run Result
+
+Status: done
+
+**Summary:** `gatekeep init` (`docker compose run --rm cli init`) makes sure the four Deployment keys exist (`dep-email`, `dep-payload`, `dep-hmac`, `dep-records`). It then writes a one-time 256-bit token to `secrets/bootstrap/bootstrap-token` (0600 in a 0700 directory owned by the cli uid). It stores only the token's SHA-256 with a 15-minute expiry in the new single-row `control.bootstrap_state`, with a `bootstrap.token.issued` or `bootstrap.token.reissued` event in the same transaction. It reissues until bootstrap completes, and refuses after that. Column grants and a trigger stop any role reopening a completed bootstrap or planting a hash.
+
+**Files:** `src/Gatekeep.Cli/` (Program, BootstrapTokenFile); `src/Modules/Admins/` (BootstrapIssuer, BootstrapToken, events, contract); the bootstrap_state migration and `TableRegistry`; `deploy/compose.yaml`, `deploy/cli/prepare-bootstrap-dir.sh`, `deploy/ci/stack-check.sh`; `docs/install.md`, `docs/threat-model.md`, `docs/audit-events.md`, `docs/architecture/module-dependencies.md`; the AD-31 amendment; `tests/Isolation/Bootstrap/*`, `tests/Architecture/BootstrapStateRuleTests.cs` and updated canary, catalogue and compose tests.
+
+**Review:** 50 findings across four layers: 42 patched, 0 deferred, 8 rejected, each with its reason in the triage log.
+
+**Follow-up review:** recommended. The review changed the locking, the grants and the file handling, and only the new tests prove them.
+
+**Verification:** see the PR screenshot; the full suite passes in the `tests` container, and the stack check runs init twice under the real uid.
+
+**Residual risks:** on a host, root or Docker access can read the token (T-20, UJ-6). Story 1.21 must hash with `BootstrapToken.Hash` and claim the row with `SELECT … FOR UPDATE`.

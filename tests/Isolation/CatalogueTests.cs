@@ -79,6 +79,12 @@ public sealed class CatalogueTests(PostgresFixture postgres)
     [InlineData("ALTER TABLE migration_history SET UNLOGGED", "migration_history: is UNLOGGED, but the registry says logged.")]
     [InlineData("GRANT UPDATE (policy) ON admin_attempt TO gk_admin", "Grant not in the registry: public.admin_attempt.policy gk_admin UPDATE.")]
     [InlineData("GRANT SELECT ON admin_attempt TO gk_hosted", "Grant not in the registry: public.admin_attempt gk_hosted SELECT.")]
+    [InlineData("GRANT DELETE ON bootstrap_state TO gk_cli", "Grant not in the registry: public.bootstrap_state gk_cli DELETE.")]
+    [InlineData("GRANT SELECT ON bootstrap_state TO gk_hosted", "Grant not in the registry: public.bootstrap_state gk_hosted SELECT.")]
+    [InlineData("REVOKE UPDATE (completed_at) ON bootstrap_state FROM gk_admin", "Grant missing from the database: public.bootstrap_state.completed_at gk_admin UPDATE.")]
+    [InlineData("GRANT UPDATE (completed_at) ON bootstrap_state TO gk_cli", "Grant not in the registry: public.bootstrap_state.completed_at gk_cli UPDATE.")]
+    [InlineData("GRANT UPDATE (token_sha256) ON bootstrap_state TO gk_admin", "Grant not in the registry: public.bootstrap_state.token_sha256 gk_admin UPDATE.")]
+    [InlineData("DROP TRIGGER bootstrap_state_guard_update ON bootstrap_state", "Trigger missing from the database: bootstrap_state.bootstrap_state_guard_update.")]
     // Policies weakened or added.
     [InlineData("DROP POLICY tenant_settings_tenant ON tenant_settings", "tenant_settings: policies are")]
     [InlineData(

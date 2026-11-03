@@ -384,6 +384,7 @@
       "gatekeep": {
         "type": "Project",
         "dependencies": {
+          "Gatekeep.Adapters.OpenBao": "[0.1.0, )",
           "Gatekeep.Adapters.Postgres": "[0.1.0, )",
           "Gatekeep.Kernel": "[0.1.0, )",
           "Gatekeep.Modules.Admins": "[0.1.0, )",

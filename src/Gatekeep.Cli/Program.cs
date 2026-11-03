@@ -1,6 +1,7 @@
 using System.Data.Common;
 using System.Globalization;
 using Gatekeep.Adapters.Postgres;
+using Gatekeep.Cli;
 using Gatekeep.Kernel.Persistence;
 using Gatekeep.Kernel.Secrets;
 using Gatekeep.Modules.Audit.Contracts;
@@ -10,24 +11,32 @@ const int Success = 0;
 const int Failure = 1;
 const int UsageError = 2;
 
-// The cli Compose service sets these, so `docker compose run --rm cli migrate` and
-// `docker compose run --rm cli audit verify` need no paths.
+// The cli Compose service sets these, so `docker compose run --rm cli migrate`,
+// `docker compose run --rm cli audit verify` and `docker compose run --rm cli init` need no paths.
 const string ConnectionFileVariable = "GATEKEEP_MIGRATE_CONNECTION_FILE";
 const string PasswordFileVariable = "GATEKEEP_MIGRATE_PASSWORD_FILE";
 const string CliConnectionFileVariable = "GATEKEEP_CLI_CONNECTION_FILE";
 const string CliPasswordFileVariable = "GATEKEEP_CLI_PASSWORD_FILE";
+
+// Where the cli service bind-mounts bootstrap/ from the host secrets directory.
+const string DefaultTokenDirectory = "/gatekeep/bootstrap";
 
 const string Usage = """
     Usage: gatekeep migrate --connection-file <path> [--password-file <path>]
            gatekeep migrate    (with GATEKEEP_MIGRATE_CONNECTION_FILE and GATEKEEP_MIGRATE_PASSWORD_FILE set)
            gatekeep audit verify --connection-file <path> [--password-file <path>]
            gatekeep audit verify    (with GATEKEEP_CLI_CONNECTION_FILE and GATEKEEP_CLI_PASSWORD_FILE set)
+           gatekeep init [--token-dir <path>]    (with GATEKEEP_CLI_CONNECTION_FILE, GATEKEEP_CLI_PASSWORD_FILE,
+                                                  GATEKEEP_CUSTODY_SOCKET, GATEKEEP_CUSTODY_ROLE_ID_FILE and
+                                                  GATEKEEP_CUSTODY_SECRET_ID_FILE set;
+                                                  the token directory defaults to /gatekeep/bootstrap)
     """;
 
 var defaultConnectionFile = Environment.GetEnvironmentVariable(ConnectionFileVariable);
 var defaultPasswordFile = Environment.GetEnvironmentVariable(PasswordFileVariable);
 var cliConnectionFile = Environment.GetEnvironmentVariable(CliConnectionFileVariable);
 var cliPasswordFile = Environment.GetEnvironmentVariable(CliPasswordFileVariable);
+var cliReady = !string.IsNullOrEmpty(cliConnectionFile) && !string.IsNullOrEmpty(cliPasswordFile);
 
 return args switch
 {
@@ -35,10 +44,12 @@ return args switch
         await MigrateAsync(defaultConnectionFile, defaultPasswordFile),
     ["migrate", "--connection-file", var path] => await MigrateAsync(path, passwordPath: null),
     ["migrate", "--connection-file", var path, "--password-file", var passwordPath] => await MigrateAsync(path, passwordPath),
-    ["audit", "verify"] when !string.IsNullOrEmpty(cliConnectionFile) && !string.IsNullOrEmpty(cliPasswordFile) =>
-        await VerifyAsync(cliConnectionFile, cliPasswordFile),
+    ["audit", "verify"] when cliReady => await VerifyAsync(cliConnectionFile!, cliPasswordFile),
     ["audit", "verify", "--connection-file", var path] => await VerifyAsync(path, passwordPath: null),
     ["audit", "verify", "--connection-file", var path, "--password-file", var passwordPath] => await VerifyAsync(path, passwordPath),
+    ["init"] when cliReady => await InitAsync(cliConnectionFile!, cliPasswordFile!, DefaultTokenDirectory, defaultDirectory: true),
+    ["init", "--token-dir", var tokenDirectory] when cliReady && tokenDirectory.Length > 0 =>
+        await InitAsync(cliConnectionFile!, cliPasswordFile!, tokenDirectory, defaultDirectory: false),
     _ => ShowUsage(),
 };
 
@@ -253,4 +264,16 @@ static async Task<int> VerifyAsync(string path, string? passwordPath)
         Console.Error.WriteLine($"Verification failed: {e.GetType().Name}");
         return Failure;
     }
+}
+
+/// <summary>
+/// <c>gatekeep init</c> (Story 1.19), as <see cref="InitCommand"/> runs it, with the connection
+/// file read here as every command reads it.
+/// </summary>
+static async Task<int> InitAsync(string path, string passwordPath, string tokenDirectory, bool defaultDirectory)
+{
+    var connectionString = await ConnectionAsync(path, passwordPath);
+    return connectionString is null
+        ? Failure
+        : await InitCommand.RunAsync(connectionString, tokenDirectory, defaultDirectory);
 }

@@ -60,6 +60,8 @@ public static class TableRegistry
 
     private static readonly IReadOnlyList<string> StepRetryColumns = ["status", "result_code", "updated_at"];
 
+    private static readonly IReadOnlyList<string> BootstrapTokenColumns = ["token_sha256", "issued_at", "expires_at"];
+
     public static readonly IReadOnlyList<TableEntry> Tables =
     [
         new("tenant", TableClass.Control, "Tenancy", new Dictionary<string, IReadOnlyList<string>>
@@ -253,6 +255,31 @@ public static class TableRegistry
                 [Admin] = [new ColumnGrant(Update, ["window_start", "attempts"])],
             },
             Unlogged: true),
+
+        // Story 1.19: one row, holding only the bootstrap token's SHA-256. The Cli issues and
+        // reissues it; Host.Admin reads it and completes bootstrap (Story 1.21). No role deletes,
+        // and a completed row is final.
+        new(
+            "bootstrap_state",
+            TableClass.Control,
+            "Admins",
+            new Dictionary<string, IReadOnlyList<string>>
+            {
+                [Admin] = [Select],
+                [Cli] = [Select],
+            },
+            new Dictionary<string, IReadOnlyList<ColumnGrant>>
+            {
+                // Issuing and reissuing: the token's hash and times. Never completion.
+                [Cli] =
+                [
+                    new ColumnGrant(Insert, ["id", "token_sha256", "issued_at", "expires_at"]),
+                    new ColumnGrant(Update, BootstrapTokenColumns),
+                ],
+                // Completing bootstrap. Never the token.
+                [Admin] = [new ColumnGrant(Update, ["completed_at"])],
+            },
+            ["bootstrap_state_guard_update"]),
     ];
 
     private static IReadOnlyList<string> EventTriggers(string table) =>

@@ -4,17 +4,21 @@
 #   docker compose -f deploy/compose.yaml --profile tools --profile setup build
 #   docker compose -f deploy/compose.yaml run --rm keygen
 #   docker compose -f deploy/compose.yaml run --rm passwords
+#   docker compose -f deploy/compose.yaml run --rm bootstrap-dir
 #   docker compose -f deploy/compose.yaml up -d openbao
 #   docker compose -f deploy/compose.yaml run --rm openbao-setup
 #   docker compose -f deploy/compose.yaml run --rm cli migrate
 #   docker compose -f deploy/compose.yaml up -d --wait
+#   docker compose -f deploy/compose.yaml run --rm cli init
 #
 # Secrets live in GATEKEEP_SECRETS_DIR (default deploy/secrets, resolved against this
 # file's directory), a directory on the Docker host that is never a Docker volume, never
 # committed and never backed up. Its subdirectories are master/ (the Master Key),
-# postgres/ (database passwords), recovery/ (OpenBao recovery keys, until escrowed) and
-# approle/ (each role's AppRole IDs). Secrets reach containers only as Compose secrets
-# under /run/secrets. No secret is in this file, an image or an environment variable.
+# postgres/ (database passwords), recovery/ (OpenBao recovery keys, until escrowed),
+# approle/ (each role's AppRole IDs) and bootstrap/ (the one-time bootstrap token, which
+# only the cli service mounts). Secrets reach containers only as Compose secrets under
+# /run/secrets, but for that token, which cli writes. No secret is in this file, an image or
+# an environment variable.
 #
 # caddy is the only service that publishes ports, 80 and 443 (Story 1.11). It serves the
 # Tenant zone wildcard to Host.Hosted and the Admin hostname to Host.Admin, and refuses
@@ -278,8 +282,10 @@ services:
       retries: 12
 
   # gatekeep, run on demand: docker compose -f deploy/compose.yaml run --rm cli <command>.
-  # A bare `migrate` (as gk_migrator) and a bare `audit verify` (as gk_cli) take their
-  # connection and password files from the environment below.
+  # A bare `migrate` (as gk_migrator), `audit verify` and `init` (as gk_cli) take their
+  # connection and password files from the environment below. `init` also reaches OpenBao
+  # on its socket with the cli AppRole, and writes the one-time bootstrap token into
+  # bootstrap/ in the secrets directory, its only bind mount from there (Story 1.19).
   cli:
     build:
       context: ..
@@ -295,6 +301,9 @@ services:
       GATEKEEP_MIGRATE_PASSWORD_FILE: /run/secrets/gk_migrator_password
       GATEKEEP_CLI_CONNECTION_FILE: /gatekeep/cli.connection
       GATEKEEP_CLI_PASSWORD_FILE: /run/secrets/gk_cli_password
+      GATEKEEP_CUSTODY_SOCKET: /run/openbao/openbao.sock
+      GATEKEEP_CUSTODY_ROLE_ID_FILE: /run/secrets/openbao_role_id
+      GATEKEEP_CUSTODY_SECRET_ID_FILE: /run/secrets/openbao_secret_id
     secrets:
       - gk_migrator_password
       - gk_cli_password
@@ -306,6 +315,14 @@ services:
       - ./postgres/migrator.connection:/gatekeep/migrator.connection:ro
       - ./postgres/cli.connection:/gatekeep/cli.connection:ro
       - openbao-socket:/run/openbao:ro
+      # Read-write: init writes bootstrap-token here, mode 0600, in the 0700 directory
+      # bootstrap-dir gives the cli uid. Never in an image, a volume or a backup.
+      # Never created here: Docker would make it root-owned, and init would refuse it.
+      - type: bind
+        source: ${GATEKEEP_SECRETS_DIR:-./secrets}/bootstrap
+        target: /gatekeep/bootstrap
+        bind:
+          create_host_path: false
     networks: [tools]
     depends_on:
       postgres:
@@ -331,6 +348,18 @@ services:
     volumes:
       - ${GATEKEEP_SECRETS_DIR:-./secrets}/postgres:/secrets/postgres
       - ./postgres/generate-passwords.sh:/gatekeep/generate-passwords.sh:ro
+
+  # Makes bootstrap/, where `cli init` writes the bootstrap token: mode 0700, owned by the
+  # cli uid, so on the host only root and that uid can read it (Story 1.19). It writes nothing
+  # else and sees no other subdirectory.
+  bootstrap-dir:
+    image: busybox:1.37.0@sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec
+    profiles: [setup]
+    <<: *secrets-tool
+    entrypoint: ["sh", "/gatekeep/prepare-bootstrap-dir.sh"]
+    volumes:
+      - ${GATEKEEP_SECRETS_DIR:-./secrets}/bootstrap:/secrets/bootstrap
+      - ./cli/prepare-bootstrap-dir.sh:/gatekeep/prepare-bootstrap-dir.sh:ro
 
   # First setup of OpenBao, once, over its socket. Writes recovery keys into recovery/ and
   # AppRole IDs into approle/ only. It can't see master/ or postgres/.
