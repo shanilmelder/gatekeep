@@ -95,6 +95,45 @@ internal static class AdminApi
             .Produces<ApiProblem>(StatusCodes.Status429TooManyRequests, AdminResponses.ProblemContentType)
             .Produces(StatusCodes.Status503ServiceUnavailable);
 
+        app.MapPost("/api/v1/deployment/signin", static (HttpContext context, AdminApiServices services) => SignInApi.BeginAsync(context, services))
+            .WithMetadata(DeploymentApiEndpoint.Instance, SignInEndpoint.Instance)
+            .WithName("BeginSignIn")
+            .WithTags(Tag)
+            .WithSummary("Begin an Admin sign-in with WebAuthn: the options for navigator.credentials.get.")
+            .WithDescription(
+                "Sessionless: needs the exact Admin Origin, and has no session or CSRF check. Returns request options for the Admin " +
+                "RP ID with user verification required and no allowed credentials listed: the credential is discoverable, so no " +
+                "username is asked for and no credential ID is sent. Sets the __Host-gk-admin-signin cookie that binds the challenge " +
+                "to this browser; it can be answered once, within 5 minutes, and a new begin replaces it. Each begin is counted per " +
+                "client: the 21st in 15 minutes is 429. Before bootstrap completes it is the unknown-path 404.")
+            .Produces<AdminSignInOptionsResponse>(StatusCodes.Status200OK)
+            .Produces(StatusCodes.Status403Forbidden)
+            .Produces(StatusCodes.Status404NotFound)
+            .Produces<ApiProblem>(StatusCodes.Status429TooManyRequests, AdminResponses.ProblemContentType)
+            .Produces(StatusCodes.Status503ServiceUnavailable);
+
+        app.MapPost("/api/v1/deployment/signin/complete", static (HttpContext context, AdminApiServices services) => SignInApi.CompleteAsync(context, services))
+            .WithMetadata(DeploymentApiEndpoint.Instance, SignInEndpoint.Instance, new JsonRequestBody(typeof(AdminSignInRequest)))
+            .WithName("CompleteSignIn")
+            .WithTags(Tag)
+            .WithSummary("Complete an Admin sign-in with the browser's WebAuthn assertion, and start a full Admin Session.")
+            .WithDescription(
+                "Sessionless: needs the exact Admin Origin and the __Host-gk-admin-signin cookie from the begin. Once the call is " +
+                "counted, the challenge that cookie names is taken before the body is read, so it is used up whatever follows, and " +
+                "every response clears the cookie. A 429, or a 503 for a missing client address, comes before that and leaves the " +
+                "challenge live. Verifies the assertion against the Admin RP ID, the exact " +
+                "Admin origin and the registered credential it names, with user verification, the credential owner's user handle " +
+                "and a signature counter that advances. Every refusal is the same 400 signin_refused, with no Session. A sign-in " +
+                "starts a full Session; an Admin without two credentials still reaches only setup. A live Session this browser " +
+                "held is ended as superseded. Each complete is counted per client, a success too: the 11th in 15 minutes is 429. " +
+                "Before bootstrap completes it is the unknown-path 404.")
+            .Produces<AdminSignInResponse>(StatusCodes.Status200OK)
+            .Produces<ApiProblem>(StatusCodes.Status400BadRequest, AdminResponses.ProblemContentType)
+            .Produces(StatusCodes.Status403Forbidden)
+            .Produces(StatusCodes.Status404NotFound)
+            .Produces<ApiProblem>(StatusCodes.Status429TooManyRequests, AdminResponses.ProblemContentType)
+            .Produces(StatusCodes.Status503ServiceUnavailable);
+
         app.MapGet("/api/v1/deployment/session", static (HttpContext context, AdminApiServices services) => GetSessionAsync(context, services))
             .WithMetadata(DeploymentApiEndpoint.Instance, SetupAllowed.Instance)
             .WithName("GetSession")
@@ -112,7 +151,7 @@ internal static class AdminApi
             .WithSummary("Begin registering a WebAuthn credential: the options for navigator.credentials.create.")
             .WithDescription(
                 "Setup-allowed. Returns creation options for the Admin RP ID and origin, with no attestation, user verification " +
-                "required, a resident key preferred, ES256 and RS256, and the Admin's credentials excluded. Its challenge can be " +
+                "required, a resident key required, ES256 and RS256, and the Admin's credentials excluded. Its challenge can be " +
                 "answered for 5 minutes, by the next complete call only; a new begin replaces it. Refused with 403 once the Admin " +
                 "has two credentials. Each begin and complete counts towards 10 per Session in 15 minutes, then 429.")
             .Produces<CredentialCreationOptionsResponse>(StatusCodes.Status200OK)
@@ -145,8 +184,8 @@ internal static class AdminApi
             .WithTags(Tag)
             .WithSummary("Sign out: end the current Admin Session.")
             .WithDescription(
-                "Ends the Session as signed_out and clears the cookie. Not setup-allowed: a setup Session signing out would leave " +
-                "the Deployment Owner unable to finish setup.")
+                "Ends the Session as signed_out, writes admin.session.signed_out, and clears the cookie. Not setup-allowed: a " +
+                "setup Session signing out would leave the Deployment Owner unable to finish setup.")
             .Produces(StatusCodes.Status204NoContent)
             .Produces(StatusCodes.Status401Unauthorized)
             .Produces(StatusCodes.Status403Forbidden)
@@ -197,7 +236,7 @@ internal static class AdminApi
 
             if (!decision.Allowed)
             {
-                logger.LogInformation("A bootstrap claim was refused with {Code}, trace {TraceId}.", AdminResponses.RateLimited, AdminResponses.TraceId(context));
+                logger.LogInformation("A bootstrap claim was refused with {Problem}, trace {TraceId}.", AdminResponses.RateLimited, AdminResponses.TraceId(context));
                 context.Response.Headers.RetryAfter = Math.Max(1, (long)Math.Ceiling(decision.RetryAfter.TotalSeconds))
                     .ToString(System.Globalization.CultureInfo.InvariantCulture);
                 await AdminResponses.ProblemAsync(context, StatusCodes.Status429TooManyRequests, AdminResponses.RateLimited);
@@ -296,7 +335,7 @@ internal static class AdminApi
                 return;
 
             default:
-                logger.LogInformation("A bootstrap claim was refused with {Code}, trace {TraceId}.", AdminResponses.BootstrapRefused, AdminResponses.TraceId(context));
+                logger.LogInformation("A bootstrap claim was refused with {Problem}, trace {TraceId}.", AdminResponses.BootstrapRefused, AdminResponses.TraceId(context));
                 await AdminResponses.ProblemAsync(context, StatusCodes.Status400BadRequest, AdminResponses.BootstrapRefused);
                 return;
         }
@@ -357,6 +396,7 @@ internal static class AdminApi
         var session = AdminRequestChecks.Session(context);
         var cancellationToken = context.RequestAborted;
 
+        // The ending and its admin.session.signed_out event: one transaction.
         await using (var scope = await services.BeginAsync(cancellationToken))
         {
             await services.Sessions.EndAsync(scope.CreateCommandContext(), session, cancellationToken);
@@ -375,12 +415,7 @@ internal static class AdminApi
         return AdminResponses.JsonAsync(context, new CapabilitiesResponse { Capabilities = [] });
     }
 
-    /// <summary>
-    /// A browser session cookie (no Domain, Expires or Max-Age), host-only by its prefix, sent
-    /// only over HTTPS, only same-site and never to script.
-    /// </summary>
-    private static string SessionCookie(string token) =>
-        $"{AdminRequestChecks.SessionCookie}={token}; Path=/; Secure; HttpOnly; SameSite=Strict";
+    private static string SessionCookie(string token) => AdminResponses.SessionCookie(token);
 
     /// <summary>
     /// The claim's <c>token</c> as UTF-8 bytes, copied straight out of the JSON with no string

@@ -141,10 +141,10 @@ public sealed partial class BootstrapClaimTests(PostgresFixture postgres)
         Assert.Equal(1, await AttemptsAsync(host));
         Assert.Equal(before, await StateAsync(host));
 
-        // The trace ID is the W3C one, and the host's log line for the refusal carries it.
+        // The trace ID is the W3C one, and the host's log line names the problem code and carries it.
         Assert.Matches("^[0-9a-f]{32}$", traceId);
         await host.StopAsync();
-        Assert.Contains(traceId, host.Output);
+        Assert.Contains($"refused with bootstrap_refused, trace {traceId}", host.Output, StringComparison.Ordinal);
     }
 
     [Theory]

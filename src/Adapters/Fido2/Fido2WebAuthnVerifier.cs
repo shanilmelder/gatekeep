@@ -24,7 +24,10 @@ public static class Fido2WebAuthn
 /// response, the client data is checked here too, exactly: its type, an origin equal to the
 /// Relying Party's origin byte for byte (the library compares case-insensitively), no
 /// <c>crossOrigin</c> and no <c>topOrigin</c>, and a challenge whose SHA-256 is the stored one,
-/// compared in constant time.
+/// compared in constant time. An assertion's user handle must be the stored credential's owner's,
+/// and its signature counter rule is applied here, not left to the library: when the stored and
+/// new counters are both 0 the authenticator keeps none and the assertion passes; otherwise the
+/// new one must be greater, or the assertion is refused as a regression, a cloned authenticator's sign.
 /// </summary>
 internal sealed class Fido2WebAuthnVerifier : IWebAuthnVerifier
 {
@@ -39,6 +42,10 @@ internal sealed class Fido2WebAuthnVerifier : IWebAuthnVerifier
     private const string PublicKey = "public-key";
 
     private const string Create = "webauthn.create";
+
+    private const string Get = "webauthn.get";
+
+    private const string Required = "required";
 
     /// <summary>ES256 first, as external authenticators support it, then RS256 for platforms that need it.</summary>
     private static readonly IReadOnlyList<PubKeyCredParam> Parameters = [PubKeyCredParam.ES256, PubKeyCredParam.RS256];
@@ -76,8 +83,8 @@ internal sealed class Fido2WebAuthnVerifier : IWebAuthnVerifier
             [.. options.PubKeyCredParams.Select(p => new WebAuthnPublicKeyParameter(PublicKey, (int)p.Alg))],
             (uint)options.Timeout,
             "none",
-            "preferred",
-            "required",
+            Required,
+            Required,
             [.. options.ExcludeCredentials.Select(d => new WebAuthnCredentialDescriptor(
                 PublicKey,
                 d.Id,
@@ -100,7 +107,7 @@ internal sealed class Fido2WebAuthnVerifier : IWebAuthnVerifier
             return WebAuthnRegistrationResult.Refused(WebAuthnRefusal.Malformed);
         }
 
-        if (ClientData(attestation.ClientDataJson, request.RelyingParty, request.ChallengeSha256, out var challenge) is { } refusal)
+        if (ClientData(attestation.ClientDataJson, Create, request.RelyingParty, request.ChallengeSha256, out var challenge) is { } refusal)
         {
             return WebAuthnRegistrationResult.Refused(refusal);
         }
@@ -158,11 +165,130 @@ internal sealed class Fido2WebAuthnVerifier : IWebAuthnVerifier
             userVerified));
     }
 
+    public WebAuthnRequestOptions BeginAssertion(WebAuthnAssertionBegin request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        RequireRelyingParty(request.RelyingParty);
+        ArgumentNullException.ThrowIfNull(request.Challenge);
+        if (request.Challenge.Length < MinChallengeBytes)
+        {
+            throw new ArgumentException($"A challenge is at least {MinChallengeBytes} bytes.", nameof(request));
+        }
+
+        var options = RequestOptions(Configuration(request.RelyingParty), request.Challenge);
+        return new WebAuthnRequestOptions(options.Challenge, options.RpId ?? request.RelyingParty.Id, (uint)options.Timeout, Required, []);
+    }
+
+    public async Task<WebAuthnAssertionResult> FinishAssertionAsync(WebAuthnAssertionFinish request, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        RequireRelyingParty(request.RelyingParty);
+        ArgumentNullException.ThrowIfNull(request.ChallengeSha256);
+        ArgumentNullException.ThrowIfNull(request.Assertion);
+        ArgumentNullException.ThrowIfNull(request.Credential);
+
+        var assertion = request.Assertion;
+        var stored = request.Credential;
+        if (assertion.CredentialId is not { Length: > 0 } || assertion.ClientDataJson is not { Length: > 0 }
+            || assertion.AuthenticatorData is not { Length: > 0 } || assertion.Signature is not { Length: > 0 }
+            || request.ChallengeSha256.Length != SHA256.HashSizeInBytes
+            || stored.CredentialId is not { Length: > 0 } || stored.PublicKey is not { Length: > 0 } || stored.UserHandle is not { Length: > 0 })
+        {
+            return WebAuthnAssertionResult.Refused(WebAuthnRefusal.Malformed);
+        }
+
+        // The stored credential is the one the response names, or nothing about it applies.
+        if (!assertion.CredentialId.AsSpan().SequenceEqual(stored.CredentialId))
+        {
+            return WebAuthnAssertionResult.Refused(WebAuthnRefusal.Invalid);
+        }
+
+        if (ClientData(assertion.ClientDataJson, Get, request.RelyingParty, request.ChallengeSha256, out var challenge) is { } refusal)
+        {
+            return WebAuthnAssertionResult.Refused(refusal);
+        }
+
+        // A discoverable credential returns its user handle; it must be its owner's.
+        if (assertion.UserHandle is not { Length: > 0 } handle
+            || handle.Length != stored.UserHandle.Length
+            || !CryptographicOperations.FixedTimeEquals(handle, stored.UserHandle))
+        {
+            return WebAuthnAssertionResult.Refused(WebAuthnRefusal.UserHandleMismatch);
+        }
+
+        var config = Configuration(request.RelyingParty);
+        VerifyAssertionResult verified;
+        bool userVerified;
+        try
+        {
+            var raw = new AuthenticatorAssertionRawResponse
+            {
+                Id = Base64Url.EncodeToString(assertion.CredentialId),
+                RawId = assertion.CredentialId,
+                Type = PublicKeyCredentialType.PublicKey,
+                Response = new AuthenticatorAssertionRawResponse.AssertionResponse
+                {
+                    AuthenticatorData = assertion.AuthenticatorData,
+                    Signature = assertion.Signature,
+                    ClientDataJson = assertion.ClientDataJson,
+                    UserHandle = handle,
+                },
+                ClientExtensionResults = new AuthenticationExtensionsClientOutputs(),
+            };
+
+            // Parsed here too, for the UV flag the result doesn't carry.
+            userVerified = AuthenticatorAssertionResponse.Parse(raw).AuthenticatorData.UserVerified;
+
+            // The counter rule is this adapter's own, below, on the verified count: given 0 as the
+            // stored counter, the library's rule never refuses one.
+            verified = await new Fido2NetLib.Fido2(config).MakeAssertionAsync(
+                new MakeAssertionParams
+                {
+                    AssertionResponse = raw,
+                    OriginalOptions = RequestOptions(config, challenge),
+                    StoredPublicKey = stored.PublicKey,
+                    StoredSignatureCounter = 0,
+                    IsUserHandleOwnerOfCredentialIdCallback = (args, _) => Task.FromResult(
+                        args.UserHandle is { } owner && owner.Length == stored.UserHandle.Length
+                        && CryptographicOperations.FixedTimeEquals(owner, stored.UserHandle)
+                        && args.CredentialId.AsSpan().SequenceEqual(stored.CredentialId)),
+                },
+                cancellationToken);
+        }
+        catch (Fido2VerificationException e)
+        {
+            return WebAuthnAssertionResult.Refused(Refusal(e.Code));
+        }
+        catch (Exception e) when (e is not OperationCanceledException)
+        {
+            // Attacker-controlled bytes the library didn't wrap: a malformed response, never a fault.
+            return WebAuthnAssertionResult.Refused(WebAuthnRefusal.Malformed);
+        }
+
+        // The library refuses a missing UV flag before the signature; this is only a second look.
+        if (!userVerified)
+        {
+            return WebAuthnAssertionResult.Refused(WebAuthnRefusal.UserNotVerified);
+        }
+
+        // The signature verified. Both 0: an authenticator that keeps no counter. Otherwise it must go up.
+        if ((verified.SignCount != 0 || stored.SignCount != 0) && verified.SignCount <= stored.SignCount)
+        {
+            return WebAuthnAssertionResult.RefusedAfterSignature(WebAuthnRefusal.SignCountRegressed);
+        }
+
+        return WebAuthnAssertionResult.Asserted(verified.SignCount, userVerified);
+    }
+
+    /// <summary>An assertion's options for this call's Relying Party: user verification required, and no credential listed.</summary>
+    private static AssertionOptions RequestOptions(Fido2Configuration config, byte[] challenge) =>
+        AssertionOptions.Create(config, challenge, [], UserVerificationRequirement.Required, extensions: null);
+
     /// <summary>
     /// The client data's own checks, before the library's: a refusal, or null and the challenge
     /// the browser signed over, which is the one whose SHA-256 was stored.
     /// </summary>
-    private static WebAuthnRefusal? ClientData(byte[] json, WebAuthnRelyingParty relyingParty, byte[] storedHash, out byte[] challenge)
+    private static WebAuthnRefusal? ClientData(byte[] json, string expectedType, WebAuthnRelyingParty relyingParty, byte[] storedHash, out byte[] challenge)
     {
         challenge = [];
         string? type;
@@ -190,7 +316,7 @@ internal sealed class Fido2WebAuthnVerifier : IWebAuthnVerifier
             return WebAuthnRefusal.Malformed;
         }
 
-        if (type != Create)
+        if (type != expectedType)
         {
             return WebAuthnRefusal.WrongType;
         }
@@ -254,7 +380,7 @@ internal sealed class Fido2WebAuthnVerifier : IWebAuthnVerifier
             new Fido2User { Id = user.Handle, Name = user.Name, DisplayName = user.DisplayName },
             new AuthenticatorSelection
             {
-                ResidentKey = ResidentKeyRequirement.Preferred,
+                ResidentKey = ResidentKeyRequirement.Required,
                 UserVerification = UserVerificationRequirement.Required,
             },
             AttestationConveyancePreference.None,
@@ -268,6 +394,7 @@ internal sealed class Fido2WebAuthnVerifier : IWebAuthnVerifier
         Fido2ErrorCode.UserVerificationRequirementNotMet or Fido2ErrorCode.UserPresentFlagNotSet => WebAuthnRefusal.UserNotVerified,
         Fido2ErrorCode.CredentialAlgorithmRequirementNotMet or Fido2ErrorCode.UnimplementedAlgorithm => WebAuthnRefusal.AlgorithmNotAllowed,
         Fido2ErrorCode.NonUniqueCredentialId => WebAuthnRefusal.ExcludedCredential,
+        Fido2ErrorCode.InvalidAssertionResponse => WebAuthnRefusal.Malformed,
         Fido2ErrorCode.InvalidAuthenticatorResponseOrigin or Fido2ErrorCode.MissingAuthenticatorResponseOrigin => WebAuthnRefusal.OriginMismatch,
         Fido2ErrorCode.CrossOriginRequestNotAllowed or Fido2ErrorCode.InvalidAuthenticatorResponseTopOrigin => WebAuthnRefusal.CrossOrigin,
         Fido2ErrorCode.InvalidAuthenticatorResponseChallenge or Fido2ErrorCode.MissingAuthenticatorResponseChallenge => WebAuthnRefusal.ChallengeMismatch,

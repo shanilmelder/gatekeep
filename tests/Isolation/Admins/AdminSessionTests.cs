@@ -119,6 +119,57 @@ public sealed class AdminSessionTests(PostgresFixture postgres)
         await AssertUnauthorizedAsync(ended, cleared: true);
     }
 
+    public static TheoryData<string, string> StateChangingCalls => new()
+    {
+        { "DELETE", SessionPath },
+        { "POST", AdminHost.RegistrationPath },
+        { "POST", AdminHost.RegistrationPath + "/complete" },
+    };
+
+    /// <summary>
+    /// Story 1.23, NFR-4: sign-out and both registration calls refuse a missing or wrong CSRF
+    /// token, and a wrong, missing or duplicated Origin, with 403; the Session stays live, no
+    /// challenge is set and no attempt is counted.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(StateChangingCalls))]
+    public async Task State_changing_call_with_a_bad_CSRF_token_or_Origin_is_403_and_changes_nothing(string method, string path)
+    {
+        await using var host = await AdminHost.StartAsync(postgres);
+        // Sign-out needs an Admin past setup; registration one still in it. Either way, only the checks refuse.
+        var (cookie, csrf, sessionId) = await host.InsertFullSessionAsync(credentials: method == "DELETE" ? 2 : 1);
+        var (_, otherCsrf, _) = await host.InsertFullSessionAsync();
+
+        (string? Csrf, string? Origin, string? SecondOrigin)[] refused =
+        [
+            (null, AdminHost.Origin, null),
+            (AdminHost.Unissued(), AdminHost.Origin, null),
+            (otherCsrf, AdminHost.Origin, null),
+            (csrf, null, null),
+            (csrf, "https://elsewhere.test", null),
+            (csrf, AdminHost.Origin, AdminHost.Origin),
+            (csrf, AdminHost.Origin, "https://elsewhere.test"),
+        ];
+        foreach (var (token, origin, second) in refused)
+        {
+            using var response = await host.SendAsync(
+                new HttpMethod(method),
+                path,
+                cookie,
+                token,
+                origin,
+                body: path.EndsWith("/complete", StringComparison.Ordinal) ? "{}" : null,
+                headers: second is null ? null : new[] { ("Origin", second) });
+            Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+            Assert.Empty(await response.Content.ReadAsByteArrayAsync(Cancellation));
+        }
+
+        Assert.True(await host.ScalarAsync<bool>(
+            $"SELECT ended_at IS NULL AND registration_challenge_sha256 IS NULL FROM admin_session WHERE id = '{sessionId}'"));
+        Assert.Equal(0L, await host.ScalarAsync<long>("SELECT count(*) FROM admin_attempt"));
+        Assert.Equal(0L, await host.ScalarAsync<long>("SELECT count(*) FROM deployment_audit_event WHERE type_code LIKE 'admin.%'"));
+    }
+
     [Fact]
     public async Task Missing_session_is_401_and_a_stale_cookie_is_cleared()
     {

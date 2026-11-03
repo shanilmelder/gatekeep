@@ -94,7 +94,11 @@ public interface IAdminSessions
     [StateChanging]
     Task<AdminSession?> AuthenticateAsync(CommandContext context, Secret<string> sessionToken, CancellationToken cancellationToken);
 
-    /// <summary>Ends the Session with <c>signed_out</c>. Ending an ended Session changes nothing.</summary>
+    /// <summary>
+    /// Ends the Session with <c>signed_out</c> and appends <see cref="AdminsEvents.SessionSignedOut"/>,
+    /// in the caller's transaction, and returns true. Ending an ended Session changes nothing,
+    /// audits nothing and returns false.
+    /// </summary>
     [StateChanging]
-    Task EndAsync(CommandContext context, AdminSession session, CancellationToken cancellationToken);
+    Task<bool> EndAsync(CommandContext context, AdminSession session, CancellationToken cancellationToken);
 }

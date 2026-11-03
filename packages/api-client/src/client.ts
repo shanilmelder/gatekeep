@@ -13,6 +13,9 @@ export type CapabilitiesResponse = components['schemas']['CapabilitiesResponse']
 export type CredentialCreationOptionsResponse = components['schemas']['CredentialCreationOptionsResponse'];
 export type CredentialRegistrationRequest = components['schemas']['CredentialRegistrationRequest'];
 export type CredentialRegistrationResponse = components['schemas']['CredentialRegistrationResponse'];
+export type AdminSignInOptionsResponse = components['schemas']['AdminSignInOptionsResponse'];
+export type AdminSignInRequest = components['schemas']['AdminSignInRequest'];
+export type AdminSignInResponse = components['schemas']['AdminSignInResponse'];
 
 /** A path the committed OpenAPI document has, so a removed endpoint fails to compile. */
 export type ApiPath = keyof paths;
@@ -130,6 +133,10 @@ export function createApiClient(options: ApiClientOptions = {}) {
     /** Completes it with the browser's attestation response, in WebAuthn's JSON form. */
     completeCredentialRegistration: (credential: CredentialRegistrationRequest) =>
       request('/api/v1/deployment/credentials/registration/complete', 'post', credential),
+    /** Begins an Admin sign-in: the options for navigator.credentials.get, and the binding cookie. Needs no Session. */
+    beginSignIn: () => request('/api/v1/deployment/signin', 'post'),
+    /** Completes it with the browser's assertion response, in WebAuthn's JSON form, and starts a Session. */
+    completeSignIn: (assertion: AdminSignInRequest) => request('/api/v1/deployment/signin/complete', 'post', assertion),
   };
 }
 

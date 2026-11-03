@@ -29,13 +29,15 @@ public class AdminApiRuleTests
         new[] { "gk_admin INSERT", "gk_admin SELECT" },
         new[] { "gk_admin UPDATE end_reason,ended_at,idle_expires_at,kind,registration_challenge_expires_at,registration_challenge_sha256" })]
     [InlineData("admin_credential", new[] { "gk_admin INSERT", "gk_admin SELECT" }, new[] { "gk_admin UPDATE last_used_at,sign_count" })]
-    public void Registry_lists_the_Admins_tables_with_exactly_their_grants(string table, string[] grants, string[] columns)
+    // Story 1.23: the one Admins table with DELETE, and no UPDATE: taking a challenge deletes it.
+    [InlineData("admin_signin_challenge", new[] { "gk_admin DELETE", "gk_admin INSERT", "gk_admin SELECT" }, new string[0], true)]
+    public void Registry_lists_the_Admins_tables_with_exactly_their_grants(string table, string[] grants, string[] columns, bool unlogged = false)
     {
         var entry = Entry(table);
 
         Assert.Equal("Control", Get(entry, "Class")!.ToString());
         Assert.Equal("Admins", Get(entry, "Owner"));
-        Assert.False((bool)Get(entry, "Unlogged")!);
+        Assert.Equal(unlogged, (bool)Get(entry, "Unlogged")!);
 
         var tableGrants = ((IEnumerable)Get(entry, "Grants")!)
             .Cast<object>()
@@ -43,7 +45,7 @@ public class AdminApiRuleTests
             .Order(StringComparer.Ordinal);
         Assert.Equal(grants, tableGrants);
 
-        var columnGrants = ((IEnumerable)Get(entry, "ColumnGrants")!)
+        var columnGrants = ((IEnumerable?)Get(entry, "ColumnGrants") ?? Array.Empty<object>())
             .Cast<object>()
             .SelectMany(g => ((IEnumerable)Get(g, "Value")!).Cast<object>().Select(c =>
                 $"{Get(g, "Key")} {Get(c, "Privilege")} {string.Join(",", ((IEnumerable<string>)Get(c, "Columns")!).Order(StringComparer.Ordinal))}"))
@@ -74,12 +76,16 @@ public class AdminApiRuleTests
     }
 
     [Fact]
-    public void Every_operation_states_its_auth_and_the_claim_alone_has_none()
+    public void Every_operation_states_its_auth_and_only_the_claim_and_sign_in_have_none()
     {
         using var document = Load();
         var operations = Operations(document).ToList();
 
-        Assert.Contains(operations, o => o.Path == "/api/v1/deployment/bootstrap" && o.Method == "post");
+        foreach (var sessionless in Sessionless)
+        {
+            Assert.Contains(operations, o => o.Path == sessionless && o.Method == "post");
+        }
+
         foreach (var (path, method, operation) in operations)
         {
             var schemes = operation.GetProperty("security").EnumerateArray()
@@ -87,7 +93,7 @@ public class AdminApiRuleTests
                 .Order(StringComparer.Ordinal)
                 .ToList();
 
-            if (path == "/api/v1/deployment/bootstrap")
+            if (Sessionless.Contains(path))
             {
                 Assert.Empty(schemes);
                 continue;
@@ -139,7 +145,22 @@ public class AdminApiRuleTests
         Assert.Equal(
             ["/api/v1/deployment/credentials/registration", "/api/v1/deployment/credentials/registration/complete", "/api/v1/deployment/session"],
             maps.Where(m => m.Groups["rest"].Value.Contains("SetupAllowed.Instance")).Select(m => m.Groups["route"].Value).Order(StringComparer.Ordinal));
+
+        // Sessionless is the reviewed short list too: the claim (Story 1.21) and sign-in's begin and
+        // complete (Story 1.23). None of them is setup-allowed: no Session reaches them.
+        Assert.Equal(
+            Sessionless.Order(StringComparer.Ordinal),
+            maps.Where(m => m.Groups["rest"].Value.Contains("BootstrapClaimEndpoint.Instance") || m.Groups["rest"].Value.Contains("SignInEndpoint.Instance"))
+                .Select(m => m.Groups["route"].Value)
+                .Order(StringComparer.Ordinal));
+        Assert.DoesNotContain(
+            maps,
+            m => m.Groups["rest"].Value.Contains("SignInEndpoint.Instance") && m.Groups["rest"].Value.Contains("SetupAllowed.Instance"));
     }
+
+    /// <summary>The operations with no Session: they need the exact Admin Origin only.</summary>
+    private static readonly string[] Sessionless =
+        ["/api/v1/deployment/bootstrap", "/api/v1/deployment/signin", "/api/v1/deployment/signin/complete"];
 
     private static JsonDocument Load() => JsonDocument.Parse(File.ReadAllText(Path.Combine(Root, Document)));
 

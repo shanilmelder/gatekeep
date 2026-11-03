@@ -118,6 +118,30 @@ describe('api-client', () => {
     assert.deepEqual(result.data, { credentials: 1, setupComplete: false });
   });
 
+  it('begins and completes an Admin sign-in on its own paths, with the body as given', async () => {
+    const { calls, fetch } = fakeFetch(200, JSON.stringify({ adminId: 'a', csrfToken: 'c', setupComplete: true }));
+    const client = createApiClient({ fetch, csrfToken: () => null });
+    const assertion = {
+      id: 'AQ',
+      rawId: 'AQ',
+      type: 'public-key',
+      response: { clientDataJSON: 'e30', authenticatorData: 'AA', signature: 'AA', userHandle: 'AQ' },
+    };
+
+    await client.beginSignIn();
+    const result = await client.completeSignIn(assertion);
+
+    // No Session yet, so no CSRF token: sign-in relies on the exact Origin and its binding cookie.
+    assert.equal(calls[0].input, '/api/v1/deployment/signin');
+    assert.equal(calls[0].init.method, 'POST');
+    assert.equal(calls[0].init.body, undefined);
+    assert.equal(CSRF_HEADER in calls[0].init.headers, false);
+    assert.equal(calls[1].input, '/api/v1/deployment/signin/complete');
+    assert.equal(calls[1].init.body, JSON.stringify(assertion));
+    assert.equal(calls[1].init.credentials, 'same-origin');
+    assert.deepEqual(result.data, { adminId: 'a', csrfToken: 'c', setupComplete: true });
+  });
+
   it('parses only a string code, and a missing trace ID as empty', () => {
     assert.equal(parseProblem(null), null);
     assert.equal(parseProblem('x'), null);

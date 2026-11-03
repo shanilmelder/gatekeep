@@ -7,7 +7,12 @@ Every audit type code Gatekeep writes, declared in its module's contract. Codes 
 | Code | Module | Summary | FR-40 class |
 | --- | --- | --- | --- |
 | `admin.credential.registered` | Admins | An Admin registered a WebAuthn credential. Holds no credential ID, public key, challenge or user handle. | None |
+| `admin.credential.sign_count_regressed` | Admins | A sign-in with an Admin's WebAuthn credential was refused because its signature counter went backwards: it may be cloned. | None |
+| `admin.session.signed_out` | Admins | An Admin signed out, which ended their Admin Session. Holds no Session ID. | None |
+| `admin.session.superseded` | Admins | A sign-in in the same browser ended a live Admin Session as superseded. Holds no Session ID. | None |
 | `admin.setup.completed` | Admins | An Admin registered their second WebAuthn credential, which completed setup and made their Session full. | None |
+| `admin.signin.failed` | Admins | A sign-in whose signature verified over an Admin's WebAuthn credential was refused. Holds no credential ID, challenge or user handle. | None |
+| `admin.signin.succeeded` | Admins | An Admin signed in with a WebAuthn credential and a full Admin Session started. Holds no credential ID, challenge, user handle or Session ID. | None |
 | `audit.retention.checkpoint` | Audit | Retention deleted a chain's sealed prefix past the Log period. Names the last deleted row's epoch, seq and hash. | None |
 | `authentication.signin_transaction.started` | Authentication | A sign-in transaction began for an Application. The caller is anonymous, so no person is named. | None |
 | `bootstrap.admin.created` | Admins | The bootstrap token was claimed: the first Admin was created as Deployment Owner and bootstrap completed. Holds no token or hash. | None |

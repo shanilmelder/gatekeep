@@ -40,6 +40,24 @@ public static class SecurityLimits
     /// <summary>The fixed window credential registration attempts are counted in: 15 minutes (Story 1.22).</summary>
     public static readonly TimeSpan CredentialRegistrationWindow = TimeSpan.FromMinutes(15);
 
-    /// <summary>How long a WebAuthn registration challenge may be answered: 5 minutes (Story 1.22).</summary>
+    /// <summary>
+    /// How long a WebAuthn challenge may be answered: 5 minutes. A registration's (Story 1.22) and
+    /// an Admin sign-in's (Story 1.23).
+    /// </summary>
     public static readonly TimeSpan WebAuthnChallengeLifetime = TimeSpan.FromMinutes(5);
+
+    /// <summary>
+    /// Admin sign-in begins one client may make in <see cref="AdminSignInWindow"/>: 20 (Story 1.23).
+    /// Each is counted before it runs.
+    /// </summary>
+    public const int AdminSignInBeginAttempts = 20;
+
+    /// <summary>
+    /// Admin sign-in completes one client may make in <see cref="AdminSignInWindow"/>: 10 (Story 1.23).
+    /// Every complete is counted before it runs, a success too, so a failed one can't be undone.
+    /// </summary>
+    public const int AdminSignInCompleteAttempts = 10;
+
+    /// <summary>The fixed window Admin sign-in begins and completes are counted in: 15 minutes (Story 1.23).</summary>
+    public static readonly TimeSpan AdminSignInWindow = TimeSpan.FromMinutes(15);
 }

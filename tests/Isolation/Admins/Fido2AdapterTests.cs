@@ -37,7 +37,7 @@ public sealed class Fido2AdapterTests
             Assert.Equal(party.Name, options.RelyingParty.Name);
             Assert.Equal(challenge, options.Challenge);
             Assert.Equal([-7, -257], options.PublicKeyParameters.Select(p => p.Algorithm));
-            Assert.Equal(("none", "preferred", "required"), (options.Attestation, options.ResidentKey, options.UserVerification));
+            Assert.Equal(("none", "required", "required"), (options.Attestation, options.ResidentKey, options.UserVerification));
 
             var result = await FinishAsync(verifier, party, challenge, authenticator, party.Id, party.Origin);
             Assert.True(result.Verified, $"{party.Id}: {result.Refusal}");
@@ -143,6 +143,191 @@ public sealed class Fido2AdapterTests
             new WebAuthnRegistrationBegin(Admin with { Origin = "https://admin.gatekeep.test/path" }, User, [], new byte[32])));
         Assert.Throws<ArgumentException>(() => verifier.BeginRegistration(
             new WebAuthnRegistrationBegin(Admin, User with { Handle = new byte[65] }, [], new byte[32])));
+    }
+
+    // Story 1.23: the assertion ceremony, with the same per-call Relying Party and no state.
+
+    [Fact]
+    public async Task Assertion_verifies_against_each_Relying_Party_it_is_given_per_call()
+    {
+        var verifier = Fido2WebAuthn.Create();
+        using var authenticator = new SoftwareAuthenticator { UserHandle = User.Handle };
+
+        foreach (var party in new[] { Admin, Other, Admin })
+        {
+            var stored = await RegisteredAsync(verifier, party, authenticator) with { SignCount = authenticator.Counter };
+            var challenge = RandomNumberGenerator.GetBytes(32);
+
+            var options = verifier.BeginAssertion(new WebAuthnAssertionBegin(party, challenge));
+            Assert.Equal((party.Id, "required", 300_000u), (options.RpId, options.UserVerification, options.TimeoutMilliseconds));
+            Assert.Equal(challenge, options.Challenge);
+            Assert.Empty(options.AllowCredentials);
+
+            var result = await AssertAsync(verifier, party, challenge, authenticator, stored, party.Id, party.Origin);
+            Assert.True(result.Verified, $"{party.Id}: {result.Refusal}");
+            Assert.Equal(authenticator.Counter, result.SignCount);
+            Assert.True(result.UserVerified);
+        }
+    }
+
+    public static TheoryData<string, WebAuthnRefusal> AssertionRefusals => new()
+    {
+        { "another RP ID", WebAuthnRefusal.RpIdMismatch },
+        { "another origin", WebAuthnRefusal.OriginMismatch },
+        { "the origin in other case", WebAuthnRefusal.OriginMismatch },
+        { "crossOrigin true", WebAuthnRefusal.CrossOrigin },
+        { "a top origin", WebAuthnRefusal.CrossOrigin },
+        { "no user verification", WebAuthnRefusal.UserNotVerified },
+        { "no user presence", WebAuthnRefusal.UserNotVerified },
+        { "a registration's type", WebAuthnRefusal.WrongType },
+        { "another challenge", WebAuthnRefusal.ChallengeMismatch },
+        { "no user handle", WebAuthnRefusal.UserHandleMismatch },
+        { "another user handle", WebAuthnRefusal.UserHandleMismatch },
+        { "a bad signature", WebAuthnRefusal.Invalid },
+    };
+
+    private static readonly Dictionary<string, AssertionTweaks> AssertionTweakCases = new()
+    {
+        { "another RP ID", new AssertionTweaks { RpId = Other.Id } },
+        { "another origin", new AssertionTweaks { Origin = Other.Origin } },
+        { "the origin in other case", new AssertionTweaks { Origin = "https://ADMIN.gatekeep.test" } },
+        { "crossOrigin true", new AssertionTweaks { CrossOrigin = true } },
+        { "a top origin", new AssertionTweaks { TopOrigin = Admin.Origin } },
+        { "no user verification", new AssertionTweaks { UserVerified = false } },
+        { "no user presence", new AssertionTweaks { UserPresent = false } },
+        { "a registration's type", new AssertionTweaks { Type = "webauthn.create" } },
+        { "another challenge", new AssertionTweaks { Challenge = Base64Url.EncodeToString(RandomNumberGenerator.GetBytes(32)) } },
+        { "no user handle", new AssertionTweaks { OmitUserHandle = true } },
+        { "another user handle", new AssertionTweaks { UserHandle = RandomNumberGenerator.GetBytes(64) } },
+        { "a bad signature", new AssertionTweaks { OtherKey = true } },
+    };
+
+    [Theory]
+    [MemberData(nameof(AssertionRefusals))]
+    public async Task Assertion_the_ceremony_refuses_is_a_fixed_refusal(string assertion, WebAuthnRefusal refusal)
+    {
+        var verifier = Fido2WebAuthn.Create();
+        using var authenticator = new SoftwareAuthenticator { UserHandle = User.Handle };
+        var stored = await RegisteredAsync(verifier, Admin, authenticator);
+        var challenge = RandomNumberGenerator.GetBytes(32);
+
+        var result = await AssertAsync(verifier, Admin, challenge, authenticator, stored, Admin.Id, Admin.Origin, AssertionTweakCases[assertion]);
+
+        Assert.Equal(refusal, result.Refusal);
+        Assert.False(result.Verified);
+
+        // Each of these comes before, or instead of, a verified signature.
+        Assert.False(result.SignatureVerified);
+    }
+
+    [Fact]
+    public async Task Only_a_counter_refusal_comes_after_the_signature()
+    {
+        var verifier = Fido2WebAuthn.Create();
+        using var authenticator = new SoftwareAuthenticator { UserHandle = User.Handle };
+        var stored = await RegisteredAsync(verifier, Admin, authenticator) with { SignCount = 7 };
+
+        var forged = await AssertAsync(verifier, Admin, RandomNumberGenerator.GetBytes(32), authenticator, stored, Admin.Id, Admin.Origin, new AssertionTweaks { OtherKey = true, SignCount = 3 });
+        var regressed = await AssertAsync(verifier, Admin, RandomNumberGenerator.GetBytes(32), authenticator, stored, Admin.Id, Admin.Origin, new AssertionTweaks { SignCount = 3 });
+        var verified = await AssertAsync(verifier, Admin, RandomNumberGenerator.GetBytes(32), authenticator, stored, Admin.Id, Admin.Origin, new AssertionTweaks { SignCount = 8 });
+
+        // A bad signature with a low counter is refused for the signature, not as a clone.
+        Assert.Equal((WebAuthnRefusal.Invalid, false), (forged.Refusal!.Value, forged.SignatureVerified));
+        Assert.Equal((WebAuthnRefusal.SignCountRegressed, true), (regressed.Refusal!.Value, regressed.SignatureVerified));
+        Assert.True(verified.Verified);
+        Assert.True(verified.SignatureVerified);
+    }
+
+    [Theory]
+    [InlineData(0u, 0u, null)]
+    [InlineData(0u, 1u, null)]
+    [InlineData(7u, 8u, null)]
+    [InlineData(7u, 7u, WebAuthnRefusal.SignCountRegressed)]
+    [InlineData(7u, 3u, WebAuthnRefusal.SignCountRegressed)]
+    [InlineData(7u, 0u, WebAuthnRefusal.SignCountRegressed)]
+    public async Task Counter_must_advance_unless_both_are_0(uint stored, uint asserted, WebAuthnRefusal? refusal)
+    {
+        var verifier = Fido2WebAuthn.Create();
+        using var authenticator = new SoftwareAuthenticator { UserHandle = User.Handle };
+        var credential = await RegisteredAsync(verifier, Admin, authenticator) with { SignCount = stored };
+        var challenge = RandomNumberGenerator.GetBytes(32);
+
+        var result = await AssertAsync(verifier, Admin, challenge, authenticator, credential, Admin.Id, Admin.Origin, new AssertionTweaks { SignCount = asserted });
+
+        Assert.Equal(refusal, result.Refusal);
+        if (refusal is null)
+        {
+            Assert.Equal(asserted, result.SignCount);
+        }
+    }
+
+    [Fact]
+    public async Task Assertion_for_another_credential_or_a_malformed_one_is_refused_never_thrown()
+    {
+        var verifier = Fido2WebAuthn.Create();
+        using var authenticator = new SoftwareAuthenticator { UserHandle = User.Handle };
+        using var other = new SoftwareAuthenticator { UserHandle = User.Handle };
+        var stored = await RegisteredAsync(verifier, Admin, authenticator);
+        var challenge = RandomNumberGenerator.GetBytes(32);
+
+        // The stored credential isn't the one the response names.
+        var crossed = await AssertAsync(verifier, Admin, challenge, other, stored, Admin.Id, Admin.Origin);
+        Assert.Equal(WebAuthnRefusal.Invalid, crossed.Refusal);
+
+        // Authenticator data and a signature that aren't what they claim: refused, not thrown.
+        var garbage = await verifier.FinishAssertionAsync(
+            new WebAuthnAssertionFinish(
+                Admin,
+                SHA256.HashData(challenge),
+                new WebAuthnAssertion(
+                    authenticator.CredentialId,
+                    SoftwareAuthenticator.ClientData("webauthn.get", Base64Url.EncodeToString(challenge), Admin.Origin, null, null),
+                    [1, 2, 3],
+                    [4, 5, 6],
+                    User.Handle),
+                stored),
+            Cancellation);
+        Assert.False(garbage.Verified);
+        Assert.Contains(garbage.Refusal, new WebAuthnRefusal?[] { WebAuthnRefusal.Malformed, WebAuthnRefusal.Invalid });
+    }
+
+    [Fact]
+    public void Begin_assertion_refuses_a_short_challenge_or_an_origin_that_isnt_the_RP_IDs()
+    {
+        var verifier = Fido2WebAuthn.Create();
+
+        Assert.Throws<ArgumentException>(() => verifier.BeginAssertion(new WebAuthnAssertionBegin(Admin, new byte[15])));
+        Assert.Throws<ArgumentException>(() => verifier.BeginAssertion(new WebAuthnAssertionBegin(Admin with { Origin = "https://elsewhere.test" }, new byte[32])));
+    }
+
+    /// <summary>Registers <paramref name="authenticator"/> for <paramref name="party"/>, as stored: its ID, key and counter, and the user's handle.</summary>
+    private static async Task<WebAuthnStoredCredential> RegisteredAsync(IWebAuthnVerifier verifier, WebAuthnRelyingParty party, SoftwareAuthenticator authenticator)
+    {
+        var registered = await FinishAsync(verifier, party, RandomNumberGenerator.GetBytes(32), authenticator, party.Id, party.Origin);
+        Assert.True(registered.Verified, $"{registered.Refusal}");
+        return new WebAuthnStoredCredential(registered.Credential!.CredentialId, registered.Credential.PublicKey, registered.Credential.SignCount, User.Handle);
+    }
+
+    private static Task<WebAuthnAssertionResult> AssertAsync(
+        IWebAuthnVerifier verifier,
+        WebAuthnRelyingParty party,
+        byte[] challenge,
+        SoftwareAuthenticator authenticator,
+        WebAuthnStoredCredential stored,
+        string rpId,
+        string origin,
+        AssertionTweaks? tweaks = null)
+    {
+        using var body = JsonDocument.Parse(authenticator.Assert(rpId, Base64Url.EncodeToString(challenge), origin, tweaks));
+        var response = body.RootElement.GetProperty("response");
+        var handle = response.GetProperty("userHandle");
+        var assertion = new WebAuthnAssertion(
+            authenticator.CredentialId,
+            Base64Url.DecodeFromChars(response.GetProperty("clientDataJSON").GetString()!),
+            Base64Url.DecodeFromChars(response.GetProperty("authenticatorData").GetString()!),
+            Base64Url.DecodeFromChars(response.GetProperty("signature").GetString()!),
+            handle.ValueKind == JsonValueKind.Null ? null : Base64Url.DecodeFromChars(handle.GetString()!));
+        return verifier.FinishAssertionAsync(new WebAuthnAssertionFinish(party, SHA256.HashData(challenge), assertion, stored), Cancellation);
     }
 
     private static Task<WebAuthnRegistrationResult> FinishAsync(

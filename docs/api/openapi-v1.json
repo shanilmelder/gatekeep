@@ -2,7 +2,7 @@
   "openapi": "3.1.1",
   "info": {
     "title": "Gatekeep Admin API",
-    "description": "The Admin Dashboard's API on Host.Admin. Every /api/v1/deployment endpoint but the bootstrap claim needs the __Host-gk-admin Session cookie; every state-changing one also needs the exact Admin Origin and the Session's X-Gatekeep-CSRF token. A refusal's body is only a fixed code and the trace ID.",
+    "description": "The Admin Dashboard's API on Host.Admin. Every /api/v1/deployment endpoint but the bootstrap claim and Admin sign-in needs the __Host-gk-admin Session cookie; every state-changing one also needs the exact Admin Origin and the Session's X-Gatekeep-CSRF token. The claim and sign-in need the exact Admin Origin only. A refusal's body is only a fixed code and the trace ID.",
     "version": "v1"
   },
   "paths": {
@@ -87,6 +87,148 @@
         "x-gatekeep-setup-allowed": false
       }
     },
+    "/api/v1/deployment/signin": {
+      "post": {
+        "tags": [
+          "Deployment"
+        ],
+        "summary": "Begin an Admin sign-in with WebAuthn: the options for navigator.credentials.get.",
+        "description": "Sessionless: needs the exact Admin Origin, and has no session or CSRF check. Returns request options for the Admin RP ID with user verification required and no allowed credentials listed: the credential is discoverable, so no username is asked for and no credential ID is sent. Sets the __Host-gk-admin-signin cookie that binds the challenge to this browser; it can be answered once, within 5 minutes, and a new begin replaces it. Each begin is counted per client: the 21st in 15 minutes is 429. Before bootstrap completes it is the unknown-path 404.",
+        "operationId": "BeginSignIn",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "headers": {
+              "Set-Cookie": {
+                "description": "The sign-in binding: __Host-gk-admin-signin={43 base64url characters}; Path=/; Secure; HttpOnly; SameSite=Strict; Max-Age=300. The complete call must carry it.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminSignInOptionsResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "404": {
+            "description": "Not Found"
+          },
+          "429": {
+            "description": "Too Many Requests",
+            "headers": {
+              "Retry-After": {
+                "description": "Whole seconds until the rate-limit window allows another request.",
+                "required": true,
+                "schema": {
+                  "minimum": 1,
+                  "type": "integer"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [ ],
+        "x-gatekeep-setup-allowed": false
+      }
+    },
+    "/api/v1/deployment/signin/complete": {
+      "post": {
+        "tags": [
+          "Deployment"
+        ],
+        "summary": "Complete an Admin sign-in with the browser's WebAuthn assertion, and start a full Admin Session.",
+        "description": "Sessionless: needs the exact Admin Origin and the __Host-gk-admin-signin cookie from the begin. Once the call is counted, the challenge that cookie names is taken before the body is read, so it is used up whatever follows, and every response clears the cookie. A 429, or a 503 for a missing client address, comes before that and leaves the challenge live. Verifies the assertion against the Admin RP ID, the exact Admin origin and the registered credential it names, with user verification, the credential owner's user handle and a signature counter that advances. Every refusal is the same 400 signin_refused, with no Session. A sign-in starts a full Session; an Admin without two credentials still reaches only setup. A live Session this browser held is ended as superseded. Each complete is counted per client, a success too: the 11th in 15 minutes is 429. Before bootstrap completes it is the unknown-path 404.",
+        "operationId": "CompleteSignIn",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminSignInRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "headers": {
+              "Set-Cookie": {
+                "description": "The Admin Session: __Host-gk-admin={43 base64url characters}; Path=/; Secure; HttpOnly; SameSite=Strict, a browser session cookie with no Domain, Expires or Max-Age. And __Host-gk-admin-signin cleared with Max-Age=0, as on every complete.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminSignInResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "404": {
+            "description": "Not Found"
+          },
+          "429": {
+            "description": "Too Many Requests",
+            "headers": {
+              "Retry-After": {
+                "description": "Whole seconds until the rate-limit window allows another request.",
+                "required": true,
+                "schema": {
+                  "minimum": 1,
+                  "type": "integer"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [ ],
+        "x-gatekeep-setup-allowed": false
+      }
+    },
     "/api/v1/deployment/session": {
       "get": {
         "tags": [
@@ -125,7 +267,7 @@
           "Deployment"
         ],
         "summary": "Sign out: end the current Admin Session.",
-        "description": "Ends the Session as signed_out and clears the cookie. Not setup-allowed: a setup Session signing out would leave the Deployment Owner unable to finish setup.",
+        "description": "Ends the Session as signed_out, writes admin.session.signed_out, and clears the cookie. Not setup-allowed: a setup Session signing out would leave the Deployment Owner unable to finish setup.",
         "operationId": "EndSession",
         "responses": {
           "204": {
@@ -156,7 +298,7 @@
           "Deployment"
         ],
         "summary": "Begin registering a WebAuthn credential: the options for navigator.credentials.create.",
-        "description": "Setup-allowed. Returns creation options for the Admin RP ID and origin, with no attestation, user verification required, a resident key preferred, ES256 and RS256, and the Admin's credentials excluded. Its challenge can be answered for 5 minutes, by the next complete call only; a new begin replaces it. Refused with 403 once the Admin has two credentials. Each begin and complete counts towards 10 per Session in 15 minutes, then 429.",
+        "description": "Setup-allowed. Returns creation options for the Admin RP ID and origin, with no attestation, user verification required, a resident key required, ES256 and RS256, and the Admin's credentials excluded. Its challenge can be answered for 5 minutes, by the next complete call only; a new begin replaces it. Refused with 403 once the Admin has two credentials. Each begin and complete counts towards 10 per Session in 15 minutes, then 429.",
         "operationId": "BeginCredentialRegistration",
         "responses": {
           "200": {
@@ -363,6 +505,109 @@
           }
         }
       },
+      "AdminSignInOptionsResponse": {
+        "required": [
+          "challenge",
+          "rpId",
+          "timeout",
+          "userVerification",
+          "allowCredentials"
+        ],
+        "type": "object",
+        "properties": {
+          "challenge": {
+            "type": "string"
+          },
+          "rpId": {
+            "type": "string"
+          },
+          "timeout": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "userVerification": {
+            "enum": [
+              "required"
+            ],
+            "type": "string"
+          },
+          "allowCredentials": {
+            "maxItems": 0,
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RegistrationExcludedCredential"
+            }
+          }
+        }
+      },
+      "AdminSignInRequest": {
+        "required": [
+          "id",
+          "rawId",
+          "type",
+          "response"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "rawId": {
+            "type": "string"
+          },
+          "type": {
+            "enum": [
+              "public-key"
+            ],
+            "type": "string"
+          },
+          "response": {
+            "required": [
+              "clientDataJSON",
+              "authenticatorData",
+              "signature"
+            ],
+            "type": "object",
+            "properties": {
+              "clientDataJSON": {
+                "type": "string"
+              },
+              "authenticatorData": {
+                "type": "string"
+              },
+              "signature": {
+                "type": "string"
+              },
+              "userHandle": {
+                "type": [
+                  "null",
+                  "string"
+                ]
+              }
+            }
+          }
+        }
+      },
+      "AdminSignInResponse": {
+        "required": [
+          "adminId",
+          "csrfToken",
+          "setupComplete"
+        ],
+        "type": "object",
+        "properties": {
+          "adminId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "csrfToken": {
+            "type": "string"
+          },
+          "setupComplete": {
+            "type": "boolean"
+          }
+        }
+      },
       "ApiProblem": {
         "required": [
           "code",
@@ -374,6 +619,7 @@
             "enum": [
               "bootstrap_refused",
               "credential_refused",
+              "signin_refused",
               "rate_limited"
             ],
             "type": "string"
@@ -545,7 +791,7 @@
         "properties": {
           "residentKey": {
             "enum": [
-              "preferred"
+              "required"
             ],
             "type": "string"
           },

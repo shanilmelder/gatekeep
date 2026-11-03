@@ -40,16 +40,21 @@ internal sealed class AdminApiServices : IAsyncDisposable
         _dataSource = new(() => NpgsqlDataSource.Create(databases["Admin"]));
         Claimer = AdminsContract.CreateBootstrapClaimer(AuditContract.CreateAppender(), LockTimeout(configuration));
         Registration = AdminsContract.CreateCredentialRegistration(AuditContract.CreateAppender(), Fido2WebAuthn.Create());
+        Sessions = AdminsContract.CreateSessions(AuditContract.CreateAppender());
+        SignIn = AdminsContract.CreateSignIn(AuditContract.CreateAppender(), Fido2WebAuthn.Create());
     }
 
     public IRateLimiter Limiter { get; } = AdminsContract.CreateAttemptLimiter();
 
-    public IAdminSessions Sessions { get; } = AdminsContract.CreateSessions();
+    public IAdminSessions Sessions { get; }
 
     public IBootstrapClaimer Claimer { get; }
 
     /// <summary>Admin WebAuthn credential registration (Story 1.22), verified by the stateless Fido2 adapter.</summary>
     public IAdminCredentialRegistration Registration { get; }
+
+    /// <summary>Admin sign-in with WebAuthn (Story 1.23), verified by the same stateless adapter.</summary>
+    public IAdminSignIn SignIn { get; }
 
     /// <summary>The claims in flight in this process: <see cref="MaxConcurrentClaims"/> slots.</summary>
     public SemaphoreSlim ClaimSlots { get; } = new(MaxConcurrentClaims, MaxConcurrentClaims);
@@ -58,13 +63,15 @@ internal sealed class AdminApiServices : IAsyncDisposable
         DeploymentScope.BeginAsync(_dataSource.Value, cancellationToken);
 
     /// <summary>Whether there is a bootstrap to claim: a token issued and bootstrap not complete.</summary>
-    public async Task<bool> IsBootstrapOpenAsync(CancellationToken cancellationToken)
-    {
-        if (_bootstrapComplete)
-        {
-            return false;
-        }
+    public async Task<bool> IsBootstrapOpenAsync(CancellationToken cancellationToken) =>
+        !_bootstrapComplete && await ReadBootstrapAsync(cancellationToken) == BootstrapOpenness.Open;
 
+    /// <summary>Whether bootstrap is complete, so there is an Admin who could sign in (Story 1.23).</summary>
+    public async Task<bool> IsBootstrapCompleteAsync(CancellationToken cancellationToken) =>
+        _bootstrapComplete || await ReadBootstrapAsync(cancellationToken) == BootstrapOpenness.Complete;
+
+    private async Task<BootstrapOpenness> ReadBootstrapAsync(CancellationToken cancellationToken)
+    {
         BootstrapOpenness state;
         await using (var scope = await BeginAsync(cancellationToken))
         {
@@ -77,7 +84,7 @@ internal sealed class AdminApiServices : IAsyncDisposable
             _bootstrapComplete = true;
         }
 
-        return state == BootstrapOpenness.Open;
+        return state;
     }
 
     /// <summary>Records a claim this host committed.</summary>

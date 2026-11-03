@@ -34,10 +34,52 @@ internal sealed record AttestationTweaks
     public int Algorithm { get; init; } = -7;
 }
 
+/// <summary>What a test makes a <see cref="SoftwareAuthenticator"/> get wrong, or set, in one assertion.</summary>
+internal sealed record AssertionTweaks
+{
+    /// <summary>The client data's origin, when not the one asked for.</summary>
+    public string? Origin { get; init; }
+
+    /// <summary>The RP ID whose hash the authenticator data carries, when not the options' own.</summary>
+    public string? RpId { get; init; }
+
+    /// <summary>The client data's <c>crossOrigin</c>: absent when null.</summary>
+    public bool? CrossOrigin { get; init; }
+
+    /// <summary>A <c>topOrigin</c> in the client data.</summary>
+    public string? TopOrigin { get; init; }
+
+    /// <summary>Whether the UV flag is set.</summary>
+    public bool UserVerified { get; init; } = true;
+
+    /// <summary>Whether the UP flag is set.</summary>
+    public bool UserPresent { get; init; } = true;
+
+    /// <summary>The client data's challenge, base64url, when not the options' own.</summary>
+    public string? Challenge { get; init; }
+
+    /// <summary>The client data's type, when not <c>webauthn.get</c>.</summary>
+    public string? Type { get; init; }
+
+    /// <summary>The signature counter, when not the authenticator's next one.</summary>
+    public uint? SignCount { get; init; }
+
+    /// <summary>The user handle sent, when not the one the credential was registered with.</summary>
+    public byte[]? UserHandle { get; init; }
+
+    /// <summary>Sends no user handle at all.</summary>
+    public bool OmitUserHandle { get; init; }
+
+    /// <summary>Signs with another key than the credential's: a bad signature.</summary>
+    public bool OtherKey { get; init; }
+}
+
 /// <summary>
 /// A WebAuthn authenticator in test code: one P-256 key and credential ID, answering creation
-/// options with a <c>none</c> attestation as a browser would hand it to the page, in WebAuthn's
-/// JSON form. It builds the CBOR itself, the few shapes a <c>none</c> attestation needs.
+/// options with a <c>none</c> attestation, and request options with an assertion, as a browser
+/// would hand them to the page, in WebAuthn's JSON form. It builds the CBOR itself, the few shapes
+/// a <c>none</c> attestation needs. Its signature counter starts at 0, as registered, and each
+/// assertion takes the next, unless a tweak says otherwise.
 /// </summary>
 internal sealed class SoftwareAuthenticator : IDisposable
 {
@@ -56,16 +98,77 @@ internal sealed class SoftwareAuthenticator : IDisposable
 
     public Guid Aaguid { get; } = Guid.NewGuid();
 
+    /// <summary>The user handle of the account the credential was last registered to, from its creation options.</summary>
+    public byte[]? UserHandle { get; set; }
+
+    /// <summary>The signature counter the last assertion carried.</summary>
+    public uint Counter { get; set; }
+
     /// <summary>
     /// The JSON body a page posts to complete a registration: the response to
-    /// <paramref name="options"/> (a begin response), made at <paramref name="origin"/>.
+    /// <paramref name="options"/> (a begin response), made at <paramref name="origin"/>. The
+    /// options' user handle is kept, as a resident key keeps it, for assertions.
     /// </summary>
     public string Attest(JsonElement options, string origin, AttestationTweaks? tweaks = null)
     {
         tweaks ??= new AttestationTweaks();
         var rpId = tweaks.RpId ?? options.GetProperty("rp").GetProperty("id").GetString()!;
         var challenge = tweaks.Challenge ?? options.GetProperty("challenge").GetString()!;
+        UserHandle = Base64Url.DecodeFromChars(options.GetProperty("user").GetProperty("id").GetString()!);
         return Attest(rpId, challenge, origin, tweaks);
+    }
+
+    /// <summary>
+    /// The JSON body a page posts to complete a sign-in: the assertion for
+    /// <paramref name="options"/> (a sign-in begin response), made at <paramref name="origin"/>.
+    /// </summary>
+    public string Assert(JsonElement options, string origin, AssertionTweaks? tweaks = null) =>
+        Assert(options.GetProperty("rpId").GetString()!, options.GetProperty("challenge").GetString()!, origin, tweaks);
+
+    public string Assert(string rpId, string challenge, string origin, AssertionTweaks? tweaks = null)
+    {
+        tweaks ??= new AssertionTweaks();
+        var clientData = ClientData(tweaks.Type ?? "webauthn.get", tweaks.Challenge ?? challenge, tweaks.Origin ?? origin, tweaks.CrossOrigin, tweaks.TopOrigin);
+        var count = tweaks.SignCount ?? Counter + 1;
+        Counter = count;
+
+        var authenticatorData = new List<byte>();
+        authenticatorData.AddRange(SHA256.HashData(Encoding.UTF8.GetBytes(tweaks.RpId ?? rpId)));
+        authenticatorData.Add((byte)((tweaks.UserPresent ? UserPresent : 0) | (tweaks.UserVerified ? UserVerifiedFlag : 0)));
+        Span<byte> counter = stackalloc byte[4];
+        BinaryPrimitives.WriteUInt32BigEndian(counter, count);
+        authenticatorData.AddRange(counter.ToArray());
+        byte[] data = [.. authenticatorData];
+
+        byte[] signed = [.. data, .. SHA256.HashData(clientData)];
+        byte[] signature;
+        if (tweaks.OtherKey)
+        {
+            using var other = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+            signature = other.SignData(signed, HashAlgorithmName.SHA256, DSASignatureFormat.Rfc3279DerSequence);
+        }
+        else
+        {
+            signature = _key.SignData(signed, HashAlgorithmName.SHA256, DSASignatureFormat.Rfc3279DerSequence);
+        }
+
+        var handle = tweaks.OmitUserHandle ? null : tweaks.UserHandle ?? UserHandle;
+        var id = Base64Url.EncodeToString(CredentialId);
+        return JsonSerializer.Serialize(new
+        {
+            id,
+            rawId = id,
+            type = "public-key",
+            response = new
+            {
+                clientDataJSON = Base64Url.EncodeToString(clientData),
+                authenticatorData = Base64Url.EncodeToString(data),
+                signature = Base64Url.EncodeToString(signature),
+                userHandle = handle is null ? null : Base64Url.EncodeToString(handle),
+            },
+            clientExtensionResults = new { },
+            authenticatorAttachment = "cross-platform",
+        });
     }
 
     public string Attest(string rpId, string challenge, string origin, AttestationTweaks? tweaks = null)

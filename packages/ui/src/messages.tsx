@@ -125,6 +125,18 @@ export interface Messages {
   credentialSetupRegister: string;
   /** Shown when the authenticator already holds one of the Admin's credentials, with what to do instead. */
   credentialSetupAlreadyRegistered: string;
+  /** Admin sign-in's heading. */
+  signInTitle: string;
+  /** Admin sign-in's subtitle: WebAuthn only, no email or password. */
+  signInSubtitle: string;
+  /** Admin sign-in's one primary action, which opens the browser's passkey sheet. */
+  signInAction: string;
+  /** Shown when a sign-in fails. It never says why, as the server doesn't. */
+  signInRefused: string;
+  /** The Admin's Sign out action. */
+  signOut: string;
+  /** Shown when Sign out was refused or couldn't reach the server, with the Session still live. */
+  signOutFailed: string;
 }
 
 export const defaultMessages: Readonly<Messages> = Object.freeze({
@@ -191,6 +203,12 @@ export const defaultMessages: Readonly<Messages> = Object.freeze({
   credentialSetupSecond: 'Now register a second one, on another device or security key.',
   credentialSetupRegister: 'Register passkey',
   credentialSetupAlreadyRegistered: 'This passkey or security key is already registered. Use a different security key or device.',
+  signInTitle: 'Sign in',
+  signInSubtitle: 'Sign in with your security key or passkey.',
+  signInAction: 'Sign in',
+  signInRefused: "That credential wasn't recognised.",
+  signOut: 'Sign out',
+  signOutFailed: "You're still signed in: signing out didn't complete. Try again.",
 });
 
 /**
