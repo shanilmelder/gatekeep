@@ -2,16 +2,37 @@
 title: 'Story 1.18: Build the Hosted component entry and screen package'
 type: 'feature'
 created: '2026-11-03'
-status: 'draft'
-baseline_revision: ''
+status: 'done'
+baseline_revision: 'd8f6ee581a1d0198e077c22548fc72bae2465cbf'
 review_loop_iteration: 0
-followup_review_recommended: false
+followup_review_recommended: true
 context:
   - '{project-root}/_bmad-output/planning-artifacts/ux-designs/ux-gatekeep-2026-11-01/DESIGN.md'
   - '{project-root}/_bmad-output/planning-artifacts/ux-designs/ux-gatekeep-2026-11-01/EXPERIENCE.md'
   - '{project-root}/_bmad-output/implementation-artifacts/spec-1-17-build-the-drawer-and-menu.md'
 warnings: []
-deferred: []
+deferred:
+  - summary: >-
+      Session-expiry alert refused while another dialog is open
+    evidence: |-
+      Story 1.18 review: AlertDialog joins the one-per-document registry, so a time-limit warning would be refused while a Modal or Drawer is open (WCAG 2.2.1).
+    location: >-
+      packages/ui/src/components/AlertDialog.tsx
+    severity: medium
+  - summary: >-
+      Tenant font needs a family token
+    evidence: |-
+      Story 1.18 review: heading and body type use composite --gk-font-* tokens with the family baked in.
+    location: >-
+      packages/design-tokens/generator
+    severity: low
+  - summary: >-
+      Bidi isolation for Tenant names in templates
+    evidence: |-
+      Story 1.18 review: RTL names are inserted into LTR catalogue templates without <bdi> or dir=auto.
+    location: >-
+      packages/ui/src/messages.tsx
+    severity: low
 ---
 
 <intent-contract>
@@ -63,7 +84,7 @@ deferred: []
   - The existing `PasswordField` toggle is named "Show password" or "Hide password". Keep it.
 - **Hosted text** (AC 4): all text is `tx` or `tx2`, in both schemes. `tx3` appears only on disabled controls and control edges, which overrides the export's `tx3` code line and `OR` divider.
 - **`StatusIcon`:**
-  - A 46px circle on a status `-sf` surface: success ✓, warning @, error !, blocked ⊘.
+  - A 52px circle (DESIGN.md `status-icon.size`; the export draws 46px) on a status `-sf` surface: success ✓, warning @, error !, blocked ⊘.
   - The glyph is `aria-hidden`, because the heading carries the meaning.
 - **`AlertDialog`** (AC 5): the Hosted `role="alertdialog"`, used by the session-expiry warning (EXPERIENCE L380).
   - Built on Story 1.16's native `<dialog>` and `useModalDialog`, not copied.
@@ -140,10 +161,10 @@ deferred: []
 ## Tasks & Acceptance
 
 **Execution:**
-- [ ] `packages/design-tokens`: the `auto` scheme scope, plus regenerating `tokens.css`.
-- [ ] `packages/ui`: `HostedPage`, `HostedCard`, `StatusIcon`, `SocialButtons` and `AlertDialog`, with their CSS Modules, catalogue strings, exports, the `surface.css` auto scope and the dependency-check change.
-- [ ] `packages/hosted-screens`: the React package and `GenericErrorScreen`.
-- [ ] `tests/browser`: the hosted fixture view, `hosted.spec.ts` and the config, covering every matrix row plus axe.
+- [x] `packages/design-tokens`: the `auto` scheme scope, plus regenerating `tokens.css`.
+- [x] `packages/ui`: `HostedPage`, `HostedCard`, `StatusIcon`, `SocialButtons` and `AlertDialog`, with their CSS Modules, catalogue strings, exports, the `surface.css` auto scope and the dependency-check change.
+- [x] `packages/hosted-screens`: the React package and `GenericErrorScreen`.
+- [x] `tests/browser`: the hosted fixture view, `hosted.spec.ts` and the config, covering every matrix row plus axe.
 
 **Acceptance Criteria:**
 - Given the Hosted entry, when it builds, then its only third-party runtime dependencies are React and React DOM (no client QR encoder, per R-8), and the check enforces that for `hosted-screens` too.
@@ -156,7 +177,84 @@ deferred: []
 
 ## Review Triage Log
 
+### 2026-11-02 — Review pass
+- verdicts: 46 findings — high 4, medium 18, low 23, false 1, maybe-false 0
+- findings:
+  - `[medium]` `[patch]` Intent: the social row has no pending state (EXPERIENCE L130) — `pendingId` added, tested.
+  - `[medium]` `[patch]` Intent: Generic error always needs a back link, but some cases must never redirect — `backHref` optional; no action without it.
+  - `[low]` `[patch]` Intent: decisions not recorded and the spec says 46px — Design Notes updated; DESIGN.md sets 52px.
+  - `[low]` `[patch]` Intent: the `HostedPage` `theme` prop goes beyond the spec — kept, noted as Story 15.1's to replace.
+  - `[low]` `[patch]` Intent: the dependency check reads ui's whole manifest — now follows what the import graph reaches.
+  - `[low]` `[defer]` Intent: composite font tokens make a Tenant font hard to apply — Story 15.1.
+  - `[low]` `[patch]` Intent: the fixture uses Apple as a provider — Google, GitHub and Microsoft only.
+  - `[high]` `[patch]` Gap: the fixture root repeats HostedPage's surface and scheme, hiding a missing attribute — `root=admin` mode tested.
+  - `[high]` `[patch]` Gap: HostedPage's default `auto` scheme is never used — omitted-prop case tested.
+  - `[high]` `[patch]` Gap: AlertDialog's place in the one-per-document registry is untested — both directions tested.
+  - `[high]` `[patch]` Gap: the 200% text checks can't fail — real height and line counts asserted.
+  - `[medium]` `[patch]` Gap: only the error StatusIcon is tested — all four, both schemes.
+  - `[low]` `[reject]` Gap: assert the status icon at 46px — DESIGN.md sets 52px and wins over the export.
+  - `[medium]` `[patch]` Gap: AlertDialog `initialFocus`, `dismissible={false}` and focus fallback untested — tested.
+  - `[medium]` `[patch]` Gap: the theme test relies on a doubled selector and light only — plain-selector theme added, dark and auto tested.
+  - `[medium]` `[patch]` Gap: the hosted export list isn't exact — frozen list.
+  - `[medium]` `[patch]` Gap: the hosted allowlist isn't pinned empty — pinned.
+  - `[medium]` `[patch]` Gap: props-only screens aren't enforced — source scan test.
+  - `[low]` `[patch]` Gap: deep and relative imports, missing nested manifest, explicit initial, link order, 0 or 1 providers, width boundaries, reduced motion, focus ring and accessible-name checks — tested.
+  - `[medium]` `[patch]` Blind: the screens rule is a denylist with gaps — only `@gatekeep/ui/hosted`; relative imports must stay in the package.
+  - `[medium]` `[patch]` Blind: the 200% test is vacuous — same fix as the Gap row.
+  - `[medium]` `[patch]` Blind: scheme set on a `div` leaves the canvas light — documented that the app's `<html>` carries it (Story 4.1), tested without it.
+  - `[false]` `[reject]` Blind: the `@` warning glyph is a typo — DESIGN.md specifies `@`.
+  - `[low]` `[patch]` Blind: prototype keys pass the StatusIcon fallback — `Object.hasOwn`.
+  - `[low]` `[patch]` Blind: an empty `initial` gives a blank tile — trimmed fallback.
+  - `[low]` `[patch]` Blind: two `h1`s in the preview frame — `headingLevel`, axe on the preview.
+  - `[low]` `[patch]` Blind: `.link a` overrides a styled link — `:where`.
+  - `[low]` `[patch]` Blind: provider names split mid-word in a narrow row — the row reflows; labels wrap only at spaces.
+  - `[low]` `[patch]` Blind: `100vw` includes the scrollbar — `100%`.
+  - `[low]` `[reject]` Blind: `var()` inside `::backdrop` needs a recent engine — the same as Modal; supported engines are the target.
+  - `[low]` `[patch]` Blind: "with no script" unproven — no inline `--gk-*` styles asserted.
+  - `[low]` `[patch]` Blind: the custom theme is tested in light only — same fix as the Gap row.
+  - `[medium]` `[patch]` Edge: relative imports reach the admin graph — same fix as the Blind row.
+  - `[medium]` `[patch]` Edge: three providers at 320px break letter by letter — same fix as the Blind row.
+  - `[medium]` `[patch]` Edge: duplicate provider ids — de-duplicated with an error.
+  - `[medium]` `[patch]` Edge: a broken logo shows a broken image — falls back to the initial.
+  - `[medium]` `[patch]` Edge: Generic error with no Application — same fix as the Intent row.
+  - `[medium]` `[defer]` Edge: a session-expiry alert refused while a modal is open would never show — the session-expiry story decides precedence.
+  - `[low]` `[patch]` Edge: `initialFocus` returning null skips the primary action — falls back to it.
+  - `[low]` `[patch]` Edge: StatusIcon prototype keys — same fix as the Blind row.
+  - `[low]` `[patch]` Edge: empty or long `initial`, bidi marks and multi-code-point names — one grapheme, format characters stripped.
+  - `[low]` `[patch]` Edge: an empty Tenant name — development error.
+  - `[low]` `[defer]` Edge: RTL Tenant names in LTR templates — the bidi pass with translation (NFR-19).
+  - `[low]` `[patch]` Edge: an empty code or trace ID shows an empty row — hidden.
+  - `[low]` `[patch]` Edge: `brought` ignores the entry allowlist — same fix as the Intent dependency row.
+  - `[medium]` `[patch]` Other: `overlay.spec.ts` axe test fails when an animation is cancelled (`AbortError`) — the animation wait tolerates cancellation.
+
 ## Design Notes
 
 - **QR (R-8):** AD-22 permits one reviewed encoder in the Hosted entry. R-8 moved encoding to the server, because a client `data:` image breaks the AD-21 CSP, and the server path also keeps the seed out of any client library. The client will render `<svg><path d=…>` on `#fff` in `packages/ui/src/qr/qr-code.tsx`, the raw-hex exception path that already exists. That arrives with TOTP enrolment, so this story only keeps the allowlist empty and says why.
 - **Generic error subtitle:** EXPERIENCE requires fixed text. The export's "This link has expired or was already used." is case-specific. `[ASSUMPTION]` The catalogue uses "We couldn't complete this request. Go back and try again." and keeps the case-specific copy out.
+- **Decisions made while building:**
+  - **Status icon:** 52px, from the DESIGN.md token.
+  - **`ButtonLink`:** an `<a href>` drawn as a button, for actions that navigate, such as "Back to {Tenant}".
+  - **`ErrorReference`:** shows the code and trace ID, with Copy. It lives in `packages/ui` because `hosted-screens` builds with plain `tsc` and ships no CSS. It hides a row whose value is empty.
+  - **Hosted buttons:** they wrap long labels and get 8px of vertical padding. Admin buttons are unchanged.
+  - **Dependency check:** it follows first-party packages through what the import graph actually reaches. `hosted-screens` may reach `@gatekeep/ui` only through `@gatekeep/ui/hosted`.
+  - **Raw-colour lint:** it now covers `packages/hosted-screens/src`.
+  - **`GenericErrorScreen`:** `backHref` is optional. Without it, the screen has no primary action, because Generic error never redirects to an unvalidated target (EXPERIENCE L590, L696).
+  - **`HostedCard`:** a `headingLevel` prop lets the preview frame sit inside an Admin page, which already has its own `h1`.
+- **`HostedPage` `theme` prop:** sets `data-gk-theme` for a Tenant theme stylesheet. Story 15.1 owns how theme CSS is scoped, and may replace this.
+- **Story 15.1 note:** heading and body type use composite `--gk-font-*` tokens, with the family baked in. A Tenant font needs a family token to override.
+
+## Auto Run Result
+
+Status: done
+
+**Summary:** `packages/ui` gains `HostedPage`, `HostedCard`, `StatusIcon`, `SocialButtons`, `AlertDialog`, `ButtonLink` and `ErrorReference` in the shared entry. The token generator adds a CSS-only `data-gk-scheme="auto"` scope that follows `prefers-color-scheme`. `packages/hosted-screens` becomes a React package whose first props-only screen is `GenericErrorScreen`. The dependency check keeps the Hosted entry at React only (R-8 moves QR encoding to the server) and now covers `hosted-screens`. A `?page=hosted` fixture and Playwright tests cover every behaviour in light, dark, auto and a custom theme, with axe.
+
+**Files:** `packages/design-tokens/generator/` and `css/tokens.css`; `packages/ui/src/components/` (HostedPage, HostedCard, StatusIcon, SocialButtons, AlertDialog, ErrorReference, Button), `surface.css`, `messages.tsx`, the entry points, `scripts/check-dependencies.mjs`, `scripts/check-no-raw-hex.mjs`; `packages/hosted-screens/`; `tests/browser/` (HostedFixture, themes, `hosted.spec.ts`, `overlay.spec.ts`, config); `pnpm-lock.yaml`.
+
+**Review:** 46 findings across four layers: 40 patched, 3 deferred, 3 rejected, each with its reason in the triage log.
+
+**Follow-up review:** recommended. Four high verification gaps and several medium patches changed the dependency check and the tests, and only the new tests prove them.
+
+**Verification:** see the PR screenshot; the full suite passes in the `tests` container.
+
+**Residual risks:** tested in Chromium only. Hosted Login's `<html>` must carry the surface and scheme, which Story 4.1 serves.

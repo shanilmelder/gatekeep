@@ -53,7 +53,7 @@ development_status:
   1-15-build-data-display-components: done
   1-16-build-overlay-and-feedback-components: done
   1-17-build-the-drawer-and-menu: done
-  1-18-build-the-hosted-component-entry-and-screen-package: in-progress
+  1-18-build-the-hosted-component-entry-and-screen-package: done
   1-19-initialise-a-deployment: backlog
   1-20-add-the-rate-limiter-and-admin-csp: backlog
   1-21-claim-bootstrap-and-create-the-first-admin: backlog

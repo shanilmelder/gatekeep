@@ -9,6 +9,10 @@
  * nest inside the other once, as a Hosted preview inside the Admin Dashboard or an Admin
  * island inside a Hosted page: the nested selectors are one step more specific, so the
  * inner surface wins over the outer one's scope rules, whichever comes later.
+ *
+ * The scheme scopes are every `[data-gk-scheme]`: light, dark and auto alike. An auto scope
+ * (Hosted Login, which follows the device) is matched the same way, so its surface values
+ * resolve against the light or dark tokens that prefers-color-scheme gives it, with no script.
  */
 
 /* Hosted, at the top level or nested once inside Admin. */
@@ -48,6 +52,9 @@
 
   --gk-ui-button-height: var(--gk-hosted-button-primary-height);
   --gk-ui-button-padding: var(--gk-space-16);
+  /* Hosted buttons wrap: at 200% text a long label takes two lines inside its min-height. */
+  --gk-ui-button-padding-block: var(--gk-space-8);
+  --gk-ui-button-white-space: normal;
   --gk-ui-button-radius: var(--gk-hosted-button-primary-radius);
   --gk-ui-button-font: var(--gk-hosted-button-primary-typography);
   --gk-ui-button-primary-background: var(--gk-hosted-button-primary-background);
@@ -113,6 +120,8 @@
 
   --gk-ui-button-height: var(--gk-button-primary-height);
   --gk-ui-button-padding: var(--gk-space-12);
+  --gk-ui-button-padding-block: 0;
+  --gk-ui-button-white-space: nowrap;
   --gk-ui-button-radius: var(--gk-button-primary-radius);
   --gk-ui-button-font: var(--gk-button-primary-typography);
   --gk-ui-button-primary-background: var(--gk-button-primary-background);

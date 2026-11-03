@@ -3,7 +3,10 @@
   "compilerOptions": {
     "rootDir": "src",
     "outDir": "dist",
-    "declaration": true
+    "declaration": true,
+    // @gatekeep/ui ships its TypeScript and CSS Modules source, which this build type-checks
+    // through the hosted entry; each app's Vite build compiles it.
+    "types": ["vite/client"]
   },
   "include": ["src"]
 }

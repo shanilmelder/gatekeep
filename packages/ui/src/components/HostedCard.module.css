@@ -1,0 +1,104 @@
+/*
+ * The Hosted Login card (DESIGN.md, components.hosted-card): sf, a bd border, radius modal,
+ * 32px padding and the sh shadow, which is sh-dark in the dark scheme. 384px wide; below
+ * 416px of window it takes the page's width, which leaves a 16px gutter on each side.
+ * Every value is a token, so a Tenant theme's overrides restyle it. All its text is tx or tx2.
+ */
+
+.card {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: var(--gk-space-16);
+  width: min(var(--gk-hosted-card-width), 100%);
+  min-width: 0;
+  padding: var(--gk-hosted-card-padding);
+  border: 1px solid var(--gk-hosted-card-border);
+  border-radius: var(--gk-hosted-card-radius);
+  background: var(--gk-hosted-card-background);
+  box-shadow: var(--gk-hosted-card-shadow);
+  color: var(--gk-color-tx);
+  font: var(--gk-font-hosted-body);
+  overflow-wrap: anywhere;
+}
+
+.header {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--gk-space-12);
+  text-align: center;
+}
+
+/* The 42px logo tile (48 - 6, from the spacing steps), on the control radius a Tenant theme sets. */
+.logo {
+  --gk-ui-logo-size: calc(var(--gk-space-48) - var(--gk-space-12) / 2);
+  box-sizing: border-box;
+  flex: none;
+  width: var(--gk-ui-logo-size);
+  height: var(--gk-ui-logo-size);
+  border-radius: var(--gk-radius-control);
+}
+
+.initial {
+  display: flex;
+  overflow: hidden;
+  white-space: nowrap;
+  align-items: center;
+  justify-content: center;
+  background: var(--gk-color-ac);
+  color: var(--gk-color-on-ac);
+  font: var(--gk-font-hosted-button);
+}
+
+.image {
+  display: block;
+  object-fit: contain;
+}
+
+/* The heading in the theme font, on page-title type. */
+.title {
+  margin: 0;
+  font: var(--gk-font-page-title);
+  letter-spacing: var(--gk-font-page-title-letter-spacing, normal);
+  color: var(--gk-color-tx);
+}
+
+.subtitle {
+  margin: 0;
+  color: var(--gk-color-tx2);
+}
+
+.content {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gk-space-16);
+  min-width: 0;
+}
+
+/* The one primary action, at full width. */
+.action {
+  display: flex;
+  flex-direction: column;
+}
+
+.action > * {
+  width: 100%;
+}
+
+/* A stand-alone link stays plain: no underline at rest (DESIGN.md, Links). */
+.link {
+  margin: 0;
+  text-align: center;
+  color: var(--gk-color-tx2);
+}
+
+/* :where, so a link that brings its own styles, such as a ButtonLink, keeps them. */
+:where(.link) :where(a) {
+  color: var(--gk-color-tx2);
+  text-decoration: none;
+}
+
+:where(.link) :where(a):hover {
+  text-decoration: underline;
+}

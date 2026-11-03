@@ -8,5 +8,7 @@ import { defineConfig } from 'vite';
 export default defineConfig({
   root: fileURLToPath(new URL('.', import.meta.url)),
   plugins: [react()],
-  build: { outDir: 'dist', emptyOutDir: true },
+  // Nothing inlined as a data: URL, so every asset, the Hosted logo image included, is a
+  // same-origin request as an app serves it (hosted.spec.ts, No third party).
+  build: { outDir: 'dist', emptyOutDir: true, assetsInlineLimit: 0 },
 });

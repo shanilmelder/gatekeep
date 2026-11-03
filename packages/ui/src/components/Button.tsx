@@ -1,4 +1,4 @@
-import { useId, type ButtonHTMLAttributes, type MouseEvent, type Ref } from 'react';
+import { useId, type AnchorHTMLAttributes, type ButtonHTMLAttributes, type MouseEvent, type Ref } from 'react';
 import { useMessages } from '../messages';
 import { cx, joinIds, type Surface } from '../util';
 import a11y from './a11y.module.css';
@@ -85,5 +85,33 @@ export function Button({
         {children}
       </span>
     </button>
+  );
+}
+
+export interface ButtonLinkProps extends AnchorHTMLAttributes<HTMLAnchorElement> {
+  /** Destructive never navigates on its own (it opens the confirming modal), so it isn't offered. */
+  variant?: Exclude<ButtonVariant, 'destructive'>;
+  size?: 'md' | 'sm';
+  surface?: Surface;
+  /** Where it goes. Required: a link drawn as a button that goes nowhere should be a Button. */
+  href: string;
+  ref?: Ref<HTMLAnchorElement>;
+}
+
+/**
+ * A link drawn as a button, for an action that navigates, such as Generic error's "Back to
+ * {Tenant}". It's a native `<a href>`, so it opens in a new tab and is announced as a link,
+ * and it takes the same variants, sizing and min-height as Button.
+ */
+export function ButtonLink({ variant = 'secondary', size = 'md', surface, className, ref, ...rest }: ButtonLinkProps) {
+  return (
+    <a
+      {...rest}
+      ref={ref}
+      className={cx(styles.button, styles[variant], size === 'sm' && styles.sm, className)}
+      data-variant={variant}
+      data-size={size}
+      data-gk-surface={surface}
+    />
   );
 }

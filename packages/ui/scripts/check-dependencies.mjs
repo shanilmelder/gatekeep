@@ -2,12 +2,21 @@
 // than React and React DOM (Story 1.14, AD-22): no headless or UI library. It walks the
 // import graph from each entry point, so only files an entry reaches count, and checks the
 // package manifest, so nothing third party is declared for runtime without an entry point
-// allowing it. First-party @gatekeep workspace packages are allowed while they have no
-// runtime dependencies of their own.
+// allowing it. First-party @gatekeep workspace packages are allowed while their own runtime
+// dependencies are only React, React DOM and such first-party packages, all the way down.
+//
+// It checks packages/hosted-screens too (Story 1.18), by what its screens actually reach: it
+// follows each @gatekeep import into that package's own files, so a dependency @gatekeep/ui
+// declares for its admin entry alone never fails the screens, while anything the hosted
+// entry's graph reaches still counts. Of @gatekeep/ui, the screens may import only the hosted
+// entry: not the admin entry, the bare package or its files directly. No relative import may
+// leave its package.
 //
 // AD-22 lets @gatekeep/ui/admin use headless accessibility primitives and @gatekeep/ui/hosted
-// one reviewed QR encoder. Neither exists yet, so both allowlists below are empty: adding a
-// package to one is the reviewed change that lets that entry reach it.
+// one reviewed QR encoder. Neither is used, so both allowlists below are empty: adding a
+// package to one is the reviewed change that lets that entry reach it. The hosted one stays
+// empty for good: architecture review R-8 moved QR encoding to the server, which returns the
+// SVG path data the TOTP enrolment screen draws, so Hosted Login needs no client encoder.
 
 import { readdir, readFile, realpath, stat } from 'node:fs/promises';
 import path from 'node:path';
@@ -20,6 +29,23 @@ export const ALLOWED_RUNTIME = Object.freeze(['react', 'react-dom']);
 export const ENTRY_POINTS = Object.freeze({
   hosted: Object.freeze({ files: ['src/hosted.ts', 'src/styles.css'], allow: Object.freeze([]) }),
   admin: Object.freeze({ files: ['src/admin.ts', 'src/styles.css'], allow: Object.freeze([]) }),
+});
+
+/**
+ * The Hosted screens package (Story 1.18), relative to the repository, with its entry. It
+ * allows nothing extra; of @gatekeep/ui it may import the hosted entry only; and its
+ * @gatekeep imports are followed, so what they reach is checked as its own.
+ */
+export const SCREENS = Object.freeze({
+  dir: 'packages/hosted-screens',
+  entries: Object.freeze({
+    'hosted-screens': Object.freeze({
+      files: ['src/index.ts'],
+      allow: Object.freeze([]),
+      only: Object.freeze({ '@gatekeep/ui': Object.freeze(['@gatekeep/ui/hosted']) }),
+      follow: true,
+    }),
+  }),
 });
 
 const RUNTIME_FIELDS = ['dependencies', 'peerDependencies', 'optionalDependencies', 'bundleDependencies', 'bundledDependencies'];
@@ -51,11 +77,35 @@ function firstParty(manifest) {
 }
 
 /**
+ * What a first-party package brings at runtime beyond React, React DOM and first-party
+ * packages that are themselves clean, all the way down. A first-party package with no
+ * workspace manifest counts as brought. `seen` stops a cycle.
+ */
+async function brought(manifest, workspaceManifest, seen) {
+  const local = new Set(firstParty(manifest));
+  const found = [];
+  for (const name of runtimeDependencies(manifest)) {
+    if (ALLOWED_RUNTIME.includes(name)) continue;
+    if (!local.has(name)) {
+      found.push(name);
+      continue;
+    }
+    if (seen.has(name)) continue;
+    seen.add(name);
+    const neighbour = await workspaceManifest(name);
+    if (!neighbour) found.push(name);
+    else found.push(...(await brought(neighbour, workspaceManifest, seen)));
+  }
+  return found;
+}
+
+/**
  * Checks a manifest's runtime dependencies against React, React DOM and `extra`.
  * `workspaceManifest(name)` returns a first-party package's manifest, or null when there is
- * no such workspace package.
+ * no such workspace package. With `transitive` (the default) a first-party package's own
+ * manifest is walked too; without, the caller checks what the import graph reaches instead.
  */
-export async function checkManifest(manifest, workspaceManifest, extra = []) {
+export async function checkManifest(manifest, workspaceManifest, extra = [], { transitive = true } = {}) {
   const problems = [];
   const local = new Set(firstParty(manifest));
   for (const name of runtimeDependencies(manifest)) {
@@ -66,9 +116,10 @@ export async function checkManifest(manifest, workspaceManifest, extra = []) {
         problems.push(`${name} is not a workspace package.`);
         continue;
       }
-      const transitive = runtimeDependencies(neighbour);
-      if (transitive.length > 0) {
-        problems.push(`${name} brings runtime dependencies of its own: ${transitive.join(', ')}.`);
+      if (!transitive) continue;
+      const found = [...new Set(await brought(neighbour, workspaceManifest, new Set([name])))];
+      if (found.length > 0) {
+        problems.push(`${name} brings runtime dependencies of its own: ${found.join(', ')}.`);
       }
       continue;
     }
@@ -126,36 +177,91 @@ async function resolveRelative(from, specifier) {
   return null;
 }
 
+/** The file a package's `exports` maps `specifier` to, relative to the package, or null. */
+export function exportedFile(manifest, specifier) {
+  const name = packageOf(specifier);
+  const key = specifier === name ? '.' : `.${specifier.slice(name.length)}`;
+  const exports = manifest.exports;
+  let target;
+  if (typeof exports === 'string') target = key === '.' ? exports : undefined;
+  else if (exports && typeof exports === 'object') target = exports[key];
+  if (typeof target === 'string') return target;
+  if (target && typeof target === 'object') return target.import ?? target.default ?? null;
+  return null;
+}
+
+/** Whether `file` is inside the directory `dir`. */
+function inside(dir, file) {
+  const relative = path.relative(dir, file);
+  return relative !== '' && !relative.startsWith('..') && !path.isAbsolute(relative);
+}
+
 /**
  * Walks the import graph of one entry point, and returns a problem for each package outside
- * React, React DOM, the declared first-party packages and the entry's `allow` list, and for
- * each relative import that resolves to no file.
+ * React, React DOM, the declared first-party packages and the entry's `allow` list; for each
+ * import of a package in the entry's `only` map other than the specifiers it lists; and for
+ * each relative import that resolves to no file, or to a file outside its package. With the
+ * entry's `follow` and a `workspace` ({ manifests, dirs }, by package name), an import of a
+ * declared first-party package is followed through that package's `exports` into its files,
+ * which are checked against that package's own declared first-party packages.
  */
-export async function checkEntry(packageDir, name, entry, manifest) {
-  const allowed = new Set([...ALLOWED_RUNTIME, ...entry.allow, ...firstParty(manifest)]);
+export async function checkEntry(packageDir, name, entry, manifest, workspace = null) {
   const problems = [];
+  const contexts = new Map();
+  const contextOf = (dir, own, label) => {
+    if (!contexts.has(dir)) {
+      // The entry's allowlist is its own package's: a followed package gets none.
+      const extra = contexts.size === 0 ? entry.allow : [];
+      contexts.set(dir, { dir, label, allowed: new Set([...ALLOWED_RUNTIME, ...extra, ...firstParty(own)]) });
+    }
+    return contexts.get(dir);
+  };
+  const start = contextOf(packageDir, manifest, '');
   const seen = new Set();
   const queue = [];
   for (const file of entry.files) {
     const full = path.join(packageDir, file);
-    if (await isFile(full)) queue.push(full);
+    if (await isFile(full)) queue.push({ file: full, context: start });
     else problems.push(`${name}: entry ${file} does not exist.`);
   }
   while (queue.length > 0) {
-    const file = queue.shift();
+    const { file, context } = queue.shift();
     if (seen.has(file)) continue;
     seen.add(file);
-    const relative = path.relative(packageDir, file).split(path.sep).join('/');
+    const relative = context.label + path.relative(context.dir, file).split(path.sep).join('/');
     const kind = file.endsWith('.css') ? 'css' : 'js';
     for (const specifier of importsIn(await readFile(file, 'utf8'), kind)) {
       if (specifier.startsWith('.') || specifier.startsWith('/')) {
         const target = await resolveRelative(file, specifier);
-        if (target) queue.push(target);
-        else problems.push(`${name}: ${relative} imports ${specifier}, which resolves to no file.`);
+        if (!target) problems.push(`${name}: ${relative} imports ${specifier}, which resolves to no file.`);
+        else if (!inside(context.dir, target)) problems.push(`${name}: ${relative} imports ${specifier}, which is outside its package.`);
+        else queue.push({ file: target, context });
         continue;
       }
-      if (allowed.has(packageOf(specifier))) continue;
-      problems.push(`${name}: ${relative} imports ${specifier}. Only React, React DOM and declared @gatekeep packages are allowed.`);
+      const pkg = packageOf(specifier);
+      const only = context === start ? entry.only?.[pkg] : undefined;
+      if (only && !only.includes(specifier)) {
+        problems.push(`${name}: ${relative} imports ${specifier}. Of ${pkg}, only ${only.join(', ')} may be imported.`);
+        continue;
+      }
+      if (!context.allowed.has(pkg)) {
+        problems.push(`${name}: ${relative} imports ${specifier}. Only React, React DOM and declared @gatekeep packages are allowed.`);
+        continue;
+      }
+      if (!entry.follow || !workspace || !pkg.startsWith('@gatekeep/')) continue;
+      const neighbour = workspace.manifests.get(pkg);
+      const dir = workspace.dirs.get(pkg);
+      if (!neighbour || !dir) {
+        problems.push(`${name}: ${relative} imports ${specifier}, which is not a workspace package.`);
+        continue;
+      }
+      const exported = exportedFile(neighbour, specifier);
+      const target = exported ? path.resolve(dir, exported) : null;
+      if (!target || !inside(dir, target) || !(await isFile(target))) {
+        problems.push(`${name}: ${relative} imports ${specifier}, which ${pkg} doesn't export as a file.`);
+        continue;
+      }
+      queue.push({ file: target, context: contextOf(dir, neighbour, `${pkg}/`) });
     }
   }
   return problems;
@@ -164,6 +270,7 @@ export async function checkEntry(packageDir, name, entry, manifest) {
 /** Reads every workspace manifest under packages/ and apps/; a malformed one is a problem. */
 async function workspaceManifests(root) {
   const manifests = new Map();
+  const dirs = new Map();
   const problems = [];
   for (const group of ['packages', 'apps']) {
     const entries = await readdir(path.join(root, group), { withFileTypes: true }).catch(() => []);
@@ -175,17 +282,21 @@ async function workspaceManifests(root) {
       try {
         const manifest = JSON.parse(text);
         manifests.set(manifest.name, manifest);
+        dirs.set(manifest.name, path.join(root, group, entry.name));
       } catch (error) {
         problems.push(`${file} is not valid JSON: ${error.message}`);
       }
     }
   }
-  return { manifests, problems };
+  return { manifests, dirs, problems };
 }
 
-/** Checks the package at `packageDir`, inside the workspace at `root`. */
+/**
+ * Checks the package at `packageDir`, inside the workspace at `root`. Entries that `follow`
+ * check their first-party packages by what they reach in them, not by those manifests.
+ */
 export async function check(root, packageDir = path.join(root, 'packages/ui'), entries = ENTRY_POINTS) {
-  const { manifests, problems } = await workspaceManifests(root);
+  const { manifests, dirs, problems } = await workspaceManifests(root);
   let manifest;
   try {
     manifest = JSON.parse(await readFile(path.join(packageDir, 'package.json'), 'utf8'));
@@ -193,11 +304,17 @@ export async function check(root, packageDir = path.join(root, 'packages/ui'), e
     return [...problems, `package.json can't be read: ${error.message}`];
   }
   const extra = [...new Set(Object.values(entries).flatMap((entry) => entry.allow))];
-  problems.push(...(await checkManifest(manifest, async (name) => manifests.get(name) ?? null, extra)));
+  const transitive = !Object.values(entries).every((entry) => entry.follow);
+  problems.push(...(await checkManifest(manifest, async (name) => manifests.get(name) ?? null, extra, { transitive })));
   for (const [name, entry] of Object.entries(entries)) {
-    problems.push(...(await checkEntry(packageDir, name, entry, manifest)));
+    problems.push(...(await checkEntry(packageDir, name, entry, manifest, { manifests, dirs })));
   }
   return problems;
+}
+
+/** Checks packages/hosted-screens inside the workspace at `root`: its manifest and what its screens reach. */
+export async function checkScreens(root) {
+  return check(root, path.join(root, SCREENS.dir), SCREENS.entries);
 }
 
 async function isMain() {
@@ -213,10 +330,13 @@ async function isMain() {
 
 if (await isMain()) {
   const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
-  const problems = await check(root);
+  const problems = [
+    ...(await check(root)).map((problem) => `packages/ui: ${problem}`),
+    ...(await checkScreens(root)).map((problem) => `${SCREENS.dir}: ${problem}`),
+  ];
   if (problems.length > 0) {
-    for (const problem of problems) console.error(`packages/ui: ${problem}`);
+    for (const problem of problems) console.error(problem);
     process.exit(1);
   }
-  console.log(`packages/ui entry points use no runtime dependency but ${ALLOWED_RUNTIME.join(' and ')}.`);
+  console.log(`packages/ui entry points and ${SCREENS.dir} use no runtime dependency but ${ALLOWED_RUNTIME.join(' and ')}.`);
 }

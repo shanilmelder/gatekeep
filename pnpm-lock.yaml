@@ -275,10 +275,23 @@ importers:
         version: 2.9.1
 
   packages/hosted-screens:
+    dependencies:
+      '@gatekeep/ui':
+        specifier: workspace:*
+        version: link:../ui
     devDependencies:
+      '@types/react':
+        specifier: 'catalog:'
+        version: 19.3.0
+      react:
+        specifier: 'catalog:'
+        version: 19.3.1
       typescript:
         specifier: 'catalog:'
         version: 7.0.2
+      vite:
+        specifier: 'catalog:'
+        version: 8.3.5(yaml@2.9.1)
 
   packages/ui:
     dependencies:
@@ -310,6 +323,9 @@ importers:
 
   tests/browser:
     dependencies:
+      '@gatekeep/hosted-screens':
+        specifier: workspace:*
+        version: link:../../packages/hosted-screens
       '@gatekeep/ui':
         specifier: workspace:*
         version: link:../../packages/ui

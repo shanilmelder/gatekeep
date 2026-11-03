@@ -4,6 +4,8 @@
 // `?page=drawer` the drawer and menu (Story 1.17) instead of the controls (Story 1.14). The
 // surface and scheme go on <html>, as an app sets them, and the components come from that
 // surface's own entry point; the drawer page is Admin only, as its components are.
+// `?page=hosted` shows the Hosted building blocks and screens (Story 1.18), always from the
+// hosted entry; its scheme may also be `auto`, its default, and HostedFixture reads the rest.
 
 import '@gatekeep/ui/styles.css';
 import * as admin from '@gatekeep/ui/admin';
@@ -13,17 +15,28 @@ import { createRoot } from 'react-dom/client';
 import { DataFixture } from './DataFixture';
 import { DrawerFixture } from './DrawerFixture';
 import { Fixture } from './Fixture';
+import { HostedFixture } from './HostedFixture';
 import { OverlayFixture } from './OverlayFixture';
 
 const params = new URLSearchParams(location.search);
-const scheme = params.get('scheme') === 'dark' ? 'dark' : 'light';
-const pages = ['data', 'overlay', 'drawer'] as const;
+const pages = ['data', 'overlay', 'drawer', 'hosted'] as const;
 const page = pages.find((name) => name === params.get('page')) ?? 'controls';
-// The drawer page's components are Admin only, so it's always on the Admin surface.
-const surface = page !== 'drawer' && params.get('surface') === 'hosted' ? 'hosted' : 'admin';
+const asked = params.get('scheme');
+const scheme = asked === 'dark' ? 'dark' : page === 'hosted' && asked !== 'light' ? 'auto' : 'light';
+// The hosted page passes the scheme it was asked for, or none, so HostedPage's own default runs.
+const hostedScheme = asked === 'dark' || asked === 'light' || asked === 'auto' ? asked : undefined;
+// The hosted page's preview frame is an Admin page holding a Hosted scope, and &root=admin
+// leaves <html> on the Admin surface and light around a HostedPage.
+const preview = page === 'hosted' && params.get('frame') === 'preview';
+const adminRoot = preview || (page === 'hosted' && params.get('root') === 'admin');
+// The drawer page's components are Admin only, so it's always on the Admin surface, and the
+// hosted page's are on the Hosted surface, except with an Admin root.
+const surface =
+  page === 'hosted' ? (adminRoot ? 'admin' : 'hosted') : page !== 'drawer' && params.get('surface') === 'hosted' ? 'hosted' : 'admin';
 
 document.documentElement.dataset.gkSurface = surface;
-document.documentElement.dataset.gkScheme = scheme;
+// An Admin root stays light: only the Hosted scope inside it takes the scheme.
+document.documentElement.dataset.gkScheme = adminRoot ? 'light' : scheme;
 // The toast's duration, for the tests to read rather than repeat.
 document.documentElement.dataset.toastMs = String(hosted.TOAST_MS);
 
@@ -32,6 +45,45 @@ document.documentElement.dataset.toastMs = String(hosted.TOAST_MS);
 const hostedExports = hosted as unknown as Record<string, unknown>;
 const adminExports = admin as unknown as Record<string, unknown>;
 const names = Object.keys(hostedExports);
+// The hosted entry's exports, exactly: anything it gains or loses fails the check.
+const HOSTED = [
+  'AlertDialog',
+  'Banner',
+  'Button',
+  'ButtonLink',
+  'COPIED_MS',
+  'Checkbox',
+  'CodeBadge',
+  'CodeBlock',
+  'CopyButton',
+  'DraftBadge',
+  'EnvironmentBadge',
+  'ErrorReference',
+  'Field',
+  'HostedCard',
+  'HostedPage',
+  'Input',
+  'MessagesProvider',
+  'PasswordField',
+  'ProtocolBadge',
+  'Radio',
+  'RadioGroup',
+  'SOCIAL_MAX',
+  'Segmented',
+  'Select',
+  'SocialButtons',
+  'StatusBadge',
+  'StatusIcon',
+  'TOAST_MS',
+  'Textarea',
+  'ToastProvider',
+  'Toggle',
+  'defaultMessages',
+  'formatMessage',
+  'useFieldControl',
+  'useMessages',
+  'useToast',
+];
 // The admin entry's own exports, exactly: anything else it gains fails the check.
 const ADMIN_ONLY = [
   'ConfirmModal',
@@ -56,8 +108,10 @@ const ADMIN_ONLY = [
 ];
 const expected = [...names, ...ADMIN_ONLY].sort();
 const actual = Object.keys(adminExports).sort();
+const hostedSorted = [...names].sort();
 const same =
-  names.length > 0 &&
+  hostedSorted.length === HOSTED.length &&
+  [...HOSTED].sort().every((name, index) => name === hostedSorted[index]) &&
   names.every((name) => name in adminExports && adminExports[name] === hostedExports[name]) &&
   actual.length === expected.length &&
   actual.every((name, index) => name === expected[index]);
@@ -70,14 +124,16 @@ document.documentElement.dataset.adminOnlyExports = Object.keys(adminExports)
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    {page === 'drawer' ? (
+    {page === 'hosted' ? (
+      <HostedFixture ui={hosted} admin={admin} scheme={hostedScheme} preview={preview} />
+    ) : page === 'drawer' ? (
       <DrawerFixture admin={admin} />
     ) : page === 'overlay' ? (
       <OverlayFixture surface={surface} ui={surface === 'hosted' ? hosted : admin} admin={surface === 'admin' ? admin : null} />
     ) : page === 'data' ? (
       <DataFixture surface={surface} ui={surface === 'hosted' ? hosted : admin} admin={surface === 'admin' ? admin : null} />
     ) : (
-      <Fixture surface={surface} scheme={scheme} ui={surface === 'hosted' ? hosted : admin} />
+      <Fixture surface={surface} scheme={scheme === 'dark' ? 'dark' : 'light'} ui={surface === 'hosted' ? hosted : admin} />
     )}
   </StrictMode>,
 );

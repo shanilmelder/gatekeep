@@ -1,0 +1,44 @@
+/*
+ * Test-only Tenant themes (Story 1.18's Theme variant row): stylesheets that override tokens
+ * under data-gk-theme, as a Tenant theme does (Story 15.1). Each changes the primary colour
+ * and its derived pairs, per scheme, and the control and card radius; the font stays the
+ * bundled Geist. Both set the same values, written two ways:
+ *
+ * - "custom" is one step more specific than tokens.css, so it wins on the themed element and
+ *   on any scheme scope inside it, whatever order the stylesheets load in.
+ * - "plain" uses a single-attribute selector, as a Tenant stylesheet loaded after tokens.css
+ *   would, and wins by coming later.
+ *
+ * The dark values apply under a forced dark scheme, and under auto with a dark preference.
+ */
+
+[data-gk-theme='custom'][data-gk-theme],
+[data-gk-theme='custom'] [data-gk-scheme],
+[data-gk-theme='plain'] {
+  --gk-color-ac: #6d28d9;
+  --gk-color-on-ac: #ffffff;
+  --gk-color-ac-sf: #efe7fd;
+  --gk-color-ac-tx: #5b21b6;
+  --gk-radius-control: 2px;
+  --gk-radius-modal: 4px;
+}
+
+[data-gk-theme='custom'][data-gk-scheme='dark'],
+[data-gk-theme='custom'] [data-gk-scheme='dark'],
+[data-gk-theme='plain'][data-gk-scheme='dark'] {
+  --gk-color-ac: #a78bfa;
+  --gk-color-on-ac: #1e1b4b;
+  --gk-color-ac-sf: #2a2140;
+  --gk-color-ac-tx: #c4b5fd;
+}
+
+@media (prefers-color-scheme: dark) {
+  [data-gk-theme='custom'][data-gk-scheme='auto'],
+  [data-gk-theme='custom'] [data-gk-scheme='auto'],
+  [data-gk-theme='plain'][data-gk-scheme='auto'] {
+    --gk-color-ac: #a78bfa;
+    --gk-color-on-ac: #1e1b4b;
+    --gk-color-ac-sf: #2a2140;
+    --gk-color-ac-tx: #c4b5fd;
+  }
+}

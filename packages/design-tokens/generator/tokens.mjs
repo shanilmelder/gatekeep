@@ -433,16 +433,20 @@ function sharedVariables(model) {
 }
 
 export function renderCss(model) {
-  const block = (selector, variables) =>
-    `${selector} {\n${variables.map(([name, value]) => `  ${name}: ${value};`).join('\n')}\n}\n`;
+  const block = (selector, variables, indent = '') =>
+    `${indent}${selector} {\n${variables.map(([name, value]) => `${indent}  ${name}: ${value};`).join('\n')}\n${indent}}\n`;
+  const dark = [['color-scheme', 'dark'], ...schemeVariables(model.schemes.dark, 'dark')];
   return [
     `/*\n * ${GENERATED_NOTE.replace(/\n/g, '\n * ')}\n *\n` +
       ' * :root carries the default (light) theme. [data-gk-theme] starts a themed subtree, such as a\n' +
-      ' * preview, and [data-gk-scheme="dark"] switches that subtree to the dark values. Component\n' +
-      ' * variables are declared on every scope, so their references resolve against its scheme.\n */\n',
-    block(':root,\n[data-gk-theme],\n[data-gk-scheme="light"]',
+      ' * preview, and [data-gk-scheme="dark"] switches that subtree to the dark values.\n' +
+      ' * [data-gk-scheme="auto"] follows the device, with no script: the light values, and the dark\n' +
+      ' * ones under prefers-color-scheme: dark (Hosted Login). Component variables are declared on\n' +
+      ' * every scope, so their references resolve against its scheme.\n */\n',
+    block(':root,\n[data-gk-theme],\n[data-gk-scheme="light"],\n[data-gk-scheme="auto"]',
       [['color-scheme', 'light'], ...schemeVariables(model.schemes.light, 'light')]),
-    block('[data-gk-scheme="dark"]', [['color-scheme', 'dark'], ...schemeVariables(model.schemes.dark, 'dark')]),
+    block('[data-gk-scheme="dark"]', dark),
+    `@media (prefers-color-scheme: dark) {\n${block('[data-gk-scheme="auto"]', dark, '  ')}}\n`,
     block(':root,\n[data-gk-theme],\n[data-gk-scheme]', sharedVariables(model)),
   ].join('\n');
 }

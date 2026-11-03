@@ -1,0 +1,31 @@
+/*
+ * The social sign-in row (DESIGN.md, components.social-button): up to three secondary
+ * buttons at the Hosted control's min-height. As many sit side by side in equal columns as
+ * fit at the minimum width, and the rest stack below at full width, so a narrow card or 200%
+ * text stacks them rather than breaking a provider's name mid-word.
+ */
+
+.row {
+  /*
+   * Room for a name such as "Microsoft", in em so it grows with the text: three fit in the
+   * card at 100%, and at 200% they stack.
+   */
+  --gk-ui-social-min: 7em;
+  /* Narrower inline padding than a lone Hosted button, so three names fit side by side. */
+  --gk-ui-button-padding: var(--gk-space-8);
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(var(--gk-ui-social-min), 100%), 1fr));
+  gap: var(--gk-space-8);
+}
+
+.button {
+  min-width: 0;
+  /* The card breaks long words anywhere; a provider's name only wraps at its spaces. */
+  overflow-wrap: normal;
+  word-break: normal;
+}
+
+.icon {
+  display: inline-flex;
+  margin-inline-end: var(--gk-space-8);
+}

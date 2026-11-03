@@ -81,6 +81,22 @@ export interface Messages {
   rawEventCopy: string;
   /** The note an event drawer shows in place of the raw detail for a role that can't see it (FR-39). */
   rawEventLimited: string;
+  /** A Hosted card's logo tile name, image or initial alike. Placeholder: {tenant}. */
+  tenantLogo: string;
+  /** A social sign-in button's name. Placeholder: {provider}. Keep the provider name in it: it's the visible text. */
+  continueWith: string;
+  /** Generic error's fixed heading (EXPERIENCE.md, Generic error). */
+  genericErrorTitle: string;
+  /** Generic error's fixed subtitle. It never names the case: the code and trace ID are the only variable detail. */
+  genericErrorBody: string;
+  /** Generic error's primary action, back to the Application. Placeholder: {tenant}. */
+  backTo: string;
+  /** The label before an error code. */
+  errorCode: string;
+  /** The label before a trace ID. */
+  traceId: string;
+  /** What a trace ID's Copy copies, as its name says: "Copy trace ID". Placeholder for `copyNamed`. */
+  traceIdCopy: string;
 }
 
 export const defaultMessages: Readonly<Messages> = Object.freeze({
@@ -125,6 +141,14 @@ export const defaultMessages: Readonly<Messages> = Object.freeze({
   rawEvent: 'Raw event',
   rawEventCopy: 'JSON',
   rawEventLimited: "Raw detail is limited by role, and yours can't see it.",
+  tenantLogo: '{tenant} logo',
+  continueWith: 'Continue with {provider}',
+  genericErrorTitle: 'Something went wrong',
+  genericErrorBody: "We couldn't complete this request. Go back and try again.",
+  backTo: 'Back to {tenant}',
+  errorCode: 'Code',
+  traceId: 'Trace ID',
+  traceIdCopy: 'trace ID',
 });
 
 /**

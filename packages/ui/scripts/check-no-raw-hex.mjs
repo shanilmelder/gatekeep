@@ -1,5 +1,5 @@
-// Fails on any raw colour (hex, or rgb()/hsl() with literal numbers) in packages/ui/src and
-// apps/*/src: colours come from the design tokens (AD-22). The one exception is the QR
+// Fails on any raw colour (hex, or rgb()/hsl() with literal numbers) in packages/ui/src,
+// packages/hosted-screens/src and apps/*/src: colours come from the design tokens (AD-22). The one exception is the QR
 // encoder, whose modules are always dark on white in every theme so that scanners work
 // (DESIGN.md, Hosted Login components).
 
@@ -39,9 +39,12 @@ async function* files(directory, visited = new Set()) {
   }
 }
 
-/** The directories the lint reads, relative to the repository: packages/ui/src and apps/*\/src. */
+/**
+ * The directories the lint reads, relative to the repository: packages/ui/src,
+ * packages/hosted-screens/src and apps/*\/src.
+ */
 export async function lintedDirectories(root) {
-  const directories = ['packages/ui/src'];
+  const directories = ['packages/ui/src', 'packages/hosted-screens/src'];
   const apps = await readdir(path.join(root, 'apps'), { withFileTypes: true }).catch(() => []);
   for (const app of apps) {
     const source = `apps/${app.name}/src`;
@@ -82,5 +85,5 @@ if (await isMain()) {
     for (const problem of problems) console.error(problem);
     process.exit(1);
   }
-  console.log('No raw colours in packages/ui/src or apps/*/src.');
+  console.log('No raw colours in packages/ui/src, packages/hosted-screens/src or apps/*/src.');
 }

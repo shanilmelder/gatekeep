@@ -1,0 +1,43 @@
+/*
+ * An error's code and trace ID on sf2, centred: mono values in tx with tx2 labels. The
+ * export's tx3 code line fails AA as text, so Hosted Login never uses it (DESIGN.md, Colors).
+ */
+
+.reference {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gk-space-4);
+  margin: 0;
+  padding: var(--gk-space-8) var(--gk-space-12);
+  border-radius: var(--gk-radius-control);
+  background: var(--gk-color-sf2);
+}
+
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: var(--gk-space-4) var(--gk-space-8);
+}
+
+.label {
+  font: var(--gk-font-small);
+  color: var(--gk-color-tx2);
+}
+
+.value {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: var(--gk-space-4);
+  min-width: 0;
+  margin: 0;
+}
+
+.code {
+  font: var(--gk-font-code);
+  color: var(--gk-color-tx);
+  overflow-wrap: anywhere;
+}
