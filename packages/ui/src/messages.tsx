@@ -97,6 +97,26 @@ export interface Messages {
   traceId: string;
   /** What a trace ID's Copy copies, as its name says: "Copy trace ID". Placeholder for `copyNamed`. */
   traceIdCopy: string;
+  /** The product's name, which the Admin pages before a session speak for, as a Tenant's name does on Hosted Login. */
+  productName: string;
+  /** Bootstrap's heading (EXPERIENCE.md, Admin: access and Tenants). */
+  bootstrapTitle: string;
+  /** Bootstrap's subtitle, saying where the token comes from. */
+  bootstrapSubtitle: string;
+  /** Bootstrap's token field label. */
+  bootstrapTokenLabel: string;
+  /** Bootstrap's token field helper, saying where the token file is. */
+  bootstrapTokenHelper: string;
+  /** Bootstrap's one primary action. */
+  bootstrapClaim: string;
+  /** The heading when there is no bootstrap to claim here: claimed already, or no token issued. */
+  bootstrapUnavailableTitle: string;
+  /** Its subtitle. It never says which, so it doesn't reveal whether the Deployment was claimed. */
+  bootstrapUnavailableBody: string;
+  /** Admin credential setup's heading. */
+  credentialSetupTitle: string;
+  /** Admin credential setup's placeholder text until Story 1.22 registers credentials. */
+  credentialSetupBody: string;
 }
 
 export const defaultMessages: Readonly<Messages> = Object.freeze({
@@ -149,6 +169,16 @@ export const defaultMessages: Readonly<Messages> = Object.freeze({
   errorCode: 'Code',
   traceId: 'Trace ID',
   traceIdCopy: 'trace ID',
+  productName: 'Gatekeep',
+  bootstrapTitle: 'Claim this Deployment',
+  bootstrapSubtitle: 'Paste the one-time token gatekeep init wrote. It works once, within 15 minutes of being issued.',
+  bootstrapTokenLabel: 'One-time token',
+  bootstrapTokenHelper: 'It is in bootstrap/bootstrap-token in the secrets directory.',
+  bootstrapClaim: 'Claim',
+  bootstrapUnavailableTitle: "This Deployment can't be claimed here",
+  bootstrapUnavailableBody: 'There is no bootstrap to claim at this address.',
+  credentialSetupTitle: 'Set up your credentials',
+  credentialSetupBody: "Next, you register two passkeys or security keys. Nothing else is available until you have.",
 });
 
 /**

@@ -17,10 +17,10 @@ flowchart TD
   HostAdmin[Host.Admin]
   Management[Management]
   Admins[Admins]
+  Audit[Audit]
   HostWorker[Host.Worker]
   Operations[Operations]
   Cli[Cli]
-  Audit[Audit]
   AdaptersOpenBao[Adapters.OpenBao]
   AdaptersPostgres[Adapters.Postgres]
   Directory[Directory]
@@ -36,6 +36,7 @@ flowchart TD
   HostHosted --> AdaptersHosting
   HostAdmin --> Management
   HostAdmin --> Admins
+  HostAdmin --> Audit
   HostAdmin --> AdaptersLogging
   HostAdmin --> AdaptersHosting
   HostWorker --> Operations

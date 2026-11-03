@@ -55,8 +55,8 @@ development_status:
   1-17-build-the-drawer-and-menu: done
   1-18-build-the-hosted-component-entry-and-screen-package: done
   1-19-initialise-a-deployment: done
-  1-20-add-the-rate-limiter-and-admin-csp: backlog
-  1-21-claim-bootstrap-and-create-the-first-admin: backlog
+  1-20-add-the-rate-limiter-and-admin-csp: done
+  1-21-claim-bootstrap-and-create-the-first-admin: done
   1-22-register-admin-webauthn-credentials: backlog
   1-23-sign-in-as-an-admin-with-webauthn: backlog
   1-24-enforce-capabilities-and-tenant-scoped-routes: backlog

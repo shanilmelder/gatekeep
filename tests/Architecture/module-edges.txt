@@ -20,6 +20,7 @@ dependency Host.Hosted -> Adapters.Logging
 dependency Host.Hosted -> Adapters.Hosting
 dependency Host.Admin -> Management
 dependency Host.Admin -> Admins
+dependency Host.Admin -> Audit
 dependency Host.Admin -> Adapters.Logging
 dependency Host.Admin -> Adapters.Hosting
 dependency Host.Worker -> Operations

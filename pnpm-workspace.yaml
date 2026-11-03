@@ -26,6 +26,9 @@ catalog:
   '@types/react-dom': 19.3.0
   '@vitejs/plugin-react': 6.1.2
   geist: 1.8.2
+  # Story 1.21, reviewed: generates packages/api-client's types from docs/api/openapi-v1.json.
+  # Dev only: nothing it brings reaches a bundle.
+  openapi-typescript: 7.13.0
   # @axe-core/playwright peers on playwright-core: pinned to the version @playwright/test uses.
   playwright-core: 1.64.1
   react: 19.3.1
@@ -33,3 +36,9 @@ catalog:
   typescript: 7.0.2
   vite: 8.3.5
   yaml: 2.9.1
+
+catalogs:
+  # openapi-typescript drives the TypeScript 5 compiler API, which TypeScript 7 doesn't ship, so
+  # packages/api-client alone has the last TypeScript 5 for it. Everything else compiles with 7.
+  openapi:
+    typescript: 5.9.3

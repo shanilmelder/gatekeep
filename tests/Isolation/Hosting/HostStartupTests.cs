@@ -134,6 +134,82 @@ public sealed class HostStartupTests(PostgresFixture postgres) : IDisposable
         Assert.DoesNotContain("ConnectionStrings:Admin", output);
     }
 
+    [Theory]
+    [InlineData("")]
+    [InlineData("admin.gatekeep.test")]
+    [InlineData("ftp://admin.gatekeep.test")]
+    [InlineData("https://admin.gatekeep.test/path")]
+    [InlineData("https://admin.gatekeep.test?x=1")]
+    [InlineData("https://user@admin.gatekeep.test")]
+    public async Task Admin_with_a_missing_or_malformed_origin_refuses_naming_it(string origin)
+    {
+        var database = await postgres.NewMigratedDatabaseAsync();
+
+        using var process = HostProcess.Start(
+            "Admin",
+            Connections(Databases("Admin"), database)
+                .Concat(Custody())
+                .Append($"--Gatekeep:PublicOrigin={origin}")
+                .Append($"--Gatekeep:HealthPort={HostProcess.FreePort()}"));
+        var output = await process.WaitForExitAsync(Timeout, Cancellation);
+
+        Assert.Equal(1, process.ExitCode);
+        Assert.Contains("Host.Admin refuses to start", output);
+        Assert.Contains("Gatekeep:PublicOrigin", output);
+        Assert.DoesNotContain("ConnectionStrings:", output);
+        Assert.DoesNotContain("Custody:", output);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("0")]
+    [InlineData("60001")]
+    [InlineData("-5")]
+    [InlineData("5s")]
+    public async Task Admin_with_a_malformed_lock_timeout_refuses_naming_it(string timeout)
+    {
+        var database = await postgres.NewMigratedDatabaseAsync();
+
+        // Refused at startup with the other settings, not per claim with a 500.
+        using var process = HostProcess.Start(
+            "Admin",
+            Connections(Databases("Admin"), database)
+                .Concat(Custody())
+                .Append($"--Gatekeep:BootstrapLockTimeoutMs={timeout}")
+                .Append($"--Gatekeep:HealthPort={HostProcess.FreePort()}"));
+        var output = await process.WaitForExitAsync(Timeout, Cancellation);
+
+        Assert.Equal(1, process.ExitCode);
+        Assert.Contains("Host.Admin refuses to start", output);
+        Assert.Contains("Gatekeep:BootstrapLockTimeoutMs", output);
+        Assert.DoesNotContain("ConnectionStrings:", output);
+        Assert.DoesNotContain("Custody:", output);
+        Assert.DoesNotContain("Gatekeep:PublicOrigin", output);
+    }
+
+    [Theory]
+    [InlineData("10.201.2.0/33")]
+    [InlineData("")]
+    [InlineData("None")]
+    [InlineData("caddy")]
+    public async Task Missing_or_malformed_forwarding_network_refuses_naming_it(string network)
+    {
+        var database = await postgres.NewMigratedDatabaseAsync();
+
+        // Unset isn't "none": Host.Admin must be told whether a proxy forwards to it.
+        using var process = HostProcess.Start(
+            "Admin",
+            Connections(Databases("Admin"), database)
+                .Concat(Custody())
+                .Append($"--Gatekeep:ForwardedBy={network}")
+                .Append($"--Gatekeep:HealthPort={HostProcess.FreePort()}"));
+        var output = await process.WaitForExitAsync(Timeout, Cancellation);
+
+        Assert.Equal(1, process.ExitCode);
+        Assert.Contains("Gatekeep:ForwardedBy", output);
+        Assert.DoesNotContain("Gatekeep:PublicOrigin", output);
+    }
+
     [Fact]
     public async Task Partial_custody_settings_refuse_naming_the_missing_ones()
     {

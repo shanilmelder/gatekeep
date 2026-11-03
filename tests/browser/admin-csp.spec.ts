@@ -78,7 +78,9 @@ test('sends the exact headers on the page and on every asset it loads', async ({
   }
   for (const response of responses) {
     expect(new URL(response.url()).origin).toBe(origin);
-    expect(response.status(), response.url()).toBe(200);
+    // The root asks for the Session (Story 1.21), which this cookieless page doesn't have: a 401.
+    const session = new URL(response.url()).pathname === '/api/v1/deployment/session';
+    expect(response.status(), response.url()).toBe(session ? 401 : 200);
     await expectExactHeaders(response);
   }
 });

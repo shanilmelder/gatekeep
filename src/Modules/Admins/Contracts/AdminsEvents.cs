@@ -24,4 +24,14 @@ public static class AdminsEvents
     public static readonly AuditEventDefinition BootstrapTokenReissued = new(
         new AuditTypeCode("bootstrap.token.reissued"),
         "gatekeep init reissued the bootstrap token, voiding the previous one. It expires 15 minutes after issue. Holds no token or hash.");
+
+    /// <summary>
+    /// Written on the Deployment chain when the bootstrap token is claimed (Story 1.21), in the
+    /// transaction that creates the first Admin as Deployment Owner, completes bootstrap and starts
+    /// their setup Admin Session. The Actor and the target are that Admin. Holds no token, hash,
+    /// Session ID or CSRF token.
+    /// </summary>
+    public static readonly AuditEventDefinition BootstrapAdminCreated = new(
+        new AuditTypeCode("bootstrap.admin.created"),
+        "The bootstrap token was claimed: the first Admin was created as Deployment Owner and bootstrap completed. Holds no token or hash.");
 }
