@@ -8,6 +8,9 @@ namespace Gatekeep.Tests.Isolation.Hosting;
 /// <summary>Runs a real host in its own process, from its own output folder, and reads its output.</summary>
 internal sealed class HostProcess : IDisposable
 {
+    /// <summary>The Admin origin a started Host.Admin has unless a test names another.</summary>
+    public const string AdminOrigin = "https://admin.gatekeep.test";
+
     private static readonly string[] ClearedEnvironment = ["ConnectionStrings", "Database__", "Custody__", "Gatekeep__", "ASPNETCORE_", "DOTNET_URLS"];
 
     private readonly Process _process;
@@ -47,6 +50,18 @@ internal sealed class HostProcess : IDisposable
         if (!list.Any(a => a.StartsWith("--Gatekeep:SecretsDirectory=", StringComparison.Ordinal)))
         {
             list.Add($"--Gatekeep:SecretsDirectory={EmptyDirectory.Value}");
+        }
+
+        // Host.Admin needs its browser origin (Story 1.21). A test that names one, even empty, keeps its own.
+        if (host == "Admin" && !list.Any(a => a.StartsWith("--Gatekeep:PublicOrigin=", StringComparison.Ordinal)))
+        {
+            list.Add($"--Gatekeep:PublicOrigin={AdminOrigin}");
+        }
+
+        // And to be told who forwards to it: no proxy, unless a test names a network, or empty.
+        if (host == "Admin" && !list.Any(a => a.StartsWith("--Gatekeep:ForwardedBy=", StringComparison.Ordinal)))
+        {
+            list.Add("--Gatekeep:ForwardedBy=none");
         }
 
         foreach (var argument in list)
@@ -171,10 +186,15 @@ internal sealed class HostProcess : IDisposable
         }
     }
 
-    /// <summary>A port free right now. Another process could take it first, which is rare enough here.</summary>
+    /// <summary>
+    /// A port free right now on every address, as the hosts' public <c>[::]</c> listener needs: a
+    /// loopback-only probe can return a port an outgoing connection (such as to Postgres) holds on
+    /// another address. Another process could still take it first, which is rare enough here.
+    /// </summary>
     public static int FreePort()
     {
-        using var listener = new TcpListener(IPAddress.Loopback, 0);
+        using var listener = new TcpListener(IPAddress.IPv6Any, 0);
+        listener.Server.DualMode = true;
         listener.Start();
         return ((IPEndPoint)listener.LocalEndpoint).Port;
     }

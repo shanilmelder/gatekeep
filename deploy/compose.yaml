@@ -197,6 +197,12 @@ services:
     user: "10002:10002"
     environment:
       ConnectionStrings__Admin: Host=postgres;Port=5432;Database=gatekeep;Username=gk_admin;Gss Encryption Mode=Disable
+      # The origin browsers reach the Admin Dashboard at, through Caddy: every state-changing
+      # request's Origin must be exactly this (Story 1.21). The default port 443 is left out.
+      Gatekeep__PublicOrigin: https://${GATEKEEP_ADMIN_HOST:-admin.gatekeep-admin.localhost}:${GATEKEEP_HTTPS_PORT:-443}
+      # Caddy's admin-edge subnet: the X-Forwarded-For it sets is believed from there only, so
+      # bootstrap claims are counted by the client's address (Story 1.21).
+      Gatekeep__ForwardedBy: 10.201.2.0/24
       Custody__SocketPath: /run/openbao/openbao.sock
       Custody__RoleIdFile: /run/secrets/openbao_role_id
       Custody__SecretIdFile: /run/secrets/openbao_secret_id

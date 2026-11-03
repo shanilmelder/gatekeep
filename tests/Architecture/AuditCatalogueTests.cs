@@ -1,4 +1,5 @@
 using System.Collections;
+using System.Reflection;
 using System.Text.RegularExpressions;
 using Gatekeep.Kernel.Audit;
 using Xunit;
@@ -217,6 +218,16 @@ public class AuditCatalogueTests
         var allowed = new HashSet<string>(Catalogue.Select(e => e.Code), StringComparer.Ordinal);
         allowed.UnionWith(Types("ProductionRegistry"));
         allowed.UnionWith(Types("ProductionOperationRegistry"));
+
+        // Rate limit policy codes share the shape (AD-14): each one a contract publishes is allowed.
+        foreach (var module in Directory.EnumerateDirectories(Path.Combine(Root, "src", "Modules")).Select(Path.GetFileName))
+        {
+            allowed.UnionWith(AuditCatalogue.ModuleAssembly(Root, module!, Project).GetExportedTypes()
+                .SelectMany(t => t.GetFields(BindingFlags.Public | BindingFlags.Static))
+                .Where(f => f.FieldType.FullName == "Gatekeep.Kernel.RateLimiting.RateLimitPolicy")
+                .Select(f => f.GetValue(null)!.ToString()!));
+        }
+
         return allowed;
     }
 

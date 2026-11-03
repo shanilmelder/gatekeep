@@ -2,8 +2,8 @@
 title: 'Story 1.21: Claim bootstrap and create the first Admin'
 type: 'feature'
 created: '2026-11-03'
-status: 'draft'
-baseline_revision: ''
+status: 'in-review'
+baseline_revision: '627bf49ee180c8d615f471feb465478238a34bb2'
 review_loop_iteration: 0
 followup_review_recommended: false
 context:
@@ -148,12 +148,12 @@ deferred: []
 ## Tasks & Acceptance
 
 **Execution:**
-- [ ] The migration and registry for `admin` and `admin_session`, with grants.
-- [ ] Admins: the claim command, Admin sessions with CSRF, the `bootstrap.admin.created` event and the catalogue.
-- [ ] `Host.Admin`: the claim, session and test endpoints; the request checks; the bootstrap page 404; wiring and module edges.
-- [ ] OpenAPI document, `packages/api-client` generation, and the pipeline drift stage.
-- [ ] `apps/admin-dashboard`: the Bootstrap and credential-setup placeholder pages.
-- [ ] Isolation, Architecture, canary and browser tests for every matrix row.
+- [x] The migration and registry for `admin` and `admin_session`, with grants.
+- [x] Admins: the claim command, Admin sessions with CSRF, the `bootstrap.admin.created` event and the catalogue.
+- [x] `Host.Admin`: the claim, session and test endpoints; the request checks; the bootstrap page 404; wiring and module edges.
+- [x] OpenAPI document, `packages/api-client` generation, and the pipeline drift stage.
+- [x] `apps/admin-dashboard`: the Bootstrap and credential-setup placeholder pages.
+- [x] Isolation, Architecture, canary and browser tests for every matrix row.
 
 **Acceptance Criteria:**
 - Given a valid token at Bootstrap, when it is consumed, then the first Admin is created as Deployment Owner in one command, and `bootstrap.admin.created` is written to the Deployment Log.
@@ -173,4 +173,30 @@ deferred: []
 
 - **Used path: 404, not Generic error.** EXPERIENCE L236 says a used path shows Generic error. The story's AC and AD-31 say it returns the same 404 as an unknown path. The AC and AD-31 win, because a 404 doesn't reveal that the Deployment exists. Generic error is kept for a wrong or expired token on an open bootstrap.
 - **Losing the setup session:** completion is recorded at claim (AD-31). A first Admin who loses the setup session before registering two credentials recovers with `gatekeep recover-admin` (Story 1.32). Until then, the restriction stops a half-set-up Owner from doing anything.
-- **CSRF transport:** the token is returned in the claim body and kept in memory. A reload during setup loses it, so `GET /api/v1/deployment/session` reissues a fresh CSRF token for the current session (rotating `csrf_hash`). This is safe because the cookie is `SameSite=Strict`, and GET requests change nothing else. `[ASSUMPTION]` Record it if implemented this way.
+- **CSRF transport (revised in review):** the CSRF token is derived from the session ID (SHA-256 of a fixed label and the session ID), so `GET /api/v1/deployment/session` is read-only and returns the same token to every tab. The earlier rotate-on-GET design changed state on a GET and broke concurrent tabs.
+- **Decisions made while building and reviewing:**
+  - **Settings:**
+    - `Gatekeep:PublicOrigin` is required: requests are compared with it in browser form, default port dropped.
+    - `Gatekeep:ForwardedBy` is required. Its value is Caddy's admin-edge subnet in Compose, or `none`. Only from that network is `X-Forwarded-For` believed, using the right-most hop. IPv6 clients are counted per /64.
+  - **No `Host.Admin -> Adapters.Postgres` edge:** Host.Admin builds an `NpgsqlDataSource` directly, the established host pattern, and doesn't ship the migrator.
+  - **Claim order and limits:**
+    1. A completed or never-issued bootstrap returns the unknown-path 404 before the Origin check. Completion is cached in the process because it never reopens, so a database restore needs a Host.Admin restart.
+    2. The attempt is counted and committed before the row lock is taken.
+    3. The lock waits at most 5 seconds.
+    4. At most 4 claims run at once, and the rest get a fast 503, so a flood can't drain the connection pool.
+    5. The commit ignores client cancellation.
+  - **Endpoints:**
+    - `DELETE /api/v1/deployment/session` (sign-out) exists but isn't setup-allowed, because a setup session signing out would strand the only Owner.
+    - `GET /api/v1/deployment/capabilities` returns `{ capabilities: [] }`. It isn't setup-allowed, which proves the restriction.
+    - Endpoints without the deployment-API marker under the prefix are denied.
+  - **Request checks:** they run in the order Origin, then session, then CSRF, then the setup restriction. A missing cookie with a foreign Origin on a state-changing call is therefore 403. The Deployment Owner check on the surface is Story 1.24's, since only one Admin can exist.
+  - **Session rows:** ending is write-once, and the lifetimes are capped by CHECKs. A partial unique index allows only one Deployment Owner.
+  - **Responses:**
+    - The 503 when the database is down has no body and keeps the security headers.
+    - A 401 clears a stale cookie.
+    - The trace ID in problem bodies is the W3C trace ID that the logs carry.
+  - **`/bootstrap` match:** exact and case-sensitive. After completion it returns the API's 404, but other SPA paths return 200, so `/bootstrap` stays distinguishable. Accepted, because the API and the page no longer work.
+  - **Browser tests:** they serve the real host's document at `/bootstrap` and intercept only the API, because the browser harness has no database. Isolation tests prove the server gate.
+  - **`packages/api-client`:** typed from the generated `paths`. `openapi-typescript` needs the TypeScript 5 compiler API, so it uses a TypeScript 5.9.3 catalog that only `packages/api-client` takes.
+  - **OpenAPI document:** carries enums, documented 503s and the `Set-Cookie`, plus an `x-gatekeep-setup-allowed` extension for Story 1.22.
+- **Residual risk:** if the browser never receives the 201, or the setup session is lost before two credentials are registered, the Deployment needs `gatekeep recover-admin` (Story 1.32). Bootstrap can't be reopened.

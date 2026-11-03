@@ -9,7 +9,25 @@ namespace Gatekeep.Adapters.Hosting;
 /// <param name="Name">The host's name in logs, such as <c>Host.Worker</c>.</param>
 /// <param name="Databases">Each connection, by its name under <c>ConnectionStrings</c>.</param>
 /// <param name="HasPublicEndpoint">Whether the host listens on a public port besides health.</param>
-public sealed record HostProfile(string Name, IReadOnlyList<string> Databases, bool HasPublicEndpoint);
+/// <param name="HasPublicOrigin">
+/// Whether the host needs its browser origin (<see cref="HostSettingNames.PublicOrigin"/>), as
+/// Host.Admin does to check the <c>Origin</c> of every state-changing request.
+/// </param>
+/// <param name="HasForwardingProxy">
+/// Whether the host must be told who forwards to it (<see cref="HostSettingNames.ForwardedBy"/>),
+/// as Host.Admin must, since it counts attempts by client address.
+/// </param>
+/// <param name="RefusedHostSettings">
+/// The host's own settings it refuses, by name, such as Host.Admin's lock timeout: checked at
+/// startup with the rest, so a malformed one stops the host rather than failing each request.
+/// </param>
+public sealed record HostProfile(
+    string Name,
+    IReadOnlyList<string> Databases,
+    bool HasPublicEndpoint,
+    bool HasPublicOrigin = false,
+    bool HasForwardingProxy = false,
+    Func<IConfiguration, IEnumerable<string>>? RefusedHostSettings = null);
 
 /// <summary>
 /// The names of every setting a host reads. A refusal names these, never a value. None of
@@ -30,6 +48,22 @@ public static class HostSettingNames
 
     public const int DefaultPublicPort = 8080;
 
+    /// <summary>
+    /// The origin browsers reach the host at, such as <c>https://admin.example.com</c>: a scheme,
+    /// a host and an optional port, with nothing after. Compose sets it from the Admin hostname.
+    /// </summary>
+    public const string PublicOrigin = "Gatekeep:PublicOrigin";
+
+    /// <summary>
+    /// The one network, in CIDR form, whose <c>X-Forwarded-For</c> the host believes, which is
+    /// Caddy's edge subnet in Compose, or <see cref="NoProxy"/> to believe none, so the client is
+    /// the connection's peer. Required where the profile has a forwarding proxy, optional elsewhere.
+    /// </summary>
+    public const string ForwardedBy = "Gatekeep:ForwardedBy";
+
+    /// <summary>The <see cref="ForwardedBy"/> value that names no proxy.</summary>
+    public const string NoProxy = "none";
+
     public const string CustodySocketPath = "Custody:SocketPath";
 
     public const string CustodyRoleIdFile = "Custody:RoleIdFile";
@@ -49,6 +83,41 @@ public sealed class HostDatabases(IReadOnlyDictionary<string, string> connection
     public string this[string database] => connectionStrings[database];
 }
 
+/// <summary>
+/// The host's browser origin, serialized as browsers send it in <c>Origin</c>: lower-case scheme
+/// and host, and the port only when it isn't the scheme's default.
+/// </summary>
+public sealed class HostOrigin
+{
+    internal HostOrigin(string value) => Value = value;
+
+    public string Value { get; }
+
+    /// <summary>Whether <paramref name="origin"/>, an <c>Origin</c> header, is exactly this origin.</summary>
+    public bool Matches(string? origin) => string.Equals(origin, Value, StringComparison.Ordinal);
+
+    public override string ToString() => Value;
+
+    /// <summary>The serialized origin of <paramref name="text"/>, or null when it isn't only an http or https origin.</summary>
+    internal static string? Serialize(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text)
+            || !Uri.TryCreate(text.Trim(), UriKind.Absolute, out var uri)
+            || (uri.Scheme != Uri.UriSchemeHttps && uri.Scheme != Uri.UriSchemeHttp)
+            || uri.UserInfo.Length > 0
+            || uri.AbsolutePath != "/"
+            || uri.Query.Length > 0
+            || uri.Fragment.Length > 0
+            || uri.Host.Length == 0)
+        {
+            return null;
+        }
+
+        var host = uri.HostNameType == UriHostNameType.IPv6 ? uri.Host : uri.IdnHost;
+        return uri.IsDefaultPort ? $"{uri.Scheme}://{host}" : $"{uri.Scheme}://{host}:{uri.Port}";
+    }
+}
+
 /// <summary>Settings after resolution, and the name of every setting refused.</summary>
 internal sealed record ResolvedSettings(
     HostProfile Profile,
@@ -56,7 +125,14 @@ internal sealed record ResolvedSettings(
     OpenBaoOptions? Custody,
     int HealthPort,
     int PublicPort,
-    IReadOnlyList<string> Refused);
+    IReadOnlyList<string> Refused)
+{
+    /// <summary>The browser origin, when the profile has one and it resolved.</summary>
+    public HostOrigin? Origin { get; init; }
+
+    /// <summary>The network whose forwarded client address is believed, when one is set.</summary>
+    public System.Net.IPNetwork? ForwardedBy { get; init; }
+}
 
 internal static class HostSettings
 {
@@ -86,7 +162,51 @@ internal static class HostSettings
             refused.Add(HostSettingNames.HealthPort);
         }
 
-        return new ResolvedSettings(profile, databases, custody, healthPort, publicPort, refused);
+        HostOrigin? origin = null;
+        if (profile.HasPublicOrigin)
+        {
+            if (HostOrigin.Serialize(configuration[HostSettingNames.PublicOrigin]) is { } serialized)
+            {
+                origin = new HostOrigin(serialized);
+            }
+            else
+            {
+                refused.Add(HostSettingNames.PublicOrigin);
+            }
+        }
+
+        System.Net.IPNetwork? forwardedBy = null;
+        var network = configuration[HostSettingNames.ForwardedBy]?.Trim();
+        if (string.IsNullOrEmpty(network))
+        {
+            if (profile.HasForwardingProxy)
+            {
+                // Unset isn't "none": the host must be told it has no proxy.
+                refused.Add(HostSettingNames.ForwardedBy);
+            }
+        }
+        else if (network != HostSettingNames.NoProxy)
+        {
+            if (System.Net.IPNetwork.TryParse(network, out var parsed))
+            {
+                forwardedBy = parsed;
+            }
+            else
+            {
+                refused.Add(HostSettingNames.ForwardedBy);
+            }
+        }
+
+        if (profile.RefusedHostSettings is { } hostSettings)
+        {
+            refused.AddRange(hostSettings(configuration));
+        }
+
+        return new ResolvedSettings(profile, databases, custody, healthPort, publicPort, refused)
+        {
+            Origin = origin,
+            ForwardedBy = forwardedBy,
+        };
     }
 
     private static string? ResolveDatabase(IConfiguration configuration, string database, List<string> refused)

@@ -1,0 +1,306 @@
+{
+  "openapi": "3.1.1",
+  "info": {
+    "title": "Gatekeep Admin API",
+    "description": "The Admin Dashboard's API on Host.Admin. Every /api/v1/deployment endpoint but the bootstrap claim needs the __Host-gk-admin Session cookie; every state-changing one also needs the exact Admin Origin and the Session's X-Gatekeep-CSRF token. A refusal's body is only a fixed code and the trace ID.",
+    "version": "v1"
+  },
+  "paths": {
+    "/api/v1/deployment/bootstrap": {
+      "post": {
+        "tags": [
+          "Deployment"
+        ],
+        "summary": "Claim bootstrap with the one-time token and create the first Admin.",
+        "description": "Consumes the token from gatekeep init, creates the first Admin as Deployment Owner, completes bootstrap and starts a setup-restricted Admin Session in one transaction. Needs the exact Admin Origin, and has no session or CSRF check. Each claim is counted per client before the token is compared: the sixth in 15 minutes is 429. Once bootstrap is complete, or before init, it is the unknown-path 404.",
+        "operationId": "ClaimBootstrap",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BootstrapClaimRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "headers": {
+              "Set-Cookie": {
+                "description": "The Admin Session: __Host-gk-admin={43 base64url characters}; Path=/; Secure; HttpOnly; SameSite=Strict. A browser session cookie, with no Domain, Expires or Max-Age.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BootstrapClaimResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "404": {
+            "description": "Not Found"
+          },
+          "429": {
+            "description": "Too Many Requests",
+            "headers": {
+              "Retry-After": {
+                "description": "Whole seconds until this client's claim window ends and it may claim again.",
+                "required": true,
+                "schema": {
+                  "minimum": 1,
+                  "type": "integer"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [ ],
+        "x-gatekeep-setup-allowed": false
+      }
+    },
+    "/api/v1/deployment/session": {
+      "get": {
+        "tags": [
+          "Deployment"
+        ],
+        "summary": "The current Admin Session and its CSRF token.",
+        "description": "Setup-allowed and read-only: the CSRF token is the Session's, the same each time and in every tab.",
+        "operationId": "GetSession",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminSessionResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "adminSession": [ ]
+          }
+        ],
+        "x-gatekeep-setup-allowed": true
+      },
+      "delete": {
+        "tags": [
+          "Deployment"
+        ],
+        "summary": "Sign out: end the current Admin Session.",
+        "description": "Ends the Session as signed_out and clears the cookie. Not setup-allowed: a setup Session signing out would leave the Deployment Owner unable to finish setup.",
+        "operationId": "EndSession",
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "adminSession": [ ],
+            "csrf": [ ]
+          }
+        ],
+        "x-gatekeep-setup-allowed": false
+      }
+    },
+    "/api/v1/deployment/capabilities": {
+      "get": {
+        "tags": [
+          "Deployment"
+        ],
+        "summary": "The Deployment capabilities the current Admin holds.",
+        "description": "Not setup-allowed: a setup Session gets 403. Empty until Story 1.24 grants capabilities.",
+        "operationId": "GetCapabilities",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CapabilitiesResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "adminSession": [ ]
+          }
+        ],
+        "x-gatekeep-setup-allowed": false
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "AdminSessionResponse": {
+        "required": [
+          "adminId",
+          "kind",
+          "deploymentOwner",
+          "setupComplete",
+          "csrfToken"
+        ],
+        "type": "object",
+        "properties": {
+          "adminId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "kind": {
+            "enum": [
+              "setup",
+              "full"
+            ],
+            "type": "string"
+          },
+          "deploymentOwner": {
+            "type": "boolean"
+          },
+          "setupComplete": {
+            "type": "boolean"
+          },
+          "csrfToken": {
+            "type": "string"
+          }
+        }
+      },
+      "ApiProblem": {
+        "required": [
+          "code",
+          "traceId"
+        ],
+        "type": "object",
+        "properties": {
+          "code": {
+            "enum": [
+              "bootstrap_refused",
+              "rate_limited"
+            ],
+            "type": "string"
+          },
+          "traceId": {
+            "type": "string"
+          }
+        }
+      },
+      "BootstrapClaimRequest": {
+        "required": [
+          "token"
+        ],
+        "type": "object",
+        "properties": {
+          "token": {
+            "type": "string"
+          }
+        }
+      },
+      "BootstrapClaimResponse": {
+        "required": [
+          "csrfToken",
+          "adminId"
+        ],
+        "type": "object",
+        "properties": {
+          "csrfToken": {
+            "type": "string"
+          },
+          "adminId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "CapabilitiesResponse": {
+        "required": [
+          "capabilities"
+        ],
+        "type": "object",
+        "properties": {
+          "capabilities": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "securitySchemes": {
+      "adminSession": {
+        "type": "apiKey",
+        "description": "The Admin Session: Secure, HttpOnly, SameSite=Strict, host-only. 30 minutes idle, 8 hours absolute.",
+        "name": "__Host-gk-admin",
+        "in": "cookie"
+      },
+      "csrf": {
+        "type": "apiKey",
+        "description": "The Session's CSRF token, from the claim or GET /api/v1/deployment/session. Required on state-changing requests.",
+        "name": "X-Gatekeep-CSRF",
+        "in": "header"
+      }
+    }
+  },
+  "tags": [
+    {
+      "name": "Deployment"
+    }
+  ]
+}

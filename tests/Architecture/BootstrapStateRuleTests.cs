@@ -7,7 +7,7 @@ namespace Gatekeep.Tests.Architecture;
 
 /// <summary>
 /// Story 1.19: <c>bootstrap_state</c> in the AD-3 registry with its column grants and trigger, no
-/// code that deletes or drops it or completes bootstrap, which is Story 1.21's, a token file
+/// code that deletes or drops it, completion only by Story 1.21's claim, a token file
 /// created owner-only and never widened, and an issuer whose times come only from the database.
 /// Tests reference no adapter, so the registry is read by reflection from the Postgres adapter's
 /// own output folder.
@@ -17,6 +17,7 @@ public class BootstrapStateRuleTests
     private const string Table = "bootstrap_state";
     private const string TokenFile = "src/Gatekeep.Cli/BootstrapTokenFile.cs";
     private const string Issuer = "src/Modules/Admins/Core/BootstrapIssuer.cs";
+    private const string Claimer = "src/Modules/Admins/Core/BootstrapClaimer.cs";
 
     private static readonly string Root = EdgeList.FindRepositoryRoot(AppContext.BaseDirectory);
 
@@ -77,14 +78,27 @@ public class BootstrapStateRuleTests
     }
 
     [Fact]
-    public void No_source_deletes_drops_or_completes_bootstrap_state()
+    public void No_source_deletes_or_drops_bootstrap_state_and_only_the_claim_completes_it()
     {
-        var offenders = new[] { "src", "deploy" }
+        var files = new[] { "src", "deploy" }
             .SelectMany(d => SourceFiles(Path.Combine(Root, d)))
-            .Where(f => Mentions(File.ReadAllText(f)))
-            .Select(f => Path.GetRelativePath(Root, f).Replace('\\', '/'));
+            .Select(f => (Path: Path.GetRelativePath(Root, f).Replace('\\', '/'), Text: File.ReadAllText(f)))
+            .ToList();
 
-        Assert.Empty(offenders);
+        Assert.Empty(files.Where(f => Removes.IsMatch(f.Text)).Select(f => f.Path));
+        Assert.Equal([Claimer], files.Where(f => Completes.IsMatch(f.Text)).Select(f => f.Path));
+    }
+
+    [Fact]
+    public void Claim_locks_the_row_first_and_completes_it_once_from_the_database_clock()
+    {
+        var source = File.ReadAllText(Path.Combine(Root, Claimer));
+
+        Assert.Contains("FOR UPDATE", source);
+        Assert.Contains("CryptographicOperations.FixedTimeEquals", source);
+        Assert.Single(Completes.Matches(source));
+        Assert.Contains("SET completed_at = clock_timestamp() WHERE id = 1 AND completed_at IS NULL", source);
+        Assert.DoesNotMatch(@"\bDateTime(?:Offset)?\s*\.\s*(?:Now|UtcNow)\b|TimeProvider", source);
     }
 
     [Theory]

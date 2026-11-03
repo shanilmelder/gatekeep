@@ -2,7 +2,20 @@
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
+    <!-- The v1 OpenAPI document, generated on every build from the mapped endpoints (Story 1.21).
+         deploy/docker/api-contract.sh diffs it with the committed docs/api/openapi-v1.json. -->
+    <OpenApiDocumentsDirectory>$(MSBuildProjectDirectory)/obj/openapi</OpenApiDocumentsDirectory>
+    <OpenApiGenerateDocumentsOptions>--file-name openapi</OpenApiGenerateDocumentsOptions>
   </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.OpenApi" />
+    <PackageReference Include="Microsoft.Extensions.ApiDescription.Server">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="Npgsql" />
+  </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="../Gatekeep.Kernel/Gatekeep.Kernel.csproj" />
@@ -10,6 +23,7 @@
     <ProjectReference Include="../Adapters/Hosting/Gatekeep.Adapters.Hosting.csproj" />
     <ProjectReference Include="../Modules/Management/Gatekeep.Modules.Management.csproj" />
     <ProjectReference Include="../Modules/Admins/Gatekeep.Modules.Admins.csproj" />
+    <ProjectReference Include="../Modules/Audit/Gatekeep.Modules.Audit.csproj" />
   </ItemGroup>
 
 </Project>

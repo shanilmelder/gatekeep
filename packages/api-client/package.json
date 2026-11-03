@@ -2,5 +2,18 @@
   "name": "@gatekeep/api-client",
   "version": "0.1.0",
   "private": true,
-  "type": "module"
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "build": "pnpm run typecheck",
+    "typecheck": "tsc -p tsconfig.json",
+    "generate": "openapi-typescript ../../docs/api/openapi-v1.json --output src/schema.generated.ts",
+    "test": "node --test \"test/**/*.test.mjs\""
+  },
+  "devDependencies": {
+    "openapi-typescript": "catalog:",
+    "typescript": "catalog:openapi"
+  }
 }

@@ -280,6 +280,40 @@ public static class TableRegistry
                 [Admin] = [new ColumnGrant(Update, ["completed_at"])],
             },
             ["bootstrap_state_guard_update"]),
+
+        // Story 1.21: the Admins and their Sessions. Host.Admin creates the first Admin at
+        // bootstrap and every Admin Session; the Cli reads Admins for recover-admin later. No
+        // role deletes either. A Session stores only its ID's hash; its CSRF token is derived
+        // from the ID, so nothing about the token is stored.
+        new(
+            "admin",
+            TableClass.Control,
+            "Admins",
+            new Dictionary<string, IReadOnlyList<string>>
+            {
+                [Admin] = [Select, Insert],
+                [Cli] = [Select],
+            },
+            new Dictionary<string, IReadOnlyList<ColumnGrant>>
+            {
+                // Completing credential setup (Story 1.22). Never the ID or ownership.
+                [Admin] = [new ColumnGrant(Update, ["setup_completed_at"])],
+            }),
+        new(
+            "admin_session",
+            TableClass.Control,
+            "Admins",
+            new Dictionary<string, IReadOnlyList<string>>
+            {
+                [Admin] = [Select, Insert],
+            },
+            new Dictionary<string, IReadOnlyList<ColumnGrant>>
+            {
+                // Sliding the idle expiry and ending. Never the ID, its Admin, its kind or its
+                // absolute expiry. The trigger makes an ending final.
+                [Admin] = [new ColumnGrant(Update, ["idle_expires_at", "ended_at", "end_reason"])],
+            },
+            ["admin_session_guard_update"]),
     ];
 
     private static IReadOnlyList<string> EventTriggers(string table) =>

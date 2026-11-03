@@ -1,6 +1,7 @@
 using Gatekeep.Adapters.OpenBao;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.FileProviders;
@@ -47,6 +48,10 @@ public static class GatekeepHosting
         builder.Services.AddSingleton(new HostDatabases(settings.Databases));
         builder.Services.AddSingleton<HealthEndpoint>();
         builder.Services.AddSingleton<IStartupFilter, HealthStartupFilter>();
+        if (settings.Origin is { } origin)
+        {
+            builder.Services.AddSingleton(origin);
+        }
 
         if (settings.Custody is { } custody)
         {
@@ -66,6 +71,35 @@ public static class GatekeepHosting
         });
 
         return builder;
+    }
+
+    /// <summary>
+    /// Makes the connection's remote address the client Caddy forwarded, when the peer is in
+    /// <see cref="HostSettingNames.ForwardedBy"/>: one <c>X-Forwarded-For</c> hop, from that network
+    /// only. Caddy replaces any <c>X-Forwarded-For</c> a client sends, so the value is the address
+    /// it saw. With <see cref="HostSettingNames.NoProxy"/> nothing is believed, and the client is the peer.
+    /// </summary>
+    public static IApplicationBuilder UseGatekeepForwardedClient(this IApplicationBuilder app)
+    {
+        ArgumentNullException.ThrowIfNull(app);
+
+        var settings = app.ApplicationServices.GetRequiredService<ResolvedSettings>();
+        if (settings.ForwardedBy is not { } network)
+        {
+            return app;
+        }
+
+        var options = new ForwardedHeadersOptions
+        {
+            ForwardedHeaders = ForwardedHeaders.XForwardedFor,
+            ForwardLimit = 1,
+        };
+
+        // Empty lists would believe any peer, so the one network replaces the loopback defaults.
+        options.KnownProxies.Clear();
+        options.KnownIPNetworks.Clear();
+        options.KnownIPNetworks.Add(network);
+        return app.UseForwardedHeaders(options);
     }
 
     /// <summary>

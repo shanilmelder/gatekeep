@@ -1,5 +1,5 @@
 // Starts the built Host.Admin serving the built Admin Dashboard bundle, for admin-csp.spec.ts
-// (Story 1.20). The headers under test are the host's own, so this is the real host, not
+// (Story 1.20) and bootstrap.spec.ts (Story 1.21). The headers under test are the host's own, so this is the real host, not
 // `vite preview`. It runs from `dotnet build` output with throwaway settings: secret files
 // of random bytes in a temporary directory, a database that isn't there and a custody socket
 // that doesn't exist. Serving static files needs neither, and /healthz isn't asked.
@@ -55,6 +55,10 @@ const host = spawn(
     `--Gatekeep:SecretsDirectory=${secrets}`,
     `--Gatekeep:PublicPort=${publicPort}`,
     `--Gatekeep:HealthPort=${healthPort}`,
+    // The origin the browser loads it from. Nothing here reaches the API: bootstrap.spec.ts
+    // answers it by route interception.
+    `--Gatekeep:PublicOrigin=http://127.0.0.1:${publicPort}`,
+    '--Gatekeep:ForwardedBy=none',
     // Port 9 (discard) on loopback: nothing answers, and nothing here needs a database.
     '--ConnectionStrings:Admin=Host=127.0.0.1;Port=9;Database=gatekeep;Username=gk_admin;Timeout=1',
     `--Custody:SocketPath=${path.join(temporary, 'openbao.sock')}`,

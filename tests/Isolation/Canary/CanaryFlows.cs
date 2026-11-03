@@ -181,6 +181,14 @@ internal static class CanaryFlows
         new("host.hosted", [new(SurfaceKind.HostStartup, "Hosted"), new(SurfaceKind.Route, HealthEndpoint)], HostAsync("Hosted")),
         new("host.admin", [new(SurfaceKind.HostStartup, "Admin"), new(SurfaceKind.Route, HealthEndpoint)], HostAsync("Admin")),
         new("host.worker", [new(SurfaceKind.HostStartup, "Worker"), new(SurfaceKind.Route, HealthEndpoint)], HostAsync("Worker")),
+        new(
+            "admin.bootstrap",
+            [
+                new(SurfaceKind.Route, "/api/v1/deployment/bootstrap"),
+                new(SurfaceKind.Route, "/api/v1/deployment/session"),
+                new(SurfaceKind.Route, "/api/v1/deployment/capabilities"),
+            ],
+            BootstrapClaimAsync),
 
         // No production type carries a credential yet, so this flow takes the runner's credential
         // path with a test type: enqueue, decrypt, run, retry and dead, as every one will.
@@ -533,6 +541,73 @@ internal static class CanaryFlows
             (status, body));
         Assert.Matches(@"""LogLevel"":""(?:Trace|Debug)""", process.StandardOutput);
     };
+
+    /// <summary>
+    /// Story 1.21's claim on the real Host.Admin at Trace, with a token issued as <c>gatekeep init</c>
+    /// does. Normally the right token claims, then the setup Session reads the Session endpoint and
+    /// is refused capabilities and signing out, which isn't setup-allowed, though it sends the
+    /// Origin and CSRF token; the token must appear in no response, and the Session
+    /// ID and both CSRF tokens, planted once they're issued, in no log or table. Failing, a wrong
+    /// token is refused and an unissued Session cookie is refused, with every response scanned.
+    /// </summary>
+    private static async Task BootstrapClaimAsync(CanaryFlowContext context, FlowRun run, bool failing)
+    {
+        await using var host = await Admins.AdminHost.StartAsync(context.Postgres, null, DebugArguments);
+        run.Database = host.Database;
+        run.Plant("role-password", PostgresFixture.Password);
+        var token = run.Plant("bootstrap-token", await host.IssueTokenAsync());
+
+        if (failing)
+        {
+            var wrong = run.Plant("wrong-bootstrap-token", Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(32)));
+            using var refused = await host.ClaimAsync(wrong.Value);
+            run.Capture("refused claim response", await ResponseTextAsync(refused));
+            Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
+
+            var unissued = run.Plant("unissued-session-id", Admins.AdminHost.Unissued());
+            using var unknown = await host.SendAsync(HttpMethod.Get, "/api/v1/deployment/session", unissued.Value);
+            run.Capture("unknown session response", await ResponseTextAsync(unknown));
+            Assert.Equal(HttpStatusCode.Unauthorized, unknown.StatusCode);
+        }
+        else
+        {
+            using var claimed = await host.ClaimAsync(token.Value);
+            Assert.Equal(HttpStatusCode.Created, claimed.StatusCode);
+            // The response carries the Session ID and CSRF token by design, but never the token.
+            Assert.DoesNotContain(token.Value, await ResponseTextAsync(claimed), StringComparison.Ordinal);
+            var (cookie, csrf, _) = await Admins.AdminHost.ReadClaimAsync(claimed);
+
+            using var session = await host.SendAsync(HttpMethod.Get, "/api/v1/deployment/session", cookie);
+            Assert.Equal(HttpStatusCode.OK, session.StatusCode);
+            Assert.DoesNotContain(token.Value, await ResponseTextAsync(session), StringComparison.Ordinal);
+            using var json = System.Text.Json.JsonDocument.Parse(await session.Content.ReadAsStringAsync(CanaryFlowContext.Cancellation));
+            var rotated = json.RootElement.GetProperty("csrfToken").GetString()!;
+
+            using var capabilities = await host.SendAsync(HttpMethod.Get, "/api/v1/deployment/capabilities", cookie);
+            run.Capture("capabilities response", await ResponseTextAsync(capabilities));
+            Assert.Equal(HttpStatusCode.Forbidden, capabilities.StatusCode);
+
+            // A setup Session can't sign out: it would strand the only Deployment Owner.
+            using var signOut = await host.SendAsync(HttpMethod.Delete, "/api/v1/deployment/session", cookie, rotated, Admins.AdminHost.Origin);
+            run.Capture("sign-out response", await ResponseTextAsync(signOut));
+            Assert.Equal(HttpStatusCode.Forbidden, signOut.StatusCode);
+
+            run.Plant("admin-session-id", cookie);
+            run.Plant("admin-csrf-token", csrf);
+            run.Plant("admin-rotated-csrf-token", rotated);
+        }
+
+        await host.StopAsync();
+        run.Capture("Admin output", host.Output);
+        Assert.Matches(@"""LogLevel"":""(?:Trace|Debug)""", host.Output);
+    }
+
+    /// <summary>A response's status, every header and its body, as one text to scan.</summary>
+    private static async Task<string> ResponseTextAsync(HttpResponseMessage response)
+    {
+        var headers = response.Headers.Concat(response.Content.Headers).Select(h => $"{h.Key}: {string.Join(", ", h.Value)}");
+        return $"{(int)response.StatusCode}\n{string.Join("\n", headers)}\n{await response.Content.ReadAsStringAsync(CanaryFlowContext.Cancellation)}";
+    }
 
     /// <summary>
     /// A credential job through the real enqueuer and runner, logging at Trace through the hosts'
