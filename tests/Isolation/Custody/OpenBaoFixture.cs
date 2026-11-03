@@ -64,9 +64,12 @@ public class OpenBaoFixture : IAsyncLifetime
 
     protected virtual string TokenMaxTtl => "1h";
 
+    /// <summary>The setup script as the container runs it. A variant may leave steps out.</summary>
+    protected virtual string SetupScript(string script) => script;
+
     public async ValueTask InitializeAsync()
     {
-        _container = Build(generateKey: true)
+        _container = Build(generateKey: true, setup: SetupScript)
             .WithPortBinding(TestPort, assignRandomHostPort: true)
             .WithWaitStrategy(Wait.ForUnixContainer().UntilMessageIsLogged("OpenBao server started"))
             .Build();
@@ -172,7 +175,7 @@ public class OpenBaoFixture : IAsyncLifetime
     /// directory is a mount, as the bind-mounted secrets directory is: a tmpfs, or <paramref name="keyVolume"/>
     /// when the key must survive a restart.
     /// </summary>
-    public static ContainerBuilder Build(bool generateKey, IVolume? keyVolume = null)
+    public static ContainerBuilder Build(bool generateKey, IVolume? keyVolume = null, Func<string, string>? setup = null)
     {
         var root = RepositoryRoot();
         var deploy = Path.Combine(root, "deploy", "openbao");
@@ -191,7 +194,7 @@ public class OpenBaoFixture : IAsyncLifetime
             .WithResourceMapping(Lf(Path.Combine(deploy, "openbao.hcl")), "/etc/openbao/openbao.hcl")
             .WithResourceMapping(Lf(Path.Combine(custody, "test-listener.hcl")), "/etc/openbao/test-listener.hcl")
             .WithResourceMapping(Lf(Path.Combine(custody, "start-openbao.sh")), "/opt/gatekeep/test/start-openbao.sh")
-            .WithResourceMapping(Lf(Path.Combine(deploy, "setup.sh")), "/opt/gatekeep/openbao/setup.sh")
+            .WithResourceMapping(Lf(Path.Combine(deploy, "setup.sh"), setup), "/opt/gatekeep/openbao/setup.sh")
             .WithResourceMapping(Lf(Path.Combine(deploy, "generate-master-key.sh")), "/opt/gatekeep/openbao/generate-master-key.sh");
 
         foreach (var policy in Directory.EnumerateFiles(Path.Combine(deploy, "policies"), "*.hcl"))
@@ -215,8 +218,8 @@ public class OpenBaoFixture : IAsyncLifetime
         throw new InvalidOperationException("No Gatekeep.slnx above the test output.");
     }
 
-    private static byte[] Lf(string path) =>
-        Encoding.UTF8.GetBytes(File.ReadAllText(path).Replace("\r\n", "\n", StringComparison.Ordinal));
+    private static byte[] Lf(string path, Func<string, string>? transform = null) =>
+        Encoding.UTF8.GetBytes((transform ?? (s => s))(File.ReadAllText(path).Replace("\r\n", "\n", StringComparison.Ordinal)));
 
     /// <summary>Tenant keys made as <c>Host.Worker</c> would at Tenant creation.</summary>
     private async Task SeedKeysAsync()
@@ -244,4 +247,23 @@ public sealed class ShortTokenOpenBaoFixture : OpenBaoFixture
     protected override string TokenTtl => "3s";
 
     protected override string TokenMaxTtl => "3s";
+}
+
+/// <summary>
+/// Setup without its four Deployment key lines, so <c>gatekeep init</c> is the one that makes
+/// them (Story 1.19). Fails at start if the lines it removes are no longer there.
+/// </summary>
+public sealed class NoDeploymentKeysOpenBaoFixture : OpenBaoFixture
+{
+    protected override string SetupScript(string script)
+    {
+        var lines = script.Split('\n');
+        var kept = lines.Where(l => !l.StartsWith("bao write transit/keys/dep-", StringComparison.Ordinal)).ToArray();
+        if (lines.Length - kept.Length != 4)
+        {
+            throw new InvalidOperationException("setup.sh no longer creates the four Deployment keys on four lines.");
+        }
+
+        return string.Join('\n', kept);
+    }
 }

@@ -107,6 +107,7 @@ $C --profile tools --profile setup build --quiet
 say "install, as docs/install.md has it."
 $C run --rm keygen
 $C run --rm passwords
+$C run --rm bootstrap-dir
 $C up -d openbao
 $C run --rm openbao-setup
 $C run --rm cli migrate
@@ -123,6 +124,24 @@ wait_healthz "200 healthy"
 
 say "audit verify, as gk_cli, finds every chain intact."
 $C run --rm cli audit verify || fail "cli audit verify didn't exit 0."
+
+say "init ensures the Deployment keys and writes a root-only bootstrap token, then reissues it."
+# bootstrap-dir again: running it twice changes nothing.
+$C run --rm bootstrap-dir > /dev/null || fail "bootstrap-dir didn't run a second time."
+for run in issue reissue; do
+    init_output="$($C run --rm cli init)" || fail "cli init ($run) didn't exit 0."
+    echo "$init_output" | grep -q "bootstrap/bootstrap-token" || fail "cli init ($run) didn't name the token file."
+    modes="$(docker run --rm -v "$SECRETS/bootstrap:/b:ro" "$BUSYBOX" stat -c '%a %u' /b /b/bootstrap-token | tr '\n' ' ')"
+    [ "$modes" = "700 10004 600 10004 " ] \
+        || fail "after $run the bootstrap token isn't 0600 in a 0700 directory owned by the cli uid ($modes)."
+    # Checked inside the container, so the token itself is never printed here: its form, and
+    # that init's captured output doesn't hold it.
+    printf '%s\n' "$init_output" | docker run --rm -i -v "$SECRETS/bootstrap:/b:ro" "$BUSYBOX" sh -c \
+        '[ "$(wc -c < /b/bootstrap-token)" -eq 65 ] && grep -qxE "[0-9a-f]{64}" /b/bootstrap-token && ! grep -qF -f /b/bootstrap-token' \
+        || fail "after $run the bootstrap token isn't 64 lower-case hex characters and a newline, or init printed it."
+done
+[ "$(docker run --rm -v "$SECRETS/bootstrap:/b:ro" "$BUSYBOX" sh -c 'ls -A /b')" = bootstrap-token ] \
+    || fail "init left files beside the bootstrap token."
 
 say "the Master Key is in no volume, built image or container environment."
 for volume in $(docker volume ls -q --filter "label=com.docker.compose.project=$COMPOSE_PROJECT_NAME"); do

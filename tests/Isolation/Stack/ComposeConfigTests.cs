@@ -232,6 +232,9 @@ public sealed class ComposeConfigTests
             ["keygen"] = ["/master"],
             ["passwords"] = ["/postgres"],
             ["openbao-setup"] = ["/approle", "/recovery"],
+            ["bootstrap-dir"] = ["/bootstrap"],
+            // The one runtime exception: init writes the bootstrap token there (Story 1.19).
+            ["cli"] = ["/bootstrap"],
         };
 
         foreach (var service in Services.EnumerateObject())
@@ -246,7 +249,7 @@ public sealed class ComposeConfigTests
                 .Order()
                 .ToList();
             Assert.Equal(expected.GetValueOrDefault(service.Name, []), bound);
-            if (bound.Count > 0)
+            if (bound.Count > 0 && service.Name != "cli")
             {
                 Assert.Equal(["setup"], Strings(service.Value, "profiles"));
                 Assert.Equal("none", service.Value.GetProperty("network_mode").GetString());
@@ -258,6 +261,38 @@ public sealed class ComposeConfigTests
         {
             Assert.DoesNotContain("secret", volume.Name, StringComparison.OrdinalIgnoreCase);
         }
+    }
+
+    /// <summary>
+    /// Story 1.19: only <c>cli</c> mounts <c>bootstrap/</c>, read-write at <c>init</c>'s default token
+    /// directory, and <c>bootstrap-dir</c> hands that directory to the uid <c>cli</c> runs as.
+    /// </summary>
+    [Fact]
+    public void Only_cli_mounts_the_bootstrap_directory_and_its_setup_gives_it_the_cli_uid()
+    {
+        var file = Normalized(Stack.Value.GetProperty("secrets").GetProperty("master_key").GetProperty("file").GetString()!);
+        var bootstrap = file[..^"/master/master-key".Length] + "/bootstrap";
+
+        var mounting = Services.EnumerateObject()
+            .Where(s => Volumes(s.Value).Any(v => Normalized(v.Source) == bootstrap))
+            .Select(s => s.Name)
+            .Order()
+            .ToList();
+        Assert.Equal(["bootstrap-dir", "cli"], mounting);
+
+        var cli = Services.GetProperty("cli");
+        var mount = Assert.Single(cli.GetProperty("volumes").EnumerateArray(), v => Normalized(v.GetProperty("source").GetString()!) == bootstrap);
+        Assert.Equal("bind", mount.GetProperty("type").GetString());
+        Assert.Equal("/gatekeep/bootstrap", mount.GetProperty("target").GetString());
+        Assert.False(mount.TryGetProperty("read_only", out var readOnly) && readOnly.GetBoolean());
+        // Docker would make a missing source root-owned, which init refuses: bootstrap-dir makes it.
+        Assert.False(mount.GetProperty("bind").GetProperty("create_host_path").GetBoolean());
+        Assert.Contains("const string DefaultTokenDirectory = \"/gatekeep/bootstrap\";", File.ReadAllText(Path.Combine(Repository.Root, "src", "Gatekeep.Cli", "Program.cs")));
+
+        var cliUid = cli.GetProperty("user").GetString()!.Split(':')[0];
+        var script = File.ReadAllText(Path.Combine(Repository.Root, "deploy", "cli", "prepare-bootstrap-dir.sh"));
+        Assert.Matches($@"(?m)^CLI_UID={cliUid}\s*$", script);
+        Assert.Contains("chmod 0700", script);
     }
 
     [Fact]

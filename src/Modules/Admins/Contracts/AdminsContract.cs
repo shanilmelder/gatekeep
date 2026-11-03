@@ -1,3 +1,4 @@
+using Gatekeep.Kernel.Audit;
 using Gatekeep.Kernel.RateLimiting;
 using Gatekeep.Modules.Admins.Core;
 
@@ -13,4 +14,14 @@ public static class AdminsContract
     /// It runs as <c>gk_admin</c>, the only role granted the table.
     /// </summary>
     public static IRateLimiter CreateAttemptLimiter() => new AdminAttemptLimiter();
+
+    /// <summary>
+    /// The bootstrap token issuer behind <c>gatekeep init</c> (Story 1.19). It runs as
+    /// <c>gk_cli</c>, in a Deployment scope, and writes its event through <paramref name="appender"/>.
+    /// </summary>
+    public static IBootstrapIssuer CreateBootstrapIssuer(IAuditAppender appender)
+    {
+        ArgumentNullException.ThrowIfNull(appender);
+        return new BootstrapIssuer(appender);
+    }
 }

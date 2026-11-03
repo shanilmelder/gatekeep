@@ -85,6 +85,12 @@
         "resolved": "10.0.14",
         "contentHash": "1bbZqqCJTPba3inTADExbp/9PsGVyvGOX3zr6tFr7ySCgVkX9Lpw7BV0TizktNItd3SsbUu1sQfSAYm1GZMoNw=="
       },
+      "gatekeep.adapters.openbao": {
+        "type": "Project",
+        "dependencies": {
+          "Gatekeep.Kernel": "[0.1.0, )"
+        }
+      },
       "gatekeep.adapters.postgres": {
         "type": "Project",
         "dependencies": {
