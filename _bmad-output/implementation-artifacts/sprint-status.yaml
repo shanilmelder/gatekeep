@@ -62,7 +62,7 @@ development_status:
   1-24-enforce-capabilities-and-tenant-scoped-routes: done
   1-25-open-the-admin-shell: done
   1-26-confirm-sensitive-actions-and-manage-admin-credentials: done
-  1-27-create-tenants-with-permanent-subdomains: backlog
+  1-27-create-tenants-with-permanent-subdomains: in-progress
   1-28-switch-tenants-and-set-the-environment-label: backlog
   1-29-delete-a-tenant-without-touching-others: backlog
   1-30-connect-the-alert-channel-and-off-server-store: backlog
