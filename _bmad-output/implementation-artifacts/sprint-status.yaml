@@ -63,7 +63,7 @@ development_status:
   1-25-open-the-admin-shell: done
   1-26-confirm-sensitive-actions-and-manage-admin-credentials: done
   1-27-create-tenants-with-permanent-subdomains: done
-  1-28-switch-tenants-and-set-the-environment-label: backlog
+  1-28-switch-tenants-and-set-the-environment-label: in-progress
   1-29-delete-a-tenant-without-touching-others: backlog
   1-30-connect-the-alert-channel-and-off-server-store: backlog
   1-31-run-the-cross-tenant-suite-on-every-build: backlog
