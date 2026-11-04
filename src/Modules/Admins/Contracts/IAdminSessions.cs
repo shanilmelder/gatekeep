@@ -13,6 +13,12 @@ public enum AdminSessionKind
 {
     Setup,
     Full,
+
+    /// <summary>
+    /// Started by redeeming a Recovery Code (Story 1.26): it reaches only the recovery-allowed
+    /// endpoints, whatever the Admin holds, and a registration makes it full.
+    /// </summary>
+    Recovery,
 }
 
 /// <summary>
@@ -24,13 +30,14 @@ public sealed class AdminSession
 {
     private readonly byte[] _csrf;
 
-    internal AdminSession(Guid id, Guid adminId, AdminSessionKind kind, bool deploymentOwner, int credentials, byte[] csrf)
+    internal AdminSession(Guid id, Guid adminId, AdminSessionKind kind, bool deploymentOwner, int credentials, bool recoveryCode, byte[] csrf)
     {
         Id = id;
         AdminId = adminId;
         Kind = kind;
         DeploymentOwner = deploymentOwner;
         Credentials = credentials;
+        RecoveryCode = recoveryCode;
         _csrf = csrf;
     }
 
@@ -46,18 +53,39 @@ public sealed class AdminSession
     public int Credentials { get; }
 
     /// <summary>
-    /// Whether the Admin has registered the <see cref="AdminsContract.RequiredCredentials"/> they
-    /// need (FR-2, FR-46). The count of <c>admin_credential</c> rows is authoritative for this and
-    /// for <see cref="Restricted"/>; <c>admin.setup_completed_at</c> is only a set-once stamp of
-    /// when setup completed, for the record, and nothing reads it to decide access.
+    /// Whether the Admin held a confirmed, unused offline Recovery Code when the Session was
+    /// authenticated (Story 1.26).
     /// </summary>
-    public bool SetupComplete => Credentials >= AdminsContract.RequiredCredentials;
+    public bool RecoveryCode { get; }
 
     /// <summary>
-    /// Whether the Session may reach only setup-allowed endpoints: a setup Session, and any
-    /// Session of an Admin who hasn't registered their credentials, whatever its kind.
+    /// Whether the Admin meets the credential floor (FR-2, FR-46): the
+    /// <see cref="AdminsContract.RequiredCredentials"/> credentials, or exactly one and a confirmed,
+    /// unused Recovery Code (Story 1.26). The <c>admin_credential</c> and <c>admin_recovery_code</c>
+    /// rows are authoritative for this and for <see cref="Restricted"/>; <c>admin.setup_completed_at</c>
+    /// is only a set-once stamp of when setup completed, for the record, and nothing reads it to
+    /// decide access.
     /// </summary>
-    public bool Restricted => Kind == AdminSessionKind.Setup || !SetupComplete;
+    public bool SetupComplete => MeetsFloor(Credentials, RecoveryCode);
+
+    /// <summary>
+    /// Whether the Session may reach only setup-allowed endpoints: a setup or recovery Session, and
+    /// any Session of an Admin who doesn't meet the credential floor, whatever its kind. A recovery
+    /// Session reaches only the recovery-allowed ones among them.
+    /// </summary>
+    public bool Restricted => Kind != AdminSessionKind.Full || !SetupComplete;
+
+    /// <summary>
+    /// Whether the Admin may take an offline Recovery Code instead of a second credential (Story
+    /// 1.26): only in a setup Session, only for an Admin who isn't the Deployment Owner (FR-2), with
+    /// exactly one credential and no confirmed, unused code.
+    /// </summary>
+    public bool RecoveryCodeAllowed =>
+        Kind == AdminSessionKind.Setup && !DeploymentOwner && Credentials == 1 && !RecoveryCode;
+
+    /// <summary>The credential floor: two credentials, or exactly one with a confirmed, unused Recovery Code.</summary>
+    public static bool MeetsFloor(int credentials, bool recoveryCode) =>
+        credentials >= AdminsContract.RequiredCredentials || (credentials == 1 && recoveryCode);
 
     /// <summary>The Session's CSRF token, for the Session endpoint to return.</summary>
     public Secret<string> CsrfToken => new(SessionSecrets.Encode(_csrf));

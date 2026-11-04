@@ -27,7 +27,10 @@ public sealed class AdminSessionResponse
 {
     public required Guid AdminId { get; init; }
 
-    /// <summary><c>setup</c> until the Admin's credentials are registered, then <c>full</c>.</summary>
+    /// <summary>
+    /// <c>setup</c> until the Admin's credentials are registered, then <c>full</c>; <c>recovery</c> after a
+    /// Recovery Code, which reaches only credential registration until one is registered.
+    /// </summary>
     public required string Kind { get; init; }
 
     public required bool DeploymentOwner { get; init; }
@@ -37,6 +40,12 @@ public sealed class AdminSessionResponse
 
     /// <summary>The WebAuthn credentials the Admin has registered: credential setup's step is this plus one.</summary>
     public required int Credentials { get; init; }
+
+    /// <summary>
+    /// Whether credential setup may offer an offline Recovery Code instead of a second credential: only
+    /// in a setup Session of an Admin who isn't the Deployment Owner, with one credential and no code.
+    /// </summary>
+    public required bool RecoveryCodeAllowed { get; init; }
 
     public required string CsrfToken { get; init; }
 }
@@ -139,33 +148,45 @@ internal static class AdminApi
             .Produces(StatusCodes.Status503ServiceUnavailable);
 
         app.MapGet("/api/v1/deployment/session", static (HttpContext context, AdminApiServices services) => GetSessionAsync(context, services))
-            .WithMetadata(DeploymentApiEndpoint.Instance, SelfService.Instance, SetupAllowed.Instance)
+            .WithMetadata(DeploymentApiEndpoint.Instance, SelfService.Instance, SetupAllowed.Instance, RecoveryAllowed.Instance)
             .WithName("GetSession")
             .WithTags(Tag)
             .WithSummary("The current Admin Session and its CSRF token.")
-            .WithDescription("Setup-allowed and read-only: the CSRF token is the Session's, the same each time and in every tab.")
+            .WithDescription(
+                "Setup-allowed and recovery-allowed, and read-only: the CSRF token is the Session's, the same each time and in " +
+                "every tab. recoveryCodeAllowed says whether credential setup may offer an offline Recovery Code.")
             .Produces<AdminSessionResponse>(StatusCodes.Status200OK)
             .Produces(StatusCodes.Status401Unauthorized)
             .Produces(StatusCodes.Status503ServiceUnavailable);
 
         app.MapPost("/api/v1/deployment/credentials/registration", static (HttpContext context, AdminApiServices services) => CredentialRegistrationApi.BeginAsync(context, services))
-            .WithMetadata(DeploymentApiEndpoint.Instance, SelfService.Instance, SetupAllowed.Instance)
+            .WithMetadata(
+                DeploymentApiEndpoint.Instance,
+                SelfService.Instance,
+                SetupAllowed.Instance,
+                RecoveryAllowed.Instance,
+                new RequiresFreshAssertion(AdminFreshAssertions.SelfCredentialsAdd, inHandler: true))
             .WithName("BeginCredentialRegistration")
             .WithTags(Tag)
             .WithSummary("Begin registering a WebAuthn credential: the options for navigator.credentials.create.")
             .WithDescription(
                 "Setup-allowed. Returns creation options for the Admin RP ID and origin, with no attestation, user verification " +
                 "required, a resident key required, ES256 and RS256, and the Admin's credentials excluded. Its challenge can be " +
-                "answered for 5 minutes, by the next complete call only; a new begin replaces it. Refused with 403 once the Admin " +
-                "has two credentials. Each begin and complete counts towards 10 per Session in 15 minutes, then 429.")
+                "answered for 5 minutes, by the next complete call only; a new begin replaces it. In a setup or recovery Session it " +
+                "needs nothing more: a setup Session registers while its Admin is below the floor of two credentials, or one and a " +
+                "Recovery Code, and is refused with a bodiless 403 after; a recovery Session registers once. In a full Session it " +
+                "adds a credential: it is 409 credentials_maximum at 10, before anything else, then needs a fresh assertion for " +
+                "self.credentials.add, which it uses up, or is 403 fresh_assertion_required. Each begin and complete counts " +
+                "towards 10 per Session in 15 minutes, then 429.")
             .Produces<CredentialCreationOptionsResponse>(StatusCodes.Status200OK)
             .Produces(StatusCodes.Status401Unauthorized)
-            .Produces(StatusCodes.Status403Forbidden)
+            .Produces<ApiProblem>(StatusCodes.Status403Forbidden, AdminResponses.ProblemContentType)
+            .Produces<ApiProblem>(StatusCodes.Status409Conflict, AdminResponses.ProblemContentType)
             .Produces<ApiProblem>(StatusCodes.Status429TooManyRequests, AdminResponses.ProblemContentType)
             .Produces(StatusCodes.Status503ServiceUnavailable);
 
         app.MapPost("/api/v1/deployment/credentials/registration/complete", static (HttpContext context, AdminApiServices services) => CredentialRegistrationApi.CompleteAsync(context, services))
-            .WithMetadata(DeploymentApiEndpoint.Instance, SelfService.Instance, SetupAllowed.Instance, new JsonRequestBody(typeof(CredentialRegistrationRequest)))
+            .WithMetadata(DeploymentApiEndpoint.Instance, SelfService.Instance, SetupAllowed.Instance, RecoveryAllowed.Instance, new JsonRequestBody(typeof(CredentialRegistrationRequest)))
             .WithName("CompleteCredentialRegistration")
             .WithTags(Tag)
             .WithSummary("Complete a WebAuthn credential registration with the browser's attestation response.")
@@ -173,23 +194,27 @@ internal static class AdminApi
                 "Setup-allowed. Verifies the response against the pending challenge, the Admin RP ID and the exact Admin origin, " +
                 "and stores the credential. The challenge is used up whatever the outcome. A response for another RP ID or origin, " +
                 "a cross-origin one, one without user verification, one with no live challenge and one returning an existing " +
-                "credential are 400 credential_refused, with nothing stored. The second credential completes setup: the Session " +
-                "becomes full. Refused with 403 once the Admin has two credentials.")
+                "credential are 400 credential_refused, with nothing stored. The challenge is taken before the body is read. A " +
+                "credential that brings the Admin to the floor completes setup, and one registered in a recovery Session ends it: " +
+                "the Session becomes full. Refused with a bodiless 403 when a restricted Session's Admin already meets the floor, " +
+                "and 409 credentials_maximum at 10.")
             .Produces<CredentialRegistrationResponse>(StatusCodes.Status200OK)
             .Produces<ApiProblem>(StatusCodes.Status400BadRequest, AdminResponses.ProblemContentType)
             .Produces(StatusCodes.Status401Unauthorized)
             .Produces(StatusCodes.Status403Forbidden)
+            .Produces<ApiProblem>(StatusCodes.Status409Conflict, AdminResponses.ProblemContentType)
             .Produces<ApiProblem>(StatusCodes.Status429TooManyRequests, AdminResponses.ProblemContentType)
             .Produces(StatusCodes.Status503ServiceUnavailable);
 
         app.MapDelete("/api/v1/deployment/session", static (HttpContext context, AdminApiServices services) => EndSessionAsync(context, services))
-            .WithMetadata(DeploymentApiEndpoint.Instance, SelfService.Instance)
+            .WithMetadata(DeploymentApiEndpoint.Instance, SelfService.Instance, SetupAllowed.Instance, RecoveryAllowed.Instance)
             .WithName("EndSession")
             .WithTags(Tag)
             .WithSummary("Sign out: end the current Admin Session.")
             .WithDescription(
-                "Ends the Session as signed_out, writes admin.session.signed_out, and clears the cookie. Not setup-allowed: a " +
-                "setup Session signing out would leave the Deployment Owner unable to finish setup.")
+                "Ends the Session as signed_out, writes admin.session.signed_out, and clears the cookie. Setup-allowed and " +
+                "recovery-allowed: any Session can always sign out. A Deployment Owner who signs out of setup before registering a " +
+                "credential can't sign in again without gatekeep recover-admin.")
             .Produces(StatusCodes.Status204NoContent)
             .Produces(StatusCodes.Status401Unauthorized)
             .Produces(StatusCodes.Status403Forbidden)
@@ -224,6 +249,133 @@ internal static class AdminApi
             .Produces<CapabilitiesResponse>(StatusCodes.Status200OK)
             .Produces(StatusCodes.Status401Unauthorized)
             .Produces<ApiProblem>(StatusCodes.Status403Forbidden, AdminResponses.ProblemContentType)
+            .Produces(StatusCodes.Status503ServiceUnavailable);
+
+        app.MapPost("/api/v1/deployment/assertions", static (HttpContext context, AdminApiServices services) => FreshAssertionApi.BeginAsync(context, services))
+            .WithMetadata(DeploymentApiEndpoint.Instance, SelfService.Instance, new JsonRequestBody(typeof(FreshAssertionBeginRequest)))
+            .WithName("BeginFreshAssertion")
+            .WithTags(Tag)
+            .WithSummary("Begin confirming a sensitive action with a fresh WebAuthn assertion: the options for navigator.credentials.get.")
+            .WithDescription(
+                "Self-service, full Sessions only. The body names the action, a Deployment capability whose fresh assertion isn't " +
+                "never or self.credentials.add or self.credentials.remove, and its target exactly as the action's request will name " +
+                "it, or null. An unknown action, a Tenant capability or a body that isn't JSON is 400 assertion_refused; a Deployment " +
+                "capability the Admin doesn't hold is 403 access_denied, counted and audited as the request checks do. Returns " +
+                "request options for the Admin RP ID with user verification required and no credential listed. The challenge can be " +
+                "answered once, within 5 minutes, and a new begin replaces it and any unused grant for the same action and target. " +
+                "Each begin and complete counts towards 10 per Session in 15 minutes, then 429.")
+            .Produces<AdminSignInOptionsResponse>(StatusCodes.Status200OK)
+            .Produces<ApiProblem>(StatusCodes.Status400BadRequest, AdminResponses.ProblemContentType)
+            .Produces(StatusCodes.Status401Unauthorized)
+            .Produces<ApiProblem>(StatusCodes.Status403Forbidden, AdminResponses.ProblemContentType)
+            .Produces<ApiProblem>(StatusCodes.Status429TooManyRequests, AdminResponses.ProblemContentType)
+            .Produces(StatusCodes.Status503ServiceUnavailable);
+
+        app.MapPost("/api/v1/deployment/assertions/complete", static (HttpContext context, AdminApiServices services) => FreshAssertionApi.CompleteAsync(context, services))
+            .WithMetadata(DeploymentApiEndpoint.Instance, SelfService.Instance, new JsonRequestBody(typeof(AdminSignInRequest)))
+            .WithName("CompleteFreshAssertion")
+            .WithTags(Tag)
+            .WithSummary("Complete a fresh WebAuthn assertion, leaving a grant on the Session for the begin's action and target.")
+            .WithDescription(
+                "Self-service, full Sessions only. Once counted, the Session's pending challenge is taken before the body is read, " +
+                "so it is used up whatever follows. Verifies the assertion as sign-in does, against one of the Session's own " +
+                "Admin's credentials, with user verification, their user handle and a signature counter that advances. A pass " +
+                "stores a grant bound to this Session and the begin's action and target for 5 minutes, writes " +
+                "admin.fresh_assertion.verified and is 204. The grant is used up by the first request it matches, whatever that " +
+                "request then does. Every refusal is the same 400 assertion_refused, with no grant.")
+            .Produces(StatusCodes.Status204NoContent)
+            .Produces<ApiProblem>(StatusCodes.Status400BadRequest, AdminResponses.ProblemContentType)
+            .Produces(StatusCodes.Status401Unauthorized)
+            .Produces(StatusCodes.Status403Forbidden)
+            .Produces<ApiProblem>(StatusCodes.Status429TooManyRequests, AdminResponses.ProblemContentType)
+            .Produces(StatusCodes.Status503ServiceUnavailable);
+
+        app.MapGet("/api/v1/deployment/credentials", static (HttpContext context, AdminApiServices services) => CredentialsApi.ListAsync(context, services))
+            .WithMetadata(DeploymentApiEndpoint.Instance, SelfService.Instance)
+            .WithName("ListCredentials")
+            .WithTags(Tag)
+            .WithSummary("Your credentials: the current Admin's own WebAuthn credentials, oldest first.")
+            .WithDescription(
+                "Self-service, full Sessions only. Each credential's acr_ public ID, kind, backup state, when it was added and last " +
+                "used, and whether removing it would keep the floor of two; and whether the Admin holds a confirmed, unused " +
+                "Recovery Code. Never a WebAuthn credential ID, public key, AAGUID, counter or user handle.")
+            .Produces<AdminCredentialsResponse>(StatusCodes.Status200OK)
+            .Produces(StatusCodes.Status401Unauthorized)
+            .Produces(StatusCodes.Status403Forbidden)
+            .Produces(StatusCodes.Status503ServiceUnavailable);
+
+        app.MapDelete("/api/v1/deployment/credentials/{credentialId}", static (HttpContext context, AdminApiServices services) => CredentialsApi.RemoveAsync(context, services))
+            .WithMetadata(
+                DeploymentApiEndpoint.Instance,
+                SelfService.Instance,
+                new RequiresFreshAssertion(AdminFreshAssertions.SelfCredentialsRemove, CredentialsApi.CredentialRouteValue))
+            .WithName("RemoveCredential")
+            .WithTags(Tag)
+            .WithSummary("Remove one of the current Admin's own WebAuthn credentials.")
+            .WithDescription(
+                "Self-service, full Sessions only, after a fresh assertion for self.credentials.remove with this credentialId as " +
+                "its target, which the request checks use up before anything else, or 403 fresh_assertion_required. A malformed, " +
+                "unknown or another Admin's credential is 404. A removal that would leave fewer than two credentials is 409 " +
+                "credentials_minimum. Otherwise it deletes the credential, ends every other live Session of the Admin as revoked, " +
+                "writes admin.credential.removed and is 204; this Session stays. When the credential removed is the one whose " +
+                "fresh assertion confirmed it, this Session ends too: 200 with sessionEnded true, and the cookie cleared.")
+            .Produces(StatusCodes.Status204NoContent)
+            .Produces<AdminCredentialRemovalResponse>(StatusCodes.Status200OK)
+            .Produces(StatusCodes.Status401Unauthorized)
+            .Produces<ApiProblem>(StatusCodes.Status403Forbidden, AdminResponses.ProblemContentType)
+            .Produces(StatusCodes.Status404NotFound)
+            .Produces<ApiProblem>(StatusCodes.Status409Conflict, AdminResponses.ProblemContentType)
+            .Produces(StatusCodes.Status503ServiceUnavailable);
+
+        app.MapPost("/api/v1/deployment/credentials/recovery-code", static (HttpContext context, AdminApiServices services) => RecoveryCodeApi.IssueAsync(context, services))
+            .WithMetadata(DeploymentApiEndpoint.Instance, SelfService.Instance, SetupAllowed.Instance)
+            .WithName("IssueRecoveryCode")
+            .WithTags(Tag)
+            .WithSummary("Issue an offline Recovery Code in place of a second credential, shown this once.")
+            .WithDescription(
+                "Setup-allowed, and only in a setup Session of an Admin who isn't the Deployment Owner, with exactly one credential " +
+                "and no confirmed code; otherwise a bodiless 403. Returns the code once, never cached; only its HMAC under the " +
+                "Deployment hmac key is stored, unconfirmed, replacing any unconfirmed one. It can't be redeemed until confirmed. " +
+                "A key custody failure is 503 with nothing stored.")
+            .Produces<AdminRecoveryCodeResponse>(StatusCodes.Status200OK)
+            .Produces(StatusCodes.Status401Unauthorized)
+            .Produces(StatusCodes.Status403Forbidden)
+            .Produces(StatusCodes.Status503ServiceUnavailable);
+
+        app.MapPost("/api/v1/deployment/credentials/recovery-code/confirm", static (HttpContext context, AdminApiServices services) => RecoveryCodeApi.ConfirmAsync(context, services))
+            .WithMetadata(DeploymentApiEndpoint.Instance, SelfService.Instance, SetupAllowed.Instance, new JsonRequestBody(typeof(RecoveryCodeConfirmRequest)))
+            .WithName("ConfirmRecoveryCode")
+            .WithTags(Tag)
+            .WithSummary("Confirm the offline Recovery Code was saved, which completes credential setup.")
+            .WithDescription(
+                "Setup-allowed, under the same rule as the issue; otherwise a bodiless 403. The body names the issueId the issue " +
+                "returned: when it isn't the Admin's current unconfirmed code, as after a later issue, it is 409 " +
+                "recovery_code_superseded and nothing changes. Confirms the code, writes admin.recovery_code.issued, makes the " +
+                "Admin's setup Sessions full, writes admin.setup.completed and is 204.")
+            .Produces(StatusCodes.Status204NoContent)
+            .Produces(StatusCodes.Status401Unauthorized)
+            .Produces(StatusCodes.Status403Forbidden)
+            .Produces<ApiProblem>(StatusCodes.Status409Conflict, AdminResponses.ProblemContentType)
+            .Produces(StatusCodes.Status503ServiceUnavailable);
+
+        app.MapPost("/api/v1/deployment/signin/recovery-code", static (HttpContext context, AdminApiServices services) => RecoveryCodeApi.RedeemAsync(context, services))
+            .WithMetadata(DeploymentApiEndpoint.Instance, SignInEndpoint.Instance, new JsonRequestBody(typeof(RecoveryCodeRedeemRequest)))
+            .WithName("RedeemRecoveryCode")
+            .WithTags(Tag)
+            .WithSummary("Sign in with an offline Recovery Code, to a Session that reaches only credential registration.")
+            .WithDescription(
+                "Sessionless: needs the exact Admin Origin only. Each call is counted Deployment-wide, then per client, before the " +
+                "code is read: the 51st across the Deployment, or a client's 6th, in 15 minutes is 429. A confirmed, unused code is used up, every live Session of its Admin ends as revoked, " +
+                "a live Session this browser held is superseded, and a recovery Session starts, which reaches only the Session " +
+                "read, sign-out and credential registration until one credential is registered, which ends every other Session " +
+                "of the Admin; admin.recovery_code.used is written. A " +
+                "wrong, unconfirmed, used or malformed code is the same 400 recovery_code_refused. A key custody failure is 503 " +
+                "with nothing used. Before bootstrap completes it is the unknown-path 404.")
+            .Produces<AdminSignInResponse>(StatusCodes.Status200OK)
+            .Produces<ApiProblem>(StatusCodes.Status400BadRequest, AdminResponses.ProblemContentType)
+            .Produces(StatusCodes.Status403Forbidden)
+            .Produces(StatusCodes.Status404NotFound)
+            .Produces<ApiProblem>(StatusCodes.Status429TooManyRequests, AdminResponses.ProblemContentType)
             .Produces(StatusCodes.Status503ServiceUnavailable);
 
         return app;
@@ -395,6 +547,66 @@ internal static class AdminApi
         }
     }
 
+    /// <summary>How long a small JSON body may take to arrive (Story 1.26's begin and redeem bodies).</summary>
+    private static readonly TimeSpan BodyDeadline = TimeSpan.FromSeconds(10);
+
+    private static readonly JsonSerializerOptions BodyJson = new(JsonSerializerDefaults.Web)
+    {
+        MaxDepth = 4,
+        UnmappedMemberHandling = JsonUnmappedMemberHandling.Skip,
+    };
+
+    /// <summary>
+    /// A small JSON body as <typeparamref name="T"/>, or null for anything malformed: not
+    /// <c>application/json</c>, over <paramref name="maxBytes"/>, still arriving after 10 seconds,
+    /// cut off or malformed on the wire (an <see cref="IOException"/>), or JSON that isn't one.
+    /// Never throws but for the client's own cancellation.
+    /// </summary>
+    internal static async Task<T?> ReadJsonAsync<T>(HttpRequest request, int maxBytes, CancellationToken cancellationToken)
+        where T : class
+    {
+        if (!IsJson(request))
+        {
+            return null;
+        }
+
+        var buffer = ArrayPool<byte>.Shared.Rent(maxBytes + 1);
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        deadline.CancelAfter(BodyDeadline);
+        try
+        {
+            var length = 0;
+            int read;
+            while (length <= maxBytes && (read = await request.Body.ReadAsync(buffer.AsMemory(length, maxBytes + 1 - length), deadline.Token)) > 0)
+            {
+                length += read;
+            }
+
+            if (length > maxBytes)
+            {
+                return null;
+            }
+
+            try
+            {
+                return JsonSerializer.Deserialize<T>(buffer.AsSpan(0, length), BodyJson);
+            }
+            catch (JsonException)
+            {
+                return null;
+            }
+        }
+        catch (Exception e) when (!cancellationToken.IsCancellationRequested && e is OperationCanceledException or IOException)
+        {
+            return null;
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(buffer);
+            ArrayPool<byte>.Shared.Return(buffer);
+        }
+    }
+
     /// <summary>Whether a request's <c>Content-Type</c> is <c>application/json</c>, with any parameters.</summary>
     internal static bool IsJson(HttpRequest request) =>
         Microsoft.Net.Http.Headers.MediaTypeHeaderValue.TryParse(request.ContentType, out var type)
@@ -407,10 +619,16 @@ internal static class AdminApi
         return AdminResponses.JsonAsync(context, new AdminSessionResponse
         {
             AdminId = session.AdminId,
-            Kind = session.Kind == AdminSessionKind.Setup ? "setup" : "full",
+            Kind = session.Kind switch
+            {
+                AdminSessionKind.Setup => "setup",
+                AdminSessionKind.Recovery => "recovery",
+                _ => "full",
+            },
             DeploymentOwner = session.DeploymentOwner,
             SetupComplete = session.SetupComplete,
             Credentials = session.Credentials,
+            RecoveryCodeAllowed = session.RecoveryCodeAllowed,
             CsrfToken = session.CsrfToken.Use(static t => t),
         });
     }

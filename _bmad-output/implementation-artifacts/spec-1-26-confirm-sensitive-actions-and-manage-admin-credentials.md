@@ -2,10 +2,10 @@
 title: 'Story 1.26: Confirm sensitive actions and manage Admin credentials'
 type: 'feature'
 created: '2026-11-04'
-status: 'ready-for-dev'
+status: 'done'
 baseline_revision: '76c21445a08d779e8fd4dd5bcd73bd4ac37e0faa'
 review_loop_iteration: 0
-followup_review_recommended: false
+followup_review_recommended: true
 context:
   - '{project-root}/_bmad-output/planning-artifacts/architecture/architecture-gatekeep-2026-11-02/ARCHITECTURE-SPINE.md'
   - '{project-root}/_bmad-output/planning-artifacts/prds/prd-gatekeep-2026-11-01/prd.md'
@@ -17,7 +17,35 @@ context:
   - '{project-root}/_bmad-output/implementation-artifacts/spec-1-25-open-the-admin-shell.md'
   - '{project-root}/design/Gatekeep Admin.dc.html'
 warnings: []
-deferred: []
+deferred:
+  - summary: >-
+      Rotating the Deployment hmac key voids every Admin Recovery Code.
+    evidence: |-
+      The lookup uses the latest key version only.
+    location: >-
+      src/Modules/Admins/Core/AdminRecoveryCodes.cs
+    severity: medium
+  - summary: >-
+      No Tenant-scoped fresh-assertion begin route.
+    evidence: |-
+      Tenant Always and When capabilities can't be confirmed until it exists.
+    location: >-
+      src/Gatekeep.Host.Admin/FreshAssertionApi.cs
+    severity: medium
+  - summary: >-
+      The credential floor trigger blocks deleting an Admin's credentials.
+    evidence: |-
+      Epic 8's Admin removal must handle it.
+    location: >-
+      src/Adapters/Postgres/Migrations/Migration20261104010000ConfirmSensitiveActions.cs
+    severity: medium
+  - summary: >-
+      Recovery can't retire the lost credential, and an Admin at the maximum can't register in recovery.
+    evidence: |-
+      Recovery-code Admins first exist with Story 8.3.
+    location: >-
+      src/Modules/Admins/Core/AdminRecoveryCodes.cs
+    severity: low
 ---
 
 <intent-contract>
@@ -189,8 +217,8 @@ Items in `deferred-work.md` this story takes in:
   - A same-credential-ID race between two completes stores one credential; the other is 400 `credential_refused` (unique violation, already caught).
 - **BE/BS flags (Kernel port and Fido2 adapter):**
   - `WebAuthnRegisteredCredential` gains `BackupEligible` and `BackedUp`, and `WebAuthnAssertionResult.Asserted` gains `BackedUp`, read from the authenticator data flags.
-  - `admin_credential` gains `backup_eligible boolean NOT NULL DEFAULT false` and `backed_up boolean NOT NULL DEFAULT false`, with `CHECK (backup_eligible OR NOT backed_up)`. `gk_admin` gains `UPDATE (backed_up)`.
-  - Sign-in and fresh assertions store the latest `backed_up`. An assertion whose BE flag differs from the stored one is refused as `Invalid` (WebAuthn §6.3.3: BE never changes).
+  - `admin_credential` gains `backup_eligible boolean NULL` and `backed_up boolean NULL`, both NULL for a credential registered before this migration and both set for every new one, with BS only with BE. `gk_admin` gains `UPDATE (backup_eligible, backed_up)`, and a trigger keeps BE once known (review amendment).
+  - Sign-in and fresh assertions store the latest `backed_up`. An assertion whose BE flag differs from a known stored one is refused as `Invalid` (WebAuthn §6.3.3: BE never changes); an unknown one is recorded on the first verified assertion (review amendment).
 - **Admin Session kinds:**
   - `admin_session.kind` adds `recovery`. The guard trigger allows only `setup` to `full` and `recovery` to `full`.
   - `AdminSession` reads the Admin's credential count and whether they hold a confirmed, unused Recovery Code.
@@ -216,8 +244,8 @@ Items in `deferred-work.md` this story takes in:
   - `gk_admin` has `SELECT`, `INSERT`, `UPDATE (confirmed_at, used_at)` and `DELETE`. `gk_cli` has `SELECT`, for `recover-admin` later.
   - The table holds no code, ciphertext or hint.
 - **Recovery Code value:**
-  - 8 characters from Crockford base32 (`0–9`, `A–Z` without `I L O U`), shown as `XXXX-XXXX`, made with `RandomNumberGenerator` `[ASSUMPTION]`.
-  - Input is normalized before any check: uppercase, hyphens and spaces removed, and `O` read as `0`, `I` and `L` as `1`. Anything that isn't then 8 alphabet characters is refused, and still counted.
+  - 16 characters from Crockford base32 (`0–9`, `A–Z` without `I L O U`), 80 bits, shown as `XXXX-XXXX-XXXX-XXXX`, made with `RandomNumberGenerator` (review amendment).
+  - Input is normalized before any check: uppercase, hyphens and spaces removed, and `O` read as `0`, `I` and `L` as `1`. Anything that isn't then 16 alphabet characters is refused, and still counted.
   - The stored value is `IKeyCustody.HmacAsync(KeyName.ForDeployment(DeploymentKeyClass.Hmac), "gatekeep-admin-recovery-code\0" + normalized)`. Host.Admin's policy already grants `transit/hmac/dep-hmac`, and the policy is unchanged.
   - A custody failure is 503 with nothing stored or used.
 - **Issue (`POST …/credentials/recovery-code`):**
@@ -485,28 +513,28 @@ Items in `deferred-work.md` this story takes in:
 ## Tasks & Acceptance
 
 **Execution:**
-- [ ] Kernel and adapter: `SecurityLimits`, `RevealOnce<T>`, `PublicIdType.AdminCredential`, and BE/BS in the port and the Fido2 adapter. `Fido2AdapterTests` covers the flags and a changed BE.
-- [ ] Migration and registry: `admin_fresh_assertion`, `admin_recovery_code`, the `admin_credential` columns, grants and triggers, and the `recovery` kind. `AdminTablesTests` covers the constraints, the grants, both triggers and that `gk_hosted` has nothing.
-- [ ] Admins: `AdminAssertions` (shared with sign-in), `AdminFreshAssertions`, `AdminCredentials`, `AdminRecoveryCodes`, the Session kinds and floor, the registration rule changes, and the events.
-- [ ] Host.Admin:
+- [x] Kernel and adapter: `SecurityLimits`, `RevealOnce<T>`, `PublicIdType.AdminCredential`, and BE/BS in the port and the Fido2 adapter. `Fido2AdapterTests` covers the flags and a changed BE.
+- [x] Migration and registry: `admin_fresh_assertion`, `admin_recovery_code`, the `admin_credential` columns, grants and triggers, and the `recovery` kind. `AdminTablesTests` covers the constraints, the grants, both triggers and that `gk_hosted` has nothing.
+- [x] Admins: `AdminAssertions` (shared with sign-in), `AdminFreshAssertions`, `AdminCredentials`, `AdminRecoveryCodes`, the Session kinds and floor, the registration rule changes, and the events.
+- [x] Host.Admin:
   - the declaration requirement, the consume step in the checks and `FreshAssertionGate`;
   - the new routes, the registration gate and the maximum;
   - the problem codes and the OpenAPI extension.
   - Then regenerate the contract with `sh deploy/docker/api-contract.sh --write <abs dir>`.
-- [ ] Architecture tests:
+- [x] Architecture tests:
   - the replaced fresh-assertion rule (`Always` → checks, `When…` → handler with the marker, a reviewed list of handler-enforced routes, the 403 `fresh_assertion_required` listed, self actions known);
   - the reviewed route lists;
   - the `RevealOnce` rule;
   - the catalogue, with `docs/audit-events.md` regenerated.
-- [ ] Isolation tests: every server row of the I/O matrix, with Testcontainers and `SoftwareAuthenticator`, and the canary flow.
-- [ ] Dashboard:
+- [x] Isolation tests: every server row of the I/O matrix, with Testcontainers and `SoftwareAuthenticator`, and the canary flow.
+- [x] Dashboard:
   - `freshAssertion.ts` and its Node test;
   - Your credentials with both modals, the avatar menu and the toasts;
   - the recovery link and entry page;
   - credential setup's recovery kind and the code choice and display;
   - the catalogue keys.
-- [ ] Browser tests: `admin-credentials.spec.ts` and `admin-recovery.spec.ts` (every browser row, `watchCsp`, axe in light and dark at 1100 and 768), the updated specs, and the config.
-- [ ] Docs: threat model (T-11, T-22, G-5, T-51, T-52, the two asset rows, new T-54), `install.md`, and `deferred-work.md`. In `deferred-work.md`, remove or narrow the six taken-in items and add the out-of-scope ones.
+- [x] Browser tests: `admin-credentials.spec.ts` and `admin-recovery.spec.ts` (every browser row, `watchCsp`, axe in light and dark at 1100 and 768), the updated specs, and the config.
+- [x] Docs: threat model (T-11, T-22, G-5, T-51, T-52, the two asset rows, new T-54), `install.md`, and `deferred-work.md`. In `deferred-work.md`, remove or narrow the six taken-in items and add the out-of-scope ones.
 
 **Acceptance Criteria:**
 - Given a `FreshAssertion` capability and a last assertion over the §5.2 limit old, when the Admin confirms, then the WebAuthn sheet appears, failure shows in the same modal, and the action isn't performed. Every sensitive confirmation needs its own assertion, bound to its action and target and usable once within 5 minutes.
@@ -519,7 +547,48 @@ Items in `deferred-work.md` this story takes in:
 
 ## Spec Change Log
 
+- 2026-11-04, Story 1.26 review patches, applied before review closed:
+  - BE and BS are NULL for credentials registered before the migration; the first verified assertion records BE, and only a known BE is compared.
+  - The Recovery Code issue returns an `issueId`; the confirm sends it and matches only the current unconfirmed code, or answers 409 `recovery_code_superseded` with nothing changed. The page explains a 403 or 409 and starts again.
+  - A registration in a recovery Session that brings the Admin back to the floor revokes every other Session of theirs. Retiring the lost credential stays with Story 8.3.
+  - Recovery Codes are 16 characters, `XXXX-XXXX-XXXX-XXXX`, 80 bits. Redemptions are also limited Deployment-wide under `admins.recovery_code.deployment`, 50 in 15 minutes, counted before the per-client count and before the code is read; it counts every redemption, not only failed ones.
+  - `DELETE /api/v1/deployment/session` is setup-allowed and recovery-allowed, and the setup and recovery cards have Sign out.
+  - Assertions lock the Admin row before the credential row, as removal does. Two begins in one Session take turns on its row. 23503 and the P0001 floor and maximum triggers map to the uniform refusals.
+  - A fresh-assertion target must be one of the route's own parameters by exact name, and an `Always` or `When…` route with a parameter other than the path Tenant must name its target.
+  - `ConsumeAsync` returns the grant's credential row. Removing the credential that confirmed the removal also ends the current Session: 200 `{ sessionEnded: true }` with the cookie cleared, and the page goes to `/signin`.
+  - The redeem response's `setupComplete` uses the floor rule the Session read uses.
+  - Your credentials: a cancelled second sheet in Add returns to the confirm step; Add is disabled at 10; a removal's 401 after renewal and any other 403 each say so in the modal.
+
 ## Review Triage Log
+
+### 2026-11-02 — Review pass
+- verdicts: 25 findings — high 5, medium 11, low 9, false 0, maybe-false 0
+- findings:
+  - `[high]` `[patch]` Blind: `backup_eligible DEFAULT false` refuses every synced passkey registered before the migration, locking the Owner out — unknown for old rows, learned from the first verified assertion.
+  - `[high]` `[patch]` Blind: confirming a Recovery Code confirms whichever code is current, not the one shown — the confirm names the issued code; a stale one is 409.
+  - `[high]` `[patch]` Blind: after recovery a thief signing in with the lost device becomes unrestricted when the Admin registers — reaching the floor from recovery revokes every other Session; retiring the lost credential is deferred to 8.3.
+  - `[high]` `[patch]` Blind: a 40-bit Recovery Code behind a per-client limit is guessable across many /64s — 80-bit code and a Deployment-wide failed-redeem limit.
+  - `[medium]` `[defer]` Blind: rotating the Deployment hmac key voids every Recovery Code — recorded for Epic 9's key rotation.
+  - `[medium]` `[patch]` Blind: sign-in and removal lock the Admin and credential rows in opposite orders — one lock order.
+  - `[low]` `[patch]` Blind: two concurrent fresh-assertion begins can 500 — the Session row is locked first.
+  - `[medium]` `[patch]` Blind: a recovery Session can't sign out — sign-out is setup- and recovery-allowed.
+  - `[medium]` `[patch]` Blind: an Always route with an object ID needn't bind its grant to the target — such a declaration is refused.
+  - `[medium]` `[defer]` Blind: Tenant-scoped fresh-assertion capabilities have no begin route — Story 1.27 or the first such route.
+  - `[low]` `[patch]` Blind: Your credentials gaps (cancelled create, Add at the maximum, 401 and other 403s) — handled.
+  - `[high]` `[patch]` Edge: pre-migration synced passkeys locked out — same fix as the Blind row.
+  - `[medium]` `[patch]` Edge: removing the credential that confirmed the removal leaves the Session it proved live — the current Session ends too.
+  - `[low]` `[defer]` Edge: a recovery Admin at the maximum of 10 can redeem but never register — Story 8.3, where such Admins first exist.
+  - `[low]` `[patch]` Edge: recovery Session can't sign out — same fix as the Blind row.
+  - `[medium]` `[patch]` Edge: the target check matches route parameters by prefix — matched exactly.
+  - `[low]` `[patch]` Edge: the redeem response's `setupComplete` disagrees with the Session read — same floor rule.
+  - `[low]` `[patch]` Edge: an FK violation on complete is a 500 — mapped to the refusal.
+  - `[medium]` `[patch]` Gap: confirming one action twice in a Session is untested — added.
+  - `[medium]` `[patch]` Gap: voiding pending registrations at the floor is untested — added.
+  - `[medium]` `[patch]` Gap: removing a credential that made a live grant is untested — added.
+  - `[low]` `[patch]` Gap: Your credentials 404, cancelled create and already-registered states are untested — added.
+  - `[medium]` `[defer]` Intent: the floor trigger blocks deleting an Admin's credentials on every path — Epic 8's Admin removal must account for it.
+  - `[low]` `[patch]` Intent: "grant used once" isn't shown by repeating the same DELETE — added.
+  - `[low]` `[reject]` Intent: a cancelled create in Add keeps step 3 only visually — the grant is used by begin, as specified; the page now returns to confirm.
 
 ## Design Notes
 
@@ -549,3 +618,19 @@ Items in `deferred-work.md` this story takes in:
 - After changing the endpoints, regenerate the contract in Docker with `sh deploy/docker/api-contract.sh --write <abs dir>` (as `docker compose -f deploy/compose.test.yaml run --rm --build -v "<repository>:/out" tests sh deploy/docker/api-contract.sh --write /out`), and the audit catalogue with the Generator. Commit both.
 
 Nothing runs on the host.
+
+## Auto Run Result
+
+Status: done
+
+**Summary:** sensitive Admin actions need a fresh WebAuthn assertion: a server-side grant bound to one Session and one action, used once within 5 minutes, enforced by the request checks or a handler gate, so a request that skips the UI is refused. Your credentials lists an Admin's own credentials with their synced flag, and adds or removes them behind a fresh assertion. The floor of two and the maximum of ten hold in code and in the database, and a removal ends the Admin's other Sessions and writes to the Deployment Log. An Admin who isn't the Owner may take one offline Recovery Code at setup, issued once through `RevealOnce`, stored as an HMAC under the Deployment key, rate-limited per client and Deployment-wide, and leading only to credential setup.
+
+**Files:** `src/Gatekeep.Kernel/Secrets/RevealOnce.cs`; the Story 1.26 migration and `TableRegistry`; `src/Modules/Admins/` (fresh assertions, credentials, Recovery Codes, sessions, sign-in); `src/Adapters/Fido2/`; `src/Gatekeep.Host.Admin/` (fresh assertion API and gate, credentials and Recovery Code APIs, request checks, OpenAPI); `docs/api/openapi-v1.json`, `packages/api-client/`; `apps/admin-dashboard/src/` (Your credentials, Recovery Code pages, setup, sign-in); `tests/Isolation/Admins/`, `tests/Architecture/`, `tests/browser/admin-credentials.spec.ts`, `admin-recovery.spec.ts`; `docs/audit-events.md`, the threat model and `install.md`.
+
+**Review:** 25 findings across four layers: 20 patched, 4 deferred, 1 rejected, each with its reason in the triage log.
+
+**Follow-up review:** recommended. The Recovery Code strength and binding, recovery eviction and the pre-migration backup flags changed in review, with new tests as the only proof.
+
+**Verification:** see the PR screenshot; the full suite passes in the `tests` container.
+
+**Residual risks:** rotating the hmac key voids Recovery Codes until Epic 9 handles it. Tenant fresh assertions have no begin route yet. Recovery can't retire a lost credential until Story 8.3, so the Admin adds a third and removes it.

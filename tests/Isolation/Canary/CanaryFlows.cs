@@ -204,6 +204,23 @@ internal static class CanaryFlows
                 new(SurfaceKind.Route, "/api/v1/tenants/{tenantId}/capabilities"),
             ],
             SignInAsync),
+        new(
+            "admin.fresh-assertions",
+            [
+                new(SurfaceKind.Route, "/api/v1/deployment/assertions"),
+                new(SurfaceKind.Route, "/api/v1/deployment/assertions/complete"),
+                new(SurfaceKind.Route, "/api/v1/deployment/credentials"),
+                new(SurfaceKind.Route, "/api/v1/deployment/credentials/{credentialId}"),
+            ],
+            FreshAssertionAsync),
+        new(
+            "admin.recovery-code",
+            [
+                new(SurfaceKind.Route, "/api/v1/deployment/credentials/recovery-code"),
+                new(SurfaceKind.Route, "/api/v1/deployment/credentials/recovery-code/confirm"),
+                new(SurfaceKind.Route, "/api/v1/deployment/signin/recovery-code"),
+            ],
+            RecoveryCodeAsync),
 
         // No production type carries a credential yet, so this flow takes the runner's credential
         // path with a test type: enqueue, decrypt, run, retry and dead, as every one will.
@@ -560,8 +577,7 @@ internal static class CanaryFlows
     /// <summary>
     /// Story 1.21's claim on the real Host.Admin at Trace, with a token issued as <c>gatekeep init</c>
     /// does. Normally the right token claims, then the setup Session reads the Session endpoint and
-    /// is refused capabilities and signing out, which isn't setup-allowed, though it sends the
-    /// Origin and CSRF token; the token must appear in no response, and the Session
+    /// is refused capabilities, then signs out, which any Session may; the token must appear in no response, and the Session
     /// ID and both CSRF tokens, planted once they're issued, in no log or table. Failing, a wrong
     /// token is refused and an unissued Session cookie is refused, with every response scanned.
     /// </summary>
@@ -602,10 +618,10 @@ internal static class CanaryFlows
             run.Capture("capabilities response", await ResponseTextAsync(capabilities));
             Assert.Equal(HttpStatusCode.Forbidden, capabilities.StatusCode);
 
-            // A setup Session can't sign out: it would strand the only Deployment Owner.
+            // A setup Session can always sign out (Story 1.26).
             using var signOut = await host.SendAsync(HttpMethod.Delete, "/api/v1/deployment/session", cookie, rotated, Admins.AdminHost.Origin);
             run.Capture("sign-out response", await ResponseTextAsync(signOut));
-            Assert.Equal(HttpStatusCode.Forbidden, signOut.StatusCode);
+            Assert.Equal(HttpStatusCode.NoContent, signOut.StatusCode);
 
             run.Plant("admin-session-id", cookie);
             run.Plant("admin-csrf-token", csrf);
@@ -742,6 +758,135 @@ internal static class CanaryFlows
             run.Plant("admin-session-id", cookie);
             run.Plant("admin-csrf-token", csrf);
         }
+
+        await host.StopAsync();
+        run.Capture("Admin output", host.Output);
+        Assert.Matches(@"""LogLevel"":""(?:Trace|Debug)""", host.Output);
+    }
+
+    /// <summary>
+    /// Story 1.26's fresh assertions and Your credentials on the real Host.Admin at Trace, with
+    /// software authenticators. Normally the Owner confirms a removal, removes a credential, which
+    /// ends their other Session, and reads the list; failing, a forged assertion is refused and a
+    /// removal with no grant is 403. The Session IDs and CSRF tokens, planted once issued, must
+    /// appear in no log or table, and no captured response may echo them.
+    /// </summary>
+    private static async Task FreshAssertionAsync(CanaryFlowContext context, FlowRun run, bool failing)
+    {
+        await using var host = await Admins.AdminHost.StartAsync(context.Postgres, null, DebugArguments);
+        run.Database = host.Database;
+        run.Plant("role-password", PostgresFixture.Password);
+        var (cookie, csrf, _, authenticators) = await host.OwnerWithCredentialsAsync(3);
+        var (other, otherCsrf) = await host.SignInAsync(authenticators[1]);
+        var ids = await host.CredentialIdsAsync(cookie);
+
+        var (begin, options) = await host.BeginAssertionAsync(cookie, csrf, "self.credentials.remove", ids[2]);
+        using (begin)
+        {
+            run.Capture("fresh assertion options", await ResponseTextAsync(begin));
+            Assert.Equal(HttpStatusCode.OK, begin.StatusCode);
+        }
+
+        if (failing)
+        {
+            using var forged = await host.CompleteAssertionAsync(
+                cookie, csrf, authenticators[0].Assert(options, Admins.AdminHost.Origin, new Admins.AssertionTweaks { OtherKey = true }));
+            run.Capture("refused fresh assertion response", await ResponseTextAsync(forged));
+            Assert.Equal(HttpStatusCode.BadRequest, forged.StatusCode);
+
+            using var unconfirmed = await host.RemoveCredentialAsync(cookie, csrf, ids[2]);
+            run.Capture("unconfirmed removal response", await ResponseTextAsync(unconfirmed));
+            Assert.Equal(HttpStatusCode.Forbidden, unconfirmed.StatusCode);
+        }
+        else
+        {
+            using (var complete = await host.CompleteAssertionAsync(cookie, csrf, authenticators[0].Assert(options, Admins.AdminHost.Origin)))
+            {
+                run.Capture("fresh assertion response", await ResponseTextAsync(complete));
+                Assert.Equal(HttpStatusCode.NoContent, complete.StatusCode);
+            }
+
+            using (var removed = await host.RemoveCredentialAsync(cookie, csrf, ids[2]))
+            {
+                run.Capture("removal response", await ResponseTextAsync(removed));
+                Assert.Equal(HttpStatusCode.NoContent, removed.StatusCode);
+            }
+
+            using var list = await host.SendAsync(HttpMethod.Get, Admins.AdminHost.CredentialsPath, cookie);
+            run.Capture("credentials response", await ResponseTextAsync(list));
+            Assert.Equal(HttpStatusCode.OK, list.StatusCode);
+        }
+
+        run.Plant("admin-session-id", cookie);
+        run.Plant("admin-csrf-token", csrf);
+        run.Plant("admin-other-session-id", other);
+        run.Plant("admin-other-csrf-token", otherCsrf);
+        foreach (var authenticator in authenticators)
+        {
+            authenticator.Dispose();
+        }
+
+        await host.StopAsync();
+        run.Capture("Admin output", host.Output);
+        Assert.Matches(@"""LogLevel"":""(?:Trace|Debug)""", host.Output);
+    }
+
+    /// <summary>
+    /// Story 1.26's Admin Recovery Codes on the real Host.Admin at Trace, with the OpenBao stand-in
+    /// computing the Deployment HMAC. A seeded Admin who isn't the Owner issues a code; normally
+    /// they confirm and redeem it, getting a recovery Session; failing, a wrong code and the
+    /// unconfirmed one are refused. The code, in both its spellings, must appear in no log or
+    /// table, and no captured response but the issue's, which holds it by design and is left out.
+    /// </summary>
+    private static async Task RecoveryCodeAsync(CanaryFlowContext context, FlowRun run, bool failing)
+    {
+        await using var host = await Admins.AdminHost.StartAsync(context.Postgres, null, DebugArguments);
+        run.Database = host.Database;
+        run.Plant("role-password", PostgresFixture.Password);
+        await host.ClaimedAsync();
+        var (cookie, csrf, _) = await host.InsertSetupAdminAsync();
+        using var key = new Admins.SoftwareAuthenticator();
+        await host.RegisterAsync(cookie, csrf, key);
+
+        var (code, issueId) = await host.IssueRecoveryCodeAsync(cookie, csrf);
+        run.Plant("admin-recovery-code", code);
+        run.Plant("admin-recovery-code-normalized", code.Replace("-", string.Empty, StringComparison.Ordinal));
+
+        if (failing)
+        {
+            var wrong = run.Plant("admin-wrong-recovery-code", "ZZZZ-ZZZY-ZZZX-ZZZW");
+            using var refused = await host.RedeemAsync(wrong.Value);
+            run.Capture("wrong recovery code response", await ResponseTextAsync(refused));
+            Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
+
+            using var unconfirmed = await host.RedeemAsync(code);
+            run.Capture("unconfirmed recovery code response", await ResponseTextAsync(unconfirmed));
+            Assert.Equal(HttpStatusCode.BadRequest, unconfirmed.StatusCode);
+        }
+        else
+        {
+            using (var confirmed = await host.ConfirmRecoveryCodeAsync(cookie, csrf, issueId))
+            {
+                run.Capture("confirm response", await ResponseTextAsync(confirmed));
+                Assert.Equal(HttpStatusCode.NoContent, confirmed.StatusCode);
+            }
+
+            // The redeem's response holds the new Session by design, so only its body is captured.
+            using var redeemed = await host.RedeemAsync(code.ToLowerInvariant());
+            Assert.Equal(HttpStatusCode.OK, redeemed.StatusCode);
+            var recovery = Admins.AdminHost.CookieValue(redeemed, Admins.AdminHost.Cookie)!;
+            var body = await redeemed.Content.ReadAsStringAsync(CanaryFlowContext.Cancellation);
+            Assert.DoesNotContain(code, body, StringComparison.OrdinalIgnoreCase);
+            using (var json = System.Text.Json.JsonDocument.Parse(body))
+            {
+                run.Plant("admin-recovery-csrf-token", json.RootElement.GetProperty("csrfToken").GetString()!);
+            }
+
+            run.Plant("admin-recovery-session-id", recovery);
+        }
+
+        run.Plant("admin-setup-session-id", cookie);
+        run.Plant("admin-setup-csrf-token", csrf);
 
         await host.StopAsync();
         run.Capture("Admin output", host.Output);

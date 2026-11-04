@@ -33,14 +33,21 @@ public sealed class AdminEndpointTests : IDisposable
 
         Assert.Equal(
             [
+                "/api/v1/deployment/assertions",
+                "/api/v1/deployment/assertions/complete",
                 "/api/v1/deployment/bootstrap",
                 "/api/v1/deployment/capabilities",
+                "/api/v1/deployment/credentials",
+                "/api/v1/deployment/credentials/recovery-code",
+                "/api/v1/deployment/credentials/recovery-code/confirm",
                 "/api/v1/deployment/credentials/registration",
                 "/api/v1/deployment/credentials/registration/complete",
+                "/api/v1/deployment/credentials/{credentialId}",
                 "/api/v1/deployment/session",
                 "/api/v1/deployment/session",
                 "/api/v1/deployment/signin",
                 "/api/v1/deployment/signin/complete",
+                "/api/v1/deployment/signin/recovery-code",
             ],
             deployment.Select(e => e.RoutePattern.RawText!).Order(StringComparer.Ordinal));
         foreach (var endpoint in deployment)

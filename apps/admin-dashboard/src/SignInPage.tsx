@@ -128,6 +128,7 @@ export function SignInPage() {
             {messages.signInAction}
           </Button>
         }
+        link={<a href="/signin/recovery">{messages.recoveryLink}</a>}
         data-testid="signin"
       >
         {refused ? (

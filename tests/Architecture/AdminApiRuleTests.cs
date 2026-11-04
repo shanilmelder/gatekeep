@@ -28,11 +28,20 @@ public class AdminApiRuleTests
         "admin_session",
         new[] { "gk_admin INSERT", "gk_admin SELECT" },
         new[] { "gk_admin UPDATE end_reason,ended_at,idle_expires_at,kind,registration_challenge_expires_at,registration_challenge_sha256" })]
-    [InlineData("admin_credential", new[] { "gk_admin INSERT", "gk_admin SELECT" }, new[] { "gk_admin UPDATE last_used_at,sign_count" })]
-    // Story 1.23: the one Admins table with DELETE, and no UPDATE: taking a challenge deletes it.
+    // Story 1.26: removal under the floor, and the BS flag at each assertion.
+    [InlineData(
+        "admin_credential",
+        new[] { "gk_admin DELETE", "gk_admin INSERT", "gk_admin SELECT" },
+        new[] { "gk_admin UPDATE backed_up,backup_eligible,last_used_at,sign_count" })]
+    // Story 1.23: DELETE and no UPDATE: taking a challenge deletes it. Story 1.26's grants work the same way.
     [InlineData("admin_signin_challenge", new[] { "gk_admin DELETE", "gk_admin INSERT", "gk_admin SELECT" }, new string[0], true)]
     // Story 1.24: read-only to gk_admin. Story 1.27 adds INSERT, Story 8.4 UPDATE and DELETE.
     [InlineData("tenant_role", new[] { "gk_admin SELECT" }, new string[0])]
+    [InlineData("admin_fresh_assertion", new[] { "gk_admin DELETE", "gk_admin INSERT", "gk_admin SELECT" }, new string[0], true)]
+    [InlineData(
+        "admin_recovery_code",
+        new[] { "gk_admin DELETE", "gk_admin INSERT", "gk_admin SELECT", "gk_cli SELECT" },
+        new[] { "gk_admin UPDATE confirmed_at,used_at" })]
     public void Registry_lists_the_Admins_tables_with_exactly_their_grants(string table, string[] grants, string[] columns, bool unlogged = false)
     {
         var entry = Entry(table);
@@ -122,8 +131,9 @@ public class AdminApiRuleTests
             .Where(r => r.Name.StartsWith('4'))
             .ToList();
 
-        // 403 carries a problem only on capability operations: access_denied (Story 1.24).
-        Assert.Equal(["400", "403", "429"], refusals.Select(r => r.Name).Distinct().Order(StringComparer.Ordinal));
+        // 403 carries a problem on capability operations, access_denied (Story 1.24), and on
+        // fresh-assertion ones, fresh_assertion_required; 409 is the credential floor and maximum (Story 1.26).
+        Assert.Equal(["400", "403", "409", "429"], refusals.Select(r => r.Name).Distinct().Order(StringComparer.Ordinal));
         foreach (var refusal in refusals)
         {
             Assert.Equal(
@@ -168,9 +178,15 @@ public class AdminApiRuleTests
         // Any other Deployment route declares a Deployment capability, which only the Owner holds.
         Assert.Equal(
             [
+                "/api/v1/deployment/assertions",
+                "/api/v1/deployment/assertions/complete",
                 "/api/v1/deployment/capabilities",
+                "/api/v1/deployment/credentials",
+                "/api/v1/deployment/credentials/recovery-code",
+                "/api/v1/deployment/credentials/recovery-code/confirm",
                 "/api/v1/deployment/credentials/registration",
                 "/api/v1/deployment/credentials/registration/complete",
+                "/api/v1/deployment/credentials/{credentialId}",
                 "/api/v1/deployment/session",
                 "/api/v1/deployment/session",
             ],
@@ -182,11 +198,26 @@ public class AdminApiRuleTests
             m => m.Groups["rest"].Value.Contains("SetupAllowed.Instance") && m.Groups["rest"].Value.Contains("new RequiresCapability("));
 
         // Setup-allowed is the reviewed short list: GET of the Session endpoint, and credential
-        // registration's begin and complete (Story 1.22). Sign-out (DELETE) is deliberately not
-        // setup-allowed: it would strand the only Owner.
+        // registration's begin and complete (Story 1.22), and the Recovery Code's issue and confirm (Story
+        // 1.26). From Story 1.26 sign-out (DELETE) is setup-allowed and recovery-allowed too: any Session can end itself.
         Assert.Equal(
-            ["/api/v1/deployment/credentials/registration", "/api/v1/deployment/credentials/registration/complete", "/api/v1/deployment/session"],
+            [
+                "/api/v1/deployment/credentials/recovery-code",
+                "/api/v1/deployment/credentials/recovery-code/confirm",
+                "/api/v1/deployment/credentials/registration",
+                "/api/v1/deployment/credentials/registration/complete",
+                "/api/v1/deployment/session",
+                "/api/v1/deployment/session",
+            ],
             maps.Where(m => m.Groups["rest"].Value.Contains("SetupAllowed.Instance")).Select(m => m.Groups["route"].Value).Order(StringComparer.Ordinal));
+
+        // Recovery-allowed is shorter still (Story 1.26): a Recovery Code leads only to the Session
+        // read, sign-out and credential registration, and every one is setup-allowed too.
+        var recovery = maps.Where(m => m.Groups["rest"].Value.Contains("RecoveryAllowed.Instance")).ToList();
+        Assert.Equal(
+            ["/api/v1/deployment/credentials/registration", "/api/v1/deployment/credentials/registration/complete", "/api/v1/deployment/session", "/api/v1/deployment/session"],
+            recovery.Select(m => m.Groups["route"].Value).Order(StringComparer.Ordinal));
+        Assert.All(recovery, m => Assert.Contains("SetupAllowed.Instance", m.Groups["rest"].Value));
 
         // Sessionless is the reviewed short list too: the claim (Story 1.21) and sign-in's begin and
         // complete (Story 1.23). None of them is setup-allowed: no Session reaches them.
@@ -202,7 +233,7 @@ public class AdminApiRuleTests
 
     /// <summary>The operations with no Session: they need the exact Admin Origin only.</summary>
     private static readonly string[] Sessionless =
-        ["/api/v1/deployment/bootstrap", "/api/v1/deployment/signin", "/api/v1/deployment/signin/complete"];
+        ["/api/v1/deployment/bootstrap", "/api/v1/deployment/signin", "/api/v1/deployment/signin/complete", "/api/v1/deployment/signin/recovery-code"];
 
     private const string TenantCapabilities = "/api/v1/tenants/{tenantId}/capabilities";
 

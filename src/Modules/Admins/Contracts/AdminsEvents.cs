@@ -45,13 +45,15 @@ public static class AdminsEvents
         "An Admin registered a WebAuthn credential. Holds no credential ID, public key, challenge or user handle.");
 
     /// <summary>
-    /// Written on the Deployment chain when an Admin's second credential completes setup (Story
-    /// 1.22, FR-2), in that credential's transaction, after its <see cref="CredentialRegistered"/>:
-    /// the Session becomes full there too. The Actor and the target are that Admin.
+    /// Written on the Deployment chain when an Admin comes to meet the credential floor (Story 1.22,
+    /// FR-2, FR-46): two WebAuthn credentials, or one and a confirmed offline Recovery Code (Story
+    /// 1.26). It is written in the transaction of the registration, or the code's confirmation, that
+    /// did it, after that step's own event, and only when the Admin didn't meet the floor before:
+    /// their setup and recovery Sessions become full there too. The Actor and the target are that Admin.
     /// </summary>
     public static readonly AuditEventDefinition SetupCompleted = new(
         new AuditTypeCode("admin.setup.completed"),
-        "An Admin registered their second WebAuthn credential, which completed setup and made their Session full.");
+        "An Admin came to hold two WebAuthn credentials, or one and an offline Recovery Code, which completed setup and made their Session full.");
 
     /// <summary>
     /// Written on the Deployment chain when an Admin signs in with WebAuthn (Story 1.23), in the
@@ -84,8 +86,9 @@ public static class AdminsEvents
     /// one (Story 1.23): the sign of a cloned authenticator. Sign-ins with one credential run one at
     /// a time under its row lock, so an assertion with a lower counter that arrives after a higher
     /// one, even from the same authenticator, is indistinguishable from a clone and is reported as
-    /// one. The Actor is Anonymous; the target is the Admin who owns the credential. The counter is
-    /// left as it was.
+    /// one. The Actor is Anonymous at sign-in; for a fresh assertion (Story 1.26), whose Session
+    /// already names its Admin, the Actor is that Admin. The target is the Admin who owns the
+    /// credential. The counter is left as it was.
     /// </summary>
     public static readonly AuditEventDefinition CredentialSignCountRegressed = new(
         new AuditTypeCode("admin.credential.sign_count_regressed"),
@@ -124,4 +127,64 @@ public static class AdminsEvents
     public static readonly AuditEventDefinition AccessDenied = new(
         new AuditTypeCode("admin.access.denied"),
         "An Admin was refused a capability. The target is the path's Tenant ID as sent, which may not exist. Past 30 per Admin in 15 minutes, only logged. Holds no capability name.");
+
+    /// <summary>
+    /// Written on the Deployment chain when an Admin confirms a sensitive action with a fresh
+    /// WebAuthn assertion (Story 1.26, FR-46), in the transaction that stores the grant, once the
+    /// signature over one of their own credentials verified with user verification. The Actor and
+    /// the target are that Admin. Holds no credential ID, challenge, binding, action or Session ID.
+    /// </summary>
+    public static readonly AuditEventDefinition FreshAssertionVerified = new(
+        new AuditTypeCode("admin.fresh_assertion.verified"),
+        "An Admin confirmed a sensitive action with a fresh WebAuthn assertion. Holds no credential ID, challenge, binding or Session ID.");
+
+    /// <summary>
+    /// Written on the Deployment chain when a fresh assertion whose signature verified over one of
+    /// the Admin's own credentials is refused for a reason other than a counter regression (Story
+    /// 1.26). Today that is only the counter's compare-and-set finding the stored value moved,
+    /// which the credential's row lock makes unreachable: it is defence in depth, as
+    /// <see cref="SignInFailed"/> is. The Actor and the target are the Session's Admin. Every
+    /// other refusal is only logged.
+    /// </summary>
+    public static readonly AuditEventDefinition FreshAssertionFailed = new(
+        new AuditTypeCode("admin.fresh_assertion.failed"),
+        "A fresh assertion whose signature verified over an Admin's own WebAuthn credential was refused. Holds no credential ID, challenge or binding.");
+
+    /// <summary>
+    /// Written on the Deployment chain when an Admin removes one of their WebAuthn credentials in
+    /// Your credentials (Story 1.26), in the transaction that deletes it, after a fresh assertion.
+    /// The Actor and the target are that Admin. Holds no credential ID or public key.
+    /// </summary>
+    public static readonly AuditEventDefinition CredentialRemoved = new(
+        new AuditTypeCode("admin.credential.removed"),
+        "An Admin removed one of their WebAuthn credentials. Holds no credential ID or public key.");
+
+    /// <summary>
+    /// Written on the Deployment chain once for each live Admin Session another action ended as
+    /// <c>revoked</c> (Story 1.26): removing a credential ends the Admin's other Sessions, and
+    /// redeeming a Recovery Code ends all of them. The Actor is the Admin who acted; the target is
+    /// the Admin whose Session ended. Holds no Session ID.
+    /// </summary>
+    public static readonly AuditEventDefinition SessionRevoked = new(
+        new AuditTypeCode("admin.session.revoked"),
+        "A credential removal or a Recovery Code ended a live Admin Session as revoked. Holds no Session ID.");
+
+    /// <summary>
+    /// Written on the Deployment chain when an Admin confirms they saved their offline Recovery
+    /// Code (Story 1.26, FR-46), in the transaction that confirms it: only then can it be redeemed.
+    /// The Actor and the target are that Admin. Holds no code, HMAC or key version.
+    /// </summary>
+    public static readonly AuditEventDefinition RecoveryCodeIssued = new(
+        new AuditTypeCode("admin.recovery_code.issued"),
+        "An Admin confirmed they saved an offline Recovery Code, which can now be used once. Holds no code or HMAC.");
+
+    /// <summary>
+    /// Written on the Deployment chain when an Admin's Recovery Code is redeemed at sign-in (Story
+    /// 1.26), in the transaction that uses it up, ends their Sessions and starts a recovery Session,
+    /// which reaches only credential registration. The Actor and the target are that Admin. Holds
+    /// no code, HMAC or Session ID.
+    /// </summary>
+    public static readonly AuditEventDefinition RecoveryCodeUsed = new(
+        new AuditTypeCode("admin.recovery_code.used"),
+        "An Admin's offline Recovery Code was used to start a Session that reaches only credential registration. Holds no code or HMAC.");
 }

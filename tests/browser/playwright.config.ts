@@ -18,6 +18,8 @@
 // Story 1.25: the Admin shell's parts, from the fixture build at ?page=shell (shell.spec.ts), and
 // the shell itself on that same host, with its API intercepted and a virtual authenticator for
 // Session renewal (admin-shell.spec.ts).
+// Story 1.26: Your credentials and the re-authentication gate (admin-credentials.spec.ts), and
+// Admin Recovery Codes (admin-recovery.spec.ts), on that same host.
 
 import { existsSync } from 'node:fs';
 import path from 'node:path';
@@ -55,7 +57,7 @@ export default defineConfig({
       name,
       // Every spec that isn't another project's own, so a new spec runs by default.
       testMatch: '*.spec.ts',
-      testIgnore: ['admin-csp.spec.ts', 'bootstrap.spec.ts', 'credential-setup.spec.ts', 'signin.spec.ts', 'controls.spec.ts', 'data.spec.ts', 'overlay.spec.ts', 'drawer.spec.ts', 'hosted.spec.ts', 'shell.spec.ts', 'admin-shell.spec.ts'],
+      testIgnore: ['admin-csp.spec.ts', 'bootstrap.spec.ts', 'credential-setup.spec.ts', 'signin.spec.ts', 'controls.spec.ts', 'data.spec.ts', 'overlay.spec.ts', 'drawer.spec.ts', 'hosted.spec.ts', 'shell.spec.ts', 'admin-shell.spec.ts', 'admin-credentials.spec.ts', 'admin-recovery.spec.ts'],
       use: { baseURL: `http://127.0.0.1:${port}` },
     })),
     { name: fixture.name, testMatch: 'controls.spec.ts', use: { baseURL: `http://127.0.0.1:${fixture.port}` } },
@@ -100,6 +102,19 @@ export default defineConfig({
     {
       name: 'admin-shell',
       testMatch: 'admin-shell.spec.ts',
+      use: { baseURL: `http://localhost:${adminHost.port}` },
+    },
+    // Your credentials and the re-authentication gate (Story 1.26), the same way: from localhost,
+    // with a virtual authenticator answering both sheets.
+    {
+      name: 'admin-credentials',
+      testMatch: 'admin-credentials.spec.ts',
+      use: { baseURL: `http://localhost:${adminHost.port}` },
+    },
+    // Admin Recovery Codes (Story 1.26): the entry on sign-in and the display at setup, from localhost.
+    {
+      name: 'admin-recovery',
+      testMatch: 'admin-recovery.spec.ts',
       use: { baseURL: `http://localhost:${adminHost.port}` },
     },
   ],

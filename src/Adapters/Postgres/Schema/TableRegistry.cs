@@ -15,8 +15,8 @@ public sealed record ColumnGrant(string Privilege, IReadOnlyList<string> Columns
 /// <summary>
 /// One table: its class, its one owning module, every privilege per role, on the table
 /// and per column, the triggers it must have, and whether it is <c>UNLOGGED</c>. Only
-/// counters a crash may reset (AD-14), and pending sign-in challenges a crash may drop
-/// (Story 1.23), are unlogged; every other table must be logged.
+/// counters a crash may reset (AD-14), pending sign-in challenges a crash may drop
+/// (Story 1.23), and fresh-assertion challenges and grants (Story 1.26) are unlogged; every other table must be logged.
 /// </summary>
 public sealed record TableEntry(
     string Name,
@@ -327,24 +327,28 @@ public static class TableRegistry
             ["admin_session_guard_update"]),
 
         // Story 1.22: Admin WebAuthn credentials, public material only. Host.Admin registers them
-        // and, from Story 1.23, updates the counter and last use at sign-in. No role deletes one.
+        // and, from Story 1.23, updates the counter and last use at sign-in. From Story 1.26 it
+        // also stores the BS flag on each assertion and removes credentials in Your credentials;
+        // its triggers lock the Admin's row and refuse an 11th credential and a delete that would
+        // leave fewer than two, for every role.
         new(
             "admin_credential",
             TableClass.Control,
             "Admins",
             new Dictionary<string, IReadOnlyList<string>>
             {
-                [Admin] = [Select, Insert],
+                [Admin] = [Select, Insert, Delete],
             },
             new Dictionary<string, IReadOnlyList<ColumnGrant>>
             {
-                // The signature counter and last use. Never the credential, its key or its Admin.
-                [Admin] = [new ColumnGrant(Update, ["sign_count", "last_used_at"])],
-            }),
+                // The signature counter, last use and backup flags: BE is recorded once, for a credential
+                // registered before Story 1.26, and the trigger keeps it. Never the credential, its key or its Admin.
+                [Admin] = [new ColumnGrant(Update, ["sign_count", "last_used_at", "backup_eligible", "backed_up"])],
+            },
+            ["admin_credential_guard_insert", "admin_credential_guard_delete", "admin_credential_guard_update"]),
 
         // Story 1.23: each pending Admin sign-in's challenge, as its SHA-256, bound to the browser
-        // that began it by the SHA-256 of its cookie. The first Admins table with DELETE, and the
-        // only one: taking a challenge deletes its row, so it can never answer twice, and a begin
+        // that began it by the SHA-256 of its cookie. Taking a challenge deletes its row, so it can never answer twice, and a begin
         // sweeps the expired rows. No role updates one. Losing them in a crash only makes an
         // Admin press Sign in again, so it is UNLOGGED.
         new(
@@ -369,6 +373,41 @@ public static class TableRegistry
             {
                 [Admin] = [Select],
             }),
+
+        // Story 1.26: each Admin Session's pending fresh-assertion challenge and its verified grants,
+        // bound to the Session and to the SHA-256 of their action, Tenant and target, for 5 minutes
+        // at most. Every step is an INSERT or a DELETE … RETURNING, never an UPDATE, so a challenge
+        // answers once and a grant is used up once. Losing them in a crash only makes an Admin
+        // confirm again, so it is UNLOGGED.
+        new(
+            "admin_fresh_assertion",
+            TableClass.Control,
+            "Admins",
+            new Dictionary<string, IReadOnlyList<string>>
+            {
+                [Admin] = [Select, Insert, Delete],
+            },
+            Unlogged: true),
+
+        // Story 1.26: an Admin's offline Recovery Code, as an HMAC under the Deployment hmac key and
+        // its key version only. Host.Admin issues, confirms and redeems it, and deletes an unconfirmed
+        // one it replaces; the trigger writes confirmation and use once and keeps a confirmed one.
+        // The Cli reads it, for recover-admin later.
+        new(
+            "admin_recovery_code",
+            TableClass.Control,
+            "Admins",
+            new Dictionary<string, IReadOnlyList<string>>
+            {
+                [Admin] = [Select, Insert, Delete],
+                [Cli] = [Select],
+            },
+            new Dictionary<string, IReadOnlyList<ColumnGrant>>
+            {
+                // Confirming and redeeming. Never the HMAC, its key version or its Admin.
+                [Admin] = [new ColumnGrant(Update, ["confirmed_at", "used_at"])],
+            },
+            ["admin_recovery_code_guard"]),
     ];
 
     private static IReadOnlyList<string> EventTriggers(string table) =>

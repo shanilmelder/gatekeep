@@ -1,4 +1,4 @@
-import type { ApiProblem } from '@gatekeep/api-client';
+import type { AdminSignInOptionsResponse, AdminSignInRequest, ApiProblem } from '@gatekeep/api-client';
 import { GenericErrorScreen } from '@gatekeep/hosted-screens';
 import {
   AdminShell,
@@ -8,6 +8,7 @@ import {
   SectionPage,
   SkeletonRows,
   Sidebar,
+  ToastProvider,
   TopBar,
   formatMessage,
   useMessages,
@@ -16,7 +17,10 @@ import {
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { navigate, useLocation } from '../navigation';
 import { api, setCsrfToken } from '../session';
+import { assertWithSheet } from '../webauthn';
 import { CapabilitiesProvider, capabilitiesOf, useCapabilityReads, type ShellRead } from './capabilities';
+import { CredentialsPage, type ShellRequest } from './CredentialsPage';
+import { createFreshAssertion } from './freshAssertion';
 import { ForbiddenPage } from './ForbiddenPage';
 import { LandingPage } from './LandingPage';
 import { NAV, visibleItems } from './nav';
@@ -27,6 +31,9 @@ import { useScheme } from './theme';
 
 /** The code Generic error shows for a failure with no problem body, such as a 503 or a lost connection. */
 const UNAVAILABLE = 'unavailable';
+
+/** Your credentials, reached from the avatar menu (Story 1.26). It is a shell page, not a sidebar item. */
+export const CREDENTIALS_PATH = '/account/credentials';
 
 /** How long the Session read may take before the boot gives up and offers to load again. */
 export const BOOT_TIMEOUT_MS = 15_000;
@@ -86,7 +93,8 @@ export function Shell() {
           return;
         }
         setCsrfToken(data.csrfToken);
-        if (!data.setupComplete) {
+        // A recovery Session reaches only credential registration, whatever its Admin holds (Story 1.26).
+        if (!data.setupComplete || data.kind === 'recovery') {
           navigate('/setup/credentials');
           return;
         }
@@ -183,6 +191,21 @@ function ShellFrame({ adminId }: { adminId: string }) {
     () => (call, signal) => (renewal.current ? renewal.current.request('get', call, signal) : call()),
     [],
   );
+  // Every request a page sends, through the same renewal: a 401 renews, and only a read is sent again.
+  const shellRequest = useMemo<ShellRequest>(
+    () => (method, call, signal) => (renewal.current ? renewal.current.request(method, call, signal) : call()),
+    [],
+  );
+  // Fresh assertions for sensitive actions (Story 1.26): each call through the renewal too.
+  const fresh = useMemo(
+    () =>
+      createFreshAssertion({
+        begin: (binding) => shellRequest('post', () => api.beginFreshAssertion(binding)),
+        complete: (assertion) => shellRequest('post', () => api.completeFreshAssertion(assertion as AdminSignInRequest)),
+        assert: (options, signal) => assertWithSheet(options as AdminSignInOptionsResponse, signal),
+      }),
+    [shellRequest],
+  );
 
   const { reads, answered, held } = useCapabilityReads(location.path, location.key, attempt, read);
   const capabilities = useMemo(() => capabilitiesOf(held), [held]);
@@ -214,7 +237,10 @@ function ShellFrame({ adminId }: { adminId: string }) {
     setSignOutFailed(true);
   }
 
-  const accountItems: MenuItem[] = [{ label: messages.signOut, onSelect: () => void signOut(), disabled: signingOut, key: 'sign-out' }];
+  const accountItems: MenuItem[] = [
+    { label: messages.credentialsTitle, onSelect: () => navigate(CREDENTIALS_PATH), disabled: signingOut, key: 'credentials' },
+    { label: messages.signOut, onSelect: () => void signOut(), disabled: signingOut, key: 'sign-out' },
+  ];
 
   const renewalMessage = renewalText(renewalState, messages);
   const signingIn = renewalState.kind !== 'live' && renewalState.signingIn;
@@ -257,10 +283,14 @@ function ShellFrame({ adminId }: { adminId: string }) {
   else if (answered.reads.kind === 'failed') page = <UnavailablePage />;
   // No Tenant page is built yet, so an allowed Tenant path is not found too: only after the
   // server has answered its Tenant capabilities read, so not-found never answers first.
-  else page = answered.path === '/' ? <LandingPage /> : <NotFoundPage />;
+  else if (answered.path === '/') page = <LandingPage />;
+  // Your credentials (Story 1.26): self-service, so the Deployment read the shell makes is all it needs.
+  else if (answered.path === CREDENTIALS_PATH) page = <CredentialsPage request={shellRequest} fresh={fresh} />;
+  else page = <NotFoundPage />;
 
   return (
     <CapabilitiesProvider value={capabilities}>
+      <ToastProvider>
       <AdminShell
         data-testid="shell"
         pageKey={answered?.navigation}
@@ -272,6 +302,7 @@ function ShellFrame({ adminId }: { adminId: string }) {
       >
         {page}
       </AdminShell>
+      </ToastProvider>
     </CapabilitiesProvider>
   );
 }

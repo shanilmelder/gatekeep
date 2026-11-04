@@ -87,7 +87,8 @@
         "x-gatekeep-setup-allowed": false,
         "x-gatekeep-access": {
           "kind": "sessionless"
-        }
+        },
+        "x-gatekeep-recovery-allowed": false
       }
     },
     "/api/v1/deployment/signin": {
@@ -151,7 +152,8 @@
         "x-gatekeep-setup-allowed": false,
         "x-gatekeep-access": {
           "kind": "sessionless"
-        }
+        },
+        "x-gatekeep-recovery-allowed": false
       }
     },
     "/api/v1/deployment/signin/complete": {
@@ -235,7 +237,8 @@
         "x-gatekeep-setup-allowed": false,
         "x-gatekeep-access": {
           "kind": "sessionless"
-        }
+        },
+        "x-gatekeep-recovery-allowed": false
       }
     },
     "/api/v1/deployment/session": {
@@ -244,7 +247,7 @@
           "Deployment"
         ],
         "summary": "The current Admin Session and its CSRF token.",
-        "description": "Setup-allowed and read-only: the CSRF token is the Session's, the same each time and in every tab.",
+        "description": "Setup-allowed and recovery-allowed, and read-only: the CSRF token is the Session's, the same each time and in every tab. recoveryCodeAllowed says whether credential setup may offer an offline Recovery Code.",
         "operationId": "GetSession",
         "responses": {
           "200": {
@@ -272,14 +275,15 @@
         "x-gatekeep-setup-allowed": true,
         "x-gatekeep-access": {
           "kind": "self"
-        }
+        },
+        "x-gatekeep-recovery-allowed": true
       },
       "delete": {
         "tags": [
           "Deployment"
         ],
         "summary": "Sign out: end the current Admin Session.",
-        "description": "Ends the Session as signed_out, writes admin.session.signed_out, and clears the cookie. Not setup-allowed: a setup Session signing out would leave the Deployment Owner unable to finish setup.",
+        "description": "Ends the Session as signed_out, writes admin.session.signed_out, and clears the cookie. Setup-allowed and recovery-allowed: any Session can always sign out. A Deployment Owner who signs out of setup before registering a credential can't sign in again without gatekeep recover-admin.",
         "operationId": "EndSession",
         "responses": {
           "204": {
@@ -301,10 +305,11 @@
             "csrf": [ ]
           }
         ],
-        "x-gatekeep-setup-allowed": false,
+        "x-gatekeep-setup-allowed": true,
         "x-gatekeep-access": {
           "kind": "self"
-        }
+        },
+        "x-gatekeep-recovery-allowed": true
       }
     },
     "/api/v1/deployment/credentials/registration": {
@@ -313,7 +318,7 @@
           "Deployment"
         ],
         "summary": "Begin registering a WebAuthn credential: the options for navigator.credentials.create.",
-        "description": "Setup-allowed. Returns creation options for the Admin RP ID and origin, with no attestation, user verification required, a resident key required, ES256 and RS256, and the Admin's credentials excluded. Its challenge can be answered for 5 minutes, by the next complete call only; a new begin replaces it. Refused with 403 once the Admin has two credentials. Each begin and complete counts towards 10 per Session in 15 minutes, then 429.",
+        "description": "Setup-allowed. Returns creation options for the Admin RP ID and origin, with no attestation, user verification required, a resident key required, ES256 and RS256, and the Admin's credentials excluded. Its challenge can be answered for 5 minutes, by the next complete call only; a new begin replaces it. In a setup or recovery Session it needs nothing more: a setup Session registers while its Admin is below the floor of two credentials, or one and a Recovery Code, and is refused with a bodiless 403 after; a recovery Session registers once. In a full Session it adds a credential: it is 409 credentials_maximum at 10, before anything else, then needs a fresh assertion for self.credentials.add, which it uses up, or is 403 fresh_assertion_required. Each begin and complete counts towards 10 per Session in 15 minutes, then 429.",
         "operationId": "BeginCredentialRegistration",
         "responses": {
           "200": {
@@ -330,7 +335,24 @@
             "description": "Unauthorized"
           },
           "403": {
-            "description": "Forbidden"
+            "description": "fresh_assertion_required, with the problem body, when no fresh assertion for this action and target is bound to the Session. No body when an earlier check refuses first: a restricted Session, or a wrong Origin or CSRF token.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiProblem"
+                }
+              }
+            }
           },
           "429": {
             "description": "Too Many Requests",
@@ -365,6 +387,12 @@
         "x-gatekeep-setup-allowed": true,
         "x-gatekeep-access": {
           "kind": "self"
+        },
+        "x-gatekeep-recovery-allowed": true,
+        "x-gatekeep-fresh-assertion": {
+          "action": "self.credentials.add",
+          "target": null,
+          "enforcedBy": "handler"
         }
       }
     },
@@ -374,7 +402,7 @@
           "Deployment"
         ],
         "summary": "Complete a WebAuthn credential registration with the browser's attestation response.",
-        "description": "Setup-allowed. Verifies the response against the pending challenge, the Admin RP ID and the exact Admin origin, and stores the credential. The challenge is used up whatever the outcome. A response for another RP ID or origin, a cross-origin one, one without user verification, one with no live challenge and one returning an existing credential are 400 credential_refused, with nothing stored. The second credential completes setup: the Session becomes full. Refused with 403 once the Admin has two credentials.",
+        "description": "Setup-allowed. Verifies the response against the pending challenge, the Admin RP ID and the exact Admin origin, and stores the credential. The challenge is used up whatever the outcome. A response for another RP ID or origin, a cross-origin one, one without user verification, one with no live challenge and one returning an existing credential are 400 credential_refused, with nothing stored. The challenge is taken before the body is read. A credential that brings the Admin to the floor completes setup, and one registered in a recovery Session ends it: the Session becomes full. Refused with a bodiless 403 when a restricted Session's Admin already meets the floor, and 409 credentials_maximum at 10.",
         "operationId": "CompleteCredentialRegistration",
         "requestBody": {
           "content": {
@@ -413,6 +441,16 @@
           "403": {
             "description": "Forbidden"
           },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
           "429": {
             "description": "Too Many Requests",
             "headers": {
@@ -446,7 +484,8 @@
         "x-gatekeep-setup-allowed": true,
         "x-gatekeep-access": {
           "kind": "self"
-        }
+        },
+        "x-gatekeep-recovery-allowed": true
       }
     },
     "/api/v1/deployment/capabilities": {
@@ -486,7 +525,8 @@
         "x-gatekeep-setup-allowed": false,
         "x-gatekeep-access": {
           "kind": "self"
-        }
+        },
+        "x-gatekeep-recovery-allowed": false
       }
     },
     "/api/v1/tenants/{tenantId}/capabilities": {
@@ -549,12 +589,555 @@
           "scope": "tenant",
           "machineAllowed": true,
           "freshAssertion": "never"
+        },
+        "x-gatekeep-recovery-allowed": false
+      }
+    },
+    "/api/v1/deployment/assertions": {
+      "post": {
+        "tags": [
+          "Deployment"
+        ],
+        "summary": "Begin confirming a sensitive action with a fresh WebAuthn assertion: the options for navigator.credentials.get.",
+        "description": "Self-service, full Sessions only. The body names the action, a Deployment capability whose fresh assertion isn't never or self.credentials.add or self.credentials.remove, and its target exactly as the action's request will name it, or null. An unknown action, a Tenant capability or a body that isn't JSON is 400 assertion_refused; a Deployment capability the Admin doesn't hold is 403 access_denied, counted and audited as the request checks do. Returns request options for the Admin RP ID with user verification required and no credential listed. The challenge can be answered once, within 5 minutes, and a new begin replaces it and any unused grant for the same action and target. Each begin and complete counts towards 10 per Session in 15 minutes, then 429.",
+        "operationId": "BeginFreshAssertion",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FreshAssertionBeginRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminSignInOptionsResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too Many Requests",
+            "headers": {
+              "Retry-After": {
+                "description": "Whole seconds until the rate-limit window allows another request.",
+                "required": true,
+                "schema": {
+                  "minimum": 1,
+                  "type": "integer"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "adminSession": [ ],
+            "csrf": [ ]
+          }
+        ],
+        "x-gatekeep-setup-allowed": false,
+        "x-gatekeep-access": {
+          "kind": "self"
+        },
+        "x-gatekeep-recovery-allowed": false
+      }
+    },
+    "/api/v1/deployment/assertions/complete": {
+      "post": {
+        "tags": [
+          "Deployment"
+        ],
+        "summary": "Complete a fresh WebAuthn assertion, leaving a grant on the Session for the begin's action and target.",
+        "description": "Self-service, full Sessions only. Once counted, the Session's pending challenge is taken before the body is read, so it is used up whatever follows. Verifies the assertion as sign-in does, against one of the Session's own Admin's credentials, with user verification, their user handle and a signature counter that advances. A pass stores a grant bound to this Session and the begin's action and target for 5 minutes, writes admin.fresh_assertion.verified and is 204. The grant is used up by the first request it matches, whatever that request then does. Every refusal is the same 400 assertion_refused, with no grant.",
+        "operationId": "CompleteFreshAssertion",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminSignInRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "429": {
+            "description": "Too Many Requests",
+            "headers": {
+              "Retry-After": {
+                "description": "Whole seconds until the rate-limit window allows another request.",
+                "required": true,
+                "schema": {
+                  "minimum": 1,
+                  "type": "integer"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "adminSession": [ ],
+            "csrf": [ ]
+          }
+        ],
+        "x-gatekeep-setup-allowed": false,
+        "x-gatekeep-access": {
+          "kind": "self"
+        },
+        "x-gatekeep-recovery-allowed": false
+      }
+    },
+    "/api/v1/deployment/credentials": {
+      "get": {
+        "tags": [
+          "Deployment"
+        ],
+        "summary": "Your credentials: the current Admin's own WebAuthn credentials, oldest first.",
+        "description": "Self-service, full Sessions only. Each credential's acr_ public ID, kind, backup state, when it was added and last used, and whether removing it would keep the floor of two; and whether the Admin holds a confirmed, unused Recovery Code. Never a WebAuthn credential ID, public key, AAGUID, counter or user handle.",
+        "operationId": "ListCredentials",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminCredentialsResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "adminSession": [ ]
+          }
+        ],
+        "x-gatekeep-setup-allowed": false,
+        "x-gatekeep-access": {
+          "kind": "self"
+        },
+        "x-gatekeep-recovery-allowed": false
+      }
+    },
+    "/api/v1/deployment/credentials/{credentialId}": {
+      "delete": {
+        "tags": [
+          "Deployment"
+        ],
+        "summary": "Remove one of the current Admin's own WebAuthn credentials.",
+        "description": "Self-service, full Sessions only, after a fresh assertion for self.credentials.remove with this credentialId as its target, which the request checks use up before anything else, or 403 fresh_assertion_required. A malformed, unknown or another Admin's credential is 404. A removal that would leave fewer than two credentials is 409 credentials_minimum. Otherwise it deletes the credential, ends every other live Session of the Admin as revoked, writes admin.credential.removed and is 204; this Session stays. When the credential removed is the one whose fresh assertion confirmed it, this Session ends too: 200 with sessionEnded true, and the cookie cleared.",
+        "operationId": "RemoveCredential",
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminCredentialRemovalResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "fresh_assertion_required, with the problem body, when no fresh assertion for this action and target is bound to the Session. No body when an earlier check refuses first: a restricted Session, or a wrong Origin or CSRF token.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found"
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "adminSession": [ ],
+            "csrf": [ ]
+          }
+        ],
+        "x-gatekeep-setup-allowed": false,
+        "x-gatekeep-access": {
+          "kind": "self"
+        },
+        "x-gatekeep-recovery-allowed": false,
+        "x-gatekeep-fresh-assertion": {
+          "action": "self.credentials.remove",
+          "target": "credentialId",
+          "enforcedBy": "checks"
         }
+      }
+    },
+    "/api/v1/deployment/credentials/recovery-code": {
+      "post": {
+        "tags": [
+          "Deployment"
+        ],
+        "summary": "Issue an offline Recovery Code in place of a second credential, shown this once.",
+        "description": "Setup-allowed, and only in a setup Session of an Admin who isn't the Deployment Owner, with exactly one credential and no confirmed code; otherwise a bodiless 403. Returns the code once, never cached; only its HMAC under the Deployment hmac key is stored, unconfirmed, replacing any unconfirmed one. It can't be redeemed until confirmed. A key custody failure is 503 with nothing stored.",
+        "operationId": "IssueRecoveryCode",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminRecoveryCodeResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "adminSession": [ ],
+            "csrf": [ ]
+          }
+        ],
+        "x-gatekeep-setup-allowed": true,
+        "x-gatekeep-access": {
+          "kind": "self"
+        },
+        "x-gatekeep-recovery-allowed": false
+      }
+    },
+    "/api/v1/deployment/credentials/recovery-code/confirm": {
+      "post": {
+        "tags": [
+          "Deployment"
+        ],
+        "summary": "Confirm the offline Recovery Code was saved, which completes credential setup.",
+        "description": "Setup-allowed, under the same rule as the issue; otherwise a bodiless 403. The body names the issueId the issue returned: when it isn't the Admin's current unconfirmed code, as after a later issue, it is 409 recovery_code_superseded and nothing changes. Confirms the code, writes admin.recovery_code.issued, makes the Admin's setup Sessions full, writes admin.setup.completed and is 204.",
+        "operationId": "ConfirmRecoveryCode",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecoveryCodeConfirmRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "adminSession": [ ],
+            "csrf": [ ]
+          }
+        ],
+        "x-gatekeep-setup-allowed": true,
+        "x-gatekeep-access": {
+          "kind": "self"
+        },
+        "x-gatekeep-recovery-allowed": false
+      }
+    },
+    "/api/v1/deployment/signin/recovery-code": {
+      "post": {
+        "tags": [
+          "Deployment"
+        ],
+        "summary": "Sign in with an offline Recovery Code, to a Session that reaches only credential registration.",
+        "description": "Sessionless: needs the exact Admin Origin only. Each call is counted Deployment-wide, then per client, before the code is read: the 51st across the Deployment, or a client's 6th, in 15 minutes is 429. A confirmed, unused code is used up, every live Session of its Admin ends as revoked, a live Session this browser held is superseded, and a recovery Session starts, which reaches only the Session read, sign-out and credential registration until one credential is registered, which ends every other Session of the Admin; admin.recovery_code.used is written. A wrong, unconfirmed, used or malformed code is the same 400 recovery_code_refused. A key custody failure is 503 with nothing used. Before bootstrap completes it is the unknown-path 404.",
+        "operationId": "RedeemRecoveryCode",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecoveryCodeRedeemRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "headers": {
+              "Set-Cookie": {
+                "description": "The recovery Admin Session: __Host-gk-admin={43 base64url characters}; Path=/; Secure; HttpOnly; SameSite=Strict, a browser session cookie with no Domain, Expires or Max-Age.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminSignInResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "404": {
+            "description": "Not Found"
+          },
+          "429": {
+            "description": "Too Many Requests",
+            "headers": {
+              "Retry-After": {
+                "description": "Whole seconds until the rate-limit window allows another request.",
+                "required": true,
+                "schema": {
+                  "minimum": 1,
+                  "type": "integer"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [ ],
+        "x-gatekeep-setup-allowed": false,
+        "x-gatekeep-access": {
+          "kind": "sessionless"
+        },
+        "x-gatekeep-recovery-allowed": false
       }
     }
   },
   "components": {
     "schemas": {
+      "AdminCredentialRemovalResponse": {
+        "required": [
+          "sessionEnded"
+        ],
+        "type": "object",
+        "properties": {
+          "sessionEnded": {
+            "type": "boolean"
+          }
+        }
+      },
+      "AdminCredentialResponse": {
+        "required": [
+          "id",
+          "kind",
+          "backedUp",
+          "createdAt",
+          "removable"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "pattern": "^acr_[a-z2-7]{25}[aeimquy4]$",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "passkey",
+              "securityKey"
+            ],
+            "type": "string"
+          },
+          "backedUp": {
+            "type": "boolean"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "lastUsedAt": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "date-time"
+          },
+          "removable": {
+            "type": "boolean"
+          }
+        }
+      },
+      "AdminCredentialsResponse": {
+        "required": [
+          "credentials",
+          "recoveryCode"
+        ],
+        "type": "object",
+        "properties": {
+          "credentials": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AdminCredentialResponse"
+            }
+          },
+          "recoveryCode": {
+            "type": "boolean"
+          }
+        }
+      },
+      "AdminRecoveryCodeResponse": {
+        "required": [
+          "code",
+          "issueId"
+        ],
+        "type": "object",
+        "properties": {
+          "code": {
+            "$ref": "#/components/schemas/RevealOnceOfstring"
+          },
+          "issueId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
       "AdminSessionResponse": {
         "required": [
           "adminId",
@@ -562,6 +1145,7 @@
           "deploymentOwner",
           "setupComplete",
           "credentials",
+          "recoveryCodeAllowed",
           "csrfToken"
         ],
         "type": "object",
@@ -573,7 +1157,8 @@
           "kind": {
             "enum": [
               "setup",
-              "full"
+              "full",
+              "recovery"
             ],
             "type": "string"
           },
@@ -586,6 +1171,9 @@
           "credentials": {
             "type": "integer",
             "format": "int32"
+          },
+          "recoveryCodeAllowed": {
+            "type": "boolean"
           },
           "csrfToken": {
             "type": "string"
@@ -708,7 +1296,13 @@
               "credential_refused",
               "signin_refused",
               "rate_limited",
-              "access_denied"
+              "access_denied",
+              "fresh_assertion_required",
+              "assertion_refused",
+              "credentials_minimum",
+              "credentials_maximum",
+              "recovery_code_refused",
+              "recovery_code_superseded"
             ],
             "type": "string"
           },
@@ -906,6 +1500,46 @@
           }
         }
       },
+      "FreshAssertionBeginRequest": {
+        "required": [
+          "action"
+        ],
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string"
+          },
+          "target": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        }
+      },
+      "RecoveryCodeConfirmRequest": {
+        "required": [
+          "issueId"
+        ],
+        "type": "object",
+        "properties": {
+          "issueId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "RecoveryCodeRedeemRequest": {
+        "required": [
+          "code"
+        ],
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string"
+          }
+        }
+      },
       "RegistrationAuthenticatorSelection": {
         "required": [
           "residentKey",
@@ -1004,6 +1638,11 @@
             "type": "string"
           }
         }
+      },
+      "RevealOnceOfstring": {
+        "pattern": "^[0-9A-HJKMNP-TV-Z]{4}(-[0-9A-HJKMNP-TV-Z]{4}){3}$",
+        "type": "string",
+        "description": "Shown in this response only, never stored and never shown again."
       }
     },
     "securitySchemes": {

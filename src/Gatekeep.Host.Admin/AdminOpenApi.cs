@@ -64,7 +64,22 @@ internal static class AdminOpenApi
                 var type = context.JsonTypeInfo.Type;
                 if (type == typeof(AdminSessionResponse))
                 {
-                    Enumerate(schema, "kind", ["setup", "full"]);
+                    Enumerate(schema, "kind", ["setup", "full", "recovery"]);
+                }
+                else if (type == typeof(AdminCredentialResponse))
+                {
+                    Enumerate(schema, "kind", ["passkey", "securityKey"]);
+                    if (schema.Properties?.TryGetValue("id", out var id) == true && id is OpenApiSchema idSchema)
+                    {
+                        idSchema.Pattern = "^acr_[a-z2-7]{25}[aeimquy4]$";
+                    }
+                }
+                else if (type == typeof(Gatekeep.Kernel.Secrets.RevealOnce<string>))
+                {
+                    // Its converter writes the value itself: an Admin Recovery Code, the only one today.
+                    schema.Type = JsonSchemaType.String;
+                    schema.Pattern = "^[0-9A-HJKMNP-TV-Z]{4}(-[0-9A-HJKMNP-TV-Z]{4}){3}$";
+                    schema.Description = "Shown in this response only, never stored and never shown again.";
                 }
                 else if (type == typeof(CredentialCreationOptionsResponse))
                 {
@@ -121,6 +136,31 @@ internal static class AdminOpenApi
                 operation.Extensions[SetupAllowedExtension] =
                     new JsonNodeExtension(JsonValue.Create(metadata.OfType<SetupAllowed>().Any()));
                 operation.Extensions[AccessExtension] = new JsonNodeExtension(Access(declaration));
+                operation.Extensions[RecoveryAllowedExtension] =
+                    new JsonNodeExtension(JsonValue.Create(metadata.OfType<RecoveryAllowed>().Any()));
+
+                if (declaration.FreshAssertion is { } fresh)
+                {
+                    operation.Extensions[FreshAssertionExtension] = new JsonNodeExtension(new JsonObject
+                    {
+                        ["action"] = fresh.Action,
+                        ["target"] = fresh.TargetRouteValue,
+                        ["enforcedBy"] = fresh.EnforcedBy == FreshAssertionEnforcement.Checks ? "checks" : "handler",
+                    });
+
+                    // Its refusal is the problem body: the build fails on a route that doesn't declare it.
+                    if (operation.Responses?.TryGetValue("403", out var refused) != true || refused is not OpenApiResponse refusedResponse
+                        || refusedResponse.Content?.ContainsKey(AdminResponses.ProblemContentType) != true)
+                    {
+                        throw new InvalidOperationException(
+                            $"{context.Description.HttpMethod} {context.Description.RelativePath} needs a fresh assertion, so it declares the 403 problem.");
+                    }
+
+                    refusedResponse.Description =
+                        "fresh_assertion_required, with the problem body, when no fresh assertion for this action and target is bound to " +
+                        "the Session" + (declaration.Kind == AccessKind.Capability ? "; access_denied when the capability is refused" : string.Empty) +
+                        ". No body when an earlier check refuses first: a restricted Session, or a wrong Origin or CSRF token.";
+                }
 
                 if (declaration.Tenant)
                 {
@@ -145,7 +185,7 @@ internal static class AdminOpenApi
                     });
                 }
 
-                if (declaration.Kind == AccessKind.Capability
+                if (declaration.Kind == AccessKind.Capability && declaration.FreshAssertion is null
                     && operation.Responses?.TryGetValue("403", out var forbidden) == true && forbidden is OpenApiResponse forbiddenResponse)
                 {
                     // Two shapes: the capability refusal's problem, or no body from an earlier gate.
@@ -236,7 +276,10 @@ internal static class AdminOpenApi
                         okResponse.Headers ??= new Dictionary<string, IOpenApiHeader>();
                         okResponse.Headers["Set-Cookie"] = new OpenApiHeader
                         {
-                            Description = metadata.OfType<JsonRequestBody>().Any()
+                            Description = context.Description.RelativePath?.EndsWith("recovery-code", StringComparison.Ordinal) == true
+                                ? "The recovery Admin Session: __Host-gk-admin={43 base64url characters}; Path=/; Secure; HttpOnly; " +
+                                  "SameSite=Strict, a browser session cookie with no Domain, Expires or Max-Age."
+                                : metadata.OfType<JsonRequestBody>().Any()
                                 ? "The Admin Session: __Host-gk-admin={43 base64url characters}; Path=/; Secure; HttpOnly; SameSite=Strict, a " +
                                   "browser session cookie with no Domain, Expires or Max-Age. And __Host-gk-admin-signin cleared with Max-Age=0, " +
                                   "as on every complete."
@@ -268,6 +311,10 @@ internal static class AdminOpenApi
     private const string SetupAllowedExtension = "x-gatekeep-setup-allowed";
 
     private const string AccessExtension = "x-gatekeep-access";
+
+    private const string RecoveryAllowedExtension = "x-gatekeep-recovery-allowed";
+
+    private const string FreshAssertionExtension = "x-gatekeep-fresh-assertion";
 
     /// <summary>The canonical spelling: 25 base32 characters, then one whose two unused low bits are zero.</summary>
     private const string TenantIdPattern = "^ten_[a-z2-7]{25}[aeimquy4]$";

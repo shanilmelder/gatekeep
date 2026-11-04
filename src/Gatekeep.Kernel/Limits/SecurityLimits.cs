@@ -70,4 +70,40 @@ public static class SecurityLimits
 
     /// <summary>The fixed window audited capability refusals are counted in: 15 minutes (Story 1.24).</summary>
     public static readonly TimeSpan AdminAccessDeniedAuditWindow = TimeSpan.FromMinutes(15);
+
+    /// <summary>
+    /// How long a verified fresh WebAuthn assertion may confirm its one sensitive action: 5 minutes
+    /// (PRD §5.2, "Recent authentication"; Story 1.26). The first request it matches uses it up.
+    /// </summary>
+    public static readonly TimeSpan RecentAuthentication = TimeSpan.FromMinutes(5);
+
+    /// <summary>
+    /// Fresh-assertion ceremony calls one Admin Session may make in <see cref="FreshAssertionWindow"/>:
+    /// 10 (Story 1.26). Each begin and each complete counts, before it runs.
+    /// </summary>
+    public const int FreshAssertionAttempts = 10;
+
+    /// <summary>The fixed window fresh-assertion calls are counted in: 15 minutes (Story 1.26).</summary>
+    public static readonly TimeSpan FreshAssertionWindow = TimeSpan.FromMinutes(15);
+
+    /// <summary>
+    /// Admin Recovery Code redemptions one client may make in <see cref="AdminRecoveryCodeWindow"/>:
+    /// 5 (Story 1.26, PRD §5.2). Each is counted before the code is read, whatever its outcome.
+    /// </summary>
+    public const int AdminRecoveryCodeAttempts = 5;
+
+    /// <summary>The fixed window Admin Recovery Code redemptions are counted in: 15 minutes (Story 1.26).</summary>
+    public static readonly TimeSpan AdminRecoveryCodeWindow = TimeSpan.FromMinutes(15);
+
+    /// <summary>
+    /// Admin Recovery Code redemptions the whole Deployment may take in <see cref="AdminRecoveryCodeWindow"/>:
+    /// 50 (Story 1.26), whatever client sends them, so many clients together can't guess for long.
+    /// </summary>
+    public const int AdminRecoveryCodeDeploymentAttempts = 50;
+
+    /// <summary>
+    /// The most WebAuthn credentials one Admin may hold: 10 (Story 1.26). It bounds the exclude list
+    /// and Your credentials, and the database refuses an 11th.
+    /// </summary>
+    public const int MaxAdminCredentials = 10;
 }

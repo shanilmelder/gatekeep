@@ -179,6 +179,93 @@ export interface Messages {
   loadFailed: string;
   /** A banner's action that reads again. */
   retry: string;
+  /** A step's primary action that goes on, such as after a confirmation. */
+  continue: string;
+  /** Shown in a confirming modal while the browser's sheet is open for a fresh assertion (UX-DR17). */
+  freshAssertionPrompt: string;
+  /** The modal's text when the fresh assertion's sheet was cancelled. */
+  freshAssertionCancelled: string;
+  /** The modal's text when a fresh assertion couldn't be made: an outage or a failed sheet. */
+  freshAssertionUnavailable: string;
+  /** Too many attempts, with the seconds to wait. Placeholder: {seconds}. */
+  tooManyAttempts: string;
+  /** The same, when the server gave no whole number of seconds. */
+  tooManyAttemptsNoTime: string;
+  /** Your credentials: the avatar menu item, the page's title and its table's caption. */
+  credentialsTitle: string;
+  /** Your credentials' description: why two. */
+  credentialsDescription: string;
+  /** Your credentials' one primary action. */
+  credentialsAdd: string;
+  /** The table's columns. */
+  credentialsColumnCredential: string;
+  credentialsColumnAdded: string;
+  credentialsColumnLastUsed: string;
+  /** A credential's name, by its kind. */
+  credentialPasskey: string;
+  credentialSecurityKey: string;
+  /** The badge on a credential its authenticator says is backed up, as a synced passkey is. */
+  credentialSynced: string;
+  /** A credential never used since it was added. */
+  credentialNeverUsed: string;
+  /** A row's Remove action. */
+  credentialsRemove: string;
+  /** Its accessible name, naming the row. Placeholders: {credential}, {added}. */
+  credentialsRemoveNamed: string;
+  /** Shown when no credential can be removed: the floor of two. */
+  credentialsFloor: string;
+  /** Shown when the Admin also holds an offline Recovery Code. */
+  credentialsRecoveryCode: string;
+  /** The remove modal's title, body and confirm label. */
+  credentialsRemoveTitle: string;
+  credentialsRemoveBody: string;
+  credentialsRemoveConfirm: string;
+  /** The toast once a credential is removed. */
+  credentialsRemoved: string;
+  /** Shown in the remove modal when the server refuses for the floor. */
+  credentialsMinimum: string;
+  /** The add modal's title and body. */
+  credentialsAddTitle: string;
+  credentialsAddBody: string;
+  /** The add modal's text once confirmed, over the Register button that opens the second sheet. */
+  credentialsAddRegister: string;
+  /** The toast once a credential is added. */
+  credentialsAdded: string;
+  /** Shown in the add modal when the Admin holds the most credentials allowed. */
+  credentialsMaximum: string;
+  /** Admin sign-in's link to the Recovery Code entry. */
+  recoveryLink: string;
+  /** The Recovery Code entry's heading and subtitle. */
+  recoveryTitle: string;
+  recoverySubtitle: string;
+  /** Its field's label and helper. */
+  recoveryCodeLabel: string;
+  recoveryCodeHelper: string;
+  /** Its link back to sign-in with a passkey. */
+  recoveryPasskeyLink: string;
+  /** Shown when a Recovery Code is refused. It never says why. */
+  recoveryRefused: string;
+  /** Credential setup's heading and subtitle in a recovery Session. */
+  setupRecoveryTitle: string;
+  setupRecoverySubtitle: string;
+  /** Credential setup's choice of an offline Recovery Code instead of a second credential. */
+  setupUseRecoveryCode: string;
+  /** The Recovery Code display's warning. */
+  recoveryCodeWarning: string;
+  /** What the Copy control copies: names it. */
+  recoveryCodeWhat: string;
+  /** The checkbox the Admin ticks once the code is saved. */
+  recoveryCodeSaved: string;
+  /** Shown when Continue is pressed with the checkbox unticked. */
+  recoveryCodeSavedRequired: string;
+  /** Shown when the code on screen was replaced by a later one before it was confirmed. */
+  recoveryCodeSuperseded: string;
+  /** Shown when the code on screen can no longer be confirmed in this Session. */
+  recoveryCodeNotConfirmable: string;
+  /** A confirming modal's text when the Session was renewed during the action, which wasn't sent again. */
+  actionRetryAfterSignIn: string;
+  /** A confirming modal's text when the server refused the action outright. */
+  actionForbidden: string;
 }
 
 export const defaultMessages: Readonly<Messages> = Object.freeze({
@@ -276,6 +363,54 @@ export const defaultMessages: Readonly<Messages> = Object.freeze({
   sessionRenewed: "You're signed in again.",
   loadFailed: "We couldn't load this page.",
   retry: 'Retry',
+  continue: 'Continue',
+  freshAssertionPrompt: "Confirm it's you with your security key or passkey.",
+  freshAssertionCancelled: 'Confirmation cancelled. Nothing was changed.',
+  freshAssertionUnavailable: "We couldn't confirm it's you. Try again.",
+  tooManyAttempts: 'Too many attempts. Try again in {seconds} seconds.',
+  tooManyAttemptsNoTime: 'Too many attempts. Try again later.',
+  credentialsTitle: 'Your credentials',
+  credentialsDescription: "The passkeys and security keys you sign in with. Keep at least two, so losing one device can't lock you out.",
+  credentialsAdd: 'Add credential',
+  credentialsColumnCredential: 'Credential',
+  credentialsColumnAdded: 'Added',
+  credentialsColumnLastUsed: 'Last used',
+  credentialPasskey: 'Passkey',
+  credentialSecurityKey: 'Security key',
+  credentialSynced: 'Synced',
+  credentialNeverUsed: 'Never',
+  credentialsRemove: 'Remove',
+  credentialsRemoveNamed: 'Remove {credential} added {added}',
+  credentialsFloor: 'You need at least two credentials. Add another before removing one.',
+  credentialsRecoveryCode: 'You also hold an offline recovery code.',
+  credentialsRemoveTitle: 'Remove this credential?',
+  credentialsRemoveBody: "You won't be able to sign in with it again. Your other Admin sessions will end.",
+  credentialsRemoveConfirm: 'Remove credential',
+  credentialsRemoved: 'Credential removed.',
+  credentialsMinimum: "You can't remove this credential: you need at least two.",
+  credentialsAddTitle: 'Add a credential',
+  credentialsAddBody: 'Confirm it\'s you with a credential you already have, then register the new passkey or security key.',
+  credentialsAddRegister: 'Now register the new passkey or security key.',
+  credentialsAdded: 'Credential added.',
+  credentialsMaximum: 'You already have 10 credentials. Remove one before adding another.',
+  recoveryLink: 'Use a recovery code',
+  recoveryTitle: 'Use a recovery code',
+  recoverySubtitle: 'Enter the offline recovery code you saved when you set up your credentials. It lets you register a new passkey.',
+  recoveryCodeLabel: 'Recovery code',
+  recoveryCodeHelper: 'Format: XXXX-XXXX-XXXX-XXXX',
+  recoveryPasskeyLink: 'Sign in with a passkey instead',
+  recoveryRefused: "That code isn't valid.",
+  setupRecoveryTitle: 'Set up a new passkey',
+  setupRecoverySubtitle: 'Your recovery code has been used. Register a new passkey or security key to continue.',
+  setupUseRecoveryCode: 'Use an offline recovery code instead',
+  recoveryCodeWarning: "If you lose your device, this code works once. We won't show it again.",
+  recoveryCodeWhat: 'recovery code',
+  recoveryCodeSaved: "I've saved this code",
+  recoveryCodeSavedRequired: "Confirm you've saved your code.",
+  recoveryCodeSuperseded: 'A newer recovery code replaced this one, so it was not saved. Start again to get a new code.',
+  recoveryCodeNotConfirmable: "This recovery code can no longer be confirmed. Start again.",
+  actionRetryAfterSignIn: "You're signed in again, but nothing was changed. Confirm to try again.",
+  actionForbidden: "You can't do this in this session.",
 });
 
 /**

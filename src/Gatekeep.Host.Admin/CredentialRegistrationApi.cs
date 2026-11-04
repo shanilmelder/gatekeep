@@ -147,6 +147,30 @@ internal static class CredentialRegistrationApi
             return;
         }
 
+        // A full Session adds a credential only after a fresh assertion (Story 1.26). A restricted
+        // one, in setup or recovery, registers as before, without one. At the maximum, a full list
+        // is refused first, so it costs no confirmation.
+        if (!session.Restricted)
+        {
+            AdminCredentialList existing;
+            await using (var read = await services.BeginAsync(cancellationToken))
+            {
+                existing = await services.Credentials.ListAsync(read.CreateCommandContext(), session, cancellationToken);
+                await read.CommitAsync(cancellationToken);
+            }
+
+            if (existing.Credentials.Count >= AdminsContract.MaxCredentials)
+            {
+                await MaximumAsync(context);
+                return;
+            }
+
+            if (!await FreshAssertionGate.RequireAsync(context, services, cancellationToken))
+            {
+                return;
+            }
+        }
+
         CredentialRegistrationStart start;
         await using (var scope = await services.BeginAsync(cancellationToken))
         {
@@ -157,6 +181,12 @@ internal static class CredentialRegistrationApi
         if (start.Status == CredentialRegistrationStatus.SessionEnded)
         {
             await AdminResponses.UnauthorizedAsync(context, clearCookie: true);
+            return;
+        }
+
+        if (start.Status == CredentialRegistrationStatus.Maximum)
+        {
+            await MaximumAsync(context);
             return;
         }
 
@@ -205,17 +235,17 @@ internal static class CredentialRegistrationApi
             return;
         }
 
-        // A body that isn't JSON, or can't be read, is a refused finish: its challenge still goes.
-        var attestation = AdminApi.IsJson(context.Request) ? await ReadAttestationAsync(context.Request, cancellationToken) : null;
-
         // The challenge is taken in a transaction of its own, kept before anything is verified,
         // so it is used up whatever happens next: a refusal, a constraint, a fault.
         CredentialRegistrationChallenge challenge;
         await using (var take = await services.BeginAsync(cancellationToken))
         {
-            challenge = await services.Registration.TakeChallengeAsync(take.CreateCommandContext(), session, cancellationToken);
-            await take.CommitAsync(cancellationToken);
+            challenge = await services.Registration.TakeChallengeAsync(take.CreateCommandContext(), session, CancellationToken.None);
+            await take.CommitAsync(CancellationToken.None);
         }
+
+        // A body that isn't JSON, or can't be read, is a refused finish: its challenge is already gone.
+        var attestation = AdminApi.IsJson(context.Request) ? await ReadAttestationAsync(context.Request, cancellationToken) : null;
 
         switch (challenge.Status)
         {
@@ -224,6 +254,9 @@ internal static class CredentialRegistrationApi
                 return;
             case CredentialRegistrationStatus.Complete:
                 await AdminResponses.ForbiddenAsync(context);
+                return;
+            case CredentialRegistrationStatus.Maximum:
+                await MaximumAsync(context);
                 return;
         }
 
@@ -241,9 +274,16 @@ internal static class CredentialRegistrationApi
                 scope.CreateCommandContext(), session, RelyingParty(context), challengeSha256, attestation, cancellationToken);
             await scope.CommitAsync(cancellationToken);
         }
-        catch (DbException e) when (e.SqlState is UniqueViolation or CheckViolation)
+        catch (DbException e) when (e.SqlState == AdminResponses.RaisedByTrigger)
         {
-            // The same credential stored by another Admin since the check, or a value a CHECK
+            // The maximum trigger refused an 11th: the same answer as the code's own check, rolled back.
+            AdminRequestChecks.Log(context, e);
+            await MaximumAsync(context);
+            return;
+        }
+        catch (DbException e) when (e.SqlState is UniqueViolation or CheckViolation or AdminResponses.ForeignKeyViolation)
+        {
+            // The same credential stored by another Admin since the check, or a value a CHECK or key
             // refuses: rolled back, so nothing is stored, and the challenge is already gone.
             AdminRequestChecks.Log(context, e);
             await RefusedAsync(context, null);
@@ -262,6 +302,10 @@ internal static class CredentialRegistrationApi
 
             case CredentialRegistrationStatus.Refused:
                 await RefusedAsync(context, outcome.Refusal);
+                return;
+
+            case CredentialRegistrationStatus.Maximum:
+                await MaximumAsync(context);
                 return;
 
             default:
@@ -305,6 +349,16 @@ internal static class CredentialRegistrationApi
             .ToString(System.Globalization.CultureInfo.InvariantCulture);
         await AdminResponses.ProblemAsync(context, StatusCodes.Status429TooManyRequests, AdminResponses.RateLimited);
         return false;
+    }
+
+    /// <summary>A registration for an Admin at <see cref="AdminsContract.MaxCredentials"/> (Story 1.26): 409, with nothing stored.</summary>
+    private static Task MaximumAsync(HttpContext context)
+    {
+        Logger(context).LogInformation(
+            "A credential registration was refused with {Problem}, trace {TraceId}.",
+            AdminResponses.CredentialsMaximum,
+            AdminResponses.TraceId(context));
+        return AdminResponses.ProblemAsync(context, StatusCodes.Status409Conflict, AdminResponses.CredentialsMaximum);
     }
 
     private static Task RefusedAsync(HttpContext context, WebAuthnRefusal? refusal)

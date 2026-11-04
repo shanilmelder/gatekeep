@@ -18,6 +18,10 @@ export type CredentialRegistrationResponse = components['schemas']['CredentialRe
 export type AdminSignInOptionsResponse = components['schemas']['AdminSignInOptionsResponse'];
 export type AdminSignInRequest = components['schemas']['AdminSignInRequest'];
 export type AdminSignInResponse = components['schemas']['AdminSignInResponse'];
+export type FreshAssertionBeginRequest = components['schemas']['FreshAssertionBeginRequest'];
+export type AdminCredentialsResponse = components['schemas']['AdminCredentialsResponse'];
+export type AdminCredentialResponse = components['schemas']['AdminCredentialResponse'];
+export type AdminRecoveryCodeResponse = components['schemas']['AdminRecoveryCodeResponse'];
 
 /** A path the committed OpenAPI document has, so a removed endpoint fails to compile. */
 export type ApiPath = keyof paths;
@@ -149,6 +153,27 @@ export function createApiClient(options: ApiClientOptions = {}) {
     beginSignIn: () => request('/api/v1/deployment/signin', 'post'),
     /** Completes it with the browser's assertion response, in WebAuthn's JSON form, and starts a Session. */
     completeSignIn: (assertion: AdminSignInRequest) => request('/api/v1/deployment/signin/complete', 'post', assertion),
+    /**
+     * Begins a fresh WebAuthn assertion for one sensitive action and its target, exactly as the
+     * action's own request will name it: the options for navigator.credentials.get (Story 1.26).
+     */
+    beginFreshAssertion: (binding: FreshAssertionBeginRequest) => request('/api/v1/deployment/assertions', 'post', binding),
+    /** Completes it with the browser's assertion: a 204 leaves a grant on the Session, never in the page. */
+    completeFreshAssertion: (assertion: AdminSignInRequest) => request('/api/v1/deployment/assertions/complete', 'post', assertion),
+    /** Your credentials: the current Admin's own, oldest first. */
+    listCredentials: () => request('/api/v1/deployment/credentials', 'get'),
+    /** Removes one of them by its `acr_` ID, which goes into the path encoded. It needs a fresh assertion for that ID. */
+    removeCredential: (credentialId: string) =>
+      request(
+        `/api/v1/deployment/credentials/${encodeURIComponent(credentialId)}` as '/api/v1/deployment/credentials/{credentialId}',
+        'delete',
+      ),
+    /** Issues an offline Recovery Code at credential setup, shown in this one response. */
+    issueRecoveryCode: () => request('/api/v1/deployment/credentials/recovery-code', 'post'),
+    /** Confirms the code the issue `issueId` showed was saved, which completes setup. A later issue makes it 409. */
+    confirmRecoveryCode: (issueId: string) => request('/api/v1/deployment/credentials/recovery-code/confirm', 'post', { issueId }),
+    /** Redeems a Recovery Code at sign-in, sessionless: a Session that reaches only credential registration. */
+    redeemRecoveryCode: (code: string) => request('/api/v1/deployment/signin/recovery-code', 'post', { code }),
   };
 }
 

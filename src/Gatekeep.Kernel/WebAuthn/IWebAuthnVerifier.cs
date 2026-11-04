@@ -41,8 +41,9 @@ public interface IWebAuthnVerifier
     /// credential in <paramref name="request"/>. A response the ceremony refuses is a refused
     /// result, never an exception: one for another RP ID or origin, a cross-origin one, one
     /// without user presence and verification, one whose challenge isn't the stored one, one
-    /// whose user handle isn't the credential's owner's, one with a bad signature, and one whose
-    /// signature counter doesn't advance past a non-zero stored one.
+    /// whose user handle isn't the credential's owner's, one with a bad signature, one whose BE flag
+    /// isn't the stored one's (BE never changes for a credential), and one whose signature counter
+    /// doesn't advance past a non-zero stored one.
     /// </summary>
     Task<WebAuthnAssertionResult> FinishAssertionAsync(WebAuthnAssertionFinish request, CancellationToken cancellationToken);
 }
@@ -115,8 +116,10 @@ public sealed record WebAuthnCreationOptions(
 
 /// <summary>
 /// A verified credential, as plain data: its ID, its COSE public key, its signature counter,
-/// its authenticator's AAGUID, the transports reported, and whether the authenticator data's UV
-/// flag was set. Registration requires it, so a verified credential always has it.
+/// its authenticator's AAGUID, the transports reported, whether the authenticator data's UV
+/// flag was set (registration requires it, so a verified credential always has it), and its
+/// backup flags: BE, whether it may be backed up, which never changes for a credential, and BS,
+/// whether it is backed up now (WebAuthn §6.1.3).
 /// </summary>
 public sealed record WebAuthnRegisteredCredential(
     byte[] CredentialId,
@@ -124,7 +127,9 @@ public sealed record WebAuthnRegisteredCredential(
     uint SignCount,
     Guid Aaguid,
     IReadOnlyList<string> Transports,
-    bool UserVerified);
+    bool UserVerified,
+    bool BackupEligible,
+    bool BackedUp);
 
 /// <summary>One assertion's start: the Relying Party, and the challenge the caller made and stores.</summary>
 public sealed record WebAuthnAssertionBegin(WebAuthnRelyingParty RelyingParty, byte[] Challenge);
@@ -165,9 +170,12 @@ public sealed record WebAuthnAssertion(
 
 /// <summary>
 /// A credential as the caller stored it at registration: its ID, its COSE public key, its last
-/// signature counter, and the user handle of the account that owns it.
+/// signature counter, the user handle of the account that owns it, and the BE flag it was
+/// registered with: an assertion whose BE differs is refused, as BE never changes (WebAuthn §6.3.3).
+/// Null when it isn't known, for a credential stored before its flags were kept: then nothing is
+/// compared, and the caller records <see cref="WebAuthnAssertionResult.BackupEligible"/>.
 /// </summary>
-public sealed record WebAuthnStoredCredential(byte[] CredentialId, byte[] PublicKey, uint SignCount, byte[] UserHandle);
+public sealed record WebAuthnStoredCredential(byte[] CredentialId, byte[] PublicKey, uint SignCount, byte[] UserHandle, bool? BackupEligible);
 
 /// <summary>Why a ceremony was refused. A fixed set, so nothing from the response reaches a log.</summary>
 public enum WebAuthnRefusal
@@ -240,17 +248,20 @@ public sealed record WebAuthnRegistrationResult
 
 /// <summary>
 /// An assertion's outcome: when verified, the authenticator's new signature counter and whether
-/// the UV flag was set (assertions require it, so a verified one always has it); when refused, why,
+/// the UV flag was set (assertions require it, so a verified one always has it) and the BS flag,
+/// whether the credential is backed up now; when refused, why,
 /// and whether the signature over the stored key had verified first. Only a refusal after a
 /// verified signature proves the credential's holder made the response; any other could come from
 /// anyone who knows a credential ID.
 /// </summary>
 public sealed record WebAuthnAssertionResult
 {
-    private WebAuthnAssertionResult(uint signCount, bool userVerified, WebAuthnRefusal? refusal, bool signatureVerified)
+    private WebAuthnAssertionResult(uint signCount, bool userVerified, bool backupEligible, bool backedUp, WebAuthnRefusal? refusal, bool signatureVerified)
     {
         SignCount = signCount;
         UserVerified = userVerified;
+        BackupEligible = backupEligible;
+        BackedUp = backedUp;
         Refusal = refusal;
         SignatureVerified = signatureVerified;
     }
@@ -260,6 +271,12 @@ public sealed record WebAuthnAssertionResult
 
     /// <summary>Whether the authenticator data's UV flag was set, when verified.</summary>
     public bool UserVerified { get; }
+
+    /// <summary>Whether the authenticator data's BS flag was set, when verified: the credential is backed up now.</summary>
+    public bool BackedUp { get; }
+
+    /// <summary>Whether the authenticator data's BE flag was set, when verified: the credential may be backed up.</summary>
+    public bool BackupEligible { get; }
 
     /// <summary>Why it wasn't verified, when it wasn't.</summary>
     public WebAuthnRefusal? Refusal { get; }
@@ -272,11 +289,12 @@ public sealed record WebAuthnAssertionResult
 
     public bool Verified => Refusal is null;
 
-    public static WebAuthnAssertionResult Asserted(uint signCount, bool userVerified) => new(signCount, userVerified, null, signatureVerified: true);
+    public static WebAuthnAssertionResult Asserted(uint signCount, bool userVerified, bool backupEligible, bool backedUp) =>
+        new(signCount, userVerified, backupEligible, backedUp, null, signatureVerified: true);
 
     /// <summary>A refusal before the signature verified, or with no signature verified at all.</summary>
-    public static WebAuthnAssertionResult Refused(WebAuthnRefusal refusal) => new(0, false, refusal, signatureVerified: false);
+    public static WebAuthnAssertionResult Refused(WebAuthnRefusal refusal) => new(0, false, false, false, refusal, signatureVerified: false);
 
     /// <summary>A refusal of a response whose signature over the stored key had verified.</summary>
-    public static WebAuthnAssertionResult RefusedAfterSignature(WebAuthnRefusal refusal) => new(0, false, refusal, signatureVerified: true);
+    public static WebAuthnAssertionResult RefusedAfterSignature(WebAuthnRefusal refusal) => new(0, false, false, false, refusal, signatureVerified: true);
 }

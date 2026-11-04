@@ -53,11 +53,17 @@ internal sealed class AdminHost : IAsyncDisposable
         };
     }
 
+    /// <summary>The key the OpenBao stand-in computes the Deployment HMAC with, so a test can compute a stored value.</summary>
+    public static readonly byte[] HmacKey = SHA256.HashData("gatekeep-tests-dep-hmac"u8);
+
     public string Database { get; }
 
     public int Port { get; }
 
     public HttpClient Http { get; }
+
+    /// <summary>The OpenBao stand-in: a test may make it fail, as by setting <see cref="FakeOpenBaoSocket.RespondToBody"/>.</summary>
+    public FakeOpenBaoSocket OpenBao => _socket;
 
     /// <summary>Everything the host has written so far.</summary>
     public string Output => _process.Output;
@@ -76,7 +82,7 @@ internal sealed class AdminHost : IAsyncDisposable
 
         database ??= await postgres.NewMigratedDatabaseAsync();
         var directory = Directory.CreateTempSubdirectory("gatekeep-admin-host-").FullName;
-        var socket = new FakeOpenBaoSocket();
+        var socket = new FakeOpenBaoSocket { RespondToBody = Custody };
         var health = HostProcess.FreePort();
         var port = HostProcess.FreePort();
 
@@ -357,6 +363,143 @@ internal sealed class AdminHost : IAsyncDisposable
         return (cookie, csrf, adminId);
     }
 
+    public const string AssertionsPath = "/api/v1/deployment/assertions";
+
+    public const string CredentialsPath = "/api/v1/deployment/credentials";
+
+    public const string RecoveryCodePath = "/api/v1/deployment/credentials/recovery-code";
+
+    public const string RedeemPath = "/api/v1/deployment/signin/recovery-code";
+
+    /// <summary>Begins a fresh assertion for <paramref name="action"/> on <paramref name="target"/>. Returns the options when it was a 200.</summary>
+    public async Task<(HttpResponseMessage Response, JsonElement Options)> BeginAssertionAsync(string cookie, string csrf, string action, string? target = null)
+    {
+        var response = await SendAsync(HttpMethod.Post, AssertionsPath, cookie, csrf, Origin, JsonSerializer.Serialize(new { action, target }));
+        var options = response.StatusCode == HttpStatusCode.OK
+            ? JsonDocument.Parse(await response.Content.ReadAsStringAsync(Cancellation)).RootElement.Clone()
+            : default;
+        return (response, options);
+    }
+
+    public Task<HttpResponseMessage> CompleteAssertionAsync(string cookie, string csrf, string body, string contentType = "application/json") =>
+        SendAsync(HttpMethod.Post, AssertionsPath + "/complete", cookie, csrf, Origin, body, contentType: contentType);
+
+    /// <summary>Confirms <paramref name="action"/> on <paramref name="target"/> with <paramref name="authenticator"/>: begin and complete, which must pass.</summary>
+    public async Task ConfirmAsync(string cookie, string csrf, SoftwareAuthenticator authenticator, string action, string? target = null)
+    {
+        var (begin, options) = await BeginAssertionAsync(cookie, csrf, action, target);
+        using (begin)
+        {
+            Assert.Equal(HttpStatusCode.OK, begin.StatusCode);
+        }
+
+        using var complete = await CompleteAssertionAsync(cookie, csrf, authenticator.Assert(options, Origin));
+        Assert.Equal(HttpStatusCode.NoContent, complete.StatusCode);
+    }
+
+    /// <summary>Adds <paramref name="added"/> from a full Session: a fresh assertion with <paramref name="confirmWith"/>, then the registration.</summary>
+    public async Task AddCredentialAsync(string cookie, string csrf, SoftwareAuthenticator confirmWith, SoftwareAuthenticator added)
+    {
+        await ConfirmAsync(cookie, csrf, confirmWith, "self.credentials.add");
+        await RegisterAsync(cookie, csrf, added);
+    }
+
+    /// <summary>The Session's own credentials, as GET /credentials lists them.</summary>
+    public async Task<JsonElement> CredentialsAsync(string cookie)
+    {
+        using var response = await SendAsync(HttpMethod.Get, CredentialsPath, cookie);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        return JsonDocument.Parse(await response.Content.ReadAsStringAsync(Cancellation)).RootElement.Clone();
+    }
+
+    /// <summary>The <c>acr_</c> IDs of the Session's credentials, oldest first.</summary>
+    public async Task<List<string>> CredentialIdsAsync(string cookie) =>
+        [.. (await CredentialsAsync(cookie)).GetProperty("credentials").EnumerateArray().Select(c => c.GetProperty("id").GetString()!)];
+
+    public Task<HttpResponseMessage> RemoveCredentialAsync(string cookie, string csrf, string id) =>
+        SendAsync(HttpMethod.Delete, $"{CredentialsPath}/{id}", cookie, csrf, Origin);
+
+    /// <summary>
+    /// The Deployment Owner with a full Session and <paramref name="count"/> credentials (Story
+    /// 1.26): two registered at setup, signed in with the first, then the rest added each after a
+    /// fresh assertion. Returns the Session and the authenticators, in registration order.
+    /// </summary>
+    public async Task<(string Cookie, string Csrf, Guid AdminId, SoftwareAuthenticator[] Authenticators)> OwnerWithCredentialsAsync(int count = 2)
+    {
+        var authenticators = Enumerable.Range(0, count).Select(_ => new SoftwareAuthenticator()).ToArray();
+        var (_, adminId) = await AdminWithCredentialsAsync(authenticators[0], authenticators[1]);
+        var (cookie, csrf) = await SignInAsync(authenticators[0]);
+        foreach (var added in authenticators.Skip(2))
+        {
+            await AddCredentialAsync(cookie, csrf, authenticators[0], added);
+        }
+
+        return (cookie, csrf, adminId, authenticators);
+    }
+
+    /// <summary>
+    /// A seeded Admin who isn't the Deployment Owner, as Story 8.3's invites will make one, with a
+    /// live setup Session inserted as the superuser and nothing registered. Bootstrap must be
+    /// complete first, for sign-in and Recovery Codes to exist. Returns the Session and the Admin.
+    /// </summary>
+    public async Task<(string Cookie, string Csrf, Guid AdminId)> InsertSetupAdminAsync()
+    {
+        var raw = RandomNumberGenerator.GetBytes(32);
+        var adminId = Guid.CreateVersion7();
+        await using var connection = new NpgsqlConnection(Superuser);
+        await connection.OpenAsync(Cancellation);
+        await using var command = new NpgsqlCommand(
+            """
+            INSERT INTO admin (id, deployment_owner) VALUES (@admin, false);
+            INSERT INTO admin_session (id, id_hash, admin_id, kind, created_at, idle_expires_at, absolute_expires_at)
+            VALUES (@id, @hash, @admin, 'setup', now(), now() + interval '30 minutes', now() + interval '8 hours');
+            """,
+            connection);
+        command.Parameters.AddWithValue("admin", adminId);
+        command.Parameters.AddWithValue("id", Guid.CreateVersion7());
+        command.Parameters.AddWithValue("hash", SHA256.HashData(raw));
+        await command.ExecuteNonQueryAsync(Cancellation);
+
+        var cookie = Base64Url.EncodeToString(raw);
+        return (cookie, Csrf(cookie), adminId);
+    }
+
+    /// <summary>Issues a Recovery Code in the setup Session, which must pass. Returns it as shown, and its issue.</summary>
+    public async Task<(string Code, Guid IssueId)> IssueRecoveryCodeAsync(string cookie, string csrf)
+    {
+        using var response = await SendAsync(HttpMethod.Post, RecoveryCodePath, cookie, csrf, Origin);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync(Cancellation));
+        return (json.RootElement.GetProperty("code").GetString()!, json.RootElement.GetProperty("issueId").GetGuid());
+    }
+
+    public Task<HttpResponseMessage> ConfirmRecoveryCodeAsync(string cookie, string csrf, Guid issueId) =>
+        SendAsync(HttpMethod.Post, RecoveryCodePath + "/confirm", cookie, csrf, Origin, JsonSerializer.Serialize(new { issueId }));
+
+    /// <summary>Redeems <paramref name="code"/> at sign-in, sessionless, with any Session cookie the browser holds.</summary>
+    public Task<HttpResponseMessage> RedeemAsync(string code, string? session = null, IEnumerable<(string, string)>? headers = null) =>
+        SendAsync(
+            HttpMethod.Post,
+            RedeemPath,
+            origin: Origin,
+            body: JsonSerializer.Serialize(new { code }),
+            headers: Cookies(null, session).Concat(headers ?? []));
+
+    /// <summary>
+    /// A seeded non-Owner Admin with one credential and a confirmed Recovery Code: their setup
+    /// Session is then full. Returns it, the code as shown and the authenticator.
+    /// </summary>
+    public async Task<(string Cookie, string Csrf, Guid AdminId, string Code, SoftwareAuthenticator Authenticator)> AdminWithRecoveryCodeAsync()
+    {
+        var (cookie, csrf, adminId) = await InsertSetupAdminAsync();
+        var authenticator = new SoftwareAuthenticator();
+        await RegisterAsync(cookie, csrf, authenticator);
+        var (code, issueId) = await IssueRecoveryCodeAsync(cookie, csrf);
+        using var confirmed = await ConfirmRecoveryCodeAsync(cookie, csrf, issueId);
+        Assert.Equal(HttpStatusCode.NoContent, confirmed.StatusCode);
+        return (cookie, csrf, adminId, code, authenticator);
+    }
+
     /// <summary>The Admin whose Session <paramref name="sessionId"/> is.</summary>
     public Task<Guid> AdminOfSessionAsync(Guid sessionId) =>
         ScalarAsync<Guid>($"SELECT admin_id FROM admin_session WHERE id = '{sessionId}'");
@@ -432,6 +575,32 @@ internal sealed class AdminHost : IAsyncDisposable
         Directory.Delete(_directory, recursive: true);
         return ValueTask.CompletedTask;
     }
+
+    /// <summary>
+    /// The OpenBao stand-in's answers (Story 1.26): an AppRole login, and Transit HMAC on
+    /// <c>dep-hmac</c> as HMAC-SHA256 under <see cref="HmacKey"/>, at key version 1. Anything else
+    /// is the default empty 200.
+    /// </summary>
+    public static (int Status, string Body) Custody(string path, string body)
+    {
+        if (path.Contains("/auth/", StringComparison.Ordinal))
+        {
+            return (200, """{"auth":{"client_token":"test-token","lease_duration":3600}}""");
+        }
+
+        if (path.EndsWith("/transit/hmac/dep-hmac", StringComparison.Ordinal))
+        {
+            using var json = JsonDocument.Parse(body);
+            var input = Convert.FromBase64String(json.RootElement.GetProperty("input").GetString()!);
+            return (200, $$$"""{"data":{"hmac":"vault:v1:{{{Convert.ToBase64String(HMACSHA256.HashData(HmacKey, input))}}}"}}""");
+        }
+
+        return (200, "{}");
+    }
+
+    /// <summary>What <c>admin_recovery_code.code_hmac</c> holds for a normalized code: the stand-in's HMAC of the domain-separated input.</summary>
+    public static byte[] RecoveryCodeHmac(string normalized) =>
+        HMACSHA256.HashData(HmacKey, (byte[])[.. "gatekeep-admin-recovery-code\0"u8, .. Encoding.ASCII.GetBytes(normalized)]);
 
     private static string SecretFile(string directory, string name)
     {

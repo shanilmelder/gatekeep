@@ -5,6 +5,12 @@ public enum PublicIdType
 {
     /// <summary><c>ten_</c>: a Tenant, as <c>{tenantId}</c> in a path and <c>{tenantPublicId}</c> in an artifact.</summary>
     Tenant,
+
+    /// <summary>
+    /// <c>acr_</c>: one of an Admin's WebAuthn credentials, by its row, as <c>{credentialId}</c> in a
+    /// path (Story 1.26). Never the WebAuthn credential ID, which no response carries.
+    /// </summary>
+    AdminCredential,
 }
 
 /// <summary>
@@ -27,6 +33,7 @@ public static class PublicId
     public static string Prefix(PublicIdType type) => type switch
     {
         PublicIdType.Tenant => "ten",
+        PublicIdType.AdminCredential => "acr",
         _ => throw new ArgumentOutOfRangeException(nameof(type)),
     };
 

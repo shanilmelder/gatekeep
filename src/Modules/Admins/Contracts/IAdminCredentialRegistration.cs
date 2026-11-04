@@ -18,8 +18,14 @@ public enum CredentialRegistrationStatus
     /// </summary>
     Refused,
 
-    /// <summary>The Admin already has their two credentials: there is nothing to register here.</summary>
+    /// <summary>
+    /// A restricted Session whose Admin already meets the credential floor: there is nothing to
+    /// register here. A recovery Session never gets it: it registers once, whatever the Admin holds.
+    /// </summary>
     Complete,
+
+    /// <summary>The Admin holds <see cref="AdminsContract.MaxCredentials"/> credentials (Story 1.26): nothing was stored.</summary>
+    Maximum,
 
     /// <summary>The Session ended after the request checks authenticated it.</summary>
     SessionEnded,

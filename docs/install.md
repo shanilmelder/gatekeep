@@ -262,7 +262,7 @@ The light and dark toggle in the top bar is kept per browser, in that browser's 
 
 These steps install the stack, not a usable product. What they can't deliver yet, and the work that owns each:
 
-- **A working Admin Dashboard.** Bootstrap, Admin sign-in and the Dashboard's shell work, but the shell has no pages to open yet. Tenant and Deployment pages arrive from Story 1.27 on.
+- **A working Admin Dashboard.** Bootstrap, Admin sign-in and the Dashboard's shell work, and so does Your credentials in the avatar menu, where an Admin adds and removes their passkeys and security keys, each change confirmed with a fresh WebAuthn assertion. The shell has no other pages to open yet. Tenant and Deployment pages arrive from Story 1.27 on.
 - **Certificate Transparency alerts.** Gatekeep raises none yet (Epic 11). Until then watch CT logs yourself for the wildcard `*.id.example.com` and the Admin hostname `admin.example.com`: search crt.sh regularly, or subscribe both names to a CT monitoring service that emails you on each new certificate. Any certificate Caddy didn't obtain is misissued.
 - **Emergency certificate replacement.** No procedure or rehearsal exists yet for a stolen key or misissued certificate (Story 13.6). As a stopgap: revoke the certificate with the CA that issued it (Let's Encrypt or ZeroSSL, through ACME revocation or the CA's own process); roll the Cloudflare token in the dashboard and write the new one to `cloudflare/dns-token`; then remove the certificates from `caddy-data` and restart Caddy, which obtains new ones and a new key:
 

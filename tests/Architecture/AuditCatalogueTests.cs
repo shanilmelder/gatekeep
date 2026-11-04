@@ -235,6 +235,12 @@ public class AuditCatalogueTests
             .Where(f => f.FieldType.FullName == "Gatekeep.Modules.Admins.Contracts.Capability")
             .Select(f => f.GetValue(null)!.ToString()!));
 
+        // So do the self-service fresh-assertion actions (Story 1.26): each one AdminFreshAssertions lists.
+        allowed.UnionWith(((IEnumerable)AuditCatalogue.ModuleAssembly(Root, "Admins", Project)
+            .GetType("Gatekeep.Modules.Admins.Contracts.AdminFreshAssertions", throwOnError: true)!
+            .GetField("SelfActions")!
+            .GetValue(null)!).Cast<string>());
+
         return allowed;
     }
 

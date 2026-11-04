@@ -11,7 +11,9 @@ namespace Gatekeep.Tests.Architecture;
 /// The committed OpenAPI document, which the build generates from the route table and the drift
 /// check holds byte-equal to it, gives every operation one <c>x-gatekeep-access</c>, each named
 /// capability is the table's, with its flags, in its own surface's scope, on no setup-allowed
-/// operation, and none needs a fresh assertion until Story 1.26 enforces it. Around the document:
+/// operation; and its fresh assertion (Story 1.26) is what the table says, enforced by the checks
+/// for <c>Always</c> and by a reviewed handler for a <c>When…</c> predicate, with its 403 problem,
+/// and a self-service route's names a self-service action. Around the document:
 /// no Host.Admin source hides an endpoint from it, every API route is mapped in <c>AdminApi.cs</c>,
 /// a Tenant scope there opens only on the path Tenant, nothing under <c>src/</c> builds a
 /// <c>MachinePrincipal</c>, and no Admins table grants <c>gk_hosted</c> anything. Each rule has
@@ -35,11 +37,27 @@ public class CapabilityRuleTests
     /// <summary>The reviewed self-service routes under <c>/api/v1/deployment</c>: every Admin needs them, the Owner or not.</summary>
     private static readonly string[] SelfService =
     [
+        "delete /api/v1/deployment/credentials/{credentialId}",
         "delete /api/v1/deployment/session",
         "get /api/v1/deployment/capabilities",
+        "get /api/v1/deployment/credentials",
         "get /api/v1/deployment/session",
+        "post /api/v1/deployment/assertions",
+        "post /api/v1/deployment/assertions/complete",
+        "post /api/v1/deployment/credentials/recovery-code",
+        "post /api/v1/deployment/credentials/recovery-code/confirm",
         "post /api/v1/deployment/credentials/registration",
         "post /api/v1/deployment/credentials/registration/complete",
+    ];
+
+    /// <summary>
+    /// The reviewed routes whose handler, not the request checks, uses up their fresh assertion
+    /// (Story 1.26): registration begin, whose need depends on the Session being full. A route
+    /// declaring a <c>When…</c> capability joins this list with the story that maps it.
+    /// </summary>
+    private static readonly string[] HandlerEnforced =
+    [
+        "post /api/v1/deployment/credentials/registration",
     ];
 
     /// <summary>The reviewed sessionless routes: the bootstrap claim and sign-in's begin and complete.</summary>
@@ -48,6 +66,7 @@ public class CapabilityRuleTests
         "post /api/v1/deployment/bootstrap",
         "post /api/v1/deployment/signin",
         "post /api/v1/deployment/signin/complete",
+        "post /api/v1/deployment/signin/recovery-code",
     ];
 
     private static readonly Regex MachinePrincipalConstruction = new(@"\bnew\s+(?:[\w.]+\.)?MachinePrincipal\s*\(", RegexOptions.Compiled);
@@ -108,7 +127,51 @@ public class CapabilityRuleTests
         { TenantPrefix + "x", "post", Capability("tenant.label.manage", "tenant", false, "whenProdTenant"), "needs a fresh assertion" },
         { TenantPrefix + "x", "get", Capability("tenant.configuration.read", "tenant", true, "never", setupAllowed: true), "setup-allowed" },
         { "/api/v1/other", "get", Capability("deployment.tenants.read", "deployment", false, "never"), "outside the Deployment and Tenant surfaces" },
+
+        // Story 1.26: the fresh-assertion requirement is the table's, enforced where it must be.
+        { DeploymentPrefix + "tenants/{x}", "delete", Capability("deployment.tenants.delete", "deployment", false, "always"), "needs a fresh assertion enforced by the checks" },
+        { DeploymentPrefix + "tenants/{x}", "delete", Capability("deployment.tenants.delete", "deployment", false, "always", enforcedBy: "handler"), "must be enforced by the checks" },
+        { DeploymentPrefix + "tenants/{x}", "delete", Capability("deployment.tenants.delete", "deployment", false, "always", enforcedBy: "checks", action: "deployment.admins.manage"), "names action deployment.admins.manage" },
+        { DeploymentPrefix + "tenants/{x}", "delete", Capability("deployment.tenants.delete", "deployment", false, "always", enforcedBy: "checks", problem403: false), "lists no 403 problem" },
+        { TenantPrefix + "label", "put", Capability("tenant.label.manage", "tenant", false, "whenProdTenant", enforcedBy: "checks"), "must be enforced by the handler" },
+        { TenantPrefix + "label", "put", Capability("tenant.label.manage", "tenant", false, "whenProdTenant", enforcedBy: "handler"), "isn't on the reviewed handler-enforced list" },
+        { TenantPrefix + "x", "get", Capability("tenant.configuration.read", "tenant", true, "never", enforcedBy: "checks"), "needs no fresh assertion" },
+        { DeploymentPrefix + "credentials/{credentialId}", "delete", Declared("self", "self.credentials.rename"), "isn't a self-service fresh-assertion action" },
+        { DeploymentPrefix + "credentials/{credentialId}", "delete", Declared("self", "deployment.tenants.delete"), "isn't a self-service fresh-assertion action" },
+        { DeploymentPrefix + "credentials/{credentialId}", "delete", Declared("self", "self.credentials.remove", "handler"), "isn't on the reviewed handler-enforced list" },
+        { DeploymentPrefix + "credentials/{credentialId}", "delete", Declared("self", "self.credentials.remove", setupAllowed: true), "setup-allowed" },
+        { DeploymentPrefix + "credentials/{credentialId}", "delete", Declared("self", "self.credentials.remove", problem403: false), "lists no 403 problem" },
+        { DeploymentPrefix + "signin", "post", Declared("sessionless", "self.credentials.add"), "is sessionless" },
     };
+
+    [Fact]
+    public void Fresh_assertion_rule_accepts_each_enforcement_where_it_belongs()
+    {
+        var operations = new (string Path, string Method, string Json)[]
+        {
+            (DeploymentPrefix + "credentials/{credentialId}", "delete", Declared("self", "self.credentials.remove")),
+            (DeploymentPrefix + "credentials/registration", "post", Declared("self", "self.credentials.add", "handler", setupAllowed: true)),
+        };
+
+        var problems = operations.SelectMany(o =>
+        {
+            using var json = JsonDocument.Parse(o.Json);
+            return AccessProblems([(o.Path, o.Method, json.RootElement.Clone())], Table());
+        });
+
+        Assert.Empty(problems);
+    }
+
+    [Fact]
+    public void Fresh_assertion_rule_holds_the_routes_this_story_declares()
+    {
+        var operations = Operations(Load()).ToDictionary(o => $"{o.Method} {o.Path}", o => o.Operation);
+
+        Assert.Equal("checks", Fresh(operations["delete /api/v1/deployment/credentials/{credentialId}"])!.EnforcedBy);
+        Assert.Equal("credentialId", Fresh(operations["delete /api/v1/deployment/credentials/{credentialId}"])!.Target);
+        Assert.Equal("handler", Fresh(operations["post /api/v1/deployment/credentials/registration"])!.EnforcedBy);
+        Assert.Equal(HandlerEnforced.Order(), operations.Where(o => Fresh(o.Value)?.EnforcedBy == "handler").Select(o => o.Key).Order());
+    }
 
     [Theory]
     [MemberData(nameof(Violations))]
@@ -371,21 +434,114 @@ public class CapabilityRuleTests
                         problems.Add($"{name} is setup-allowed but declares {capability}: a restricted Session holds none.");
                     }
 
-                    // Lifted by Story 1.26, which enforces fresh assertions.
-                    if (row.FreshAssertion != "never")
+                    // Story 1.26: the table's flag decides the requirement, and who enforces it.
+                    var expected = row.FreshAssertion switch
                     {
-                        problems.Add($"{name}: {capability} needs a fresh assertion, which no route may declare before Story 1.26.");
-                    }
-
+                        "never" => null,
+                        "always" => "checks",
+                        _ => "handler",
+                    };
+                    problems.AddRange(FreshProblems(name, operation, expected, capability, setupAllowed));
                     break;
 
                 default:
                     problems.Add($"{name} has an unknown access kind {kind}.");
                     break;
             }
+
+            if (kind == "self" && Fresh(operation) is { } self)
+            {
+                if (!SelfActions().Contains(self.Action))
+                {
+                    problems.Add($"{name}: {self.Action} isn't a self-service fresh-assertion action.");
+                }
+                else
+                {
+                    problems.AddRange(FreshProblems(name, operation, self.EnforcedBy, self.Action, setupAllowed));
+                }
+            }
+
+            if (kind == "sessionless" && Fresh(operation) is not null)
+            {
+                problems.Add($"{name} is sessionless, so it can't need a fresh assertion.");
+            }
         }
 
         return problems;
+    }
+
+    /// <summary>
+    /// Story 1.26: an operation's <c>x-gatekeep-fresh-assertion</c> against what it must be. A null
+    /// <paramref name="enforcedBy"/> means none. Checks-enforced is never setup-allowed, a
+    /// handler-enforced route is on the reviewed list, and every one lists the 403 problem.
+    /// </summary>
+    private static List<string> FreshProblems(string name, JsonElement operation, string? enforcedBy, string action, bool setupAllowed)
+    {
+        var problems = new List<string>();
+        var fresh = Fresh(operation);
+        if (enforcedBy is null)
+        {
+            if (fresh is not null)
+            {
+                problems.Add($"{name}: {action} needs no fresh assertion, but the route declares one.");
+            }
+
+            return problems;
+        }
+
+        if (fresh is null)
+        {
+            problems.Add($"{name}: {action} needs a fresh assertion enforced by the {enforcedBy}, but the route declares none.");
+            return problems;
+        }
+
+        if (fresh.Action != action)
+        {
+            problems.Add($"{name}: its fresh assertion names action {fresh.Action}, not {action}.");
+        }
+
+        if (fresh.EnforcedBy != enforcedBy)
+        {
+            problems.Add($"{name}: {action}'s fresh assertion must be enforced by the {enforcedBy}, not the {fresh.EnforcedBy}.");
+        }
+
+        if (fresh.EnforcedBy == "handler" && !HandlerEnforced.Contains(name))
+        {
+            problems.Add($"{name}: its handler enforces its fresh assertion, but it isn't on the reviewed handler-enforced list.");
+        }
+
+        if (fresh.EnforcedBy == "checks" && setupAllowed)
+        {
+            problems.Add($"{name} is setup-allowed, so a checks-enforced fresh assertion could never be met.");
+        }
+
+        if (!(operation.TryGetProperty("responses", out var responses)
+            && responses.TryGetProperty("403", out var refused)
+            && refused.TryGetProperty("content", out var content)
+            && content.TryGetProperty("application/problem+json", out _)))
+        {
+            problems.Add($"{name} needs a fresh assertion but lists no 403 problem for fresh_assertion_required.");
+        }
+
+        return problems;
+    }
+
+    private sealed record FreshDeclaration(string Action, string? Target, string EnforcedBy);
+
+    private static FreshDeclaration? Fresh(JsonElement operation) =>
+        operation.TryGetProperty("x-gatekeep-fresh-assertion", out var fresh) && fresh.ValueKind == JsonValueKind.Object
+            ? new FreshDeclaration(
+                fresh.TryGetProperty("action", out var a) ? a.GetString() ?? string.Empty : string.Empty,
+                fresh.TryGetProperty("target", out var t) && t.ValueKind == JsonValueKind.String ? t.GetString() : null,
+                fresh.TryGetProperty("enforcedBy", out var e) ? e.GetString() ?? string.Empty : string.Empty)
+            : null;
+
+    /// <summary>The self-service fresh-assertion actions, read by reflection from the Admins build output.</summary>
+    private static IReadOnlyList<string> SelfActions()
+    {
+        var assembly = Assembly.LoadFrom(Path.Combine(Root, "src/Modules/Admins", Output(), "Gatekeep.Modules.Admins.dll"));
+        var actions = assembly.GetType("Gatekeep.Modules.Admins.Contracts.AdminFreshAssertions", throwOnError: true)!;
+        return [.. ((IEnumerable)actions.GetField("SelfActions")!.GetValue(null)!).Cast<string>()];
     }
 
     /// <summary>Every API route mapped outside <c>AdminApi.cs</c>, and every fallback outside <c>Program.cs</c>.</summary>
@@ -466,11 +622,17 @@ public class CapabilityRuleTests
     private static IEnumerable<string> Roles(object? grants) =>
         grants is null ? [] : ((IEnumerable)grants).Cast<object>().Select(g => (string)Get(g, "Key")!);
 
-    private static string Capability(string name, string scope, bool machineAllowed, string freshAssertion, bool setupAllowed = false) =>
-        JsonSerializer.Serialize(new Dictionary<string, object>
-        {
-            ["x-gatekeep-setup-allowed"] = setupAllowed,
-            ["x-gatekeep-access"] = new Dictionary<string, object>
+    private static string Capability(
+        string name,
+        string scope,
+        bool machineAllowed,
+        string freshAssertion,
+        bool setupAllowed = false,
+        string? enforcedBy = null,
+        string? action = null,
+        bool problem403 = true) =>
+        JsonSerializer.Serialize(Operation(
+            new Dictionary<string, object>
             {
                 ["kind"] = "capability",
                 ["capability"] = name,
@@ -478,7 +640,47 @@ public class CapabilityRuleTests
                 ["machineAllowed"] = machineAllowed,
                 ["freshAssertion"] = freshAssertion,
             },
-        });
+            setupAllowed,
+            enforcedBy is null ? null : (action ?? name, enforcedBy),
+            problem403));
+
+    /// <summary>A self-service or sessionless operation, with a fresh assertion when <paramref name="action"/> is given.</summary>
+    private static string Declared(string kind, string? action = null, string enforcedBy = "checks", bool setupAllowed = false, bool problem403 = true) =>
+        JsonSerializer.Serialize(Operation(
+            new Dictionary<string, object> { ["kind"] = kind },
+            setupAllowed,
+            action is null ? null : (action, enforcedBy),
+            problem403));
+
+    private static Dictionary<string, object> Operation(
+        Dictionary<string, object> access,
+        bool setupAllowed,
+        (string Action, string EnforcedBy)? fresh,
+        bool problem403)
+    {
+        var operation = new Dictionary<string, object>
+        {
+            ["x-gatekeep-setup-allowed"] = setupAllowed,
+            ["x-gatekeep-access"] = access,
+        };
+        if (fresh is { } f)
+        {
+            operation["x-gatekeep-fresh-assertion"] = new Dictionary<string, object?> { ["action"] = f.Action, ["target"] = null, ["enforcedBy"] = f.EnforcedBy };
+        }
+
+        if (problem403)
+        {
+            operation["responses"] = new Dictionary<string, object>
+            {
+                ["403"] = new Dictionary<string, object>
+                {
+                    ["content"] = new Dictionary<string, object> { ["application/problem+json"] = new Dictionary<string, object>() },
+                },
+            };
+        }
+
+        return operation;
+    }
 
     /// <summary>The capability table, by name, read by reflection from the Admins build output, in the document's spelling.</summary>
     private static Dictionary<string, (string Scope, bool MachineAllowed, string FreshAssertion)> Table()
