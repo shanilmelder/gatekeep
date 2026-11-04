@@ -39,6 +39,12 @@ internal sealed class FakeOpenBaoSocket : IDisposable
     /// </summary>
     public Func<string, (int Status, string Body)>? Respond { get; set; }
 
+    /// <summary>
+    /// Answers by request path and body, when set, before <see cref="Respond"/>: for example a
+    /// Transit HMAC computed from the input it was sent (Story 1.26).
+    /// </summary>
+    public Func<string, string, (int Status, string Body)>? RespondToBody { get; set; }
+
     public void Dispose()
     {
         // A test may stop OpenBao early, and the class disposes it again at the end.
@@ -91,8 +97,28 @@ internal sealed class FakeOpenBaoSocket : IDisposable
                     request.Append(Encoding.ASCII.GetString(buffer, 0, read));
                 }
 
-                var path = request.ToString().Split(' ', 3) is [_, var target, _] ? target : string.Empty;
-                var (status, text) = Respond?.Invoke(path) ?? (Status, Body);
+                var head = request.ToString();
+                var path = head.Split(' ', 3) is [_, var target, _] ? target : string.Empty;
+
+                // The body follows the headers, Content-Length bytes of it.
+                var split = head.IndexOf("\r\n\r\n", StringComparison.Ordinal) + 4;
+                var received = Encoding.ASCII.GetBytes(head[split..]).ToList();
+                var length = System.Text.RegularExpressions.Regex.Match(head[..split], @"(?im)^content-length:\s*(\d+)") is { Success: true } m
+                    ? int.Parse(m.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture)
+                    : 0;
+                while (received.Count < length)
+                {
+                    var read = await client.ReceiveAsync(buffer);
+                    if (read == 0)
+                    {
+                        break;
+                    }
+
+                    received.AddRange(buffer.AsSpan(0, read).ToArray());
+                }
+
+                var requestBody = Encoding.UTF8.GetString([.. received]);
+                var (status, text) = RespondToBody?.Invoke(path, requestBody) ?? Respond?.Invoke(path) ?? (Status, Body);
                 var body = Encoding.UTF8.GetBytes(text);
                 byte[] response =
                 [

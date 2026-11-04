@@ -159,7 +159,7 @@ public sealed class CredentialRegistrationTests(PostgresFixture postgres)
     }
 
     [Fact]
-    public async Task Admin_with_two_credentials_is_refused_a_third_registration()
+    public async Task Admin_with_two_credentials_adds_a_third_only_after_a_fresh_assertion()
     {
         await using var host = await AdminHost.StartAsync(postgres);
         var (cookie, csrf, _) = await host.ClaimedAsync();
@@ -169,17 +169,75 @@ public sealed class CredentialRegistrationTests(PostgresFixture postgres)
         await host.RegisterAsync(cookie, csrf, first);
         await host.RegisterAsync(cookie, csrf, second);
 
+        // The Session is full now (Story 1.26): a third is an add, which needs a fresh assertion.
+        var (begin, _) = await host.BeginRegistrationAsync(cookie, csrf);
+        using (begin)
+        {
+            await FreshAssertionTests.AssertProblemAsync(begin, HttpStatusCode.Forbidden, "fresh_assertion_required");
+        }
+
+        // No begin passed, so no challenge is pending to complete.
+        using var complete = await host.CompleteRegistrationAsync(cookie, csrf, third.Attest(RpId, Base64Url.EncodeToString(new byte[32]), AdminHost.Origin));
+        await AssertRefusedAsync(complete);
+        Assert.Equal(2L, await host.ScalarAsync<long>("SELECT count(*) FROM admin_credential"));
+        Assert.True(await host.ScalarAsync<bool>("SELECT registration_challenge_sha256 IS NULL FROM admin_session"));
+    }
+
+    [Fact]
+    public async Task A_challenge_begun_in_setup_is_voided_when_another_Session_reaches_the_floor()
+    {
+        await using var host = await AdminHost.StartAsync(postgres);
+        var (a, aCsrf, _) = await host.ClaimedAsync();
+        using var first = new SoftwareAuthenticator();
+        using var second = new SoftwareAuthenticator();
+        using var third = new SoftwareAuthenticator();
+        await host.RegisterAsync(a, aCsrf, first);
+
+        // A second setup Session of the same Owner, as another tab's would be.
+        var raw = RandomNumberGenerator.GetBytes(32);
+        await PostgresFixture.ExecuteAsync(
+            host.Superuser,
+            $"""
+            INSERT INTO admin_session (id, id_hash, admin_id, kind, created_at, idle_expires_at, absolute_expires_at)
+            SELECT gen_random_uuid(), '\x{Convert.ToHexStringLower(SHA256.HashData(raw))}', admin_id, 'setup', now(), now() + interval '30 minutes', now() + interval '8 hours'
+            FROM admin_session
+            """);
+        var b = Base64Url.EncodeToString(raw);
+
+        // A begins, unconfirmed as setup allows; then B reaches the floor.
+        var (begin, options) = await host.BeginRegistrationAsync(a, aCsrf);
+        begin.Dispose();
+        await host.RegisterAsync(b, AdminHost.Csrf(b), second);
+
+        Assert.True(await host.ScalarAsync<bool>(
+            $"SELECT registration_challenge_sha256 IS NULL FROM admin_session WHERE id_hash <> '\\x{Convert.ToHexStringLower(SHA256.HashData(raw))}'"));
+        using var late = await host.CompleteRegistrationAsync(a, aCsrf, third.Attest(options, AdminHost.Origin));
+        await AssertRefusedAsync(late);
+        Assert.Equal(2L, await host.ScalarAsync<long>("SELECT count(*) FROM admin_credential"));
+    }
+
+    [Fact]
+    public async Task A_setup_Session_that_meets_the_floor_elsewhere_is_refused_with_a_bodiless_403()
+    {
+        await using var host = await AdminHost.StartAsync(postgres);
+        var (cookie, csrf, _) = await host.ClaimedAsync();
+        using var first = new SoftwareAuthenticator();
+        await host.RegisterAsync(cookie, csrf, first);
+
+        // Its Admin reached two credentials through another Session; this one still says setup.
+        await PostgresFixture.ExecuteAsync(
+            host.Superuser,
+            """
+            INSERT INTO admin_credential (id, admin_id, credential_id, public_key, sign_count, aaguid)
+            SELECT gen_random_uuid(), id, '\x0b0b', '\x01', 0, gen_random_uuid() FROM admin
+            """);
+
         var (begin, _) = await host.BeginRegistrationAsync(cookie, csrf);
         using (begin)
         {
             Assert.Equal(HttpStatusCode.Forbidden, begin.StatusCode);
             Assert.Empty(await begin.Content.ReadAsByteArrayAsync(Cancellation));
         }
-
-        using var complete = await host.CompleteRegistrationAsync(cookie, csrf, third.Attest(RpId, Base64Url.EncodeToString(new byte[32]), AdminHost.Origin));
-        Assert.Equal(HttpStatusCode.Forbidden, complete.StatusCode);
-        Assert.Equal(2L, await host.ScalarAsync<long>("SELECT count(*) FROM admin_credential"));
-        Assert.True(await host.ScalarAsync<bool>("SELECT registration_challenge_sha256 IS NULL FROM admin_session"));
     }
 
     [Fact]
@@ -252,11 +310,6 @@ public sealed class CredentialRegistrationTests(PostgresFixture postgres)
             Assert.Equal(HttpStatusCode.Forbidden, capabilities.StatusCode);
         }
 
-        using (var signOut = await host.SendAsync(HttpMethod.Delete, SessionPath, cookie, csrf, AdminHost.Origin))
-        {
-            Assert.Equal(HttpStatusCode.Forbidden, signOut.StatusCode);
-        }
-
         // Setup itself stays reachable.
         using (var session = await host.SendAsync(HttpMethod.Get, SessionPath, cookie))
         {
@@ -267,6 +320,12 @@ public sealed class CredentialRegistrationTests(PostgresFixture postgres)
         using (begin)
         {
             Assert.Equal(HttpStatusCode.OK, begin.StatusCode);
+        }
+
+        // And so does signing out (Story 1.26): any Session can always end itself.
+        using (var signOut = await host.SendAsync(HttpMethod.Delete, SessionPath, cookie, csrf, AdminHost.Origin))
+        {
+            Assert.Equal(HttpStatusCode.NoContent, signOut.StatusCode);
         }
     }
 

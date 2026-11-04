@@ -6,7 +6,7 @@ namespace Gatekeep.Host.Admin;
 /// <summary>A refusal's body: a fixed code and the trace ID support asks for, and nothing else.</summary>
 public sealed class ApiProblem
 {
-    /// <summary>A fixed code: <c>bootstrap_refused</c>, <c>credential_refused</c>, <c>signin_refused</c>, <c>rate_limited</c> or <c>access_denied</c>.</summary>
+    /// <summary>A fixed code, one of the document's closed set, such as <c>access_denied</c> or <c>fresh_assertion_required</c>.</summary>
     public required string Code { get; init; }
 
     /// <summary>The request's W3C trace ID, which the host's log line for the refusal carries too.</summary>
@@ -34,8 +34,48 @@ internal static class AdminResponses
     /// </summary>
     public const string AccessDenied = "access_denied";
 
+    /// <summary>
+    /// A sensitive action with no fresh assertion bound to its Session, action and target (Story
+    /// 1.26): the Admin is allowed, only unconfirmed. Logged, never audited.
+    /// </summary>
+    public const string FreshAssertionRequired = "fresh_assertion_required";
+
+    /// <summary>Every refused fresh-assertion begin or complete (Story 1.26), whatever the reason: nothing says why.</summary>
+    public const string AssertionRefused = "assertion_refused";
+
+    /// <summary>A removal that would leave the Admin fewer than two credentials (Story 1.26).</summary>
+    public const string CredentialsMinimum = "credentials_minimum";
+
+    /// <summary>A registration for an Admin who holds the most credentials allowed (Story 1.26).</summary>
+    public const string CredentialsMaximum = "credentials_maximum";
+
+    /// <summary>Every refused Recovery Code (Story 1.26): wrong, unconfirmed, used or malformed alike.</summary>
+    public const string RecoveryCodeRefused = "recovery_code_refused";
+
+    /// <summary>A Recovery Code confirmation naming an issue that isn't the Admin's current unconfirmed code (Story 1.26).</summary>
+    public const string RecoveryCodeSuperseded = "recovery_code_superseded";
+
+    /// <summary>The SQLSTATE the credential floor and maximum triggers raise, and nothing else (Story 1.26).</summary>
+    public const string RaisedByTrigger = "GK001";
+
+    /// <summary>A foreign key a write broke, such as a credential removed under a grant being stored.</summary>
+    public const string ForeignKeyViolation = "23503";
+
     /// <summary>Every problem code a body can carry, for the OpenAPI document.</summary>
-    public static readonly IReadOnlyList<string> ProblemCodes = [BootstrapRefused, CredentialRefused, SignInRefused, RateLimited, AccessDenied];
+    public static readonly IReadOnlyList<string> ProblemCodes =
+    [
+        BootstrapRefused,
+        CredentialRefused,
+        SignInRefused,
+        RateLimited,
+        AccessDenied,
+        FreshAssertionRequired,
+        AssertionRefused,
+        CredentialsMinimum,
+        CredentialsMaximum,
+        RecoveryCodeRefused,
+        RecoveryCodeSuperseded,
+    ];
 
     /// <summary>The Session cookie, expired: sent with a sign-out and a 401 for a stale cookie.</summary>
     public static readonly string ClearedSessionCookie =
@@ -130,6 +170,14 @@ internal static class AdminResponses
     /// <summary>A capability refusal: 403 with the one <c>access_denied</c> body and the trace ID, never cached.</summary>
     public static Task AccessDeniedAsync(HttpContext context) =>
         ProblemAsync(context, StatusCodes.Status403Forbidden, AccessDenied);
+
+    /// <summary>A 429 with <c>Retry-After</c> in whole seconds, at least 1.</summary>
+    public static Task RateLimitedAsync(HttpContext context, Gatekeep.Kernel.RateLimiting.RateLimitDecision decision)
+    {
+        context.Response.Headers.RetryAfter = Math.Max(1, (long)Math.Ceiling(decision.RetryAfter.TotalSeconds))
+            .ToString(System.Globalization.CultureInfo.InvariantCulture);
+        return ProblemAsync(context, StatusCodes.Status429TooManyRequests, RateLimited);
+    }
 
     public static Task ProblemAsync(HttpContext context, int status, string code)
     {

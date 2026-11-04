@@ -3,6 +3,7 @@ using Gatekeep.Adapters.Fido2;
 using Gatekeep.Adapters.Hosting;
 using Gatekeep.Kernel.Persistence;
 using Gatekeep.Kernel.RateLimiting;
+using Gatekeep.Kernel.Secrets;
 using Gatekeep.Modules.Admins.Contracts;
 using Gatekeep.Modules.Audit.Contracts;
 using Npgsql;
@@ -43,6 +44,8 @@ internal sealed class AdminApiServices : IAsyncDisposable
         Sessions = AdminsContract.CreateSessions(AuditContract.CreateAppender());
         SignIn = AdminsContract.CreateSignIn(AuditContract.CreateAppender(), Fido2WebAuthn.Create());
         Authorization = AdminsContract.CreateAuthorization(AuditContract.CreateAppender());
+        FreshAssertions = AdminsContract.CreateFreshAssertions(AuditContract.CreateAppender(), Fido2WebAuthn.Create());
+        Credentials = AdminsContract.CreateCredentials(AuditContract.CreateAppender());
     }
 
     public IRateLimiter Limiter { get; } = AdminsContract.CreateAttemptLimiter();
@@ -59,6 +62,19 @@ internal sealed class AdminApiServices : IAsyncDisposable
 
     /// <summary>The capability authorizer (Story 1.24): every capability route is decided by it, reading Tenant Roles on each request.</summary>
     public IAdminAuthorization Authorization { get; }
+
+    /// <summary>Fresh WebAuthn assertions for sensitive actions (Story 1.26): the ceremony and the grants the checks use up.</summary>
+    public IAdminFreshAssertions FreshAssertions { get; }
+
+    /// <summary>Your credentials (Story 1.26): the Admin's own list, and removal under the floor.</summary>
+    public IAdminCredentials Credentials { get; }
+
+    /// <summary>
+    /// Admin Recovery Codes (Story 1.26), over this host's key custody, which computes the
+    /// Deployment HMAC and decrypts nothing. Made per call: custody is resolved from the request.
+    /// </summary>
+    public IAdminRecoveryCodes RecoveryCodes(IKeyCustody custody) =>
+        AdminsContract.CreateRecoveryCodes(AuditContract.CreateAppender(), custody);
 
     /// <summary>The claims in flight in this process: <see cref="MaxConcurrentClaims"/> slots.</summary>
     public SemaphoreSlim ClaimSlots { get; } = new(MaxConcurrentClaims, MaxConcurrentClaims);

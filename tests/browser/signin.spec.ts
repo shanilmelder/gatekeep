@@ -176,7 +176,9 @@ test('the screen asks for no email, password or username, only the passkey sheet
   await expect(signInButton(page)).toBeVisible();
   await expect(page.locator('input, textarea, select')).toHaveCount(0);
   await expect(page.getByRole('textbox')).toHaveCount(0);
-  await expect(page.getByRole('link')).toHaveCount(0);
+  // One link only (Story 1.26): to the offline Recovery Code entry.
+  await expect(page.getByRole('link')).toHaveText(['Use a recovery code']);
+  await expect(page.getByRole('link', { name: 'Use a recovery code' })).toHaveAttribute('href', '/signin/recovery');
   await noViolations();
 });
 

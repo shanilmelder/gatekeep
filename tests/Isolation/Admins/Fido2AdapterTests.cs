@@ -300,12 +300,56 @@ public sealed class Fido2AdapterTests
         Assert.Throws<ArgumentException>(() => verifier.BeginAssertion(new WebAuthnAssertionBegin(Admin with { Origin = "https://elsewhere.test" }, new byte[32])));
     }
 
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public async Task Backup_flags_are_read_and_a_changed_BE_is_refused(bool eligible, bool backedUp)
+    {
+        var verifier = Fido2WebAuthn.Create();
+        using var authenticator = new SoftwareAuthenticator { UserHandle = User.Handle, BackupEligible = eligible, BackedUp = backedUp };
+
+        var registered = await FinishAsync(verifier, Admin, RandomNumberGenerator.GetBytes(32), authenticator, Admin.Id, Admin.Origin);
+        Assert.True(registered.Verified, $"{registered.Refusal}");
+        Assert.Equal((eligible, backedUp), (registered.Credential!.BackupEligible, registered.Credential.BackedUp));
+
+        // BS may change between assertions, and the result says the new one.
+        var stored = await RegisteredAsync(verifier, Admin, authenticator) with { SignCount = authenticator.Counter };
+        var flipped = await AssertAsync(
+            verifier, Admin, RandomNumberGenerator.GetBytes(32), authenticator, stored, Admin.Id, Admin.Origin,
+            new AssertionTweaks { BackedUp = eligible && !backedUp });
+        Assert.True(flipped.Verified, $"{flipped.Refusal}");
+        Assert.Equal(eligible && !backedUp, flipped.BackedUp);
+
+        // BE never changes for a credential: an assertion with the other one isn't this credential's.
+        var changed = await AssertAsync(
+            verifier, Admin, RandomNumberGenerator.GetBytes(32), authenticator, stored with { SignCount = authenticator.Counter }, Admin.Id, Admin.Origin,
+            new AssertionTweaks { BackupEligible = !eligible, BackedUp = false });
+        Assert.Equal(WebAuthnRefusal.Invalid, changed.Refusal);
+        Assert.False(changed.SignatureVerified);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task An_unknown_stored_BE_is_reported_not_compared(bool eligible)
+    {
+        var verifier = Fido2WebAuthn.Create();
+        using var authenticator = new SoftwareAuthenticator { UserHandle = User.Handle, BackupEligible = eligible };
+        var stored = await RegisteredAsync(verifier, Admin, authenticator) with { SignCount = authenticator.Counter, BackupEligible = null };
+
+        var result = await AssertAsync(verifier, Admin, RandomNumberGenerator.GetBytes(32), authenticator, stored, Admin.Id, Admin.Origin);
+
+        Assert.True(result.Verified, $"{result.Refusal}");
+        Assert.Equal(eligible, result.BackupEligible);
+    }
+
     /// <summary>Registers <paramref name="authenticator"/> for <paramref name="party"/>, as stored: its ID, key and counter, and the user's handle.</summary>
     private static async Task<WebAuthnStoredCredential> RegisteredAsync(IWebAuthnVerifier verifier, WebAuthnRelyingParty party, SoftwareAuthenticator authenticator)
     {
         var registered = await FinishAsync(verifier, party, RandomNumberGenerator.GetBytes(32), authenticator, party.Id, party.Origin);
         Assert.True(registered.Verified, $"{registered.Refusal}");
-        return new WebAuthnStoredCredential(registered.Credential!.CredentialId, registered.Credential.PublicKey, registered.Credential.SignCount, User.Handle);
+        return new WebAuthnStoredCredential(registered.Credential!.CredentialId, registered.Credential.PublicKey, registered.Credential.SignCount, User.Handle, registered.Credential.BackupEligible);
     }
 
     private static Task<WebAuthnAssertionResult> AssertAsync(

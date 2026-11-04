@@ -23,9 +23,6 @@ internal sealed class AdminSignIn(IAuditAppender appender, IWebAuthnVerifier ver
 {
     private const int ChallengeBytes = 32;
 
-    // admin_credential's CHECK on the credential ID, refused here before the database sees it.
-    private const int MaxCredentialIdBytes = 1023;
-
     private const string SweepExpired = "DELETE FROM admin_signin_challenge WHERE expires_at <= clock_timestamp()";
 
     private const string DeleteBinding = "DELETE FROM admin_signin_challenge WHERE binding_hash = @binding";
@@ -44,23 +41,6 @@ internal sealed class AdminSignIn(IAuditAppender appender, IWebAuthnVerifier ver
         WHERE binding_hash = @binding
         RETURNING challenge_sha256, expires_at > clock_timestamp()
         """;
-
-    private const string LockCredential =
-        """
-        SELECT c.id, c.admin_id, c.public_key, c.sign_count, a.webauthn_handle
-        FROM admin_credential AS c
-        JOIN admin AS a ON a.id = c.admin_id
-        WHERE c.credential_id = @credential
-        FOR UPDATE OF c, a
-        """;
-
-    private const string AdvanceCounter =
-        """
-        UPDATE admin_credential SET sign_count = @new, last_used_at = clock_timestamp()
-        WHERE id = @id AND sign_count = @stored
-        """;
-
-    private const string CountCredentials = "SELECT count(*)::int FROM admin_credential WHERE admin_id = @admin";
 
     private static readonly AuditTypeCode Succeeded = AdminsEvents.SignInSucceeded.Code;
 
@@ -142,77 +122,21 @@ internal sealed class AdminSignIn(IAuditAppender appender, IWebAuthnVerifier ver
         ArgumentNullException.ThrowIfNull(challengeSha256);
         ArgumentNullException.ThrowIfNull(assertion);
 
-        if (assertion.CredentialId is not { Length: >= 1 and <= MaxCredentialIdBytes })
+        var check = await AdminAssertions.CheckAsync(context, verifier, relyingParty, challengeSha256, assertion, owner: null, cancellationToken);
+        switch (check.Kind)
         {
-            return AdminSignInOutcome.Unattributed(WebAuthnRefusal.Malformed);
+            case AssertionCheckKind.Unattributed:
+                // Nothing proves the credential's holder sent it, so it is logged, not audited.
+                return AdminSignInOutcome.Unattributed(check.Refusal ?? WebAuthnRefusal.Invalid);
+
+            case AssertionCheckKind.Regressed:
+            case AssertionCheckKind.Failed:
+                // The holder's own signature: a possible clone, or the compare-and-set's miss.
+                await AppendRefusalAsync(context, check.Kind == AssertionCheckKind.Regressed ? Regressed : Failed, check.AdminId, cancellationToken);
+                return new AdminSignInOutcome(AdminSignInStatus.Refused, null, false, check.Refusal, Audited: true);
         }
 
-        Guid credentialRow;
-        Guid adminId;
-        byte[] publicKey;
-        uint storedCount;
-        byte[]? handle;
-        await using (var command = context.CreateCommand())
-        {
-            command.CommandText = LockCredential;
-            AdminSessions.Add(command, "credential", assertion.CredentialId);
-            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-            if (!await reader.ReadAsync(cancellationToken))
-            {
-                // No Admin credential has this ID, a Tenant User's passkey included: nobody to audit.
-                return AdminSignInOutcome.Unattributed(WebAuthnRefusal.Invalid);
-            }
-
-            credentialRow = reader.GetGuid(0);
-            adminId = reader.GetGuid(1);
-            publicKey = reader.GetFieldValue<byte[]>(2);
-            storedCount = checked((uint)reader.GetInt64(3));
-            handle = reader.IsDBNull(4) ? null : reader.GetFieldValue<byte[]>(4);
-        }
-
-        // Every credential's Admin has a handle, made at their first registration's begin; one
-        // without is refused before any signature is checked, so it is only logged.
-        var result = handle is null
-            ? WebAuthnAssertionResult.Refused(WebAuthnRefusal.UserHandleMismatch)
-            : await verifier.FinishAssertionAsync(
-                new WebAuthnAssertionFinish(
-                    relyingParty,
-                    challengeSha256,
-                    assertion,
-                    new WebAuthnStoredCredential(assertion.CredentialId, publicKey, storedCount, handle)),
-                cancellationToken);
-
-        if (!result.Verified || !result.UserVerified)
-        {
-            var refusal = result.Refusal ?? WebAuthnRefusal.UserNotVerified;
-            if (!result.SignatureVerified)
-            {
-                // A bad signature, a user handle or RP that isn't this credential's, and the rest:
-                // nothing proves the credential's holder sent it, so it is logged, not audited.
-                return AdminSignInOutcome.Unattributed(refusal);
-            }
-
-            // The holder's own signature with a counter that didn't go up. Under the row lock a
-            // lower counter after a higher one is indistinguishable from a clone, and is one here.
-            await AppendRefusalAsync(context, refusal == WebAuthnRefusal.SignCountRegressed ? Regressed : Failed, adminId, cancellationToken);
-            return new AdminSignInOutcome(AdminSignInStatus.Refused, null, false, refusal, Audited: true);
-        }
-
-        await using (var command = context.CreateCommand())
-        {
-            command.CommandText = AdvanceCounter;
-            AdminSessions.Add(command, "new", (long)result.SignCount);
-            AdminSessions.Add(command, "id", credentialRow);
-            AdminSessions.Add(command, "stored", (long)storedCount);
-            if (await command.ExecuteNonQueryAsync(cancellationToken) != 1)
-            {
-                // Defence in depth: the row lock serialises sign-ins with one credential, so the
-                // counter can't move between the read and here. If it ever did, the signature had
-                // verified, so the refusal is the credential holder's and is audited as failed.
-                await AppendRefusalAsync(context, Failed, adminId, cancellationToken);
-                return new AdminSignInOutcome(AdminSignInStatus.Refused, null, false, WebAuthnRefusal.Invalid, Audited: true);
-            }
-        }
+        var adminId = check.AdminId;
 
         // One browser holds one live Admin Session: the one it presented is replaced.
         if (presentedSession is not null)
@@ -222,13 +146,7 @@ internal sealed class AdminSignIn(IAuditAppender appender, IWebAuthnVerifier ver
 
         var session = await AdminSessions.StartAsync(context, adminId, AdminSessionKind.Full, cancellationToken);
 
-        int credentials;
-        await using (var command = context.CreateCommand())
-        {
-            command.CommandText = CountCredentials;
-            AdminSessions.Add(command, "admin", adminId);
-            credentials = (int)(await command.ExecuteScalarAsync(cancellationToken))!;
-        }
+        var (credentials, recoveryCode) = await AdminSessions.FloorAsync(context, adminId, cancellationToken);
 
         await appender.AppendAsync(
             context,
@@ -239,7 +157,7 @@ internal sealed class AdminSignIn(IAuditAppender appender, IWebAuthnVerifier ver
         return new AdminSignInOutcome(
             AdminSignInStatus.SignedIn,
             session,
-            credentials >= AdminsContract.RequiredCredentials,
+            AdminSession.MeetsFloor(credentials, recoveryCode),
             null,
             Audited: true);
     }

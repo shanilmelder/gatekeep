@@ -73,14 +73,14 @@ export interface paths {
         };
         /**
          * The current Admin Session and its CSRF token.
-         * @description Setup-allowed and read-only: the CSRF token is the Session's, the same each time and in every tab.
+         * @description Setup-allowed and recovery-allowed, and read-only: the CSRF token is the Session's, the same each time and in every tab. recoveryCodeAllowed says whether credential setup may offer an offline Recovery Code.
          */
         get: operations["GetSession"];
         put?: never;
         post?: never;
         /**
          * Sign out: end the current Admin Session.
-         * @description Ends the Session as signed_out, writes admin.session.signed_out, and clears the cookie. Not setup-allowed: a setup Session signing out would leave the Deployment Owner unable to finish setup.
+         * @description Ends the Session as signed_out, writes admin.session.signed_out, and clears the cookie. Setup-allowed and recovery-allowed: any Session can always sign out. A Deployment Owner who signs out of setup before registering a credential can't sign in again without gatekeep recover-admin.
          */
         delete: operations["EndSession"];
         options?: never;
@@ -99,7 +99,7 @@ export interface paths {
         put?: never;
         /**
          * Begin registering a WebAuthn credential: the options for navigator.credentials.create.
-         * @description Setup-allowed. Returns creation options for the Admin RP ID and origin, with no attestation, user verification required, a resident key required, ES256 and RS256, and the Admin's credentials excluded. Its challenge can be answered for 5 minutes, by the next complete call only; a new begin replaces it. Refused with 403 once the Admin has two credentials. Each begin and complete counts towards 10 per Session in 15 minutes, then 429.
+         * @description Setup-allowed. Returns creation options for the Admin RP ID and origin, with no attestation, user verification required, a resident key required, ES256 and RS256, and the Admin's credentials excluded. Its challenge can be answered for 5 minutes, by the next complete call only; a new begin replaces it. In a setup or recovery Session it needs nothing more: a setup Session registers while its Admin is below the floor of two credentials, or one and a Recovery Code, and is refused with a bodiless 403 after; a recovery Session registers once. In a full Session it adds a credential: it is 409 credentials_maximum at 10, before anything else, then needs a fresh assertion for self.credentials.add, which it uses up, or is 403 fresh_assertion_required. Each begin and complete counts towards 10 per Session in 15 minutes, then 429.
          */
         post: operations["BeginCredentialRegistration"];
         delete?: never;
@@ -119,7 +119,7 @@ export interface paths {
         put?: never;
         /**
          * Complete a WebAuthn credential registration with the browser's attestation response.
-         * @description Setup-allowed. Verifies the response against the pending challenge, the Admin RP ID and the exact Admin origin, and stores the credential. The challenge is used up whatever the outcome. A response for another RP ID or origin, a cross-origin one, one without user verification, one with no live challenge and one returning an existing credential are 400 credential_refused, with nothing stored. The second credential completes setup: the Session becomes full. Refused with 403 once the Admin has two credentials.
+         * @description Setup-allowed. Verifies the response against the pending challenge, the Admin RP ID and the exact Admin origin, and stores the credential. The challenge is used up whatever the outcome. A response for another RP ID or origin, a cross-origin one, one without user verification, one with no live challenge and one returning an existing credential are 400 credential_refused, with nothing stored. The challenge is taken before the body is read. A credential that brings the Admin to the floor completes setup, and one registered in a recovery Session ends it: the Session becomes full. Refused with a bodiless 403 when a restricted Session's Admin already meets the floor, and 409 credentials_maximum at 10.
          */
         post: operations["CompleteCredentialRegistration"];
         delete?: never;
@@ -168,19 +168,183 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/deployment/assertions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Begin confirming a sensitive action with a fresh WebAuthn assertion: the options for navigator.credentials.get.
+         * @description Self-service, full Sessions only. The body names the action, a Deployment capability whose fresh assertion isn't never or self.credentials.add or self.credentials.remove, and its target exactly as the action's request will name it, or null. An unknown action, a Tenant capability or a body that isn't JSON is 400 assertion_refused; a Deployment capability the Admin doesn't hold is 403 access_denied, counted and audited as the request checks do. Returns request options for the Admin RP ID with user verification required and no credential listed. The challenge can be answered once, within 5 minutes, and a new begin replaces it and any unused grant for the same action and target. Each begin and complete counts towards 10 per Session in 15 minutes, then 429.
+         */
+        post: operations["BeginFreshAssertion"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/deployment/assertions/complete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Complete a fresh WebAuthn assertion, leaving a grant on the Session for the begin's action and target.
+         * @description Self-service, full Sessions only. Once counted, the Session's pending challenge is taken before the body is read, so it is used up whatever follows. Verifies the assertion as sign-in does, against one of the Session's own Admin's credentials, with user verification, their user handle and a signature counter that advances. A pass stores a grant bound to this Session and the begin's action and target for 5 minutes, writes admin.fresh_assertion.verified and is 204. The grant is used up by the first request it matches, whatever that request then does. Every refusal is the same 400 assertion_refused, with no grant.
+         */
+        post: operations["CompleteFreshAssertion"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/deployment/credentials": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Your credentials: the current Admin's own WebAuthn credentials, oldest first.
+         * @description Self-service, full Sessions only. Each credential's acr_ public ID, kind, backup state, when it was added and last used, and whether removing it would keep the floor of two; and whether the Admin holds a confirmed, unused Recovery Code. Never a WebAuthn credential ID, public key, AAGUID, counter or user handle.
+         */
+        get: operations["ListCredentials"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/deployment/credentials/{credentialId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Remove one of the current Admin's own WebAuthn credentials.
+         * @description Self-service, full Sessions only, after a fresh assertion for self.credentials.remove with this credentialId as its target, which the request checks use up before anything else, or 403 fresh_assertion_required. A malformed, unknown or another Admin's credential is 404. A removal that would leave fewer than two credentials is 409 credentials_minimum. Otherwise it deletes the credential, ends every other live Session of the Admin as revoked, writes admin.credential.removed and is 204; this Session stays. When the credential removed is the one whose fresh assertion confirmed it, this Session ends too: 200 with sessionEnded true, and the cookie cleared.
+         */
+        delete: operations["RemoveCredential"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/deployment/credentials/recovery-code": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Issue an offline Recovery Code in place of a second credential, shown this once.
+         * @description Setup-allowed, and only in a setup Session of an Admin who isn't the Deployment Owner, with exactly one credential and no confirmed code; otherwise a bodiless 403. Returns the code once, never cached; only its HMAC under the Deployment hmac key is stored, unconfirmed, replacing any unconfirmed one. It can't be redeemed until confirmed. A key custody failure is 503 with nothing stored.
+         */
+        post: operations["IssueRecoveryCode"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/deployment/credentials/recovery-code/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Confirm the offline Recovery Code was saved, which completes credential setup.
+         * @description Setup-allowed, under the same rule as the issue; otherwise a bodiless 403. The body names the issueId the issue returned: when it isn't the Admin's current unconfirmed code, as after a later issue, it is 409 recovery_code_superseded and nothing changes. Confirms the code, writes admin.recovery_code.issued, makes the Admin's setup Sessions full, writes admin.setup.completed and is 204.
+         */
+        post: operations["ConfirmRecoveryCode"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/deployment/signin/recovery-code": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Sign in with an offline Recovery Code, to a Session that reaches only credential registration.
+         * @description Sessionless: needs the exact Admin Origin only. Each call is counted Deployment-wide, then per client, before the code is read: the 51st across the Deployment, or a client's 6th, in 15 minutes is 429. A confirmed, unused code is used up, every live Session of its Admin ends as revoked, a live Session this browser held is superseded, and a recovery Session starts, which reaches only the Session read, sign-out and credential registration until one credential is registered, which ends every other Session of the Admin; admin.recovery_code.used is written. A wrong, unconfirmed, used or malformed code is the same 400 recovery_code_refused. A key custody failure is 503 with nothing used. Before bootstrap completes it is the unknown-path 404.
+         */
+        post: operations["RedeemRecoveryCode"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        AdminCredentialRemovalResponse: {
+            sessionEnded: boolean;
+        };
+        AdminCredentialResponse: {
+            id: string;
+            /** @enum {string} */
+            kind: "passkey" | "securityKey";
+            backedUp: boolean;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            lastUsedAt?: null | string;
+            removable: boolean;
+        };
+        AdminCredentialsResponse: {
+            credentials: components["schemas"]["AdminCredentialResponse"][];
+            recoveryCode: boolean;
+        };
+        AdminRecoveryCodeResponse: {
+            code: components["schemas"]["RevealOnceOfstring"];
+            /** Format: uuid */
+            issueId: string;
+        };
         AdminSessionResponse: {
             /** Format: uuid */
             adminId: string;
             /** @enum {string} */
-            kind: "setup" | "full";
+            kind: "setup" | "full" | "recovery";
             deploymentOwner: boolean;
             setupComplete: boolean;
             /** Format: int32 */
             credentials: number;
+            recoveryCodeAllowed: boolean;
             csrfToken: string;
         };
         AdminSignInOptionsResponse: {
@@ -212,7 +376,7 @@ export interface components {
         };
         ApiProblem: {
             /** @enum {string} */
-            code: "bootstrap_refused" | "credential_refused" | "signin_refused" | "rate_limited" | "access_denied";
+            code: "bootstrap_refused" | "credential_refused" | "signin_refused" | "rate_limited" | "access_denied" | "fresh_assertion_required" | "assertion_refused" | "credentials_minimum" | "credentials_maximum" | "recovery_code_refused" | "recovery_code_superseded";
             traceId: string;
         };
         BootstrapClaimRequest: {
@@ -254,6 +418,17 @@ export interface components {
             credentials: number;
             setupComplete: boolean;
         };
+        FreshAssertionBeginRequest: {
+            action: string;
+            target?: null | string;
+        };
+        RecoveryCodeConfirmRequest: {
+            /** Format: uuid */
+            issueId: string;
+        };
+        RecoveryCodeRedeemRequest: {
+            code: string;
+        };
         RegistrationAuthenticatorSelection: {
             /** @enum {string} */
             residentKey: "required";
@@ -281,6 +456,8 @@ export interface components {
             name: string;
             displayName: string;
         };
+        /** @description Shown in this response only, never stored and never shown again. */
+        RevealOnceOfstring: string;
     };
     responses: never;
     parameters: never;
@@ -576,12 +753,23 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description Forbidden */
+            /** @description fresh_assertion_required, with the problem body, when no fresh assertion for this action and target is bound to the Session. No body when an earlier check refuses first: a restricted Session, or a wrong Origin or CSRF token. */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
             };
             /** @description Too Many Requests */
             429: {
@@ -647,6 +835,15 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
             };
             /** @description Too Many Requests */
             429: {
@@ -740,6 +937,403 @@ export interface operations {
             /** @description access_denied, with the problem body, when the capability is refused. No body when an earlier check refuses first: a Session restricted to setup, or on a state-changing call a wrong Origin or CSRF token. */
             403: {
                 headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    BeginFreshAssertion: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FreshAssertionBeginRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminSignInOptionsResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    /** @description Whole seconds until the rate-limit window allows another request. */
+                    "Retry-After": number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    CompleteFreshAssertion: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminSignInRequest"];
+            };
+        };
+        responses: {
+            /** @description No Content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    /** @description Whole seconds until the rate-limit window allows another request. */
+                    "Retry-After": number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    ListCredentials: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminCredentialsResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    RemoveCredential: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminCredentialRemovalResponse"];
+                };
+            };
+            /** @description No Content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description fresh_assertion_required, with the problem body, when no fresh assertion for this action and target is bound to the Session. No body when an earlier check refuses first: a restricted Session, or a wrong Origin or CSRF token. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    IssueRecoveryCode: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminRecoveryCodeResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    ConfirmRecoveryCode: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RecoveryCodeConfirmRequest"];
+            };
+        };
+        responses: {
+            /** @description No Content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    RedeemRecoveryCode: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RecoveryCodeRedeemRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    /** @description The recovery Admin Session: __Host-gk-admin={43 base64url characters}; Path=/; Secure; HttpOnly; SameSite=Strict, a browser session cookie with no Domain, Expires or Max-Age. */
+                    "Set-Cookie"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminSignInResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    /** @description Whole seconds until the rate-limit window allows another request. */
+                    "Retry-After": number;
                     [name: string]: unknown;
                 };
                 content: {

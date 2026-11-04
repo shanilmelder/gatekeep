@@ -100,3 +100,13 @@ export function assertionRequest(credential: PublicKeyCredential): AdminSignInRe
     },
   };
 }
+
+/**
+ * A fresh assertion's sheet (Story 1.26): the begin's options to navigator.credentials.get, and
+ * the credential it returns as the complete call takes it, or null for none. It throws as the
+ * browser does, a DOMException when cancelled, refused or aborted through `signal`.
+ */
+export async function assertWithSheet(options: AdminSignInOptionsResponse, signal?: AbortSignal): Promise<AdminSignInRequest | null> {
+  const credential = await navigator.credentials.get({ publicKey: requestOptions(options), signal });
+  return credential instanceof PublicKeyCredential ? assertionRequest(credential) : null;
+}

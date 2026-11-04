@@ -6,6 +6,9 @@ export {
   CSRF_HEADER,
   createApiClient,
   parseProblem,
+  type AdminCredentialResponse,
+  type AdminCredentialsResponse,
+  type AdminRecoveryCodeResponse,
   type AdminSessionResponse,
   type AdminSignInOptionsResponse,
   type AdminSignInRequest,
@@ -23,6 +26,7 @@ export {
   type CredentialCreationOptionsResponse,
   type CredentialRegistrationRequest,
   type CredentialRegistrationResponse,
+  type FreshAssertionBeginRequest,
   type TenantCapabilities,
 } from './client';
 export type { components, paths } from './schema.generated';

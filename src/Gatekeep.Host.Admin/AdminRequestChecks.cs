@@ -3,6 +3,7 @@ using System.Net;
 using System.Net.Sockets;
 using Gatekeep.Adapters.Hosting;
 using Gatekeep.Kernel.Identifiers;
+using Gatekeep.Kernel.Persistence;
 using Gatekeep.Kernel.Secrets;
 using Gatekeep.Modules.Admins.Contracts;
 
@@ -42,6 +43,61 @@ internal sealed class SelfService
     public static readonly SelfService Instance = new();
 }
 
+/// <summary>
+/// A self-service endpoint's fresh-assertion requirement (Story 1.26): <paramref name="action"/>,
+/// one of <see cref="AdminFreshAssertions.SelfActions"/>, on the target the route value
+/// <paramref name="targetRouteValue"/> names, if any. The request checks use up the grant, or, when
+/// <paramref name="inHandler"/>, the handler does through <see cref="FreshAssertionGate"/>, when
+/// its own condition holds. A capability endpoint never carries this: its capability's
+/// <see cref="Capability.FreshAssertion"/> decides.
+/// </summary>
+internal sealed class RequiresFreshAssertion(string action, string? targetRouteValue = null, bool inHandler = false)
+{
+    public string Action { get; } = action ?? throw new ArgumentNullException(nameof(action));
+
+    public string? TargetRouteValue { get; } = targetRouteValue;
+
+    public bool InHandler { get; } = inHandler;
+}
+
+/// <summary>
+/// Marks a capability endpoint whose capability's fresh assertion is a <c>When…</c> predicate
+/// (Story 1.26, AD-20): its handler evaluates it and, when it holds, calls
+/// <see cref="FreshAssertionGate"/>. Such an endpoint without this marker is invalid.
+/// </summary>
+internal sealed class EvaluatesFreshAssertion
+{
+    public static readonly EvaluatesFreshAssertion Instance = new();
+}
+
+/// <summary>Names the route value a capability endpoint's fresh assertion is bound to, such as the object it changes (Story 1.26).</summary>
+internal sealed class FreshAssertionTarget(string routeValue)
+{
+    public string RouteValue { get; } = routeValue ?? throw new ArgumentNullException(nameof(routeValue));
+}
+
+/// <summary>
+/// Marks an endpoint a recovery Admin Session may call (Story 1.26): it is setup-allowed too.
+/// A recovery Session reaches nothing else.
+/// </summary>
+internal sealed class RecoveryAllowed
+{
+    public static readonly RecoveryAllowed Instance = new();
+}
+
+/// <summary>Who uses up an endpoint's fresh assertion: the request checks, or its handler's gate.</summary>
+internal enum FreshAssertionEnforcement
+{
+    Checks,
+    Handler,
+}
+
+/// <summary>
+/// An endpoint's fresh-assertion requirement, derived in <see cref="AccessDeclaration.Of"/> only:
+/// the action, the route value its target is, if any, and who enforces it.
+/// </summary>
+internal sealed record FreshAssertionRequirement(string Action, string? TargetRouteValue, FreshAssertionEnforcement EnforcedBy);
+
 /// <summary>The kinds of access an API endpoint declares: exactly one each.</summary>
 internal enum AccessKind
 {
@@ -51,8 +107,134 @@ internal enum AccessKind
 }
 
 /// <summary>An endpoint's one valid access declaration, and whether it is on the Tenant surface.</summary>
-internal sealed record AccessDeclaration(AccessKind Kind, Capability? Capability, bool Tenant)
+internal sealed record AccessDeclaration(AccessKind Kind, Capability? Capability, bool Tenant, FreshAssertionRequirement? FreshAssertion = null)
 {
+    /// <summary>
+    /// The declaration <paramref name="metadata"/> makes, with its fresh-assertion requirement
+    /// (Story 1.26): a capability's comes from its <see cref="Capability.FreshAssertion"/> alone,
+    /// <c>Always</c> enforced by the checks and a <c>When…</c> predicate by the handler, which must
+    /// carry <see cref="EvaluatesFreshAssertion"/>; a self-service endpoint's from its
+    /// <see cref="RequiresFreshAssertion"/>, naming a self-service action; a sessionless one has
+    /// none. A checks-enforced requirement on a setup-allowed endpoint is invalid, as a restricted
+    /// Session can never confirm, and so is a target route value the route doesn't have, and a
+    /// recovery-allowed endpoint that isn't setup-allowed. Null is denied at runtime and refused by
+    /// the OpenAPI build.
+    /// </summary>
+    public static AccessDeclaration? Of(IEnumerable<object> metadata, string? routePattern)
+    {
+        var items = metadata.ToList();
+        if (Declared(items, routePattern) is not { } declared)
+        {
+            return null;
+        }
+
+        var requires = items.OfType<RequiresFreshAssertion>().ToList();
+        var evaluates = items.Count(m => m is EvaluatesFreshAssertion);
+        var targets = items.OfType<FreshAssertionTarget>().ToList();
+        var setupAllowed = items.Any(m => m is SetupAllowed);
+        if (requires.Count > 1 || evaluates > 1 || targets.Count > 1 || (items.Any(m => m is RecoveryAllowed) && !setupAllowed))
+        {
+            return null;
+        }
+
+        FreshAssertionRequirement? requirement = null;
+        switch (declared.Kind)
+        {
+            case AccessKind.Capability:
+                var capability = declared.Capability!;
+                if (requires.Count != 0)
+                {
+                    return null;
+                }
+
+                switch (capability.FreshAssertion)
+                {
+                    case Modules.Admins.Contracts.FreshAssertion.Never:
+                        if (evaluates != 0 || targets.Count != 0)
+                        {
+                            return null;
+                        }
+
+                        break;
+
+                    case Modules.Admins.Contracts.FreshAssertion.Always:
+                        if (evaluates != 0)
+                        {
+                            return null;
+                        }
+
+                        requirement = new(capability.Name, targets.SingleOrDefault()?.RouteValue, FreshAssertionEnforcement.Checks);
+                        break;
+
+                    default:
+                        // A predicate on the target: only the handler can evaluate it (AD-20).
+                        if (evaluates != 1)
+                        {
+                            return null;
+                        }
+
+                        requirement = new(capability.Name, targets.SingleOrDefault()?.RouteValue, FreshAssertionEnforcement.Handler);
+                        break;
+                }
+
+                break;
+
+            case AccessKind.Self:
+                if (evaluates != 0 || targets.Count != 0)
+                {
+                    return null;
+                }
+
+                if (requires.SingleOrDefault() is { } self)
+                {
+                    if (!AdminFreshAssertions.SelfActions.Contains(self.Action, StringComparer.Ordinal))
+                    {
+                        return null;
+                    }
+
+                    requirement = new(
+                        self.Action,
+                        self.TargetRouteValue,
+                        self.InHandler ? FreshAssertionEnforcement.Handler : FreshAssertionEnforcement.Checks);
+                }
+
+                break;
+
+            default:
+                if (requires.Count != 0 || evaluates != 0 || targets.Count != 0)
+                {
+                    return null;
+                }
+
+                break;
+        }
+
+        if (requirement is not null)
+        {
+            if (requirement.EnforcedBy == FreshAssertionEnforcement.Checks && setupAllowed)
+            {
+                return null;
+            }
+
+            // The target is one of the route's own parameters, by its exact name.
+            var parameters = RouteParameters(routePattern);
+            if (parameters is null
+                || (requirement.TargetRouteValue is { } target && !parameters.Contains(target, StringComparer.Ordinal)))
+            {
+                return null;
+            }
+
+            // A capability route acting on an object names it: a parameter beside the path Tenant is its target.
+            if (declared.Kind == AccessKind.Capability && requirement.TargetRouteValue is null
+                && parameters.Any(p => !string.Equals(p, AdminRequestChecks.TenantRouteValue, StringComparison.Ordinal)))
+            {
+                return null;
+            }
+        }
+
+        return declared with { FreshAssertion = requirement };
+    }
+
     /// <summary>
     /// The declaration <paramref name="metadata"/> makes, or null when it isn't exactly one API
     /// marker and exactly one access declaration, or the two disagree: a Tenant endpoint declares
@@ -63,9 +245,8 @@ internal sealed record AccessDeclaration(AccessKind Kind, Capability? Capability
     /// Deployment or self-service handler ever sees a Tenant it might act on. Null is denied at
     /// runtime and refused by the OpenAPI build.
     /// </summary>
-    public static AccessDeclaration? Of(IEnumerable<object> metadata, string? routePattern)
+    private static AccessDeclaration? Declared(List<object> items, string? routePattern)
     {
-        var items = metadata.ToList();
         var namesTenant = routePattern is not null
             && routePattern.Contains("{" + AdminRequestChecks.TenantRouteValue, StringComparison.OrdinalIgnoreCase);
         if (items.Any(m => m is TenantApiEndpoint) != namesTenant)
@@ -97,9 +278,28 @@ internal sealed record AccessDeclaration(AccessKind Kind, Capability? Capability
         return onTenant ? null : new AccessDeclaration(self == 1 ? AccessKind.Self : AccessKind.Sessionless, null, false);
     }
 
+    /// <summary>The route pattern's parameter names, or null when it doesn't parse. No pattern has none.</summary>
+    private static List<string>? RouteParameters(string? routePattern)
+    {
+        if (routePattern is null)
+        {
+            return [];
+        }
+
+        try
+        {
+            return [.. Microsoft.AspNetCore.Routing.Patterns.RoutePatternFactory.Parse(routePattern).Parameters.Select(p => p.Name)];
+        }
+        catch (Microsoft.AspNetCore.Routing.Patterns.RoutePatternException)
+        {
+            return null;
+        }
+    }
+
     /// <summary>Whether <paramref name="metadata"/> holds any API marker or access declaration, valid or not.</summary>
     public static bool AnyApiMetadata(IEnumerable<object> metadata) =>
-        metadata.Any(m => m is DeploymentApiEndpoint or TenantApiEndpoint or RequiresCapability or SelfService or BootstrapClaimEndpoint or SignInEndpoint);
+        metadata.Any(m => m is DeploymentApiEndpoint or TenantApiEndpoint or RequiresCapability or SelfService or BootstrapClaimEndpoint
+            or SignInEndpoint or RequiresFreshAssertion or EvaluatesFreshAssertion or FreshAssertionTarget or RecoveryAllowed);
 }
 
 /// <summary>
@@ -109,6 +309,12 @@ internal sealed record AccessDeclaration(AccessKind Kind, Capability? Capability
 /// handler can't give an allowed request a different answer.
 /// </summary>
 internal sealed record PathTenantFeature(Guid TenantId, TenantRoleGrant? Grant);
+
+/// <summary>
+/// The fresh assertion the checks, or a handler's gate, used up for this request (Story 1.26): the
+/// row of the credential that made it, so an action can tell when it is removing that very one.
+/// </summary>
+internal sealed record FreshAssertionFeature(Guid CredentialRow);
 
 /// <summary>
 /// Marks an endpoint a setup Admin Session, or an Admin without their two credentials, may call.
@@ -381,7 +587,12 @@ internal static class AdminRequestChecks
             }
             else if (session.Restricted && endpoint.Metadata.GetMetadata<SetupAllowed>() is null)
             {
-                // A setup Session, and any Session of an Admin without their two credentials (FR-2, FR-46).
+                // A setup or recovery Session, and any Session of an Admin below the credential floor (FR-2, FR-46).
+                refusal = Refusal.Forbidden;
+            }
+            else if (session.Kind == AdminSessionKind.Recovery && endpoint.Metadata.GetMetadata<RecoveryAllowed>() is null)
+            {
+                // A Recovery Code leads only to credential registration (Story 1.26).
                 refusal = Refusal.Forbidden;
             }
             else if (declaration.Kind == AccessKind.Capability)
@@ -400,19 +611,22 @@ internal static class AdminRequestChecks
                 if (!decision.Allowed)
                 {
                     refusal = Refusal.AccessDenied;
+                    audited = await DenyAsync(command, services, principal, pathTenant, cancellationToken);
+                }
+            }
 
-                    // Counted per Admin, in the transaction that authenticated the Session, with its
-                    // slide: within the cap the refusal is audited (AD-9); past it, only logged.
-                    var count = await services.Limiter.AttemptAsync(
-                        command,
-                        AdminsContract.AccessDeniedAuditPolicy,
-                        session.AdminId.ToString("N"),
-                        cancellationToken);
-                    if (count.Allowed)
-                    {
-                        await services.Authorization.DenyAsync(command, principal, pathTenant, cancellationToken);
-                        audited = true;
-                    }
+            if (refusal == Refusal.None && declaration.FreshAssertion is { EnforcedBy: FreshAssertionEnforcement.Checks } fresh)
+            {
+                // After the capability decision and before the handler, in this transaction, which
+                // commits it with the slide: the grant is used up whatever the action then does.
+                var binding = new FreshAssertionBinding(fresh.Action, pathTenant, FreshAssertionGate.Target(context, fresh));
+                if (await services.FreshAssertions.ConsumeAsync(command, session!, binding, cancellationToken) is { } confirmedWith)
+                {
+                    context.Features.Set(new FreshAssertionFeature(confirmedWith));
+                }
+                else
+                {
+                    refusal = Refusal.FreshAssertionRequired;
                 }
             }
 
@@ -441,6 +655,10 @@ internal static class AdminRequestChecks
                         AdminResponses.TraceId(context));
                 await AdminResponses.AccessDeniedAsync(context);
                 return false;
+
+            case Refusal.FreshAssertionRequired:
+                await FreshAssertionGate.RequiredAsync(context, declaration.FreshAssertion!);
+                return false;
         }
 
         context.Features.Set(session!);
@@ -458,6 +676,32 @@ internal static class AdminRequestChecks
         Unauthenticated,
         Forbidden,
         AccessDenied,
+        FreshAssertionRequired,
+    }
+
+    /// <summary>
+    /// A capability refusal's accounting, in the caller's transaction: counted per Admin, and within
+    /// the cap audited (AD-9); past it, only logged. Returns whether it was audited.
+    /// </summary>
+    internal static async Task<bool> DenyAsync(
+        CommandContext command,
+        AdminApiServices services,
+        AdminPrincipal principal,
+        Guid? pathTenant,
+        CancellationToken cancellationToken)
+    {
+        var count = await services.Limiter.AttemptAsync(
+            command,
+            AdminsContract.AccessDeniedAuditPolicy,
+            principal.AdminId.ToString("N"),
+            cancellationToken);
+        if (!count.Allowed)
+        {
+            return false;
+        }
+
+        await services.Authorization.DenyAsync(command, principal, pathTenant, cancellationToken);
+        return true;
     }
 
     private static bool IsStateChanging(string method) =>

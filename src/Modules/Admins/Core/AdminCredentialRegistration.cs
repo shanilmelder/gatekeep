@@ -70,20 +70,11 @@ internal sealed class AdminCredentialRegistration(IAuditAppender appender, IWebA
 
     private const string InsertCredential =
         """
-        INSERT INTO admin_credential (id, admin_id, credential_id, public_key, sign_count, aaguid, transports)
-        VALUES (@id, @admin, @credential, @public_key, @sign_count, @aaguid, @transports)
+        INSERT INTO admin_credential (id, admin_id, credential_id, public_key, sign_count, aaguid, transports, backup_eligible, backed_up)
+        VALUES (@id, @admin, @credential, @public_key, @sign_count, @aaguid, @transports, @backup_eligible, @backed_up)
         """;
 
-    // Every live setup Session of the Admin: none may stay held to setup once it is complete.
-    private const string FullSessions =
-        "UPDATE admin_session SET kind = 'full' WHERE admin_id = @admin AND kind = 'setup' AND ended_at IS NULL";
-
-    private const string CompleteSetup =
-        "UPDATE admin SET setup_completed_at = clock_timestamp() WHERE id = @admin AND setup_completed_at IS NULL";
-
     private static readonly AuditTypeCode Registered = AdminsEvents.CredentialRegistered.Code;
-
-    private static readonly AuditTypeCode SetupCompleted = AdminsEvents.SetupCompleted.Code;
 
     public async Task<CredentialRegistrationStart> BeginAsync(
         CommandContext context,
@@ -97,9 +88,10 @@ internal sealed class AdminCredentialRegistration(IAuditAppender appender, IWebA
 
         var admin = await LockAdminAsync(context, session.AdminId, cancellationToken);
         var existing = await CredentialsAsync(context, session.AdminId, cancellationToken);
-        if (existing.Count >= AdminsContract.RequiredCredentials)
+        var (_, recoveryCode) = await AdminSessions.FloorAsync(context, session.AdminId, cancellationToken);
+        if (Barred(session, existing.Count, recoveryCode) is { } barred)
         {
-            return new CredentialRegistrationStart(CredentialRegistrationStatus.Complete, null);
+            return new CredentialRegistrationStart(barred, null);
         }
 
         var challenge = RandomNumberGenerator.GetBytes(ChallengeBytes);
@@ -131,6 +123,7 @@ internal sealed class AdminCredentialRegistration(IAuditAppender appender, IWebA
 
         await LockAdminAsync(context, session.AdminId, cancellationToken);
         var existing = await CredentialsAsync(context, session.AdminId, cancellationToken);
+        var (_, recoveryCode) = await AdminSessions.FloorAsync(context, session.AdminId, cancellationToken);
 
         bool found;
         byte[]? hash = null;
@@ -161,9 +154,9 @@ internal sealed class AdminCredentialRegistration(IAuditAppender appender, IWebA
             await command.ExecuteNonQueryAsync(cancellationToken);
         }
 
-        if (existing.Count >= AdminsContract.RequiredCredentials)
+        if (Barred(session, existing.Count, recoveryCode) is { } barred)
         {
-            return new CredentialRegistrationChallenge(CredentialRegistrationStatus.Complete, null);
+            return new CredentialRegistrationChallenge(barred, null);
         }
 
         return hash is not null && live
@@ -187,9 +180,11 @@ internal sealed class AdminCredentialRegistration(IAuditAppender appender, IWebA
 
         var admin = await LockAdminAsync(context, session.AdminId, cancellationToken);
         var existing = await CredentialsAsync(context, session.AdminId, cancellationToken);
-        if (existing.Count >= AdminsContract.RequiredCredentials)
+        var (_, recoveryCode) = await AdminSessions.FloorAsync(context, session.AdminId, cancellationToken);
+        var metBefore = AdminSession.MeetsFloor(existing.Count, recoveryCode);
+        if (Barred(session, existing.Count, recoveryCode) is { } barred)
         {
-            return new CredentialRegistrationOutcome(CredentialRegistrationStatus.Complete, existing.Count, SetupComplete: true);
+            return new CredentialRegistrationOutcome(barred, existing.Count, metBefore);
         }
 
         // A challenge was handed out, so the handle exists; without one nothing can match.
@@ -239,6 +234,9 @@ internal sealed class AdminCredentialRegistration(IAuditAppender appender, IWebA
             AdminSessions.Add(command, "sign_count", (long)credential.SignCount);
             AdminSessions.Add(command, "aaguid", credential.Aaguid);
             AdminSessions.Add(command, "transports", credential.Transports.Where(KnownTransports.Contains).Distinct(StringComparer.Ordinal).ToArray());
+            AdminSessions.Add(command, "backup_eligible", credential.BackupEligible);
+            // BS without BE is no state a credential can be in: it is stored as not backed up.
+            AdminSessions.Add(command, "backed_up", credential.BackedUp && credential.BackupEligible);
             await command.ExecuteNonQueryAsync(cancellationToken);
         }
 
@@ -246,27 +244,41 @@ internal sealed class AdminCredentialRegistration(IAuditAppender appender, IWebA
         await appender.AppendAsync(context, new AuditEvent(Registered, actor, AuditTargetKind.Admin, session.AdminId), detail: null, cancellationToken);
 
         var credentials = existing.Count + 1;
-        if (credentials < AdminsContract.RequiredCredentials)
+        var meets = AdminSession.MeetsFloor(credentials, recoveryCode);
+        if (meets)
         {
-            return new CredentialRegistrationOutcome(CredentialRegistrationStatus.Accepted, credentials, SetupComplete: false);
+            // A recovery Session follows a lost device: whoever holds it may hold another Session of
+            // this Admin, signed in with the lost credential. Back at the floor, every other one ends.
+            if (session.Kind == AdminSessionKind.Recovery)
+            {
+                await AdminSessions.RevokeAsync(context, appender, session.AdminId, session.AdminId, keep: session.Id, cancellationToken);
+            }
+
+            // Setup and recovery Sessions become full; completion is audited only when this step reached the floor.
+            await AdminSessions.MeetFloorAsync(context, appender, session.AdminId, metBefore, cancellationToken);
         }
 
-        await using (var command = context.CreateCommand())
+        return new CredentialRegistrationOutcome(CredentialRegistrationStatus.Accepted, credentials, meets);
+    }
+
+    /// <summary>
+    /// Why the Session may not register now, or null when it may: at the maximum, never; in a
+    /// restricted Session, only while the Admin is below the floor, or once in a recovery Session.
+    /// A full Session's begin passed its fresh-assertion gate in the handler.
+    /// </summary>
+    private static CredentialRegistrationStatus? Barred(AdminSession session, int credentials, bool recoveryCode)
+    {
+        if (credentials >= AdminsContract.MaxCredentials)
         {
-            command.CommandText = FullSessions;
-            AdminSessions.Add(command, "admin", session.AdminId);
-            await command.ExecuteNonQueryAsync(cancellationToken);
+            return CredentialRegistrationStatus.Maximum;
         }
 
-        await using (var command = context.CreateCommand())
+        if (session.Restricted && session.Kind != AdminSessionKind.Recovery && AdminSession.MeetsFloor(credentials, recoveryCode))
         {
-            command.CommandText = CompleteSetup;
-            AdminSessions.Add(command, "admin", session.AdminId);
-            await command.ExecuteNonQueryAsync(cancellationToken);
+            return CredentialRegistrationStatus.Complete;
         }
 
-        await appender.AppendAsync(context, new AuditEvent(SetupCompleted, actor, AuditTargetKind.Admin, session.AdminId), detail: null, cancellationToken);
-        return new CredentialRegistrationOutcome(CredentialRegistrationStatus.Accepted, credentials, SetupComplete: true);
+        return null;
     }
 
     private static CredentialRegistrationOutcome Refused(int credentials, WebAuthnRefusal refusal) =>

@@ -116,6 +116,8 @@ internal sealed class Fido2WebAuthnVerifier : IWebAuthnVerifier
         var excluded = request.ExcludeCredentials;
         RegisteredPublicKeyCredential credential;
         bool userVerified;
+        bool backupEligible;
+        bool backedUp;
         try
         {
             var raw = new AuthenticatorAttestationRawResponse
@@ -132,8 +134,11 @@ internal sealed class Fido2WebAuthnVerifier : IWebAuthnVerifier
                 ClientExtensionResults = new AuthenticationExtensionsClientOutputs(),
             };
 
-            // Parsed here too, for the UV flag the verified credential doesn't carry.
-            userVerified = AuthenticatorAttestationResponse.Parse(raw).AttestationObject.AuthData.UserVerified;
+            // Parsed here too, for the flags the verified credential doesn't carry: UV, BE and BS.
+            var authData = AuthenticatorAttestationResponse.Parse(raw).AttestationObject.AuthData;
+            userVerified = authData.UserVerified;
+            backupEligible = authData.IsBackupEligible;
+            backedUp = authData.IsBackedUp;
 
             credential = await new Fido2NetLib.Fido2(config).MakeNewCredentialAsync(
                 new MakeNewCredentialParams
@@ -162,7 +167,9 @@ internal sealed class Fido2WebAuthnVerifier : IWebAuthnVerifier
             credential.SignCount,
             credential.AaGuid,
             [.. (credential.Transports ?? []).Select(TransportName).OfType<string>().Distinct(StringComparer.Ordinal)],
-            userVerified));
+            userVerified,
+            backupEligible,
+            backedUp));
     }
 
     public WebAuthnRequestOptions BeginAssertion(WebAuthnAssertionBegin request)
@@ -219,6 +226,8 @@ internal sealed class Fido2WebAuthnVerifier : IWebAuthnVerifier
         var config = Configuration(request.RelyingParty);
         VerifyAssertionResult verified;
         bool userVerified;
+        bool backupEligible;
+        bool backedUp;
         try
         {
             var raw = new AuthenticatorAssertionRawResponse
@@ -236,8 +245,11 @@ internal sealed class Fido2WebAuthnVerifier : IWebAuthnVerifier
                 ClientExtensionResults = new AuthenticationExtensionsClientOutputs(),
             };
 
-            // Parsed here too, for the UV flag the result doesn't carry.
-            userVerified = AuthenticatorAssertionResponse.Parse(raw).AuthenticatorData.UserVerified;
+            // Parsed here too, for the flags the result doesn't carry: UV, BE and BS.
+            var authenticatorData = AuthenticatorAssertionResponse.Parse(raw).AuthenticatorData;
+            userVerified = authenticatorData.UserVerified;
+            backupEligible = authenticatorData.IsBackupEligible;
+            backedUp = authenticatorData.IsBackedUp;
 
             // The counter rule is this adapter's own, below, on the verified count: given 0 as the
             // stored counter, the library's rule never refuses one.
@@ -271,13 +283,20 @@ internal sealed class Fido2WebAuthnVerifier : IWebAuthnVerifier
             return WebAuthnAssertionResult.Refused(WebAuthnRefusal.UserNotVerified);
         }
 
+        // BE is fixed when a credential is made (WebAuthn §6.3.3): a different one isn't that credential.
+        // Refused as invalid, and not as after the signature, so it is only logged.
+        if (stored.BackupEligible is { } known && backupEligible != known)
+        {
+            return WebAuthnAssertionResult.Refused(WebAuthnRefusal.Invalid);
+        }
+
         // The signature verified. Both 0: an authenticator that keeps no counter. Otherwise it must go up.
         if ((verified.SignCount != 0 || stored.SignCount != 0) && verified.SignCount <= stored.SignCount)
         {
             return WebAuthnAssertionResult.RefusedAfterSignature(WebAuthnRefusal.SignCountRegressed);
         }
 
-        return WebAuthnAssertionResult.Asserted(verified.SignCount, userVerified);
+        return WebAuthnAssertionResult.Asserted(verified.SignCount, userVerified, backupEligible, backedUp);
     }
 
     /// <summary>An assertion's options for this call's Relying Party: user verification required, and no credential listed.</summary>

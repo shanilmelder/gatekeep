@@ -201,7 +201,7 @@ internal static class SignInApi
             // A Session, or a refusal's event: either is kept once decided, if the client goes now.
             await scope.CommitAsync(CancellationToken.None);
         }
-        catch (DbException e) when (e.SqlState is UniqueViolation or CheckViolation)
+        catch (DbException e) when (e.SqlState is UniqueViolation or CheckViolation or AdminResponses.ForeignKeyViolation)
         {
             // A value a constraint refuses: rolled back, so no Session, and the challenge is already gone.
             AdminRequestChecks.Log(context, e);
@@ -230,14 +230,14 @@ internal static class SignInApi
     }
 
     /// <summary>The Admin origin's Relying Party: its host is the RP ID, and the origin is the one a response must name.</summary>
-    private static WebAuthnRelyingParty RelyingParty(HttpContext context)
+    internal static WebAuthnRelyingParty RelyingParty(HttpContext context)
     {
         var origin = context.RequestServices.GetRequiredService<HostOrigin>().Value;
         return new WebAuthnRelyingParty(new Uri(origin).IdnHost, RelyingPartyName, origin);
     }
 
     /// <summary>A cookie's value as a secret, or null when it wasn't sent or is empty.</summary>
-    private static Secret<string>? Cookie(HttpContext context, string name) =>
+    internal static Secret<string>? Cookie(HttpContext context, string name) =>
         context.Request.Cookies.TryGetValue(name, out var value) && !string.IsNullOrEmpty(value) ? new Secret<string>(value) : null;
 
     /// <summary>Counts the attempt per client in its own transaction, and answers 429 when it is over the limit.</summary>
@@ -287,7 +287,7 @@ internal static class SignInApi
     /// slow, missing a member, not <c>public-key</c>, an ID that isn't its raw ID, or a value that
     /// isn't base64url. Never throws.
     /// </summary>
-    private static async Task<WebAuthnAssertion?> ReadAssertionAsync(HttpRequest request, CancellationToken cancellationToken)
+    internal static async Task<WebAuthnAssertion?> ReadAssertionAsync(HttpRequest request, CancellationToken cancellationToken)
     {
         var buffer = ArrayPool<byte>.Shared.Rent(MaxBody + 1);
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);

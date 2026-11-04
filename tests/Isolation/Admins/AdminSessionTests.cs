@@ -36,7 +36,7 @@ public sealed class AdminSessionTests(PostgresFixture postgres)
             Assert.False(response.Headers.Contains("Set-Cookie"));
             using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync(Cancellation));
             var root = body.RootElement;
-            Assert.Equal(["adminId", "kind", "deploymentOwner", "setupComplete", "credentials", "csrfToken"], root.EnumerateObject().Select(p => p.Name));
+            Assert.Equal(["adminId", "kind", "deploymentOwner", "setupComplete", "credentials", "recoveryCodeAllowed", "csrfToken"], root.EnumerateObject().Select(p => p.Name));
             Assert.Equal(adminId, root.GetProperty("adminId").GetGuid());
             Assert.Equal("setup", root.GetProperty("kind").GetString());
             Assert.True(root.GetProperty("deploymentOwner").GetBoolean());
@@ -56,13 +56,12 @@ public sealed class AdminSessionTests(PostgresFixture postgres)
 
     [Theory]
     [InlineData("GET", CapabilitiesPath)]
-    [InlineData("DELETE", SessionPath)]
     public async Task Setup_session_on_an_endpoint_that_isnt_setup_allowed_is_403(string method, string path)
     {
         await using var host = await AdminHost.StartAsync(postgres);
         var (cookie, csrf, _) = await host.ClaimedAsync();
 
-        // Signing out isn't setup-allowed: it would strand the only Deployment Owner.
+        // Signing out is setup-allowed from Story 1.26: AdminRecoveryCodeTests covers it.
         using var response = await host.SendAsync(new HttpMethod(method), path, cookie, csrf, AdminHost.Origin);
 
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);

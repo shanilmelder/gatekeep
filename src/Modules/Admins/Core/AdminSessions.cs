@@ -28,7 +28,9 @@ internal sealed class AdminSessions(IAuditAppender appender) : IAdminSessions
         SELECT s.id, s.admin_id, s.kind, s.ended_at IS NOT NULL,
                c.t >= s.idle_expires_at OR c.t >= s.absolute_expires_at,
                a.deployment_owner,
-               (SELECT count(*)::int FROM admin_credential AS c WHERE c.admin_id = s.admin_id)
+               (SELECT count(*)::int FROM admin_credential AS c WHERE c.admin_id = s.admin_id),
+               EXISTS (SELECT 1 FROM admin_recovery_code AS r
+                       WHERE r.admin_id = s.admin_id AND r.confirmed_at IS NOT NULL AND r.used_at IS NULL)
         FROM admin_session AS s
         JOIN admin AS a ON a.id = s.admin_id
         CROSS JOIN (SELECT clock_timestamp() AS t) AS c
@@ -52,6 +54,39 @@ internal sealed class AdminSessions(IAuditAppender appender) : IAdminSessions
           AND idle_expires_at > clock_timestamp() AND absolute_expires_at > clock_timestamp()
         RETURNING admin_id
         """;
+
+    private const string RevokeAll =
+        """
+        UPDATE admin_session SET ended_at = clock_timestamp(), end_reason = 'revoked'
+        WHERE admin_id = @admin AND ended_at IS NULL
+          AND idle_expires_at > clock_timestamp() AND absolute_expires_at > clock_timestamp()
+        """;
+
+    private const string RevokeOthers = RevokeAll + " AND id <> @keep";
+
+    private const string ReadFloor =
+        """
+        SELECT (SELECT count(*)::int FROM admin_credential WHERE admin_id = @admin),
+               EXISTS (SELECT 1 FROM admin_recovery_code
+                       WHERE admin_id = @admin AND confirmed_at IS NOT NULL AND used_at IS NULL)
+        """;
+
+    // Every live setup and recovery Session of the Admin: none stays restricted once they meet the floor.
+    private const string FullSessions =
+        "UPDATE admin_session SET kind = 'full' WHERE admin_id = @admin AND kind IN ('setup', 'recovery') AND ended_at IS NULL";
+
+    private const string CompleteSetup =
+        "UPDATE admin SET setup_completed_at = clock_timestamp() WHERE id = @admin AND setup_completed_at IS NULL";
+
+    private const string VoidChallenges =
+        """
+        UPDATE admin_session SET registration_challenge_sha256 = NULL, registration_challenge_expires_at = NULL
+        WHERE admin_id = @admin AND registration_challenge_sha256 IS NOT NULL AND ended_at IS NULL
+        """;
+
+    private static readonly AuditTypeCode Revoked = AdminsEvents.SessionRevoked.Code;
+
+    private static readonly AuditTypeCode SetupCompleted = AdminsEvents.SetupCompleted.Code;
 
     private static readonly AuditTypeCode SignedOut = AdminsEvents.SessionSignedOut.Code;
 
@@ -127,6 +162,7 @@ internal sealed class AdminSessions(IAuditAppender appender) : IAdminSessions
                 ParseKind(reader.GetString(2)),
                 reader.GetBoolean(5),
                 reader.GetInt32(6),
+                reader.GetBoolean(7),
                 csrf);
             ended = reader.GetBoolean(3);
             expired = reader.GetBoolean(4);
@@ -209,6 +245,90 @@ internal sealed class AdminSessions(IAuditAppender appender) : IAdminSessions
             cancellationToken);
     }
 
+    /// <summary>
+    /// Ends as <c>revoked</c> every live Session of <paramref name="adminId"/> but
+    /// <paramref name="keep"/>, appending <see cref="AdminsEvents.SessionRevoked"/> for each, in the
+    /// caller's transaction (Story 1.26). The Actor is <paramref name="actorAdminId"/>.
+    /// </summary>
+    internal static async Task RevokeAsync(
+        CommandContext context,
+        IAuditAppender appender,
+        Guid adminId,
+        Guid actorAdminId,
+        Guid? keep,
+        CancellationToken cancellationToken)
+    {
+        var ended = 0;
+        await using (var command = context.CreateCommand())
+        {
+            command.CommandText = keep is null ? RevokeAll : RevokeOthers;
+            Add(command, "admin", adminId);
+            if (keep is { } id)
+            {
+                Add(command, "keep", id);
+            }
+
+            ended = await command.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        for (var i = 0; i < ended; i++)
+        {
+            await appender.AppendAsync(
+                context,
+                new AuditEvent(Revoked, Actor.Admin(actorAdminId), AuditTargetKind.Admin, adminId),
+                detail: null,
+                cancellationToken);
+        }
+    }
+
+    /// <summary>The Admin's credential count and whether they hold a confirmed, unused Recovery Code, read now.</summary>
+    internal static async Task<(int Credentials, bool RecoveryCode)> FloorAsync(CommandContext context, Guid adminId, CancellationToken cancellationToken)
+    {
+        await using var command = context.CreateCommand();
+        command.CommandText = ReadFloor;
+        Add(command, "admin", adminId);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        if (!await reader.ReadAsync(cancellationToken))
+        {
+            throw new InvalidOperationException("The floor query returned no row.");
+        }
+
+        return (reader.GetInt32(0), reader.GetBoolean(1));
+    }
+
+    /// <summary>
+    /// The Session rule once an Admin meets the credential floor (Story 1.26), in the caller's
+    /// transaction: every live setup and recovery Session of theirs becomes full, and the stamp is
+    /// set if it isn't. When <paramref name="metBefore"/> is false, this step took them to the
+    /// floor: <see cref="AdminsEvents.SetupCompleted"/> is appended, and every pending registration
+    /// challenge of theirs is voided, as one begun while restricted needed no fresh assertion and
+    /// mustn't complete in a full Session.
+    /// </summary>
+    internal static async Task MeetFloorAsync(
+        CommandContext context,
+        IAuditAppender appender,
+        Guid adminId,
+        bool metBefore,
+        CancellationToken cancellationToken)
+    {
+        foreach (var sql in metBefore ? new[] { FullSessions, CompleteSetup } : [FullSessions, CompleteSetup, VoidChallenges])
+        {
+            await using var command = context.CreateCommand();
+            command.CommandText = sql;
+            Add(command, "admin", adminId);
+            await command.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        if (!metBefore)
+        {
+            await appender.AppendAsync(
+                context,
+                new AuditEvent(SetupCompleted, Actor.Admin(adminId), AuditTargetKind.Admin, adminId),
+                detail: null,
+                cancellationToken);
+        }
+    }
+
     internal static void RequireDeployment(CommandContext context)
     {
         ArgumentNullException.ThrowIfNull(context);
@@ -231,6 +351,7 @@ internal sealed class AdminSessions(IAuditAppender appender) : IAdminSessions
     {
         AdminSessionKind.Setup => "setup",
         AdminSessionKind.Full => "full",
+        AdminSessionKind.Recovery => "recovery",
         _ => throw new ArgumentOutOfRangeException(nameof(kind)),
     };
 
@@ -238,6 +359,7 @@ internal sealed class AdminSessions(IAuditAppender appender) : IAdminSessions
     {
         "setup" => AdminSessionKind.Setup,
         "full" => AdminSessionKind.Full,
+        "recovery" => AdminSessionKind.Recovery,
         _ => throw new InvalidOperationException("An Admin Session has an unknown kind."),
     };
 }

@@ -1,6 +1,7 @@
 using Gatekeep.Kernel.Audit;
 using Gatekeep.Kernel.Limits;
 using Gatekeep.Kernel.RateLimiting;
+using Gatekeep.Kernel.Secrets;
 using Gatekeep.Kernel.WebAuthn;
 using Gatekeep.Modules.Admins.Core;
 
@@ -60,9 +61,49 @@ public static class AdminsContract
 
     /// <summary>
     /// The WebAuthn credentials an Admin registers before they can do anything else: two, so
-    /// losing one device can't lock them out (FR-2, FR-46).
+    /// losing one device can't lock them out (FR-2, FR-46), or one and a confirmed offline Recovery
+    /// Code for an Admin who isn't the Deployment Owner (Story 1.26). It is also the removal floor:
+    /// no removal ever leaves an Admin with fewer, a Recovery Code or not.
     /// </summary>
     public const int RequiredCredentials = 2;
+
+    /// <summary>
+    /// The most WebAuthn credentials an Admin may hold (Story 1.26): 10. A registration at it is
+    /// refused before any confirmation, and the database refuses an 11th whatever path inserts it.
+    /// </summary>
+    public const int MaxCredentials = SecurityLimits.MaxAdminCredentials;
+
+    /// <summary>
+    /// Fresh-assertion ceremonies (Story 1.26): 10 calls per Admin Session in a fixed 15-minute
+    /// window, each begin and each complete, counted in <c>admin_attempt</c> in their own committed
+    /// transaction before the call runs. The subject is the Session's ID.
+    /// </summary>
+    public static readonly RateLimitPolicy FreshAssertionPolicy = new(
+        "admins.fresh_assertion.attempt",
+        SecurityLimits.FreshAssertionAttempts,
+        SecurityLimits.FreshAssertionWindow);
+
+    /// <summary>
+    /// Admin Recovery Code redemptions (Story 1.26): 5 per client in a fixed 15-minute window,
+    /// counted in <c>admin_attempt</c> in their own committed transaction before the code is read.
+    /// </summary>
+    public static readonly RateLimitPolicy RecoveryCodePolicy = new(
+        "admins.recovery_code.redeem",
+        SecurityLimits.AdminRecoveryCodeAttempts,
+        SecurityLimits.AdminRecoveryCodeWindow);
+
+    /// <summary>
+    /// Admin Recovery Code redemptions across the Deployment (Story 1.26): 50 in a fixed 15-minute
+    /// window under the one subject <see cref="DeploymentSubject"/>, counted before the per-client
+    /// count and before the code is read. Past it every redemption is 429, whichever client sends it.
+    /// </summary>
+    public static readonly RateLimitPolicy RecoveryCodeDeploymentPolicy = new(
+        "admins.recovery_code.deployment",
+        SecurityLimits.AdminRecoveryCodeDeploymentAttempts,
+        SecurityLimits.AdminRecoveryCodeWindow);
+
+    /// <summary>The fixed subject Deployment-wide limits are counted under.</summary>
+    public const string DeploymentSubject = "deployment";
 
     /// <summary>
     /// The Kernel <see cref="IRateLimiter"/> for Admin attempts, such as bootstrap claims and
@@ -139,5 +180,42 @@ public static class AdminsContract
         ArgumentNullException.ThrowIfNull(appender);
         ArgumentNullException.ThrowIfNull(verifier);
         return new AdminCredentialRegistration(appender, verifier);
+    }
+
+    /// <summary>
+    /// Fresh WebAuthn assertions for sensitive actions (Story 1.26, FR-46): the ceremony, and the
+    /// grants it leaves, which the request checks and handlers use up. It runs as <c>gk_admin</c>,
+    /// in a Deployment scope, verifies through <paramref name="verifier"/>, and writes its events
+    /// through <paramref name="appender"/>.
+    /// </summary>
+    public static IAdminFreshAssertions CreateFreshAssertions(IAuditAppender appender, IWebAuthnVerifier verifier)
+    {
+        ArgumentNullException.ThrowIfNull(appender);
+        ArgumentNullException.ThrowIfNull(verifier);
+        return new FreshAssertionGrants(appender, verifier);
+    }
+
+    /// <summary>
+    /// Your credentials (Story 1.26): an Admin's own credential list and their removal under the
+    /// floor of two. It runs as <c>gk_admin</c>, in a Deployment scope, and writes its events
+    /// through <paramref name="appender"/>.
+    /// </summary>
+    public static IAdminCredentials CreateCredentials(IAuditAppender appender)
+    {
+        ArgumentNullException.ThrowIfNull(appender);
+        return new AdminCredentials(appender);
+    }
+
+    /// <summary>
+    /// Admin Recovery Codes (Story 1.26, FR-46): issued once, held only as an HMAC under the
+    /// Deployment <c>hmac</c> key through <paramref name="custody"/>, and redeemed once for a
+    /// Session that reaches only credential registration. It runs as <c>gk_admin</c>, in a
+    /// Deployment scope, and writes its events through <paramref name="appender"/>.
+    /// </summary>
+    public static IAdminRecoveryCodes CreateRecoveryCodes(IAuditAppender appender, IKeyCustody custody)
+    {
+        ArgumentNullException.ThrowIfNull(appender);
+        ArgumentNullException.ThrowIfNull(custody);
+        return new AdminRecoveryCodes(appender, custody);
     }
 }

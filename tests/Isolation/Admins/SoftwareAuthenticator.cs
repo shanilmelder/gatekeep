@@ -32,6 +32,12 @@ internal sealed record AttestationTweaks
 
     /// <summary>The COSE algorithm the public key claims: ES256 (-7) unless set.</summary>
     public int Algorithm { get; init; } = -7;
+
+    /// <summary>The BE flag, when not the authenticator's own.</summary>
+    public bool? BackupEligible { get; init; }
+
+    /// <summary>The BS flag, when not the authenticator's own.</summary>
+    public bool? BackedUp { get; init; }
 }
 
 /// <summary>What a test makes a <see cref="SoftwareAuthenticator"/> get wrong, or set, in one assertion.</summary>
@@ -72,6 +78,12 @@ internal sealed record AssertionTweaks
 
     /// <summary>Signs with another key than the credential's: a bad signature.</summary>
     public bool OtherKey { get; init; }
+
+    /// <summary>The BE flag, when not the authenticator's own.</summary>
+    public bool? BackupEligible { get; init; }
+
+    /// <summary>The BS flag, when not the authenticator's own.</summary>
+    public bool? BackedUp { get; init; }
 }
 
 /// <summary>
@@ -85,6 +97,8 @@ internal sealed class SoftwareAuthenticator : IDisposable
 {
     private const byte UserPresent = 0x01;
     private const byte UserVerifiedFlag = 0x04;
+    private const byte BackupEligibleFlag = 0x08;
+    private const byte BackedUpFlag = 0x10;
     private const byte AttestedCredentialData = 0x40;
 
     private readonly ECDsa _key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
@@ -103,6 +117,12 @@ internal sealed class SoftwareAuthenticator : IDisposable
 
     /// <summary>The signature counter the last assertion carried.</summary>
     public uint Counter { get; set; }
+
+    /// <summary>The BE flag every response carries unless a tweak says otherwise: false, as a security key's.</summary>
+    public bool BackupEligible { get; set; }
+
+    /// <summary>The BS flag every response carries unless a tweak says otherwise.</summary>
+    public bool BackedUp { get; set; }
 
     /// <summary>
     /// The JSON body a page posts to complete a registration: the response to
@@ -134,7 +154,8 @@ internal sealed class SoftwareAuthenticator : IDisposable
 
         var authenticatorData = new List<byte>();
         authenticatorData.AddRange(SHA256.HashData(Encoding.UTF8.GetBytes(tweaks.RpId ?? rpId)));
-        authenticatorData.Add((byte)((tweaks.UserPresent ? UserPresent : 0) | (tweaks.UserVerified ? UserVerifiedFlag : 0)));
+        authenticatorData.Add((byte)((tweaks.UserPresent ? UserPresent : 0) | (tweaks.UserVerified ? UserVerifiedFlag : 0)
+            | Backup(tweaks.BackupEligible, tweaks.BackedUp)));
         Span<byte> counter = stackalloc byte[4];
         BinaryPrimitives.WriteUInt32BigEndian(counter, count);
         authenticatorData.AddRange(counter.ToArray());
@@ -175,7 +196,7 @@ internal sealed class SoftwareAuthenticator : IDisposable
     {
         tweaks ??= new AttestationTweaks();
         var clientData = ClientData(tweaks.Type ?? "webauthn.create", tweaks.Challenge ?? challenge, tweaks.Origin ?? origin, tweaks.CrossOrigin, tweaks.TopOrigin);
-        var attestationObject = AttestationObject(rpId, tweaks.UserVerified, tweaks.Algorithm);
+        var attestationObject = AttestationObject(rpId, tweaks.UserVerified, tweaks.Algorithm, Backup(tweaks.BackupEligible, tweaks.BackedUp));
         var id = Base64Url.EncodeToString(CredentialId);
         return JsonSerializer.Serialize(new
         {
@@ -213,10 +234,14 @@ internal sealed class SoftwareAuthenticator : IDisposable
         return Encoding.UTF8.GetBytes(json.Append('}').ToString());
     }
 
+    /// <summary>The BE and BS bits a response carries: the tweak's, or the authenticator's own.</summary>
+    private byte Backup(bool? eligible, bool? backedUp) =>
+        (byte)(((eligible ?? BackupEligible) ? BackupEligibleFlag : 0) | ((backedUp ?? BackedUp) ? BackedUpFlag : 0));
+
     public void Dispose() => _key.Dispose();
 
     /// <summary>{ "fmt": "none", "attStmt": {}, "authData": … }, keys in CTAP canonical order.</summary>
-    private byte[] AttestationObject(string rpId, bool userVerified, int algorithm)
+    private byte[] AttestationObject(string rpId, bool userVerified, int algorithm, byte backup)
     {
         var cbor = new List<byte> { 0xA3 };
         Text(cbor, "fmt");
@@ -224,15 +249,15 @@ internal sealed class SoftwareAuthenticator : IDisposable
         Text(cbor, "attStmt");
         cbor.Add(0xA0);
         Text(cbor, "authData");
-        Bytes(cbor, AuthenticatorData(rpId, userVerified, algorithm));
+        Bytes(cbor, AuthenticatorData(rpId, userVerified, algorithm, backup));
         return [.. cbor];
     }
 
-    private byte[] AuthenticatorData(string rpId, bool userVerified, int algorithm)
+    private byte[] AuthenticatorData(string rpId, bool userVerified, int algorithm, byte backup)
     {
         var data = new List<byte>();
         data.AddRange(SHA256.HashData(Encoding.UTF8.GetBytes(rpId)));
-        data.Add((byte)(UserPresent | AttestedCredentialData | (userVerified ? UserVerifiedFlag : 0)));
+        data.Add((byte)(UserPresent | AttestedCredentialData | (userVerified ? UserVerifiedFlag : 0) | backup));
         data.AddRange([0, 0, 0, 0]);
 
         // The AAGUID is big-endian, as its RFC 4122 bytes.

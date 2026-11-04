@@ -50,6 +50,31 @@ public sealed class RequestChecksTests(PostgresFixture postgres)
         { "tenantId on a deployment self-service route", false },
         { "tenantId on a deployment capability route", false },
         { "tenant marker without tenantId", false },
+
+        // Story 1.26: the fresh-assertion requirement is derived, or the declaration is invalid.
+        { "always capability", true },
+        { "always capability with a target", true },
+        { "always capability evaluated in the handler", false },
+        { "when capability with its marker", true },
+        { "when capability without its marker", false },
+        { "never capability with the marker", false },
+        { "never capability with a target", false },
+        { "capability with a self-service requirement", false },
+        { "self-service requirement", true },
+        { "self-service requirement in the handler on a setup-allowed route", true },
+        { "self-service requirement in the checks on a setup-allowed route", false },
+        { "self-service requirement for a capability", false },
+        { "self-service requirement for an unknown action", false },
+        { "self-service requirement whose target isn't in the route", false },
+        { "self-service with the handler marker", false },
+        { "two self-service requirements", false },
+        { "sessionless with a requirement", false },
+        { "recovery-allowed and setup-allowed", true },
+        { "recovery-allowed alone", false },
+        { "self-service target only a prefix of the route parameter", false },
+        { "always capability on a route with an object but no target", false },
+        { "when capability on a route with an object but no target", false },
+        { "when capability with only the path Tenant", true },
     };
 
     [Theory]
@@ -116,6 +141,38 @@ public sealed class RequestChecksTests(PostgresFixture postgres)
         Assert.Equal(1L, await app.ScalarAsync<long>("SELECT count(*) FROM deployment_audit_event WHERE type_code = 'admin.access.denied'"));
     }
 
+    [Fact]
+    public async Task An_Always_capability_route_needs_a_grant_the_checks_use_up_before_the_handler()
+    {
+        await using var app = await StartAsync(await postgres.NewMigratedDatabaseAsync());
+        var owner = await app.SessionAsync(owner: true);
+
+        using (var unconfirmed = await app.GetAsync("/api/v1/deployment/test/always", owner))
+        {
+            await FreshAssertionTests.AssertProblemAsync(unconfirmed, HttpStatusCode.Forbidden, "fresh_assertion_required");
+        }
+
+        // A grant for this Session and action, as a passed ceremony leaves one.
+        await PostgresFixture.ExecuteAsync(
+            app.Superuser,
+            $"""
+            INSERT INTO admin_fresh_assertion (id, session_id, stage, binding_hash, credential_id, created_at, expires_at)
+            SELECT gen_random_uuid(), '{app.SessionOf(owner)}', 'verified', sha256(convert_to(E'deployment.tenants.delete\n\n', 'UTF8')),
+                   min(id::text)::uuid, now(), now() + interval '5 minutes'
+            FROM admin_credential WHERE admin_id = '{app.AdminOf(owner)}'
+            """);
+
+        using (var confirmed = await app.GetAsync("/api/v1/deployment/test/always", owner))
+        {
+            Assert.Equal(HttpStatusCode.OK, confirmed.StatusCode);
+        }
+
+        Assert.Equal(0L, await app.ScalarAsync<long>("SELECT count(*) FROM admin_fresh_assertion"));
+        using var again = await app.GetAsync("/api/v1/deployment/test/always", owner);
+        await FreshAssertionTests.AssertProblemAsync(again, HttpStatusCode.Forbidden, "fresh_assertion_required");
+        Assert.Equal(0L, await app.ScalarAsync<long>("SELECT count(*) FROM deployment_audit_event"));
+    }
+
     private static string PublicIdFor() =>
         Gatekeep.Kernel.Identifiers.PublicId.Format(Gatekeep.Kernel.Identifiers.PublicIdType.Tenant, Guid.CreateVersion7());
 
@@ -124,6 +181,12 @@ public sealed class RequestChecksTests(PostgresFixture postgres)
 
     private static object Requires(Capability capability) =>
         Activator.CreateInstance(Host.GetType(Namespace + "RequiresCapability", throwOnError: true)!, capability)!;
+
+    private static object Fresh(string action, string? target = null, bool inHandler = false) =>
+        Activator.CreateInstance(Host.GetType(Namespace + "RequiresFreshAssertion", throwOnError: true)!, action, target, inHandler)!;
+
+    private static object Target(string routeValue) =>
+        Activator.CreateInstance(Host.GetType(Namespace + "FreshAssertionTarget", throwOnError: true)!, routeValue)!;
 
     /// <summary>The metadata and route pattern of each named declaration shape.</summary>
     private static (object[] Metadata, string Pattern) Shape(string shape)
@@ -153,6 +216,29 @@ public sealed class RequestChecksTests(PostgresFixture postgres)
             "tenantId on a deployment self-service route" => (new object[] { deploymentMarker, self }, "/api/v1/deployment/{tenantId}/x"),
             "tenantId on a deployment capability route" => (new object[] { deploymentMarker, deploymentCapability }, "/api/v1/deployment/{TenantId:guid}/x"),
             "tenant marker without tenantId" => (new object[] { tenantMarker, tenantCapability }, "/api/v1/tenants/x"),
+            "always capability" => (new object[] { deploymentMarker, Requires(AdminCapabilities.DeploymentTenantsDelete) }, Deployment),
+            "always capability with a target" => (new object[] { deploymentMarker, Requires(AdminCapabilities.DeploymentTenantsDelete), Target("item") }, "/api/v1/deployment/x/{item}"),
+            "always capability evaluated in the handler" => (new object[] { deploymentMarker, Requires(AdminCapabilities.DeploymentTenantsDelete), Instance("EvaluatesFreshAssertion") }, Deployment),
+            "when capability with its marker" => (new object[] { tenantMarker, Requires(AdminCapabilities.TenantLabelManage), Instance("EvaluatesFreshAssertion") }, Tenant),
+            "when capability without its marker" => (new object[] { tenantMarker, Requires(AdminCapabilities.TenantLabelManage) }, Tenant),
+            "never capability with the marker" => (new object[] { tenantMarker, tenantCapability, Instance("EvaluatesFreshAssertion") }, Tenant),
+            "never capability with a target" => (new object[] { deploymentMarker, deploymentCapability, Target("item") }, "/api/v1/deployment/x/{item}"),
+            "capability with a self-service requirement" => (new object[] { deploymentMarker, Requires(AdminCapabilities.DeploymentTenantsDelete), Fresh("self.credentials.remove") }, Deployment),
+            "self-service requirement" => (new object[] { deploymentMarker, self, Fresh("self.credentials.remove", "credentialId") }, "/api/v1/deployment/x/{credentialId}"),
+            "self-service requirement in the handler on a setup-allowed route" => (new object[] { deploymentMarker, self, Instance("SetupAllowed"), Fresh("self.credentials.add", inHandler: true) }, Deployment),
+            "self-service requirement in the checks on a setup-allowed route" => (new object[] { deploymentMarker, self, Instance("SetupAllowed"), Fresh("self.credentials.add") }, Deployment),
+            "self-service requirement for a capability" => (new object[] { deploymentMarker, self, Fresh("deployment.tenants.delete") }, Deployment),
+            "self-service requirement for an unknown action" => (new object[] { deploymentMarker, self, Fresh("self.credentials.rename") }, Deployment),
+            "self-service requirement whose target isn't in the route" => (new object[] { deploymentMarker, self, Fresh("self.credentials.remove", "credentialId") }, Deployment),
+            "self-service with the handler marker" => (new object[] { deploymentMarker, self, Instance("EvaluatesFreshAssertion") }, Deployment),
+            "two self-service requirements" => (new object[] { deploymentMarker, self, Fresh("self.credentials.add"), Fresh("self.credentials.add") }, Deployment),
+            "sessionless with a requirement" => (new object[] { deploymentMarker, Instance("SignInEndpoint"), Fresh("self.credentials.add") }, Deployment),
+            "recovery-allowed and setup-allowed" => (new object[] { deploymentMarker, self, Instance("SetupAllowed"), Instance("RecoveryAllowed") }, Deployment),
+            "recovery-allowed alone" => (new object[] { deploymentMarker, self, Instance("RecoveryAllowed") }, Deployment),
+            "self-service target only a prefix of the route parameter" => (new object[] { deploymentMarker, self, Fresh("self.credentials.remove", "credential") }, "/api/v1/deployment/x/{credentialId}"),
+            "always capability on a route with an object but no target" => (new object[] { deploymentMarker, Requires(AdminCapabilities.DeploymentTenantsDelete) }, "/api/v1/deployment/x/{item}"),
+            "when capability on a route with an object but no target" => (new object[] { tenantMarker, Requires(AdminCapabilities.TenantLabelManage), Instance("EvaluatesFreshAssertion") }, "/api/v1/tenants/{tenantId}/x/{item}"),
+            "when capability with only the path Tenant" => (new object[] { tenantMarker, Requires(AdminCapabilities.TenantLabelManage), Instance("EvaluatesFreshAssertion") }, Tenant),
             _ => throw new ArgumentOutOfRangeException(nameof(shape)),
         };
     }
@@ -179,6 +265,7 @@ public sealed class RequestChecksTests(PostgresFixture postgres)
         var tenant = Instance("TenantApiEndpoint");
         var self = Instance("SelfService");
         Map(app, "/api/v1/deployment/test/owner-only", deployment, Requires(AdminCapabilities.DeploymentTenantsRead));
+        Map(app, "/api/v1/deployment/test/always", deployment, Requires(AdminCapabilities.DeploymentTenantsDelete));
         Map(app, "/api/v1/deployment/test/undeclared", deployment);
         Map(app, "/api/v1/deployment/test/two-declarations", deployment, self, Requires(AdminCapabilities.DeploymentTenantsRead));
         Map(app, "/api/v1/deployment/test/capability-and-setup", deployment, Requires(AdminCapabilities.DeploymentTenantsRead), Instance("SetupAllowed"));
@@ -205,6 +292,10 @@ public sealed class RequestChecksTests(PostgresFixture postgres)
     private sealed class CheckedApp(WebApplication app, string superuser) : IAsyncDisposable
     {
         private readonly Dictionary<string, Guid> _admins = [];
+
+        private readonly Dictionary<string, Guid> _sessions = [];
+
+        public Guid SessionOf(string cookie) => _sessions[cookie];
 
         private readonly HttpClient _client = app.GetTestClient();
 
@@ -236,6 +327,7 @@ public sealed class RequestChecksTests(PostgresFixture postgres)
 
             var cookie = System.Buffers.Text.Base64Url.EncodeToString(raw);
             _admins[cookie] = admin;
+            _sessions[cookie] = session;
             return cookie;
         }
 
@@ -247,6 +339,8 @@ public sealed class RequestChecksTests(PostgresFixture postgres)
             await response.Content.LoadIntoBufferAsync(Cancellation);
             return response;
         }
+
+        public string Superuser => superuser;
 
         public Task<T> ScalarAsync<T>(string sql) => PostgresFixture.ScalarAsync<T>(superuser, sql);
 

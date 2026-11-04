@@ -251,9 +251,9 @@ test.describe('shell', () => {
     await expect(nav(page).getByRole('link')).toHaveCount(0);
     await expect(nav(page).getByRole('button')).toHaveCount(0);
 
-    // The account menu holds Sign out only.
+    // The account menu holds Your credentials, then Sign out (Story 1.26).
     await header.getByRole('button', { name: 'Account' }).click();
-    await expect(page.getByRole('menuitem')).toHaveText(['Sign out']);
+    await expect(page.getByRole('menuitem')).toHaveText(['Your credentials', 'Sign out']);
     await page.keyboard.press('Escape');
   });
 
@@ -759,7 +759,7 @@ test.describe('sign out', () => {
     await signOut(page);
     await expect.poll(() => api.count(`DELETE ${SESSION}`)).toBe(1);
 
-    // Its only item disabled, the account menu can't be opened onto it again.
+    // Its items disabled while signing out, the account menu can't be opened onto them again.
     const account = page.getByRole('button', { name: 'Account' });
     await expect(account).toHaveAttribute('aria-disabled', 'true');
     await account.click({ force: true });

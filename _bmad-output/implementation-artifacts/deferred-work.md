@@ -149,13 +149,7 @@
   summary: Audit refused and rate-limited bootstrap claims, Admin sign-outs and Session expiries.
   evidence: Story 1.21 review; Stories 1.23 and Epic 7.
 - source_spec: `_bmad-output/implementation-artifacts/spec-1-22-register-admin-webauthn-credentials.md`
-  summary: Store WebAuthn backup-eligible and backed-up flags for Admin credentials.
-  evidence: Story 1.22 review; credential management.
-- source_spec: `_bmad-output/implementation-artifacts/spec-1-22-register-admin-webauthn-credentials.md`
   summary: End-to-end WebAuthn registration test: real browser, real dashboard, real server.
-  evidence: Story 1.22 review.
-- source_spec: `_bmad-output/implementation-artifacts/spec-1-22-register-admin-webauthn-credentials.md`
-  summary: Database guard for the two-credential cap and a race test for duplicate credential IDs.
   evidence: Story 1.22 review.
 - source_spec: `_bmad-output/implementation-artifacts/spec-1-23-sign-in-as-an-admin-with-webauthn.md`
   summary: Audit refused and rate-limited bootstrap claims (Epic 7).
@@ -164,17 +158,8 @@
   summary: Audit Admin Session expiry (Epic 7).
   evidence: Story 1.23 out of scope. An expired Session is ended as `expired` with no event. Story 1.25's shell now shows the expiry banner and renews in place; the audit is what's left.
 - source_spec: `_bmad-output/implementation-artifacts/spec-1-23-sign-in-as-an-admin-with-webauthn.md`
-  summary: Store and use the WebAuthn BE/BS backup flags for Admin credentials (credential management).
-  evidence: Story 1.23 out of scope; carries on the Story 1.22 item. A synced passkey that reports a 0 counter gives no clone signal.
-- source_spec: `_bmad-output/implementation-artifacts/spec-1-23-sign-in-as-an-admin-with-webauthn.md`
   summary: Disable the credential, or raise a Security Alert, on a sign-count regression (Security Alerts story).
   evidence: Story 1.23 refuses the one sign-in and writes `admin.credential.sign_count_regressed`; the credential stays usable (threat model T-52).
-- source_spec: `_bmad-output/implementation-artifacts/spec-1-23-sign-in-as-an-admin-with-webauthn.md`
-  summary: Fresh assertions for sensitive Admin actions (FR-46 re-authentication).
-  evidence: Story 1.23 out of scope; threat model T-22 and G-5.
-- source_spec: `_bmad-output/implementation-artifacts/spec-1-23-sign-in-as-an-admin-with-webauthn.md`
-  summary: Admin Recovery Codes, and the "Use a recovery code" link on Admin sign-in.
-  evidence: Story 1.23 omits the EXPERIENCE link until Admin Recovery Codes exist.
 - source_spec: `_bmad-output/implementation-artifacts/spec-1-23-sign-in-as-an-admin-with-webauthn.md`
   summary: End-to-end WebAuthn test, registration and sign-in: real browser, real dashboard, real server.
   evidence: Deferred from Story 1.22 and still open: `signin.spec.ts` intercepts the API, and the Isolation tests use a software authenticator.
@@ -193,9 +178,6 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-1-23-sign-in-as-an-admin-with-webauthn.md`
   summary: Test the no-client-address 503 on sign-in and the bootstrap claim.
   evidence: Story 1.23 review.
-- source_spec: `_bmad-output/implementation-artifacts/spec-1-24-enforce-capabilities-and-tenant-scoped-routes.md`
-  summary: Enforce `FreshAssertion` on capability routes, and lift the architecture rule that no route may declare a fresh-assertion capability (Story 1.26).
-  evidence: Story 1.24 declares `FreshAssertion` in `AdminCapabilities` and returns it with each decision, but nothing evaluates it; `CapabilityRuleTests` refuses any route declaring one meanwhile.
 - source_spec: `_bmad-output/implementation-artifacts/spec-1-24-enforce-capabilities-and-tenant-scoped-routes.md`
   summary: Build `MachinePrincipal` from validated Management API tokens, add the Management API bearer scheme on `/api/v1/tenants/*`, and map each capability to the Management API Permission that grants it, as ADV-22 asks (Epic 17, Story 17.3).
   evidence: Story 1.24 has no `src/` construction of `MachinePrincipal` (an architecture rule holds it to that); machine denial is proven only at handler level with `TestOnlyMachinePrincipal`.
@@ -227,9 +209,6 @@
   summary: The Tenant switcher, the current Tenant's name and environment badge in the top bar, Tenant mismatch, and the final landing rules (Story 1.28).
   evidence: Story 1.25 out of scope. The top bar has the brand, the theme toggle and the avatar menu only, and the landing page is a holding page.
 - source_spec: `_bmad-output/implementation-artifacts/spec-1-25-open-the-admin-shell.md`
-  summary: Your credentials in the avatar menu (Story 1.26).
-  evidence: Story 1.25 out of scope. The avatar menu holds Sign out only.
-- source_spec: `_bmad-output/implementation-artifacts/spec-1-25-open-the-admin-shell.md`
   summary: Help in the top bar, opening the API reference (Story 17.5).
   evidence: Story 1.25 out of scope. FR-44: a deferred feature doesn't appear in any form, so the top bar has no Help until the reference exists.
 - source_spec: `_bmad-output/implementation-artifacts/spec-1-25-open-the-admin-shell.md`
@@ -247,3 +226,72 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-1-25-open-the-admin-shell.md`
   summary: Prove a real form keeps its values across a Session renewal.
   evidence: Story 1.25 review; Story 1.27.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-26-confirm-sensitive-actions-and-manage-admin-credentials.md`
+  summary: The Tenant-surface fresh-assertion begin, `POST /api/v1/tenants/{tenantId}/assertions`, for Tenant capability actions (Story 1.27, or the first story that maps a Tenant route with a fresh-assertion capability).
+  evidence: Story 1.26 refuses a Tenant capability action on the Deployment begin with 400 `assertion_refused`; the binding already takes the path Tenant.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-26-confirm-sensitive-actions-and-manage-admin-credentials.md`
+  summary: The first HTTP test of an `Always` capability route on a production route (Tenant deletion, Story 1.29; Admin invites and removal, Epic 8).
+  evidence: Story 1.26 proves the checks' consume on a test-only route in `RequestChecksTests`; no production route declares an `Always` capability yet.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-26-confirm-sensitive-actions-and-manage-admin-credentials.md`
+  summary: The `WhenProdTenant` and `WhenLoweringPolicy` predicates, each evaluated in its route's handler before `FreshAssertionGate.RequireAsync` (their routes' stories).
+  evidence: Story 1.26 builds the gate, the `EvaluatesFreshAssertion` marker and the reviewed handler-enforced list; registration begin is its only caller.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-26-confirm-sensitive-actions-and-manage-admin-credentials.md`
+  summary: Rename an Admin credential in Your credentials.
+  evidence: Story 1.26 out of scope: credentials are named by their kind only.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-26-confirm-sensitive-actions-and-manage-admin-credentials.md`
+  summary: Reissue an Admin Recovery Code from Your credentials, and a Recovery Code for the Deployment Owner.
+  evidence: Story 1.26 issues one only at setup, to an Admin who isn't the Owner (FR-2); the Owner's way back is Story 1.32's host recovery.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-26-confirm-sensitive-actions-and-manage-admin-credentials.md`
+  summary: Download for the Admin Recovery Code.
+  evidence: Story 1.26 offers Copy only: a client-made file needs a `blob:` or `data:` URI, which AD-21's CSP forbids, and a server-sent one would be a second reveal.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-26-confirm-sensitive-actions-and-manage-admin-credentials.md`
+  summary: A Security Alert on Admin Recovery Code use and on credential removal (Story 1.30).
+  evidence: Story 1.26 audits both on the Deployment chain and ends the Admin's other Sessions, but alerts nobody.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-26-confirm-sensitive-actions-and-manage-admin-credentials.md`
+  summary: Email notice of Admin credential changes (Story 8.2).
+  evidence: Admins have no email address until Story 8.2.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-26-confirm-sensitive-actions-and-manage-admin-credentials.md`
+  summary: HMAC key rotation for `admin_recovery_code`, using its `hmac_key_version`.
+  evidence: Story 1.26 stores the key version with each HMAC but never rewraps or rehashes.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-26-confirm-sensitive-actions-and-manage-admin-credentials.md`
+  summary: List the Admin's credentials in `allowCredentials` for fresh assertions.
+  evidence: Story 1.26 keeps the begin options unchanged (empty `allowCredentials`), so the browser may offer another account's passkey, which the server then refuses.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-26-confirm-sensitive-actions-and-manage-admin-credentials.md`
+  summary: Purge `admin_attempt` rows.
+  evidence: Story 1.26 adds two more policies counted there, per Session and per client; carries on the Story 1.20 item.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-26-confirm-sensitive-actions-and-manage-admin-credentials.md`
+  summary: Disable the credential, or raise a Security Alert, on a sign-count regression (Security Alerts story).
+  evidence: Story 1.26 writes `admin.credential.sign_count_regressed` for fresh assertions too, with the Admin as Actor; the credential stays usable. Carries on the Story 1.23 item.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-26-confirm-sensitive-actions-and-manage-admin-credentials.md`
+  summary: End-to-end WebAuthn test, real browser, real dashboard and real server, for registration, sign-in and fresh assertions.
+  evidence: Story 1.26's browser tests intercept the API, and its Isolation tests use a software authenticator. Carries on the Story 1.23 item.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-26-confirm-sensitive-actions-and-manage-admin-credentials.md`
+  summary: Catch `ARCHITECTURE-SPINE.md` up with Story 1.26: add `admin_fresh_assertion` and `admin_signin_challenge` to AD-27's Admins tables.
+  evidence: Story 1.26 adds the `UNLOGGED` `control` table `admin_fresh_assertion`, which AD-27 doesn't name, nor Story 1.23's `admin_signin_challenge`.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-26-confirm-sensitive-actions-and-manage-admin-credentials.md`
+  summary: Retire the lost credential during recovery (Story 8.3).
+  evidence: Story 1.26 review. A recovery registration evicts every other Session, but the lost credential stays registered, so whoever holds the lost device can sign in again until the Admin adds a third credential and removes it in Your credentials; threat model T-54.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-26-confirm-sensitive-actions-and-manage-admin-credentials.md`
+  summary: A recovery Admin who already holds the maximum of 10 credentials can't register one (Story 8.3).
+  evidence: Story 1.26 review. A recovery Session's registration is refused with 409 `credentials_maximum` at 10, so such an Admin can only sign out.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-26-confirm-sensitive-actions-and-manage-admin-credentials.md`
+  summary: Re-key `admin_recovery_code` on Deployment `hmac` key rotation, or keep the old key version for recovery lookups (Epic 9).
+  evidence: Story 1.26 review. The redeem looks a code up by its HMAC under the latest key version and ignores `hmac_key_version`, so rotating the key would invalidate every Recovery Code. No rotation path exists in the code yet; threat model T-54.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-26-confirm-sensitive-actions-and-manage-admin-credentials.md`
+  summary: Decide how removing an Admin works with the credential floor trigger (Epic 8, Admin removal).
+  evidence: Story 1.26 review. `admin_credential_guard_delete` refuses any delete that leaves an Admin fewer than two credentials, for every role, so an Admin's credentials can't be deleted with them; threat model T-51.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-26-confirm-sensitive-actions-and-manage-admin-credentials.md`
+  summary: Limit only failed Recovery Code redemptions Deployment-wide.
+  evidence: Story 1.26 review. `admins.recovery_code.deployment` counts every redemption before the code is read, since `IRateLimiter` has no way to check a limit without counting; a flood of wrong codes therefore also holds back the genuine Admin for the window.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-26-confirm-sensitive-actions-and-manage-admin-credentials.md`
+  summary: Key rotation must re-key or keep the old hmac version for Admin Recovery Code lookups.
+  evidence: Story 1.26 review; Epic 9.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-26-confirm-sensitive-actions-and-manage-admin-credentials.md`
+  summary: Tenant-scoped fresh-assertion begin route.
+  evidence: Story 1.26 review; Story 1.27 or the first Tenant fresh-assertion route.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-26-confirm-sensitive-actions-and-manage-admin-credentials.md`
+  summary: Admin removal must account for the credential floor trigger.
+  evidence: Story 1.26 review; Epic 8.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-26-confirm-sensitive-actions-and-manage-admin-credentials.md`
+  summary: Retire the lost credential during recovery, and handle a recovery Admin at the maximum.
+  evidence: Story 1.26 review; Story 8.3.
