@@ -137,6 +137,48 @@ export interface Messages {
   signOut: string;
   /** Shown when Sign out was refused or couldn't reach the server, with the Session still live. */
   signOutFailed: string;
+  /** The Admin sidebar's landmark name. */
+  navMain: string;
+  /** The nine v1 sidebar group labels, in EXPERIENCE order. */
+  navApplications: string;
+  navAuthentication: string;
+  navUsers: string;
+  navAuthorization: string;
+  navSecurity: string;
+  navBranding: string;
+  navMonitoring: string;
+  navSettings: string;
+  navDeployment: string;
+  /** The top bar's wordmark, which also names the brand link. */
+  brandWordmark: string;
+  /** The avatar menu trigger's name. */
+  account: string;
+  /** The theme toggle's name: pressed while the scheme is dark. */
+  darkTheme: string;
+  /** The Admin Dashboard landing page's heading. */
+  landingTitle: string;
+  /** The landing page's empty state for an Admin who can list Tenants, before any exists. */
+  landingNoTenants: string;
+  /** The landing page's empty state for an Admin with no Tenant to reach (EXPERIENCE.md). */
+  landingNoAccess: string;
+  /** The forbidden page's heading, over the server's code and trace ID. It never says whether the page exists. */
+  forbiddenTitle: string;
+  /** The not-found page's heading. */
+  notFoundTitle: string;
+  /** The not-found page's link back to the landing page. */
+  backToDashboard: string;
+  /** The banner while the Admin Session has expired: the sheet opens, and nothing typed is lost. */
+  sessionExpired: string;
+  /** Shown when signing in again is rate limited. Placeholder: {seconds}. */
+  signInRateLimited: string;
+  /** The same, when the server gave no whole number of seconds to wait. */
+  signInRateLimitedNoTime: string;
+  /** Announced politely once the Admin is signed in again and the banner has gone. */
+  sessionRenewed: string;
+  /** A banner for a page whose reads failed: an outage, a lost connection or an answer with no data. */
+  loadFailed: string;
+  /** A banner's action that reads again. */
+  retry: string;
 }
 
 export const defaultMessages: Readonly<Messages> = Object.freeze({
@@ -209,6 +251,31 @@ export const defaultMessages: Readonly<Messages> = Object.freeze({
   signInRefused: "That credential wasn't recognised.",
   signOut: 'Sign out',
   signOutFailed: "You're still signed in: signing out didn't complete. Try again.",
+  navMain: 'Main',
+  navApplications: 'Applications',
+  navAuthentication: 'Authentication',
+  navUsers: 'User management',
+  navAuthorization: 'Authorization',
+  navSecurity: 'Security',
+  navBranding: 'Branding',
+  navMonitoring: 'Monitoring',
+  navSettings: 'Settings',
+  navDeployment: 'Deployment',
+  brandWordmark: 'gatekeep',
+  account: 'Account',
+  darkTheme: 'Dark theme',
+  landingTitle: 'Admin Dashboard',
+  landingNoTenants: 'No Tenants yet.',
+  landingNoAccess: "You don't have access to a Tenant yet. Ask a Deployment Owner.",
+  forbiddenTitle: "You don't have access to this page.",
+  notFoundTitle: 'This no longer exists.',
+  backToDashboard: 'Back to Admin Dashboard',
+  sessionExpired: 'Your session expired. Sign in to continue. Nothing you entered has been lost.',
+  signInRateLimited: 'Too many sign-in attempts. Try again in {seconds} seconds.',
+  signInRateLimitedNoTime: 'Too many sign-in attempts. Try again later.',
+  sessionRenewed: "You're signed in again.",
+  loadFailed: "We couldn't load this page.",
+  retry: 'Retry',
 });
 
 /**

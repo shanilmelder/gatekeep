@@ -6,6 +6,7 @@
 // surface's own entry point; the drawer page is Admin only, as its components are.
 // `?page=hosted` shows the Hosted building blocks and screens (Story 1.18), always from the
 // hosted entry; its scheme may also be `auto`, its default, and HostedFixture reads the rest.
+// `?page=shell` shows the Admin shell (Story 1.25), Admin only like the drawer page.
 
 import '@gatekeep/ui/styles.css';
 import * as admin from '@gatekeep/ui/admin';
@@ -17,9 +18,10 @@ import { DrawerFixture } from './DrawerFixture';
 import { Fixture } from './Fixture';
 import { HostedFixture } from './HostedFixture';
 import { OverlayFixture } from './OverlayFixture';
+import { ShellFixture } from './ShellFixture';
 
 const params = new URLSearchParams(location.search);
-const pages = ['data', 'overlay', 'drawer', 'hosted'] as const;
+const pages = ['data', 'overlay', 'drawer', 'hosted', 'shell'] as const;
 const page = pages.find((name) => name === params.get('page')) ?? 'controls';
 const asked = params.get('scheme');
 const scheme = asked === 'dark' ? 'dark' : page === 'hosted' && asked !== 'light' ? 'auto' : 'light';
@@ -32,7 +34,13 @@ const adminRoot = preview || (page === 'hosted' && params.get('root') === 'admin
 // The drawer page's components are Admin only, so it's always on the Admin surface, and the
 // hosted page's are on the Hosted surface, except with an Admin root.
 const surface =
-  page === 'hosted' ? (adminRoot ? 'admin' : 'hosted') : page !== 'drawer' && params.get('surface') === 'hosted' ? 'hosted' : 'admin';
+  page === 'hosted'
+    ? adminRoot
+      ? 'admin'
+      : 'hosted'
+    : page !== 'drawer' && page !== 'shell' && params.get('surface') === 'hosted'
+      ? 'hosted'
+      : 'admin';
 
 document.documentElement.dataset.gkSurface = surface;
 // An Admin root stays light: only the Hosted scope inside it takes the scheme.
@@ -86,6 +94,8 @@ const HOSTED = [
 ];
 // The admin entry's own exports, exactly: anything else it gains fails the check.
 const ADMIN_ONLY = [
+  'ADMIN_NAV_GROUPS',
+  'AdminShell',
   'ConfirmModal',
   'DataTable',
   'Drawer',
@@ -98,12 +108,17 @@ const ADMIN_ONLY = [
   'OneTimeReveal',
   'PAGE_SIZE',
   'RbacMatrix',
+  'SectionPage',
   'SKELETON_DELAY_MS',
   'SettingsRow',
+  'Sidebar',
   'SkeletonRows',
   'StatTile',
   'Tabs',
+  'ThemeToggle',
+  'TopBar',
   'UsageBar',
+  'useMediaQuery',
   'useUrlTab',
 ];
 const expected = [...names, ...ADMIN_ONLY].sort();
@@ -124,7 +139,9 @@ document.documentElement.dataset.adminOnlyExports = Object.keys(adminExports)
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    {page === 'hosted' ? (
+    {page === 'shell' ? (
+      <ShellFixture admin={admin} />
+    ) : page === 'hosted' ? (
       <HostedFixture ui={hosted} admin={admin} scheme={hostedScheme} preview={preview} />
     ) : page === 'drawer' ? (
       <DrawerFixture admin={admin} />

@@ -107,8 +107,8 @@
   summary: Prove fonts and same-origin requests through Caddy once the stack serves the apps.
   evidence: Story 1.13 proved them on vite preview.
 - source_spec: `_bmad-output/implementation-artifacts/spec-1-13-generate-design-tokens-and-bundle-fonts.md`
-  summary: Make Hosted Login follow prefers-color-scheme (DESIGN.md line 579).
-  evidence: Story 1.13 review; surface stories 1.18 and 1.25.
+  summary: Make the Hosted Login app's own `index.html` follow prefers-color-scheme (DESIGN.md line 579), with `data-gk-surface="hosted"` and `data-gk-scheme="auto"` on `<html>` (Story 4.1).
+  evidence: Story 1.13 review. Story 1.18 gave HostedPage its `auto` scope, and Story 1.25 settled the Admin side: the pre-Session cards follow the device and only the shell takes the manual toggle. Only the Hosted Login app's own page is left.
 - source_spec: `_bmad-output/implementation-artifacts/spec-1-13-generate-design-tokens-and-bundle-fonts.md`
   summary: Add a prefers-reduced-motion override for motion tokens.
   evidence: Story 1.13 review; Story 1.16.
@@ -161,8 +161,8 @@
   summary: Audit refused and rate-limited bootstrap claims (Epic 7).
   evidence: Story 1.23 audits Admin sign-in and sign-out only; the rest of the Story 1.21 item stays open.
 - source_spec: `_bmad-output/implementation-artifacts/spec-1-23-sign-in-as-an-admin-with-webauthn.md`
-  summary: Audit Admin Session expiry, and show the expiry banner (Epic 7, and Story 1.25's shell).
-  evidence: Story 1.23 out of scope. An expired Session is ended as `expired` with no event, and the dashboard only goes to `/signin` on the 401.
+  summary: Audit Admin Session expiry (Epic 7).
+  evidence: Story 1.23 out of scope. An expired Session is ended as `expired` with no event. Story 1.25's shell now shows the expiry banner and renews in place; the audit is what's left.
 - source_spec: `_bmad-output/implementation-artifacts/spec-1-23-sign-in-as-an-admin-with-webauthn.md`
   summary: Store and use the WebAuthn BE/BS backup flags for Admin credentials (credential management).
   evidence: Story 1.23 out of scope; carries on the Story 1.22 item. A synced passkey that reports a 0 counter gives no clone signal.
@@ -223,3 +223,27 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-1-24-enforce-capabilities-and-tenant-scoped-routes.md`
   summary: Over-HTTP refusal of a non-Owner on a real Owner-only Deployment route.
   evidence: Story 1.24 review; Story 1.27.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-25-open-the-admin-shell.md`
+  summary: The Tenant switcher, the current Tenant's name and environment badge in the top bar, Tenant mismatch, and the final landing rules (Story 1.28).
+  evidence: Story 1.25 out of scope. The top bar has the brand, the theme toggle and the avatar menu only, and the landing page is a holding page.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-25-open-the-admin-shell.md`
+  summary: Your credentials in the avatar menu (Story 1.26).
+  evidence: Story 1.25 out of scope. The avatar menu holds Sign out only.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-25-open-the-admin-shell.md`
+  summary: Help in the top bar, opening the API reference (Story 17.5).
+  evidence: Story 1.25 out of scope. FR-44: a deferred feature doesn't appear in any form, so the top bar has no Help until the reference exists.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-25-open-the-admin-shell.md`
+  summary: The create-Tenant landing and the first Deployment sidebar item, Tenants (Story 1.27).
+  evidence: Story 1.25 ships the sidebar with an empty item registry (`apps/admin-dashboard/src/shell/nav.ts`) and a holding landing page.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-25-open-the-admin-shell.md`
+  summary: The "role removed mid-session" and "Tenant deleted" banners (Story 8.4, Story 1.29).
+  evidence: Story 1.25 out of scope. The shell reads capabilities on every navigation, so a removal counts at once, but no banner says so.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-25-open-the-admin-shell.md`
+  summary: Prove Session renewal keeps the values of a real form on a real page (Story 1.27's Create Tenant is the first).
+  evidence: Story 1.25 proves the banner slot keeps an input's value, focus and node on the fixture, and no reload or remount on a real 401 in the dashboard; no shell page has a form yet. Renewal's rule for a state-changing request (never resent) is proven by `apps/admin-dashboard/test/renewal.test.mjs` only.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-25-open-the-admin-shell.md`
+  summary: Tenant page titles in `<title>`.
+  evidence: Story 1.25 out of scope. Every shell page keeps the document title "Gatekeep Admin Dashboard".
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-25-open-the-admin-shell.md`
+  summary: Prove a real form keeps its values across a Session renewal.
+  evidence: Story 1.25 review; Story 1.27.

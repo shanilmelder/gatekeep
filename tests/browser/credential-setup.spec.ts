@@ -6,6 +6,10 @@
 
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type CDPSession, type Page, type Request, type Route } from '@playwright/test';
+import { watchCsp } from './csp-watch';
+
+// Every test, not only those that check it in place, fails on a CSP violation (Story 1.25).
+watchCsp(test);
 
 const SESSION = '/api/v1/deployment/session';
 const BEGIN = '/api/v1/deployment/credentials/registration';
@@ -76,6 +80,11 @@ async function answerApi(page: Page, baseURL: string, { credentials = 0, kind, b
   const begins: Request[] = [];
   const completes: Request[] = [];
   const challenges: string[] = [];
+
+  // The shell's Deployment capabilities read, on the landing page setup goes on to (Story 1.25).
+  await page.route(path('/api/v1/deployment/capabilities'), (route) =>
+    route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ capabilities: [] }) }),
+  );
 
   await page.route(path(SESSION), (route) =>
     route.fulfill({
@@ -184,7 +193,7 @@ test('two registrations, step 1 of 2 then 2 of 2, end at the landing page', asyn
   await registerButton(page).click();
 
   await expect(page).toHaveURL(/\/$/);
-  await expect(page.getByText('Admin Dashboard')).toBeVisible();
+  await expect(page.getByRole('heading', { level: 1, name: 'Admin Dashboard' })).toBeVisible();
   expect(api.completes).toHaveLength(2);
   expect((api.completes[1]!.postDataJSON() as { rawId: string }).rawId).not.toBe(body.rawId);
   await noViolations();
@@ -367,7 +376,7 @@ test('a 403 from the begin, setup finished elsewhere, goes to the landing page',
   await registerButton(page).click();
 
   await expect(page).toHaveURL(/\/$/);
-  await expect(page.getByText('Admin Dashboard')).toBeVisible();
+  await expect(page.getByRole('heading', { level: 1, name: 'Admin Dashboard' })).toBeVisible();
 });
 
 for (const scheme of ['light', 'dark'] as const) {

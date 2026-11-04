@@ -15,6 +15,9 @@
 // Story 1.21: the Bootstrap screen on that same host, with its API intercepted (bootstrap.spec.ts).
 // Story 1.22: credential setup on that same host, with a virtual authenticator (credential-setup.spec.ts).
 // Story 1.23: Admin sign-in and sign-out on that same host, with a virtual authenticator (signin.spec.ts).
+// Story 1.25: the Admin shell's parts, from the fixture build at ?page=shell (shell.spec.ts), and
+// the shell itself on that same host, with its API intercepted and a virtual authenticator for
+// Session renewal (admin-shell.spec.ts).
 
 import { existsSync } from 'node:fs';
 import path from 'node:path';
@@ -52,7 +55,7 @@ export default defineConfig({
       name,
       // Every spec that isn't another project's own, so a new spec runs by default.
       testMatch: '*.spec.ts',
-      testIgnore: ['admin-csp.spec.ts', 'bootstrap.spec.ts', 'credential-setup.spec.ts', 'signin.spec.ts', 'controls.spec.ts', 'data.spec.ts', 'overlay.spec.ts', 'drawer.spec.ts', 'hosted.spec.ts'],
+      testIgnore: ['admin-csp.spec.ts', 'bootstrap.spec.ts', 'credential-setup.spec.ts', 'signin.spec.ts', 'controls.spec.ts', 'data.spec.ts', 'overlay.spec.ts', 'drawer.spec.ts', 'hosted.spec.ts', 'shell.spec.ts', 'admin-shell.spec.ts'],
       use: { baseURL: `http://127.0.0.1:${port}` },
     })),
     { name: fixture.name, testMatch: 'controls.spec.ts', use: { baseURL: `http://127.0.0.1:${fixture.port}` } },
@@ -64,6 +67,8 @@ export default defineConfig({
     { name: 'drawer', testMatch: 'drawer.spec.ts', use: { baseURL: `http://127.0.0.1:${fixture.port}` } },
     // The Hosted building blocks and screens (Story 1.18), on the same fixture build at ?page=hosted.
     { name: 'hosted', testMatch: 'hosted.spec.ts', use: { baseURL: `http://127.0.0.1:${fixture.port}` } },
+    // The Admin shell's parts (Story 1.25), on the same fixture build at ?page=shell.
+    { name: 'shell', testMatch: 'shell.spec.ts', use: { baseURL: `http://127.0.0.1:${fixture.port}` } },
     {
       name: 'admin-host',
       testMatch: 'admin-csp.spec.ts',
@@ -88,6 +93,13 @@ export default defineConfig({
     {
       name: 'signin',
       testMatch: 'signin.spec.ts',
+      use: { baseURL: `http://localhost:${adminHost.port}` },
+    },
+    // The Admin shell (Story 1.25), the same way: from localhost, with a virtual authenticator
+    // answering Session renewal's sheet.
+    {
+      name: 'admin-shell',
+      testMatch: 'admin-shell.spec.ts',
       use: { baseURL: `http://localhost:${adminHost.port}` },
     },
   ],

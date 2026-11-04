@@ -1,0 +1,63 @@
+/*
+ * The Admin shell (DESIGN.md, Admin shell): a grid, the top bar's row over a sidebar | main
+ * row, exactly the window's height with nothing overflowing it. Only main scrolls, so the
+ * window never does at any width. The banner slot is always in the tree, empty or not, so the
+ * page beside it keeps its place and is never remounted.
+ */
+
+.shell {
+  position: relative;
+  box-sizing: border-box;
+  display: grid;
+  grid-template-rows: var(--gk-top-bar-height) minmax(0, 1fr);
+  height: 100dvh;
+  overflow: hidden;
+  background: var(--gk-color-bg);
+  color: var(--gk-color-tx);
+  font: var(--gk-font-body);
+}
+
+.body {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  min-height: 0;
+}
+
+.main {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+}
+
+.banner {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gk-space-8);
+  padding: var(--gk-space-16) var(--gk-space-page-padding) 0;
+}
+
+.banner:empty {
+  display: none;
+}
+
+/*
+ * The next page is loading while this one stays: a thin, still jade bar under the top bar,
+ * over the sidebar and main, that blocks nothing. It doesn't move, so it needs no
+ * reduced-motion rule and never holds up a wait for animations.
+ */
+.progress {
+  position: absolute;
+  top: var(--gk-top-bar-height);
+  left: 0;
+  right: 0;
+  height: 2px;
+  pointer-events: none;
+  background: var(--gk-color-ac);
+}
+
+@media (forced-colors: active) {
+  .progress {
+    background: Highlight;
+  }
+}

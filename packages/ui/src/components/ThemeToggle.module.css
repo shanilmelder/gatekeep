@@ -1,0 +1,18 @@
+/* A square ghost button holding one 16px icon, as the export's top-bar controls. */
+
+.toggle[data-variant] {
+  width: var(--gk-ui-button-height);
+  padding: 0;
+  color: var(--gk-color-tx2);
+}
+
+.icon {
+  display: block;
+  width: var(--gk-space-16);
+  height: var(--gk-space-16);
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
