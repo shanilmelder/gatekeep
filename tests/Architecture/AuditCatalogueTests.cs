@@ -228,6 +228,13 @@ public class AuditCatalogueTests
                 .Select(f => f.GetValue(null)!.ToString()!));
         }
 
+        // Capability names share the shape too (Story 1.24, AD-20): each one the Admins table holds is allowed.
+        allowed.UnionWith(AuditCatalogue.ModuleAssembly(Root, "Admins", Project)
+            .GetType("Gatekeep.Modules.Admins.Contracts.AdminCapabilities", throwOnError: true)!
+            .GetFields(BindingFlags.Public | BindingFlags.Static)
+            .Where(f => f.FieldType.FullName == "Gatekeep.Modules.Admins.Contracts.Capability")
+            .Select(f => f.GetValue(null)!.ToString()!));
+
         return allowed;
     }
 

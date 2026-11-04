@@ -55,6 +55,31 @@ describe('api-client', () => {
     assert.deepEqual(rest, { ok: true, status: 200, data: { capabilities: [] } });
   });
 
+  it("puts the Tenant's public ID into the templated path, encoded", async () => {
+    const { calls, fetch } = fakeFetch(200, JSON.stringify({ capabilities: ['tenant.configuration.read'] }));
+    const client = createApiClient({ fetch, csrfToken: () => 'csrf-1' });
+
+    const result = await client.getTenantCapabilities('ten_aaaaaaaaaaaaaaaaaaaaaaaaab');
+    await client.getTenantCapabilities('../deployment/session?x=1#y');
+
+    assert.equal(calls[0].input, '/api/v1/tenants/ten_aaaaaaaaaaaaaaaaaaaaaaaaab/capabilities');
+    assert.equal(calls[0].init.method, 'GET');
+    assert.equal(CSRF_HEADER in calls[0].init.headers, false);
+    assert.deepEqual(result.data, { capabilities: ['tenant.configuration.read'] });
+    // Encoded, a hostile ID stays one path segment and can't reach another path.
+    assert.equal(calls[1].input, '/api/v1/tenants/..%2Fdeployment%2Fsession%3Fx%3D1%23y/capabilities');
+  });
+
+  it('reads an access_denied refusal as its problem', async () => {
+    const { fetch } = fakeFetch(403, JSON.stringify({ code: 'access_denied', traceId: 't-3' }), 'application/problem+json');
+
+    const result = await createApiClient({ fetch }).getTenantCapabilities('ten_aaaaaaaaaaaaaaaaaaaaaaaaab');
+
+    const { headers, ...rest } = result;
+    assert.ok(headers instanceof Headers);
+    assert.deepEqual(rest, { ok: false, status: 403, problem: { code: 'access_denied', traceId: 't-3' } });
+  });
+
   it('reads a problem body into its code and trace ID only', async () => {
     const { fetch } = fakeFetch(400, JSON.stringify({ code: 'bootstrap_refused', traceId: 't-1', detail: 'x' }), 'application/problem+json');
 

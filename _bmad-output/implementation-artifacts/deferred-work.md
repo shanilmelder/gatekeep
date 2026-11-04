@@ -193,3 +193,33 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-1-23-sign-in-as-an-admin-with-webauthn.md`
   summary: Test the no-client-address 503 on sign-in and the bootstrap claim.
   evidence: Story 1.23 review.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-24-enforce-capabilities-and-tenant-scoped-routes.md`
+  summary: Enforce `FreshAssertion` on capability routes, and lift the architecture rule that no route may declare a fresh-assertion capability (Story 1.26).
+  evidence: Story 1.24 declares `FreshAssertion` in `AdminCapabilities` and returns it with each decision, but nothing evaluates it; `CapabilityRuleTests` refuses any route declaring one meanwhile.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-24-enforce-capabilities-and-tenant-scoped-routes.md`
+  summary: Build `MachinePrincipal` from validated Management API tokens, add the Management API bearer scheme on `/api/v1/tenants/*`, and map each capability to the Management API Permission that grants it, as ADV-22 asks (Epic 17, Story 17.3).
+  evidence: Story 1.24 has no `src/` construction of `MachinePrincipal` (an architecture rule holds it to that); machine denial is proven only at handler level with `TestOnlyMachinePrincipal`.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-24-enforce-capabilities-and-tenant-scoped-routes.md`
+  summary: Grant `gk_admin` `INSERT` on `tenant_role` and make a Tenant's creator its Tenant Owner; add the first Owner-only Deployment route with its HTTP refusal test for a non-Owner (Story 1.27).
+  evidence: Story 1.24 makes `tenant_role` read-only and has no Owner-only route, so AC 2 is proven by the generated matrix, the route rule and a non-Owner's empty Deployment capability list.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-24-enforce-capabilities-and-tenant-scoped-routes.md`
+  summary: Tenant switching from an Admin's roles, and the "no Tenant Role" landing (Story 1.28).
+  evidence: Story 1.24 adds the `tenant_role_admin` index for the switcher but no route lists an Admin's Tenants.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-24-enforce-capabilities-and-tenant-scoped-routes.md`
+  summary: Make a deleted Tenant's roles grant nothing (Story 1.29).
+  evidence: Story 1.24's authorizer doesn't read `tenant` (AD-1), and `tenant_role` keeps `RESTRICT` keys, so deletion isn't designed yet.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-24-enforce-capabilities-and-tenant-scoped-routes.md`
+  summary: Grant `UPDATE (role)` and `DELETE` on `tenant_role`, audit role changes, guard the last Tenant Owner, and show the "role removed mid-session" banner (Story 8.4).
+  evidence: Story 1.24 reads roles on every request, so a removal counts at once, but nothing writes or audits role changes.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-24-enforce-capabilities-and-tenant-scoped-routes.md`
+  summary: Write rejected cross-Tenant attempts to the Tenant's own Log, the FR-40 `CrossTenantRejection` class (Story 7.4).
+  evidence: Story 1.24 writes `admin.access.denied` on the Deployment chain only, with no FR-40 class.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-24-enforce-capabilities-and-tenant-scoped-routes.md`
+  summary: Have the cross-Tenant suite read the Tenant routes from `x-gatekeep-access` in the committed OpenAPI document (Story 1.31).
+  evidence: Story 1.24 adds `x-gatekeep-access` to every operation; the suite isn't built.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-24-enforce-capabilities-and-tenant-scoped-routes.md`
+  summary: Catch `ARCHITECTURE-SPINE.md` up with Story 1.24: the AD-19 self-service exemption under `/api/v1/deployment`, the public ID alphabet (lowercase RFC 4648 base32, no padding, canonical only, never the empty UUID) in Conventions, the capability names in AD-20, and `tenant_role` in AD-27's Admins tables.
+  evidence: Story 1.24 exempts the reviewed self-service and sessionless routes from the Deployment Owner gate and fixes the public ID encoding, which the spine doesn't yet state.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-24-enforce-capabilities-and-tenant-scoped-routes.md`
+  summary: Over-HTTP refusal of a non-Owner on a real Owner-only Deployment route.
+  evidence: Story 1.24 review; Story 1.27.

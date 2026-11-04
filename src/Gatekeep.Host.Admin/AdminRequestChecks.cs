@@ -2,6 +2,7 @@ using System.Data.Common;
 using System.Net;
 using System.Net.Sockets;
 using Gatekeep.Adapters.Hosting;
+using Gatekeep.Kernel.Identifiers;
 using Gatekeep.Kernel.Secrets;
 using Gatekeep.Modules.Admins.Contracts;
 
@@ -12,6 +13,102 @@ internal sealed class DeploymentApiEndpoint
 {
     public static readonly DeploymentApiEndpoint Instance = new();
 }
+
+/// <summary>
+/// Marks an endpoint under <c>/api/v1/tenants/{tenantId}</c> (Story 1.24, AD-19), so the request
+/// checks apply to it and take its Tenant from that path segment only. It declares a Tenant capability.
+/// </summary>
+internal sealed class TenantApiEndpoint
+{
+    public static readonly TenantApiEndpoint Instance = new();
+}
+
+/// <summary>
+/// An access declaration (Story 1.24): the endpoint needs <see cref="Capability"/>, decided by
+/// the authorizer from <see cref="AdminCapabilities"/> after the Session checks. A refusal is 403
+/// <c>access_denied</c>, audited.
+/// </summary>
+internal sealed class RequiresCapability(Capability capability)
+{
+    public Capability Capability { get; } = capability ?? throw new ArgumentNullException(nameof(capability));
+}
+
+/// <summary>
+/// An access declaration (Story 1.24): any Admin with a live Session, acting only on their own
+/// Session, credentials or capability list. On the reviewed list only: no capability is checked.
+/// </summary>
+internal sealed class SelfService
+{
+    public static readonly SelfService Instance = new();
+}
+
+/// <summary>The kinds of access an API endpoint declares: exactly one each.</summary>
+internal enum AccessKind
+{
+    Capability,
+    Self,
+    Sessionless,
+}
+
+/// <summary>An endpoint's one valid access declaration, and whether it is on the Tenant surface.</summary>
+internal sealed record AccessDeclaration(AccessKind Kind, Capability? Capability, bool Tenant)
+{
+    /// <summary>
+    /// The declaration <paramref name="metadata"/> makes, or null when it isn't exactly one API
+    /// marker and exactly one access declaration, or the two disagree: a Tenant endpoint declares
+    /// a Tenant capability and nothing else, a Deployment capability is declared on a Deployment
+    /// endpoint only, and no setup-allowed endpoint declares a capability, as a restricted Session
+    /// holds none. The <c>{tenantId}</c> route value belongs to the Tenant surface alone: a Tenant
+    /// endpoint's <paramref name="routePattern"/> has it, and no other endpoint's may, so no
+    /// Deployment or self-service handler ever sees a Tenant it might act on. Null is denied at
+    /// runtime and refused by the OpenAPI build.
+    /// </summary>
+    public static AccessDeclaration? Of(IEnumerable<object> metadata, string? routePattern)
+    {
+        var items = metadata.ToList();
+        var namesTenant = routePattern is not null
+            && routePattern.Contains("{" + AdminRequestChecks.TenantRouteValue, StringComparison.OrdinalIgnoreCase);
+        if (items.Any(m => m is TenantApiEndpoint) != namesTenant)
+        {
+            return null;
+        }
+
+        var deployment = items.Count(m => m is DeploymentApiEndpoint);
+        var tenant = items.Count(m => m is TenantApiEndpoint);
+        var capabilities = items.OfType<RequiresCapability>().ToList();
+        var self = items.Count(m => m is SelfService);
+        var sessionless = items.Count(m => m is BootstrapClaimEndpoint or SignInEndpoint);
+
+        if (deployment + tenant != 1 || capabilities.Count + self + sessionless != 1)
+        {
+            return null;
+        }
+
+        var onTenant = tenant == 1;
+        if (capabilities.Count == 1)
+        {
+            var capability = capabilities[0].Capability;
+            var scope = onTenant ? CapabilityScope.Tenant : CapabilityScope.Deployment;
+            return capability.Scope != scope || items.Any(m => m is SetupAllowed)
+                ? null
+                : new AccessDeclaration(AccessKind.Capability, capability, onTenant);
+        }
+
+        return onTenant ? null : new AccessDeclaration(self == 1 ? AccessKind.Self : AccessKind.Sessionless, null, false);
+    }
+
+    /// <summary>Whether <paramref name="metadata"/> holds any API marker or access declaration, valid or not.</summary>
+    public static bool AnyApiMetadata(IEnumerable<object> metadata) =>
+        metadata.Any(m => m is DeploymentApiEndpoint or TenantApiEndpoint or RequiresCapability or SelfService or BootstrapClaimEndpoint or SignInEndpoint);
+}
+
+/// <summary>
+/// The path Tenant the request checks parsed and authorized, for the endpoint (AD-4, AD-19), with
+/// the Tenant Role grant they read in their own transaction to decide. The endpoint answers from
+/// this grant and never reads the role again, so a role changed between the check and the
+/// handler can't give an allowed request a different answer.
+/// </summary>
+internal sealed record PathTenantFeature(Guid TenantId, TenantRoleGrant? Grant);
 
 /// <summary>
 /// Marks an endpoint a setup Admin Session, or an Admin without their two credentials, may call.
@@ -52,18 +149,27 @@ internal sealed class SignInEndpoint
 }
 
 /// <summary>
-/// The one server-side gate in front of every <c>/api/v1/deployment</c> endpoint (NFR-5), in order:
-/// an endpoint under the prefix without the <see cref="DeploymentApiEndpoint"/> marker is the
-/// unknown-path 404, so a route mapped there by mistake is never reached unchecked; a
-/// state-changing request needs an <c>Origin</c> exactly equal to the Admin origin (403); then a
-/// live Admin Session from the <c>__Host-gk-admin</c> cookie (401, clearing a stale cookie, and an
-/// expired Session is ended), whose idle expiry slides; a state-changing request's
-/// <c>X-Gatekeep-CSRF</c> must be the Session's (403); and a setup Session, or any Session of an
-/// Admin with fewer than two WebAuthn credentials, reaches only setup-allowed endpoints (403).
+/// The one server-side gate in front of every <c>/api/</c> endpoint (NFR-5), denying by default,
+/// in order: an endpoint under <c>/api/</c> without exactly one API marker and exactly one valid
+/// <see cref="AccessDeclaration"/> is the unknown-path 404, so a route mapped there by mistake,
+/// the fallback included, is never reached unchecked; a state-changing request needs an
+/// <c>Origin</c> exactly equal to the Admin origin (403); then a live Admin Session from the
+/// <c>__Host-gk-admin</c> cookie (401, clearing a stale cookie, and an expired Session is ended),
+/// whose idle expiry slides; a state-changing request's <c>X-Gatekeep-CSRF</c> must be the
+/// Session's (403); a setup Session, or any Session of an Admin with fewer than two WebAuthn
+/// credentials, reaches only setup-allowed endpoints (403); and a capability endpoint's
+/// capability must be allowed by the authorizer, for a Tenant endpoint in the Tenant its
+/// <c>{tenantId}</c> path segment names and no other (403 <c>access_denied</c>, audited).
 /// </summary>
 internal static class AdminRequestChecks
 {
+    /// <summary>Everything under it is checked or is the unknown-path 404.</summary>
+    public const string ApiPrefix = "/api";
+
     public const string Prefix = "/api/v1/deployment";
+
+    /// <summary>The route value that names the path Tenant on <c>/api/v1/tenants/{tenantId}</c> (AD-19), and nothing else does.</summary>
+    public const string TenantRouteValue = "tenantId";
 
     public const string SessionCookie = "__Host-gk-admin";
 
@@ -113,8 +219,28 @@ internal static class AdminRequestChecks
         });
 
     /// <summary>The authenticated Session the checks found, for the endpoint.</summary>
+    /// <summary>Whether <paramref name="path"/> is under <c>/api</c>, in any case: checked, or the unknown-path 404, never a file.</summary>
+    public static bool IsApiPath(PathString path) => path.StartsWithSegments(ApiPrefix, StringComparison.OrdinalIgnoreCase);
+
     public static AdminSession Session(HttpContext context) =>
         context.Features.Get<AdminSession>() ?? throw new InvalidOperationException("No Admin Session passed the checks.");
+
+    /// <summary>
+    /// The Tenant the path named and the checks authorized: the only Tenant a Tenant endpoint may
+    /// act in, and the only one it may open a Tenant scope with (AD-4, AD-19).
+    /// </summary>
+    public static Guid PathTenant(HttpContext context) => PathTenantGrant(context).TenantId;
+
+    /// <summary>The path Tenant and the Tenant Role grant the checks read there to allow the request.</summary>
+    public static PathTenantFeature PathTenantGrant(HttpContext context) =>
+        context.Features.Get<PathTenantFeature>() ?? throw new InvalidOperationException("No path Tenant passed the checks.");
+
+    /// <summary>The principal the checks built from the authenticated Session.</summary>
+    public static AdminPrincipal Principal(HttpContext context)
+    {
+        var session = Session(context);
+        return new AdminPrincipal(session.AdminId, session.DeploymentOwner);
+    }
 
     /// <summary>
     /// The client bootstrap claims are counted by, after any forwarding Caddy did: an IPv4
@@ -147,13 +273,14 @@ internal static class AdminRequestChecks
     private static async Task CheckAsync(HttpContext context, RequestDelegate next)
     {
         var endpoint = context.GetEndpoint();
-        var underPrefix = context.Request.Path.StartsWithSegments(Prefix, StringComparison.OrdinalIgnoreCase);
-        if (endpoint?.Metadata.GetMetadata<DeploymentApiEndpoint>() is null)
+        var underApi = IsApiPath(context.Request.Path);
+        var declaration = endpoint is null ? null : AccessDeclaration.Of(endpoint.Metadata, (endpoint as RouteEndpoint)?.RoutePattern.RawText);
+        if (declaration is null)
         {
-            if (underPrefix && endpoint is not null)
+            if (endpoint is not null && (underApi || AccessDeclaration.AnyApiMetadata(endpoint.Metadata)))
             {
-                // Deny by prefix: whatever answers here unmarked, the unknown-path fallback
-                // included, answers exactly as the fallback does.
+                // Deny by default: whatever answers here undeclared, or declared twice, the
+                // unknown-path fallback included, answers exactly as the fallback does.
                 await AdminResponses.NotFoundAsync(context);
                 return;
             }
@@ -164,7 +291,7 @@ internal static class AdminRequestChecks
 
         try
         {
-            if (await PassesAsync(context, endpoint))
+            if (await PassesAsync(context, endpoint!, declaration))
             {
                 await next(context);
             }
@@ -176,7 +303,7 @@ internal static class AdminRequestChecks
         }
     }
 
-    private static async Task<bool> PassesAsync(HttpContext context, Endpoint endpoint)
+    private static async Task<bool> PassesAsync(HttpContext context, Endpoint endpoint, AccessDeclaration declaration)
     {
         var request = context.Request;
         var services = context.RequestServices.GetRequiredService<AdminApiServices>();
@@ -235,34 +362,102 @@ internal static class AdminRequestChecks
         }
 
         AdminSession? session;
+        var refusal = Refusal.None;
+        Guid? pathTenant = null;
+        TenantRoleGrant? grant = null;
+        var audited = false;
         await using (var scope = await services.BeginAsync(cancellationToken))
         {
-            // Commits the slide, or the ending of an expired Session, either way.
-            session = await services.Sessions.AuthenticateAsync(scope.CreateCommandContext(), new Secret<string>(cookie), cancellationToken);
+            var command = scope.CreateCommandContext();
+            session = await services.Sessions.AuthenticateAsync(command, new Secret<string>(cookie), cancellationToken);
+
+            if (session is null)
+            {
+                refusal = Refusal.Unauthenticated;
+            }
+            else if (stateChanging && !session.CsrfMatches(SingleValue(request.Headers[CsrfHeader])))
+            {
+                refusal = Refusal.Forbidden;
+            }
+            else if (session.Restricted && endpoint.Metadata.GetMetadata<SetupAllowed>() is null)
+            {
+                // A setup Session, and any Session of an Admin without their two credentials (FR-2, FR-46).
+                refusal = Refusal.Forbidden;
+            }
+            else if (declaration.Kind == AccessKind.Capability)
+            {
+                // The Tenant comes from the path segment only. A malformed one is no Tenant, so
+                // every Tenant capability is denied, exactly as an unknown or role-less one is.
+                if (declaration.Tenant
+                    && PublicId.TryParse(PublicIdType.Tenant, context.GetRouteValue(TenantRouteValue) as string, out var parsed))
+                {
+                    pathTenant = parsed;
+                }
+
+                var principal = new AdminPrincipal(session.AdminId, session.DeploymentOwner);
+                var decision = await services.Authorization.AuthorizeAsync(command, principal, declaration.Capability!, pathTenant, cancellationToken);
+                grant = decision.Grant;
+                if (!decision.Allowed)
+                {
+                    refusal = Refusal.AccessDenied;
+
+                    // Counted per Admin, in the transaction that authenticated the Session, with its
+                    // slide: within the cap the refusal is audited (AD-9); past it, only logged.
+                    var count = await services.Limiter.AttemptAsync(
+                        command,
+                        AdminsContract.AccessDeniedAuditPolicy,
+                        session.AdminId.ToString("N"),
+                        cancellationToken);
+                    if (count.Allowed)
+                    {
+                        await services.Authorization.DenyAsync(command, principal, pathTenant, cancellationToken);
+                        audited = true;
+                    }
+                }
+            }
+
+            // The slide, or the ending of an expired Session, and any refusal's event, either way.
             await scope.CommitAsync(cancellationToken);
         }
 
-        if (session is null)
+        switch (refusal)
         {
-            await AdminResponses.UnauthorizedAsync(context, clearCookie: true);
-            return false;
+            case Refusal.Unauthenticated:
+                await AdminResponses.UnauthorizedAsync(context, clearCookie: true);
+                return false;
+
+            case Refusal.Forbidden:
+                await AdminResponses.ForbiddenAsync(context);
+                return false;
+
+            case Refusal.AccessDenied:
+                context.RequestServices.GetRequiredService<ILoggerFactory>()
+                    .CreateLogger("Gatekeep.Host.Admin")
+                    .LogInformation(
+                        "An Admin request was refused with {Problem} for {Capability}, audited {Audited}, trace {TraceId}.",
+                        AdminResponses.AccessDenied,
+                        declaration.Capability!.Name,
+                        audited,
+                        AdminResponses.TraceId(context));
+                await AdminResponses.AccessDeniedAsync(context);
+                return false;
         }
 
-        if (stateChanging && !session.CsrfMatches(SingleValue(request.Headers[CsrfHeader])))
+        context.Features.Set(session!);
+        if (pathTenant is { } tenant)
         {
-            await AdminResponses.ForbiddenAsync(context);
-            return false;
+            context.Features.Set(new PathTenantFeature(tenant, grant));
         }
 
-        // A setup Session, and any Session of an Admin without their two credentials (FR-2, FR-46).
-        if (session.Restricted && endpoint.Metadata.GetMetadata<SetupAllowed>() is null)
-        {
-            await AdminResponses.ForbiddenAsync(context);
-            return false;
-        }
-
-        context.Features.Set(session);
         return true;
+    }
+
+    private enum Refusal
+    {
+        None,
+        Unauthenticated,
+        Forbidden,
+        AccessDenied,
     }
 
     private static bool IsStateChanging(string method) =>

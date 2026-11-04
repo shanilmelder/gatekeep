@@ -60,4 +60,14 @@ public static class SecurityLimits
 
     /// <summary>The fixed window Admin sign-in begins and completes are counted in: 15 minutes (Story 1.23).</summary>
     public static readonly TimeSpan AdminSignInWindow = TimeSpan.FromMinutes(15);
+
+    /// <summary>
+    /// Capability refusals one Admin may have audited in <see cref="AdminAccessDeniedAuditWindow"/>:
+    /// 30 (Story 1.24, AD-9's capped rejected events). Every refusal is counted; past the limit it
+    /// is still refused alike, but only logged, so one Admin can't flood the Deployment chain.
+    /// </summary>
+    public const int AdminAccessDeniedAuditAttempts = 30;
+
+    /// <summary>The fixed window audited capability refusals are counted in: 15 minutes (Story 1.24).</summary>
+    public static readonly TimeSpan AdminAccessDeniedAuditWindow = TimeSpan.FromMinutes(15);
 }

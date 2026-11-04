@@ -31,6 +31,8 @@ public class AdminApiRuleTests
     [InlineData("admin_credential", new[] { "gk_admin INSERT", "gk_admin SELECT" }, new[] { "gk_admin UPDATE last_used_at,sign_count" })]
     // Story 1.23: the one Admins table with DELETE, and no UPDATE: taking a challenge deletes it.
     [InlineData("admin_signin_challenge", new[] { "gk_admin DELETE", "gk_admin INSERT", "gk_admin SELECT" }, new string[0], true)]
+    // Story 1.24: read-only to gk_admin. Story 1.27 adds INSERT, Story 8.4 UPDATE and DELETE.
+    [InlineData("tenant_role", new[] { "gk_admin SELECT" }, new string[0])]
     public void Registry_lists_the_Admins_tables_with_exactly_their_grants(string table, string[] grants, string[] columns, bool unlogged = false)
     {
         var entry = Entry(table);
@@ -86,6 +88,9 @@ public class AdminApiRuleTests
             Assert.Contains(operations, o => o.Path == sessionless && o.Method == "post");
         }
 
+        // The Tenant surface (Story 1.24) is covered too: it always needs a Session.
+        Assert.Contains(operations, o => o.Path == TenantCapabilities && o.Method == "get");
+
         foreach (var (path, method, operation) in operations)
         {
             var schemes = operation.GetProperty("security").EnumerateArray()
@@ -117,7 +122,8 @@ public class AdminApiRuleTests
             .Where(r => r.Name.StartsWith('4'))
             .ToList();
 
-        Assert.Equal(["400", "429"], refusals.Select(r => r.Name).Distinct().Order(StringComparer.Ordinal));
+        // 403 carries a problem only on capability operations: access_denied (Story 1.24).
+        Assert.Equal(["400", "403", "429"], refusals.Select(r => r.Name).Distinct().Order(StringComparer.Ordinal));
         foreach (var refusal in refusals)
         {
             Assert.Equal(
@@ -135,9 +141,45 @@ public class AdminApiRuleTests
         Assert.NotEmpty(maps);
         foreach (Match map in maps)
         {
-            Assert.StartsWith("/api/v1/deployment/", map.Groups["route"].Value);
-            Assert.Contains("DeploymentApiEndpoint.Instance", map.Groups["rest"].Value);
+            var route = map.Groups["route"].Value;
+            var rest = map.Groups["rest"].Value;
+
+            // One access declaration each (Story 1.24): a capability, self-service, or sessionless.
+            var declarations = new[] { "new RequiresCapability(", "SelfService.Instance", "BootstrapClaimEndpoint.Instance", "SignInEndpoint.Instance" }
+                .Sum(d => Regex.Matches(rest, Regex.Escape(d)).Count);
+            Assert.True(declarations == 1, $"{route} declares {declarations} access kinds, not one.");
+
+            if (route.StartsWith("/api/v1/tenants/{tenantId}/", StringComparison.Ordinal))
+            {
+                // The Tenant surface: a Tenant capability only, never self-service or sessionless.
+                Assert.Contains("TenantApiEndpoint.Instance", rest);
+                Assert.DoesNotContain("DeploymentApiEndpoint.Instance", rest);
+                Assert.Matches(@"new RequiresCapability\(AdminCapabilities\.Tenant[A-Za-z]+\)", rest);
+                continue;
+            }
+
+            Assert.StartsWith("/api/v1/deployment/", route);
+            Assert.Contains("DeploymentApiEndpoint.Instance", rest);
+            Assert.DoesNotContain("TenantApiEndpoint.Instance", rest);
+            Assert.DoesNotMatch(@"new RequiresCapability\(AdminCapabilities\.Tenant", rest);
         }
+
+        // Self-service is the reviewed list: every Admin needs these, the Owner or not (Story 1.24).
+        // Any other Deployment route declares a Deployment capability, which only the Owner holds.
+        Assert.Equal(
+            [
+                "/api/v1/deployment/capabilities",
+                "/api/v1/deployment/credentials/registration",
+                "/api/v1/deployment/credentials/registration/complete",
+                "/api/v1/deployment/session",
+                "/api/v1/deployment/session",
+            ],
+            maps.Where(m => m.Groups["rest"].Value.Contains("SelfService.Instance")).Select(m => m.Groups["route"].Value).Order(StringComparer.Ordinal));
+
+        // No setup-allowed route declares a capability: a restricted Session holds none.
+        Assert.DoesNotContain(
+            maps,
+            m => m.Groups["rest"].Value.Contains("SetupAllowed.Instance") && m.Groups["rest"].Value.Contains("new RequiresCapability("));
 
         // Setup-allowed is the reviewed short list: GET of the Session endpoint, and credential
         // registration's begin and complete (Story 1.22). Sign-out (DELETE) is deliberately not
@@ -161,6 +203,8 @@ public class AdminApiRuleTests
     /// <summary>The operations with no Session: they need the exact Admin Origin only.</summary>
     private static readonly string[] Sessionless =
         ["/api/v1/deployment/bootstrap", "/api/v1/deployment/signin", "/api/v1/deployment/signin/complete"];
+
+    private const string TenantCapabilities = "/api/v1/tenants/{tenantId}/capabilities";
 
     private static JsonDocument Load() => JsonDocument.Parse(File.ReadAllText(Path.Combine(Root, Document)));
 

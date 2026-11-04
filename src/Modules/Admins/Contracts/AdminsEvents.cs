@@ -109,4 +109,19 @@ public static class AdminsEvents
     public static readonly AuditEventDefinition SessionSuperseded = new(
         new AuditTypeCode("admin.session.superseded"),
         "A sign-in in the same browser ended a live Admin Session as superseded. Holds no Session ID.");
+
+    /// <summary>
+    /// Written on the Deployment chain when an authenticated Admin, past the Origin, Session, CSRF
+    /// and setup checks, is refused a capability (Story 1.24, AD-9), in the request checks'
+    /// transaction. Every refusal is counted per Admin under
+    /// <see cref="AdminsContract.AccessDeniedAuditPolicy"/>: the first 30 in 15 minutes are
+    /// audited, and past that the same refusal is only logged, so one Admin can't flood the chain.
+    /// The Actor is the Admin; the target is the path Tenant when the path named a well-formed
+    /// Tenant ID, and none otherwise. That ID is the caller's, as sent: the authorizer doesn't read
+    /// <c>tenant</c>, so it may name no Tenant at all. Holds no capability name, Session ID or CSRF
+    /// token: the capability goes only in the log line.
+    /// </summary>
+    public static readonly AuditEventDefinition AccessDenied = new(
+        new AuditTypeCode("admin.access.denied"),
+        "An Admin was refused a capability. The target is the path's Tenant ID as sent, which may not exist. Past 30 per Admin in 15 minutes, only logged. Holds no capability name.");
 }

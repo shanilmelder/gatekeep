@@ -1,4 +1,5 @@
 using System.Text.Json.Nodes;
+using Gatekeep.Modules.Admins.Contracts;
 using Microsoft.AspNetCore.OpenApi;
 using Microsoft.OpenApi;
 
@@ -26,10 +27,12 @@ internal static class AdminOpenApi
                     Title = "Gatekeep Admin API",
                     Version = "v1",
                     Description =
-                        "The Admin Dashboard's API on Host.Admin. Every /api/v1/deployment endpoint but the bootstrap claim and Admin " +
-                        "sign-in needs the __Host-gk-admin Session cookie; every state-changing one also needs the exact Admin Origin " +
-                        "and the Session's X-Gatekeep-CSRF token. The claim and sign-in need the exact Admin Origin only. A refusal's " +
-                        "body is only a fixed code and the trace ID.",
+                        "The Admin Dashboard's API on Host.Admin: the Deployment surface under /api/v1/deployment and the Tenant " +
+                        "surface under /api/v1/tenants/{tenantId}, whose Tenant comes from that path segment only. Every endpoint but " +
+                        "the bootstrap claim and Admin sign-in needs the __Host-gk-admin Session cookie; every state-changing one also " +
+                        "needs the exact Admin Origin and the Session's X-Gatekeep-CSRF token. The claim and sign-in need the exact " +
+                        "Admin Origin only. Each operation's x-gatekeep-access names its one access declaration: a capability from the " +
+                        "capability table, self-service, or sessionless. A refusal's body is only a fixed code and the trace ID.",
                 };
 
                 // The stand-in server's address isn't part of the contract.
@@ -91,6 +94,15 @@ internal static class AdminOpenApi
                 {
                     Enumerate(schema, "code", AdminResponses.ProblemCodes);
                 }
+                else if (type == typeof(CapabilitiesResponse))
+                {
+                    // Every name the capability table holds, read from it, never restated.
+                    if (schema.Properties?.TryGetValue("capabilities", out var list) == true
+                        && list is OpenApiSchema array && array.Items is OpenApiSchema items)
+                    {
+                        items.Enum = [.. AdminCapabilities.All.Select(c => (JsonNode)JsonValue.Create(c.Name))];
+                    }
+                }
 
                 return Task.CompletedTask;
             });
@@ -99,10 +111,48 @@ internal static class AdminOpenApi
             {
                 var metadata = context.Description.ActionDescriptor.EndpointMetadata;
 
-                // Machine-readable: whether a setup Session may call it.
+                // Exactly one access declaration, or the build that generates the document fails.
+                var declaration = AccessDeclaration.Of(metadata, "/" + context.Description.RelativePath)
+                    ?? throw new InvalidOperationException(
+                        $"{context.Description.HttpMethod} {context.Description.RelativePath} needs exactly one API marker and one valid access declaration.");
+
+                // Machine-readable: whether a setup Session may call it, and its access.
                 operation.Extensions ??= new Dictionary<string, IOpenApiExtension>();
                 operation.Extensions[SetupAllowedExtension] =
                     new JsonNodeExtension(JsonValue.Create(metadata.OfType<SetupAllowed>().Any()));
+                operation.Extensions[AccessExtension] = new JsonNodeExtension(Access(declaration));
+
+                if (declaration.Tenant)
+                {
+                    // The Tenant comes from this segment only: its canonical public ID.
+                    operation.Parameters ??= [];
+                    var existing = operation.Parameters.FirstOrDefault(p => p.Name == AdminRequestChecks.TenantRouteValue);
+                    if (existing is not null)
+                    {
+                        operation.Parameters.Remove(existing);
+                    }
+
+                    operation.Parameters.Insert(0, new OpenApiParameter
+                    {
+                        Name = AdminRequestChecks.TenantRouteValue,
+                        In = ParameterLocation.Path,
+                        Required = true,
+                        Description =
+                            "The Tenant's public ID: ten_ and the UUID's 16 bytes in lowercase RFC 4648 base32 with no padding, whose " +
+                            "last character carries two zero bits. Only this canonical spelling, after URL decoding, names a Tenant, and " +
+                            "the empty UUID's never does; anything else is refused like a Tenant the Admin holds no role in.",
+                        Schema = new OpenApiSchema { Type = JsonSchemaType.String, Pattern = TenantIdPattern },
+                    });
+                }
+
+                if (declaration.Kind == AccessKind.Capability
+                    && operation.Responses?.TryGetValue("403", out var forbidden) == true && forbidden is OpenApiResponse forbiddenResponse)
+                {
+                    // Two shapes: the capability refusal's problem, or no body from an earlier gate.
+                    forbiddenResponse.Description =
+                        "access_denied, with the problem body, when the capability is refused. No body when an earlier check " +
+                        "refuses first: a Session restricted to setup, or on a state-changing call a wrong Origin or CSRF token.";
+                }
 
                 if (metadata.OfType<BootstrapClaimEndpoint>().Any())
                 {
@@ -216,6 +266,34 @@ internal static class AdminOpenApi
         });
 
     private const string SetupAllowedExtension = "x-gatekeep-setup-allowed";
+
+    private const string AccessExtension = "x-gatekeep-access";
+
+    /// <summary>The canonical spelling: 25 base32 characters, then one whose two unused low bits are zero.</summary>
+    private const string TenantIdPattern = "^ten_[a-z2-7]{25}[aeimquy4]$";
+
+    /// <summary>The <c>x-gatekeep-access</c> value: the declaration, and a capability's flags as the table holds them.</summary>
+    private static JsonObject Access(AccessDeclaration declaration) => declaration.Kind switch
+    {
+        AccessKind.Capability => new JsonObject
+        {
+            ["kind"] = "capability",
+            ["capability"] = declaration.Capability!.Name,
+            ["scope"] = declaration.Capability.Scope == CapabilityScope.Tenant ? "tenant" : "deployment",
+            ["machineAllowed"] = declaration.Capability.MachineAllowed,
+            ["freshAssertion"] = declaration.Capability.FreshAssertion switch
+            {
+                FreshAssertion.Never => "never",
+                FreshAssertion.Always => "always",
+                FreshAssertion.WhenProdTenant => "whenProdTenant",
+                FreshAssertion.WhenLoweringPolicy => "whenLoweringPolicy",
+                _ => throw new InvalidOperationException("A capability has an unknown fresh assertion."),
+            },
+        },
+        AccessKind.Self => new JsonObject { ["kind"] = "self" },
+        AccessKind.Sessionless => new JsonObject { ["kind"] = "sessionless" },
+        _ => throw new InvalidOperationException("An access declaration has an unknown kind."),
+    };
 
     private static void Enumerate(OpenApiSchema schema, string property, IEnumerable<string> values)
     {

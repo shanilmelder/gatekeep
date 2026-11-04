@@ -356,6 +356,19 @@ public static class TableRegistry
                 [Admin] = [Select, Insert, Delete],
             },
             Unlogged: true),
+
+        // Story 1.24: the one Tenant Role each Admin holds in a Tenant (AD-27). control, not tenant:
+        // one Admin's roles are listed across Tenants, so the request checks filter by the path
+        // Tenant in code. Host.Admin only reads it on every Tenant request, caching nothing. Story
+        // 1.27 adds INSERT, Story 8.4 UPDATE (role) and DELETE. gk_hosted never reads it (AD-2).
+        new(
+            "tenant_role",
+            TableClass.Control,
+            "Admins",
+            new Dictionary<string, IReadOnlyList<string>>
+            {
+                [Admin] = [Select],
+            }),
     ];
 
     private static IReadOnlyList<string> EventTriggers(string table) =>

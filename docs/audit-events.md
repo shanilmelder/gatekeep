@@ -6,6 +6,7 @@ Every audit type code Gatekeep writes, declared in its module's contract. Codes 
 
 | Code | Module | Summary | FR-40 class |
 | --- | --- | --- | --- |
+| `admin.access.denied` | Admins | An Admin was refused a capability. The target is the path's Tenant ID as sent, which may not exist. Past 30 per Admin in 15 minutes, only logged. Holds no capability name. | None |
 | `admin.credential.registered` | Admins | An Admin registered a WebAuthn credential. Holds no credential ID, public key, challenge or user handle. | None |
 | `admin.credential.sign_count_regressed` | Admins | A sign-in with an Admin's WebAuthn credential was refused because its signature counter went backwards: it may be cloned. | None |
 | `admin.session.signed_out` | Admins | An Admin signed out, which ended their Admin Session. Holds no Session ID. | None |

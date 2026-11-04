@@ -137,9 +137,29 @@ export interface paths {
         };
         /**
          * The Deployment capabilities the current Admin holds.
-         * @description Not setup-allowed: a setup Session gets 403. Empty until Story 1.24 grants capabilities.
+         * @description Self-service: any Admin may read their own list. Every Deployment capability for the Deployment Owner, in the table's order, and none for any other Admin: a Tenant Role grants no Deployment capability. Not setup-allowed: a setup Session gets 403.
          */
         get: operations["GetCapabilities"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tenants/{tenantId}/capabilities": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The Tenant capabilities the current Admin holds in the path Tenant.
+         * @description The Tenant is the tenantId path segment, its public ID, and nothing else: no Session, cookie or header names one. Returns the capabilities the Admin's Tenant Role there holds, in the table's order. Being Deployment Owner adds nothing in a Tenant. A malformed, unknown or role-less Tenant is the same 403 access_denied, and writes admin.access.denied while the Admin is within 30 audited refusals in 15 minutes, and is only logged past that. A setup-restricted Session, a wrong Origin or a wrong CSRF token gets a bodiless 403 first. The role is read once per request, by the check that allows it, and the list is answered from that same read.
+         */
+        get: operations["GetTenantCapabilities"];
         put?: never;
         post?: never;
         delete?: never;
@@ -192,7 +212,7 @@ export interface components {
         };
         ApiProblem: {
             /** @enum {string} */
-            code: "bootstrap_refused" | "credential_refused" | "signin_refused" | "rate_limited";
+            code: "bootstrap_refused" | "credential_refused" | "signin_refused" | "rate_limited" | "access_denied";
             traceId: string;
         };
         BootstrapClaimRequest: {
@@ -204,7 +224,7 @@ export interface components {
             adminId: string;
         };
         CapabilitiesResponse: {
-            capabilities: string[];
+            capabilities: ("tenant.configuration.read" | "tenant.users.read" | "tenant.logs.read" | "tenant.log_detail.read" | "tenant.applications.manage" | "tenant.application_callbacks.manage" | "tenant.apis.manage" | "tenant.roles.manage" | "tenant.users.manage" | "tenant.theme.manage" | "tenant.templates.manage" | "tenant.settings.manage" | "tenant.connections.toggle" | "tenant.configuration.export" | "tenant.client_secrets.manage" | "tenant.password_policy.manage" | "tenant.mfa_policy.manage" | "tenant.connection_credentials.manage" | "tenant.email_provider.manage" | "tenant.label.manage" | "tenant.signing_keys.rotate" | "tenant.signing_keys.revoke" | "tenant.management_access.grant" | "tenant.user_data.export" | "tenant.user_data.erase" | "tenant.incident_response.run" | "deployment.tenants.read" | "deployment.tenants.create" | "deployment.tenants.delete" | "deployment.admins.read" | "deployment.admins.manage" | "deployment.email_provider.manage" | "deployment.incident_response.run" | "deployment.log.read")[];
         };
         CredentialCreationOptionsResponse: {
             rp: components["schemas"]["RegistrationRelyingParty"];
@@ -679,6 +699,52 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    GetTenantCapabilities: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The Tenant's public ID: ten_ and the UUID's 16 bytes in lowercase RFC 4648 base32 with no padding, whose last character carries two zero bits. Only this canonical spelling, after URL decoding, names a Tenant, and the empty UUID's never does; anything else is refused like a Tenant the Admin holds no role in. */
+                tenantId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CapabilitiesResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description access_denied, with the problem body, when the capability is refused. No body when an earlier check refuses first: a Session restricted to setup, or on a state-changing call a wrong Origin or CSRF token. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
             };
             /** @description Service Unavailable */
             503: {

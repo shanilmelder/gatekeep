@@ -30,10 +30,15 @@ app.UseGatekeepForwardedClient();
 // Once bootstrap is complete the Bootstrap page is gone: the same 404 as an unknown path.
 app.UseBootstrapPage();
 
-// The Admin Dashboard bundle (apps/admin-dashboard), copied into the web root by the image.
-app.UseStaticFiles();
+// The Admin Dashboard bundle (apps/admin-dashboard), copied into the web root by the image. It
+// runs before routing and the request checks, so it never serves a path under /api, in any case:
+// those reach only the checked endpoints or the unknown-path 404.
+app.UseWhen(
+    static context => !AdminRequestChecks.IsApiPath(context.Request.Path),
+    static branch => branch.UseStaticFiles());
 
-// The session, CSRF, Origin and setup checks run on every /api/v1/deployment endpoint (NFR-5).
+// The session, CSRF, Origin, setup and capability checks run on every /api/ endpoint, and deny
+// any undeclared one (NFR-5). Every API route is mapped in AdminApi.cs; only the fallbacks are here.
 app.UseRouting();
 app.UseAdminRequestChecks();
 app.MapAdminApi();

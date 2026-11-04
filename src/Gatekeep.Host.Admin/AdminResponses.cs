@@ -6,7 +6,7 @@ namespace Gatekeep.Host.Admin;
 /// <summary>A refusal's body: a fixed code and the trace ID support asks for, and nothing else.</summary>
 public sealed class ApiProblem
 {
-    /// <summary>A fixed code: <c>bootstrap_refused</c>, <c>credential_refused</c>, <c>signin_refused</c> or <c>rate_limited</c>.</summary>
+    /// <summary>A fixed code: <c>bootstrap_refused</c>, <c>credential_refused</c>, <c>signin_refused</c>, <c>rate_limited</c> or <c>access_denied</c>.</summary>
     public required string Code { get; init; }
 
     /// <summary>The request's W3C trace ID, which the host's log line for the refusal carries too.</summary>
@@ -27,8 +27,15 @@ internal static class AdminResponses
     /// <summary>Every refused Admin sign-in complete (Story 1.23), whatever the reason: nothing says why.</summary>
     public const string SignInRefused = "signin_refused";
 
+    /// <summary>
+    /// Every capability refusal (Story 1.24), whatever the reason: a malformed, unknown or role-less
+    /// path Tenant, too low a Tenant Role, and a Deployment capability for an Admin who isn't the
+    /// Deployment Owner all send exactly this, so nothing says which Tenants exist.
+    /// </summary>
+    public const string AccessDenied = "access_denied";
+
     /// <summary>Every problem code a body can carry, for the OpenAPI document.</summary>
-    public static readonly IReadOnlyList<string> ProblemCodes = [BootstrapRefused, CredentialRefused, SignInRefused, RateLimited];
+    public static readonly IReadOnlyList<string> ProblemCodes = [BootstrapRefused, CredentialRefused, SignInRefused, RateLimited, AccessDenied];
 
     /// <summary>The Session cookie, expired: sent with a sign-out and a 401 for a stale cookie.</summary>
     public static readonly string ClearedSessionCookie =
@@ -119,6 +126,10 @@ internal static class AdminResponses
         context.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
         return Task.CompletedTask;
     }
+
+    /// <summary>A capability refusal: 403 with the one <c>access_denied</c> body and the trace ID, never cached.</summary>
+    public static Task AccessDeniedAsync(HttpContext context) =>
+        ProblemAsync(context, StatusCodes.Status403Forbidden, AccessDenied);
 
     public static Task ProblemAsync(HttpContext context, int status, string code)
     {

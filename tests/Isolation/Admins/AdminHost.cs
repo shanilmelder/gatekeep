@@ -344,6 +344,41 @@ internal sealed class AdminHost : IAsyncDisposable
         return (cookie, adminId);
     }
 
+    /// <summary>
+    /// The Deployment Owner with a full Session (Story 1.24): bootstrap claimed, two credentials
+    /// registered, then signed in. Returns the full Session's cookie and CSRF token, and the Owner.
+    /// </summary>
+    public async Task<(string Cookie, string Csrf, Guid AdminId)> OwnerSessionAsync()
+    {
+        using var first = new SoftwareAuthenticator();
+        using var second = new SoftwareAuthenticator();
+        var (_, adminId) = await AdminWithCredentialsAsync(first, second);
+        var (cookie, csrf) = await SignInAsync(first);
+        return (cookie, csrf, adminId);
+    }
+
+    /// <summary>The Admin whose Session <paramref name="sessionId"/> is.</summary>
+    public Task<Guid> AdminOfSessionAsync(Guid sessionId) =>
+        ScalarAsync<Guid>($"SELECT admin_id FROM admin_session WHERE id = '{sessionId}'");
+
+    /// <summary>A new Tenant row, as the superuser, since creating Tenants is Story 1.27's. Returns its ID.</summary>
+    public async Task<Guid> InsertTenantAsync()
+    {
+        var id = Guid.CreateVersion7();
+        await PostgresFixture.ExecuteAsync(Superuser, $"INSERT INTO tenant (id) VALUES ('{id}')");
+        return id;
+    }
+
+    /// <summary>Gives <paramref name="adminId"/> <paramref name="role"/> (<c>viewer</c>, <c>editor</c> or <c>owner</c>) in the Tenant, as the superuser.</summary>
+    public Task GrantTenantRoleAsync(Guid tenantId, Guid adminId, string role) =>
+        PostgresFixture.ExecuteAsync(
+            Superuser,
+            $"INSERT INTO tenant_role (tenant_id, admin_id, role) VALUES ('{tenantId}', '{adminId}', '{role}')");
+
+    /// <summary>Removes the Admin's role in the Tenant, as the superuser, since removing roles is Story 8.4's.</summary>
+    public Task RevokeTenantRoleAsync(Guid tenantId, Guid adminId) =>
+        PostgresFixture.ExecuteAsync(Superuser, $"DELETE FROM tenant_role WHERE tenant_id = '{tenantId}' AND admin_id = '{adminId}'");
+
     /// <summary>The value a response's <c>Set-Cookie</c> gives <paramref name="name"/>, or null when it sets none.</summary>
     public static string? CookieValue(HttpResponseMessage response, string name) =>
         response.Headers.TryGetValues("Set-Cookie", out var values)
