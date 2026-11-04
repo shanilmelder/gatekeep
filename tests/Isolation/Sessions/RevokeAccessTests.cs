@@ -501,7 +501,7 @@ public sealed class RevokeAccessTests(PostgresFixture postgres)
     {
         var sql =
             $"""
-            INSERT INTO tenant (id) VALUES ('{tenant}');
+            {TestTenants.InsertSql(tenant)};
             INSERT INTO "user" (tenant_id, id) VALUES ('{tenant}', '{UserU}'), ('{tenant}', '{UserV}');
 
             """;

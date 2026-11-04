@@ -1,11 +1,15 @@
 using Gatekeep.Kernel.Persistence;
+using Gatekeep.Kernel.Secrets;
 using Gatekeep.Modules.Operations.Contracts;
 using Npgsql;
 
 namespace Gatekeep.Modules.Operations.Core;
 
-/// <summary>What Operations' own job handlers need beyond the context: the run-as database and the Operation registry.</summary>
-internal sealed record JobRunServices(NpgsqlDataSource Source, OperationRegistry Operations)
+/// <summary>
+/// What Operations' own job handlers need beyond the context: the run-as database, the Operation
+/// registry, and the runner's key custody for stage handlers, null when the Worker has none.
+/// </summary>
+internal sealed record JobRunServices(NpgsqlDataSource Source, OperationRegistry Operations, IKeyCustody? Custody = null)
 {
     public override string ToString() => nameof(JobRunServices);
 }
@@ -17,12 +21,15 @@ internal static class ProductionOperations
     /// <c>audit.chain.purge</c> deletes a deleted Tenant's audit chain once its retention ends
     /// (AD-16). Its one Tenant stage enqueues the <c>audit.chain.purge</c> job, which runs as
     /// <c>gk_retention</c>. Tenant deletion, its future caller, starts it.
+    /// <c>tenancy.tenant.create</c> (Story 1.27) creates a new Tenant's secret class keys, then, on
+    /// success, its settings, and makes it active.
     /// </summary>
     public static readonly OperationRegistry Registry = new(
     [
         new OperationDefinition(
             AuditRetentionJobs.PurgeOperation,
             [new OperationStage(AuditRetentionJobs.PurgeStage, OperationStageKind.Tenant, AuditRetentionJobs.PurgeStageAsync)]),
+        TenantCreation.Definition,
     ]);
 }
 
@@ -61,6 +68,7 @@ internal static class OperationStore
             updated_at = now(), finished_at = now()
         WHERE id = @id AND status = 'running'
           AND NOT EXISTS (SELECT 1 FROM operation_step WHERE operation_id = @id AND status IN ('pending', 'running'))
+        RETURNING status, type, tenant_id
         """;
 
     private const string StartStep =
@@ -136,9 +144,19 @@ internal static class OperationStore
     /// <summary>
     /// Sets the Operation's final status once no step is pending or running. Whichever step
     /// finishes last does it, under a row lock on the Operation, so two finishing together
-    /// can't both miss it.
+    /// can't both miss it, and only one ever makes the transition. When it is <c>succeeded</c> and
+    /// the type has a completion handler (Story 1.27), the handler runs here, in this same
+    /// transaction, so it commits with the success or neither does.
     /// </summary>
-    public static async Task TryFinishAsync(CommandContext context, Guid operationId, CancellationToken cancellationToken)
+    /// <returns>The status this call set, or null when it set none.</returns>
+    /// <exception cref="InvalidOperationException">
+    /// A completion handler would run for a Deployment Operation, or outside its Tenant's own scope.
+    /// </exception>
+    public static async Task<OperationStatus?> TryFinishAsync(
+        CommandContext context,
+        OperationRegistry registry,
+        Guid operationId,
+        CancellationToken cancellationToken)
     {
         await using (var command = context.CreateCommand())
         {
@@ -147,12 +165,36 @@ internal static class OperationStore
             await command.ExecuteNonQueryAsync(cancellationToken);
         }
 
+        OperationStatus status;
+        string type;
+        Guid? tenantId;
         await using (var command = context.CreateCommand())
         {
             command.CommandText = FinishOperation;
             Sql.Add(command, "id", operationId);
-            await command.ExecuteNonQueryAsync(cancellationToken);
+
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            if (!await reader.ReadAsync(cancellationToken))
+            {
+                return null;
+            }
+
+            status = ParseOperationStatus(reader.GetString(0));
+            type = reader.GetString(1);
+            tenantId = reader.IsDBNull(2) ? null : reader.GetGuid(2);
         }
+
+        if (status == OperationStatus.Succeeded && registry.Find(type)?.OnSucceeded is { } onSucceeded)
+        {
+            if (tenantId is not { } tenant || context.TenantId != tenant)
+            {
+                throw new InvalidOperationException("A completion handler runs only for a Tenant-scoped Operation, in that Tenant's own scope.");
+            }
+
+            await onSucceeded(new OperationCompletion(operationId, tenant, context), cancellationToken);
+        }
+
+        return status;
     }
 
     /// <summary>
@@ -169,6 +211,7 @@ internal static class OperationStore
         OperationType type,
         OperationCode stage,
         Guid? tenantId,
+        IKeyCustody? custody,
         CancellationToken cancellationToken)
     {
         int attempt;
@@ -200,7 +243,7 @@ internal static class OperationStore
             OperationStepResult? returned;
             try
             {
-                var run = new OperationStepRun(operationId, stepId, type, stage, tenantId, attempt, context);
+                var run = new OperationStepRun(operationId, stepId, type, stage, tenantId, attempt, context, custody);
                 returned = await handler(run, cancellationToken);
             }
             catch (Exception) when (!cancellationToken.IsCancellationRequested)

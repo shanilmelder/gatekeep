@@ -801,7 +801,7 @@ public sealed class AuditTests(PostgresFixture postgres)
         var database = await EventDatabaseAsync();
         var other = Guid.NewGuid();
         await PostgresFixture.ExecuteAsync(
-            postgres.SuperuserConnection(database), $"INSERT INTO tenant (id) VALUES ('{other}')");
+            postgres.SuperuserConnection(database), TestTenants.InsertSql(other));
 
         var error = await Assert.ThrowsAsync<PostgresException>(() => PostgresFixture.ExecuteAsync(
             postgres.SuperuserConnection(database),
@@ -862,7 +862,7 @@ public sealed class AuditTests(PostgresFixture postgres)
     {
         var database = await postgres.NewMigratedDatabaseAsync();
         await PostgresFixture.ExecuteAsync(
-            postgres.SuperuserConnection(database), $"INSERT INTO tenant (id) VALUES ('{TenantA}')");
+            postgres.SuperuserConnection(database), TestTenants.InsertSql(TenantA));
         return database;
     }
 
@@ -899,7 +899,7 @@ public sealed class AuditTests(PostgresFixture postgres)
         await PostgresFixture.ExecuteAsync(
             postgres.SuperuserConnection(database),
             $"""
-            INSERT INTO tenant (id) VALUES ('{TenantB}');
+            {TestTenants.InsertSql(TenantB)};
             INSERT INTO audit_event (tenant_id, id, type_code, actor_kind) VALUES ('{TenantB}', '{EventB}', '{Unchanged}', 'system');
             INSERT INTO audit_event (tenant_id, id, type_code, actor_kind) VALUES ('{TenantB}', '{EventBWithoutDetail}', '{Unchanged}', 'system');
             INSERT INTO audit_detail (tenant_id, event_id, email) VALUES ('{TenantB}', '{EventB}', '{Email}');

@@ -2,10 +2,10 @@
 title: 'Story 1.27: Create Tenants with permanent subdomains'
 type: 'feature'
 created: '2026-11-04'
-status: 'ready-for-dev'
+status: 'done'
 baseline_revision: 'e9546561cd9dc96f9ce82c20900631157b6e83bb'
 review_loop_iteration: 0
-followup_review_recommended: false
+followup_review_recommended: true
 context:
   - '{project-root}/_bmad-output/planning-artifacts/architecture/architecture-gatekeep-2026-11-02/ARCHITECTURE-SPINE.md'
   - '{project-root}/_bmad-output/planning-artifacts/prds/prd-gatekeep-2026-11-01/prd.md'
@@ -18,7 +18,28 @@ context:
   - '{project-root}/docs/spikes/2-1-openiddict-per-tenant.md'
   - '{project-root}/design/Gatekeep Admin.dc.html'
 warnings: []
-deferred: []
+deferred:
+  - summary: >-
+      Host.Hosted Tenant lookup has no per-client limit.
+    evidence: |-
+      A short timeout and bounded pool protect it for now.
+    location: >-
+      src/Modules/Tenancy/Adapters/TenancyAdapters.cs
+    severity: medium
+  - summary: >-
+      The Create poll stopping on unmount has no browser test.
+    evidence: |-
+      The cleanup is short and readable.
+    location: >-
+      apps/admin-dashboard/src/shell/CreateTenantPage.tsx
+    severity: low
+  - summary: >-
+      Tenancy references ASP.NET Core and Npgsql, which reach every host and the CLI.
+    evidence: |-
+      Needed for the resolution middleware.
+    location: >-
+      src/Modules/Tenancy/Gatekeep.Modules.Tenancy.csproj
+    severity: low
 ---
 
 <intent-contract>
@@ -450,46 +471,46 @@ Not taken in: "The Tenant-surface fresh-assertion begin" (Story 1.26). Tenant cr
 ## Tasks & Acceptance
 
 **Execution:**
-- [ ] Kernel and schema:
+- [x] Kernel and schema:
   - `PublicIdType.Operation`;
   - the migration and registry;
   - `TestTenants` and the fixture updates;
   - `TenantTablesTests` covers the columns, the `NOT NULL` failure on a pre-existing row, both triggers for every role and the migrator, the grants, and that `gk_hosted` still has only `SELECT`.
-- [ ] Tenancy, Keys and Admins:
+- [x] Tenancy, Keys and Admins:
   - `TenantAddress`, `TenantSubdomain` with the reserved list, name and label rules, `ITenants` and `TenancyEvents`;
   - `CreateSecretClassKeysAsync`;
   - `IAdminTenantRoles`.
   - The subdomain rule's test vectors (the matrix's malformed, reserved and valid values) are the same in the Tenancy tests and `tenantSubdomain.test.mjs`, so client and server can't drift.
-- [ ] Operations:
+- [x] Operations:
   - `OperationStepRun.Custody` and `JobRunServices`;
   - `OnSucceeded` in the finish;
   - `FindActiveAsync`;
   - `tenancy.tenant.create`;
   - dead jobs fail their steps;
   - `operations.operation.retried`.
-- [ ] Management: `ITenantManagement` (create, list, Operation read, retry), with the AD-5 re-check.
-- [ ] Host.Admin:
+- [x] Management: `ITenantManagement` (create, list, Operation read, retry), with the AD-5 re-check.
+- [x] Host.Admin:
   - the settings and refusals;
   - the four routes, problem codes and OpenAPI text;
   - `compose.yaml`.
   - Then regenerate the contract with `sh deploy/docker/api-contract.sh --write <abs dir>`.
-- [ ] Host.Hosted: `UseTenantResolution` first, the fixed 404 fallback, the fixed 503.
-- [ ] Architecture tests:
+- [x] Host.Hosted: `UseTenantResolution` first, the fixed 404 fallback, the fixed 503.
+- [x] Architecture tests:
   - `TenantRuleTests` with self-checks;
   - the Admins registry rows;
   - the `OnSucceeded` rule;
   - the edges and diagram;
   - the catalogue, with `docs/audit-events.md` regenerated.
-- [ ] Isolation tests: every server row of the I/O matrix, with Testcontainers PostgreSQL and the real OpenBao container for custody, and the canary row.
-- [ ] Dashboard:
+- [x] Isolation tests: every server row of the I/O matrix, with Testcontainers PostgreSQL and the real OpenBao container for custody, and the canary row.
+- [x] Dashboard:
   - the API calls;
   - `nav.ts`;
   - the routes;
   - `LandingPage`;
   - `CreateTenantPage`, `TenantsPage` and `tenantSubdomain.ts` with its Node test;
   - the catalogue keys.
-- [ ] Browser tests: `admin-tenants.spec.ts` (every browser row, `watchCsp`, axe in light and dark at 1100 and 768), `admin-shell.spec.ts`, and the config.
-- [ ] Docs:
+- [x] Browser tests: `admin-tenants.spec.ts` (every browser row, `watchCsp`, axe in light and dark at 1100 and 768), `admin-shell.spec.ts`, and the config.
+- [x] Docs:
   - threat model (header, TB-1, T-1, T-2, T-46, new T-55);
   - `install.md`;
   - `deferred-work.md`: remove the five taken-in items (Story 1.24's two, and Story 1.25's three, counting both renewal twins); remove Story 1.9's dead-job item; narrow Story 1.26's two Tenant-surface begin items to Story 1.28; add the out-of-scope ones.
@@ -509,6 +530,37 @@ Not taken in: "The Tenant-surface fresh-assertion begin" (Story 1.26). Tenant cr
 ## Spec Change Log
 
 ## Review Triage Log
+
+### 2026-11-02 — Review pass
+- verdicts: 27 findings — high 0, medium 10, low 17, false 0, maybe-false 0
+- findings:
+  - `[medium]` `[patch]` Blind: a dead run job fails Tenant steps that live step jobs still own, stranding the Tenant — only pending and Deployment steps are failed.
+  - `[medium]` `[patch]` Blind: Host.Hosted runs one lookup per request with default timeouts and pool — short timeout and bounded pool; per-client limiting deferred to Epic 10.
+  - `[medium]` `[patch]` Blind: the database guards only UPDATE and DELETE, so a bug could add a second host, insert an active Tenant or grant Owner anywhere — INSERT guards added.
+  - `[medium]` `[patch]` Blind: any Worker path can activate a Tenant without settings — activation requires `tenant_settings`.
+  - `[medium]` `[patch]` Blind: the Create form polls forever on 403/404/5xx and Retry fails silently — bounded, with banners.
+  - `[medium]` `[patch]` Blind: no test makes the completion handler throw — added, including going dead and Retry.
+  - `[low]` `[patch]` Blind: a throw during dead marking keeps the job from ever reaching dead — the job commits dead first.
+  - `[low]` `[patch]` Blind: Retry locks the Operation before its steps, against the Worker's order — matched.
+  - `[low]` `[patch]` Blind: the trigger docs overstate the guarantee — reworded; a test checks the triggers are enabled.
+  - `[low]` `[patch]` Blind: Tenant names allow bidi and zero-width characters — refused, server and dashboard.
+  - `[low]` `[patch]` Blind: the list sorts by ID, not creation time, and queries per row — ordered by creation, one query per page.
+  - `[low]` `[patch]` Blind: an Admin host sharing a registrable domain with the Tenant zone is same-site — documented.
+  - `[low]` `[patch]` Blind: Retry reports a programming error as 409 — a dedicated status.
+  - `[medium]` `[patch]` Edge: a dead step job with a missing payload leaves its Operation stuck — falls back to the claim's Operation.
+  - `[medium]` `[patch]` Edge: a completion handler on a Deployment-scoped start throws on every success — refused at start.
+  - `[low]` `[patch]` Edge: the lazy data source caches a first-call exception forever — not cached.
+  - `[low]` `[patch]` Edge: list paging can skip a Tenant under clock skew — same fix as the Blind row.
+  - `[low]` `[patch]` Edge: the Operation read doesn't re-check access in the module — it does now.
+  - `[low]` `[patch]` Edge: the dashboard accepts names the server refuses — same rule.
+  - `[medium]` `[patch]` Gap: the landing's history replacement is untested — Back is checked.
+  - `[medium]` `[patch]` Gap: completion-handler rollback is untested — same as the Blind row.
+  - `[low]` `[defer]` Gap: the Create poll stopping on unmount is untested — a later dashboard story.
+  - `[low]` `[patch]` Intent: `tenancy.tenant.created` says the label is on the Tenant, untrue once 1.28 changes labels — reworded.
+  - `[low]` `[reject]` Intent: `operations.operation.retried` targets the Tenant, not the Operation — the audit envelope has no Operation kind and one active creation per Tenant makes it unambiguous; deferred.
+  - `[low]` `[patch]` Intent: the fixed 404 isn't compared with Story 1.21's bytes, and the absolute-form test accepts 400 or 404 — both pinned.
+  - `[low]` `[patch]` Intent: resolution maps InvalidOperationException to 503, hiding bugs — narrowed.
+  - `[low]` `[defer]` Intent: Tenancy now carries ASP.NET Core and Npgsql to every host and the CLI — noted for the architecture spine.
 
 ## Design Notes
 
@@ -539,3 +591,19 @@ Not taken in: "The Tenant-surface fresh-assertion begin" (Story 1.26). Tenant cr
 - After changing the endpoints, regenerate the contract in Docker with `sh deploy/docker/api-contract.sh --write <abs dir>` (as `docker compose -f deploy/compose.test.yaml run --rm --build -v "<repository>:/out" tests sh deploy/docker/api-contract.sh --write /out`). Regenerate the audit catalogue and the module diagram with the Generator. Commit all three.
 
 Nothing runs on the host.
+
+## Auto Run Result
+
+Status: done
+
+**Summary:** the Deployment Owner creates Tenants on their own permanent subdomains. One request writes the Tenant, its host, the creator's Tenant Owner role, an Operation and an audit event, and answers `202`. The Worker creates the six secret class keys, and a completion handler writes `tenant_settings` and activates the Tenant in the same transaction as the Operation's success. The issuer, RP ID and email link base are stored once and never change, and no route or role can change or delete a subdomain. Malformed, reserved and taken subdomains get one refusal. Host.Hosted resolves the exact host to an active Tenant, and every other host gets one fixed 404 before any Tenant code runs. The dashboard opens on Create Tenant and lists Tenants.
+
+**Files:** `src/Modules/Tenancy/` (subdomain, address, Tenants, resolution); `src/Modules/Management/`; `src/Modules/Operations/` (completion handler, dead jobs, Tenant creation); `src/Modules/Admins/` (Tenant roles); the Tenants migration and `TableRegistry`; `src/Gatekeep.Host.Admin/` (Tenants API, OpenAPI); `src/Gatekeep.Host.Hosted/Program.cs`; `docs/api/openapi-v1.json`, `packages/api-client/`; `apps/admin-dashboard/src/shell/` (Create Tenant, Tenants); `tests/Isolation/Tenancy/`, `Operations/`, `Custody/`, `tests/Architecture/TenantRuleTests.cs`, `tests/browser/admin-tenants.spec.ts`; `docs/audit-events.md`, the threat model and `install.md`.
+
+**Review:** 27 findings across four layers: 24 patched, 2 deferred, 1 rejected, each with its reason in the triage log.
+
+**Follow-up review:** recommended. Dead-job handling and the database invariants changed in review, with new tests as the only proof.
+
+**Verification:** see the PR screenshot; the full suite passes in the `tests` container.
+
+**Residual risks:** Host.Hosted lookups have no per-client limit until Epic 10. The retry event targets the Tenant, not the Operation, until the audit envelope gains an Operation kind.

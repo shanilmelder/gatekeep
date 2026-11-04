@@ -216,14 +216,34 @@ public sealed class AdminTablesTests(PostgresFixture postgres)
         }
     }
 
+    /// <summary>Story 1.27: gk_admin inserts the creator's Owner role, and still never changes or removes one.</summary>
     [Fact]
-    public async Task Admin_only_reads_tenant_role()
+    public async Task Admin_reads_and_inserts_tenant_role_but_never_changes_or_removes_one()
     {
         var database = await WithRoleAsync();
         var admin = postgres.RoleConnection(TableRegistry.Admin, database);
 
         Assert.Equal("owner", await PostgresFixture.ScalarAsync<string>(admin, $"SELECT role FROM tenant_role WHERE admin_id = '{Owner}'"));
-        foreach (var sql in TenantRoleWrites.Append("TRUNCATE tenant_role"))
+
+        // The creator's Owner role, on the Tenant it is creating; any other insert is GK004.
+        var creator = Guid.CreateVersion7();
+        var creating = Guid.CreateVersion7();
+        await PostgresFixture.ExecuteAsync(postgres.SuperuserConnection(database), $"INSERT INTO admin (id, deployment_owner) VALUES ('{creator}', false)");
+        await TestTenants.InsertAsync(postgres.SuperuserConnection(database), creating, status: "creating");
+        await PostgresFixture.ExecuteAsync(admin, $"INSERT INTO tenant_role (tenant_id, admin_id, role) VALUES ('{creating}', '{creator}', 'owner')");
+        Assert.Equal("owner", await PostgresFixture.ScalarAsync<string>(admin, $"SELECT role FROM tenant_role WHERE admin_id = '{creator}'"));
+
+        foreach (var sql in new[]
+        {
+            $"INSERT INTO tenant_role (tenant_id, admin_id, role) VALUES ('{creating}', '{Invitee}', 'viewer')",
+            $"INSERT INTO tenant_role (tenant_id, admin_id, role) VALUES ('{TenantA}', '{creator}', 'owner')",
+        })
+        {
+            var refused = await Assert.ThrowsAsync<PostgresException>(() => PostgresFixture.ExecuteAsync(admin, sql));
+            Assert.Equal("GK004", refused.SqlState);
+        }
+
+        foreach (var sql in TenantRoleWrites.Skip(1).Append("TRUNCATE tenant_role"))
         {
             var denied = await Assert.ThrowsAsync<PostgresException>(() => PostgresFixture.ExecuteAsync(admin, sql));
             Assert.Equal(PermissionDenied, denied.SqlState);
@@ -413,7 +433,7 @@ public sealed class AdminTablesTests(PostgresFixture postgres)
         await PostgresFixture.ExecuteAsync(
             postgres.SuperuserConnection(database),
             $"""
-            INSERT INTO tenant (id) VALUES ('{TenantA}');
+            {TestTenants.InsertSql(TenantA)};
             INSERT INTO admin (id, deployment_owner) VALUES ('{Invitee}', false);
             INSERT INTO tenant_role (tenant_id, admin_id, role) VALUES ('{TenantA}', '{Owner}', 'owner'), ('{TenantA}', '{Invitee}', 'viewer');
             """);

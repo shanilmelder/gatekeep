@@ -178,7 +178,7 @@ public sealed class CanaryScanTests(PostgresFixture postgres)
     {
         var database = await postgres.NewMigratedDatabaseAsync();
         await PostgresFixture.ExecuteAsync(
-            postgres.SuperuserConnection(database), $"INSERT INTO tenant (id) VALUES ('{TenantA}')");
+            postgres.SuperuserConnection(database), TestTenants.InsertSql(TenantA));
         return database;
     }
 

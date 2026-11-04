@@ -12,4 +12,13 @@ public static class OperationsEvents
     public static readonly AuditEventDefinition JobDead = new(
         new AuditTypeCode("operations.job.dead"),
         "A job used its last attempt and went dead. Only its fixed failure code is kept.");
+
+    /// <summary>
+    /// Written on the Deployment chain when an Admin retries a failed Operation (Story 1.27), in the
+    /// transaction that reopens its failed steps. The Actor is the Admin; the target the Operation's
+    /// Tenant, when it has one: the envelope has no Operation target kind.
+    /// </summary>
+    public static readonly AuditEventDefinition OperationRetried = new(
+        new AuditTypeCode("operations.operation.retried"),
+        "An Admin retried a failed Operation's failed steps. Names the Operation's Tenant only, when it has one.");
 }

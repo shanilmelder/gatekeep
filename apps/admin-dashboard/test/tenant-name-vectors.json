@@ -1,0 +1,25 @@
+{
+  "_comment": "Story 1.27: the Tenant name rule's test vectors, shared by the server's Tenancy tests and apps/admin-dashboard/test/tenantName.test.mjs. 'valid' passes after trimming; 'invalid' is empty after trimming, over 100 UTF-16 units, or holds a control (Cc) or format (Cf) character or a lone surrogate.",
+  "valid": [
+    "Acme Dev",
+    "  Acme  ",
+    "Ünïcødé 🙂",
+    "nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn"
+  ],
+  "invalid": [
+    "",
+    "   ",
+    "a\u0007b",
+    "a\u0000b",
+    "a\nb",
+    "a\u009fb",
+    "a​b",
+    "a‎b",
+    "a‮b",
+    "a⁦b",
+    "a﻿b",
+    "a\ud800b",
+    "a\udc00",
+    "nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn"
+  ]
+}

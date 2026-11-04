@@ -83,9 +83,9 @@ public class InstallDocTests
             @"^## Using the Admin Dashboard$",
             @"\*\*Below 768px: unsupported\.\*\*",
         ],
-        ["no Admin Dashboard pages yet (from Story 1.27)"] =
+        ["no Tenant pages yet (from Stories 1.28 and 3.1)"] =
         [
-            @"\*\*A working Admin Dashboard\.\*\*[^\n]*from Story 1\.27 on",
+            @"\*\*A working Admin Dashboard\.\*\*[^\n]*creates and lists Tenants[^\n]*from Stories 1\.28 and 3\.1 on",
         ],
         ["no Certificate Transparency alerts yet (Epic 11)"] =
         [

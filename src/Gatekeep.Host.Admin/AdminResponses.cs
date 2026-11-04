@@ -55,8 +55,27 @@ internal static class AdminResponses
     /// <summary>A Recovery Code confirmation naming an issue that isn't the Admin's current unconfirmed code (Story 1.26).</summary>
     public const string RecoveryCodeSuperseded = "recovery_code_superseded";
 
+    /// <summary>A Tenant create body, name, label or list cursor that is malformed (Story 1.27).</summary>
+    public const string TenantInvalid = "tenant_invalid";
+
+    /// <summary>
+    /// Every refused Tenant Subdomain (Story 1.27): malformed, reserved and taken alike, a creation
+    /// that lost a race included. Nothing says which.
+    /// </summary>
+    public const string SubdomainRefused = "subdomain_refused";
+
+    /// <summary>A retry of an Operation that isn't failed (Story 1.27).</summary>
+    public const string OperationNotFailed = "operation_not_failed";
+
     /// <summary>The SQLSTATE the credential floor and maximum triggers raise, and nothing else (Story 1.26).</summary>
     public const string RaisedByTrigger = "GK001";
+
+    /// <summary>
+    /// The Tenancy guards' own SQLSTATEs (Story 1.27): a host refused (<c>GK002</c>), a Tenant inserted
+    /// as other than creating (<c>GK003</c>), a role refused (<c>GK004</c>) and an activation without
+    /// settings (<c>GK005</c>). Each is a refusal, never a 500.
+    /// </summary>
+    public static readonly IReadOnlyList<string> TenancyGuardStates = ["GK002", "GK003", "GK004", "GK005"];
 
     /// <summary>A foreign key a write broke, such as a credential removed under a grant being stored.</summary>
     public const string ForeignKeyViolation = "23503";
@@ -75,6 +94,9 @@ internal static class AdminResponses
         CredentialsMaximum,
         RecoveryCodeRefused,
         RecoveryCodeSuperseded,
+        TenantInvalid,
+        SubdomainRefused,
+        OperationNotFailed,
     ];
 
     /// <summary>The Session cookie, expired: sent with a sign-out and a 401 for a stale cookie.</summary>

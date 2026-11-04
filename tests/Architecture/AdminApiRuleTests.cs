@@ -35,8 +35,8 @@ public class AdminApiRuleTests
         new[] { "gk_admin UPDATE backed_up,backup_eligible,last_used_at,sign_count" })]
     // Story 1.23: DELETE and no UPDATE: taking a challenge deletes it. Story 1.26's grants work the same way.
     [InlineData("admin_signin_challenge", new[] { "gk_admin DELETE", "gk_admin INSERT", "gk_admin SELECT" }, new string[0], true)]
-    // Story 1.24: read-only to gk_admin. Story 1.27 adds INSERT, Story 8.4 UPDATE and DELETE.
-    [InlineData("tenant_role", new[] { "gk_admin SELECT" }, new string[0])]
+    // Story 1.24: read-only to gk_admin. Story 1.27 adds INSERT, the creator's Owner role; Story 8.4 UPDATE and DELETE.
+    [InlineData("tenant_role", new[] { "gk_admin INSERT", "gk_admin SELECT" }, new string[0])]
     [InlineData("admin_fresh_assertion", new[] { "gk_admin DELETE", "gk_admin INSERT", "gk_admin SELECT" }, new string[0], true)]
     [InlineData(
         "admin_recovery_code",
@@ -63,6 +63,77 @@ public class AdminApiRuleTests
             .Order(StringComparer.Ordinal);
         Assert.Equal(columns, columnGrants);
     }
+
+    /// <summary>
+    /// Story 1.27: the Tenancy tables with exactly their grants. Only Host.Admin creates a Tenant and
+    /// its host; only the creation Operation's completion, as gk_worker, sets its status and inserts
+    /// its settings; nobody updates or deletes a host, and gk_hosted only reads.
+    /// </summary>
+    [Theory]
+    [InlineData(
+        "tenant",
+        "Control",
+        new[] { "gk_admin INSERT", "gk_admin SELECT", "gk_cli SELECT", "gk_hosted SELECT", "gk_worker SELECT" },
+        new[] { "gk_sealer SELECT id", "gk_worker UPDATE status" },
+        new[] { "tenant_guard_insert", "tenant_guard_update" })]
+    [InlineData(
+        "tenant_host",
+        "Control",
+        new[] { "gk_admin INSERT", "gk_admin SELECT", "gk_hosted SELECT", "gk_worker SELECT" },
+        new string[0],
+        new[] { "tenant_host_guard", "tenant_host_guard_insert", "tenant_host_refuse_truncate" })]
+    [InlineData(
+        "tenant_settings",
+        "Tenant",
+        new[] { "gk_admin INSERT", "gk_admin SELECT", "gk_admin UPDATE", "gk_hosted SELECT", "gk_worker INSERT", "gk_worker SELECT" },
+        new string[0],
+        new string[0])]
+    public void Registry_lists_the_Tenancy_tables_with_exactly_their_grants(
+        string table,
+        string tableClass,
+        string[] grants,
+        string[] columns,
+        string[] triggers)
+    {
+        var entry = Entry(table);
+
+        Assert.Equal(tableClass, Get(entry, "Class")!.ToString());
+        Assert.Equal("Tenancy", Get(entry, "Owner"));
+        Assert.False((bool)Get(entry, "Unlogged")!);
+        Assert.Equal(grants, TableGrants(entry));
+        Assert.Equal(columns, ColumnGrants(entry));
+        Assert.Equal(triggers, ((IEnumerable<string>?)Get(entry, "Triggers") ?? []).Order(StringComparer.Ordinal));
+    }
+
+    [Fact]
+    public void Nobody_may_update_or_delete_a_tenant_host()
+    {
+        var entry = Entry("tenant_host");
+
+        Assert.DoesNotContain(TableGrants(entry), g => g.EndsWith(" UPDATE", StringComparison.Ordinal) || g.EndsWith(" DELETE", StringComparison.Ordinal));
+        Assert.Empty(ColumnGrants(entry));
+        Assert.True(UpdatesOrDeletes(["gk_admin INSERT", "gk_worker UPDATE"]), "The check misses an UPDATE grant.");
+        Assert.True(UpdatesOrDeletes(["gk_admin DELETE"]), "The check misses a DELETE grant.");
+        Assert.False(UpdatesOrDeletes(TableGrants(entry)));
+    }
+
+    private static bool UpdatesOrDeletes(IEnumerable<string> grants) =>
+        grants.Any(g => g.EndsWith(" UPDATE", StringComparison.Ordinal) || g.EndsWith(" DELETE", StringComparison.Ordinal));
+
+    private static IEnumerable<string> TableGrants(object entry) =>
+        ((IEnumerable)Get(entry, "Grants")!)
+            .Cast<object>()
+            .SelectMany(g => ((IEnumerable<string>)Get(g, "Value")!).Select(p => $"{Get(g, "Key")} {p}"))
+            .Order(StringComparer.Ordinal)
+            .ToList();
+
+    private static IEnumerable<string> ColumnGrants(object entry) =>
+        ((IEnumerable?)Get(entry, "ColumnGrants") ?? Array.Empty<object>())
+            .Cast<object>()
+            .SelectMany(g => ((IEnumerable)Get(g, "Value")!).Cast<object>().Select(c =>
+                $"{Get(g, "Key")} {Get(c, "Privilege")} {string.Join(",", ((IEnumerable<string>)Get(c, "Columns")!).Order(StringComparer.Ordinal))}"))
+            .Order(StringComparer.Ordinal)
+            .ToList();
 
     [Fact]
     public void Document_names_the_session_cookie_and_the_CSRF_header()

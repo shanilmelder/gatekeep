@@ -207,6 +207,12 @@ public static class AdminsContract
     }
 
     /// <summary>
+    /// The creator's Tenant Owner role (Story 1.27, FR-7): the only <c>tenant_role</c> writer so far,
+    /// called by Tenant creation alone. It runs as <c>gk_admin</c>, in a Deployment scope.
+    /// </summary>
+    public static IAdminTenantRoles CreateTenantRoles() => new AdminTenantRoles();
+
+    /// <summary>
     /// Admin Recovery Codes (Story 1.26, FR-46): issued once, held only as an HMAC under the
     /// Deployment <c>hmac</c> key through <paramref name="custody"/>, and redeemed once for a
     /// Session that reaches only credential registration. It runs as <c>gk_admin</c>, in a

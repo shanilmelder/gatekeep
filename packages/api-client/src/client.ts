@@ -22,6 +22,11 @@ export type FreshAssertionBeginRequest = components['schemas']['FreshAssertionBe
 export type AdminCredentialsResponse = components['schemas']['AdminCredentialsResponse'];
 export type AdminCredentialResponse = components['schemas']['AdminCredentialResponse'];
 export type AdminRecoveryCodeResponse = components['schemas']['AdminRecoveryCodeResponse'];
+export type CreateTenantRequest = components['schemas']['CreateTenantRequest'];
+export type TenantResponse = components['schemas']['TenantResponse'];
+export type TenantListResponse = components['schemas']['TenantListResponse'];
+export type TenantCreatedResponse = components['schemas']['TenantCreatedResponse'];
+export type OperationResponse = components['schemas']['OperationResponse'];
 
 /** A path the committed OpenAPI document has, so a removed endpoint fails to compile. */
 export type ApiPath = keyof paths;
@@ -174,6 +179,31 @@ export function createApiClient(options: ApiClientOptions = {}) {
     confirmRecoveryCode: (issueId: string) => request('/api/v1/deployment/credentials/recovery-code/confirm', 'post', { issueId }),
     /** Redeems a Recovery Code at sign-in, sessionless: a Session that reaches only credential registration. */
     redeemRecoveryCode: (code: string) => request('/api/v1/deployment/signin/recovery-code', 'post', { code }),
+    /**
+     * The Deployment's Tenants, oldest first, 50 a page, with the Tenant zone (Story 1.27).
+     * `cursor` is the previous page's `nextCursor`, which goes into the query encoded.
+     */
+    listTenants: (cursor?: string) =>
+      request(
+        (cursor === undefined
+          ? '/api/v1/deployment/tenants'
+          : `/api/v1/deployment/tenants?cursor=${encodeURIComponent(cursor)}`) as '/api/v1/deployment/tenants',
+        'get',
+      ),
+    /** Creates a Tenant: a 202 with the Tenant, still creating, and the Operation that finishes it. */
+    createTenant: (body: CreateTenantRequest) => request('/api/v1/deployment/tenants', 'post', body),
+    /** One Operation as the Tenant `tenantId` sees it: only that Tenant's steps. Both IDs go into the path encoded. */
+    getTenantOperation: (tenantId: string, operationId: string) =>
+      request(
+        `/api/v1/tenants/${encodeURIComponent(tenantId)}/operations/${encodeURIComponent(operationId)}` as '/api/v1/tenants/{tenantId}/operations/{operationId}',
+        'get',
+      ),
+    /** Retries a failed Tenant creation's failed steps: a 202 with the Operation running again, or 409 when it isn't failed. */
+    retryOperation: (operationId: string) =>
+      request(
+        `/api/v1/deployment/operations/${encodeURIComponent(operationId)}/retry` as '/api/v1/deployment/operations/{operationId}/retry',
+        'post',
+      ),
   };
 }
 

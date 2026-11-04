@@ -1,5 +1,6 @@
 using System.Text.RegularExpressions;
 using Gatekeep.Kernel.Persistence;
+using Gatekeep.Kernel.Secrets;
 
 namespace Gatekeep.Modules.Operations.Contracts;
 
@@ -116,7 +117,8 @@ public sealed class OperationStepRun
         OperationCode stage,
         Guid? tenantId,
         int attempt,
-        CommandContext context)
+        CommandContext context,
+        IKeyCustody? custody)
     {
         OperationId = operationId;
         StepId = stepId;
@@ -125,6 +127,7 @@ public sealed class OperationStepRun
         TenantId = tenantId;
         Attempt = attempt;
         Context = context;
+        Custody = custody;
     }
 
     public Guid OperationId { get; }
@@ -142,7 +145,41 @@ public sealed class OperationStepRun
     public int Attempt { get; }
 
     public CommandContext Context { get; }
+
+    /// <summary>
+    /// The Worker's key custody, for a stage that creates or uses keys (Story 1.27). Null when the
+    /// Worker has none configured: such a stage reports a failure code rather than throwing.
+    /// </summary>
+    public IKeyCustody? Custody { get; }
 }
+
+/// <summary>
+/// An Operation that has just succeeded, as its completion handler sees it (Story 1.27). The
+/// handler runs in the transaction that marks it <c>succeeded</c>, so its writes land with that
+/// or neither does. <see cref="Context"/> is scoped to <see cref="TenantId"/>, the Operation's own Tenant.
+/// </summary>
+public sealed class OperationCompletion
+{
+    internal OperationCompletion(Guid operationId, Guid tenantId, CommandContext context)
+    {
+        OperationId = operationId;
+        TenantId = tenantId;
+        Context = context;
+    }
+
+    public Guid OperationId { get; }
+
+    public Guid TenantId { get; }
+
+    public CommandContext Context { get; }
+}
+
+/// <summary>
+/// Runs once an Operation's every step has succeeded, after every stage by definition, in the
+/// transaction that marks it <c>succeeded</c>. It must be idempotent, as a step is. A throw rolls
+/// the finish back, with the step that finished last: its job runs again.
+/// </summary>
+public delegate Task OperationCompletionHandler(OperationCompletion completion, CancellationToken cancellationToken);
 
 /// <summary>
 /// Runs one step. It must be idempotent: a step can run again after a crash, and a retry
@@ -180,7 +217,7 @@ public sealed class OperationDefinition
 {
     private readonly Dictionary<string, OperationStage> _byCode;
 
-    public OperationDefinition(OperationType type, IEnumerable<OperationStage> stages)
+    public OperationDefinition(OperationType type, IEnumerable<OperationStage> stages, OperationCompletionHandler? onSucceeded = null)
     {
         ArgumentNullException.ThrowIfNull(type);
         ArgumentNullException.ThrowIfNull(stages);
@@ -203,12 +240,26 @@ public sealed class OperationDefinition
             }
         }
 
+        // The finisher must be a step job in the Operation's own Tenant scope (Story 1.27).
+        if (onSucceeded is not null && Stages.Any(s => s.Kind != OperationStageKind.Tenant))
+        {
+            throw new ArgumentException($"Operation type {type} has a completion handler, so all its stages are Tenant stages.", nameof(onSucceeded));
+        }
+
         Type = type;
+        OnSucceeded = onSucceeded;
     }
 
     public OperationType Type { get; }
 
     public IReadOnlyList<OperationStage> Stages { get; }
+
+    /// <summary>
+    /// What runs once every step has succeeded, if anything (Story 1.27). It runs only for a
+    /// Tenant-scoped Operation, in that Tenant's own scope; a type that has one has only Tenant
+    /// stages, so its last step job, in that scope, is always the one that finishes it.
+    /// </summary>
+    public OperationCompletionHandler? OnSucceeded { get; }
 
     public OperationStage? Find(OperationCode stage) => _byCode.GetValueOrDefault(stage.Value);
 

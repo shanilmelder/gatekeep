@@ -83,7 +83,7 @@ public sealed class TenantScopeTests(PostgresFixture postgres)
         var database = await TenantDatabaseAsync();
         await using var scope = await AdminScopeAsync(database);
         await using var command = scope.CreateCommandContext().CreateCommand();
-        command.CommandText = $"INSERT INTO tenant (id) VALUES ('{Guid.NewGuid()}')";
+        command.CommandText = TestTenants.InsertSql(Guid.NewGuid());
 
         await scope.CommitAsync(Cancellation);
 
@@ -122,7 +122,7 @@ public sealed class TenantScopeTests(PostgresFixture postgres)
     {
         var database = await postgres.NewMigratedDatabaseAsync();
         await PostgresFixture.ExecuteAsync(
-            postgres.SuperuserConnection(database), $"INSERT INTO tenant (id) VALUES ('{TenantA}')");
+            postgres.SuperuserConnection(database), TestTenants.InsertSql(TenantA));
         return database;
     }
 

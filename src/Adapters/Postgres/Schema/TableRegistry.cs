@@ -65,29 +65,52 @@ public static class TableRegistry
 
     public static readonly IReadOnlyList<TableEntry> Tables =
     [
-        new("tenant", TableClass.Control, "Tenancy", new Dictionary<string, IReadOnlyList<string>>
-        {
-            [Hosted] = [Select],
-            [Admin] = [Select, Insert],
-            [Worker] = [Select],
-            [Cli] = [Select],
-        },
-        new Dictionary<string, IReadOnlyList<ColumnGrant>>
-        {
-            // The seal loop lists the Tenant chains, so it reads the IDs only.
-            [Sealer] = [new ColumnGrant(Select, ["id"])],
-        }),
-        new("tenant_host", TableClass.Control, "Tenancy", new Dictionary<string, IReadOnlyList<string>>
-        {
-            [Hosted] = [Select],
-            [Admin] = [Select, Insert],
-            [Worker] = [Select],
-        }),
+        // Story 1.27: Host.Admin creates a Tenant, always creating, which its creation Operation's
+        // completion, as gk_worker, makes active once its settings exist. Nobody else changes one, and
+        // the triggers keep its ID, issuer, RP ID, link base and creation time, and let its status go
+        // only from creating to active. They hold every DML by any role; an owner or superuser can
+        // still disable triggers.
+        new(
+            "tenant",
+            TableClass.Control,
+            "Tenancy",
+            new Dictionary<string, IReadOnlyList<string>>
+            {
+                [Hosted] = [Select],
+                [Admin] = [Select, Insert],
+                [Worker] = [Select],
+                [Cli] = [Select],
+            },
+            new Dictionary<string, IReadOnlyList<ColumnGrant>>
+            {
+                // The seal loop lists the Tenant chains, so it reads the IDs only.
+                [Sealer] = [new ColumnGrant(Select, ["id"])],
+                // Activation, once the creation Operation succeeds.
+                [Worker] = [new ColumnGrant(Update, ["status"])],
+            },
+            ["tenant_guard_insert", "tenant_guard_update"]),
+
+        // Every host ever issued, kept for good (AD-6): one per Tenant and kind, added only to a
+        // creating Tenant. No role updates or deletes one, and the triggers refuse every DML and
+        // TRUNCATE by any role, so a host is never changed or reused; an owner or superuser can still
+        // disable triggers.
+        new(
+            "tenant_host",
+            TableClass.Control,
+            "Tenancy",
+            new Dictionary<string, IReadOnlyList<string>>
+            {
+                [Hosted] = [Select],
+                [Admin] = [Select, Insert],
+                [Worker] = [Select],
+            },
+            Triggers: ["tenant_host_guard", "tenant_host_guard_insert", "tenant_host_refuse_truncate"]),
         new("tenant_settings", TableClass.Tenant, "Tenancy", new Dictionary<string, IReadOnlyList<string>>
         {
             [Hosted] = [Select],
             [Admin] = [Select, Insert, Update],
-            [Worker] = [Select],
+            // Story 1.27: the creation Operation's completion writes the new Tenant's row.
+            [Worker] = [Select, Insert],
         }),
         new("migration_history", TableClass.Control, "Operations", new Dictionary<string, IReadOnlyList<string>>()),
         new(
@@ -363,16 +386,18 @@ public static class TableRegistry
 
         // Story 1.24: the one Tenant Role each Admin holds in a Tenant (AD-27). control, not tenant:
         // one Admin's roles are listed across Tenants, so the request checks filter by the path
-        // Tenant in code. Host.Admin only reads it on every Tenant request, caching nothing. Story
-        // 1.27 adds INSERT, Story 8.4 UPDATE (role) and DELETE. gk_hosted never reads it (AD-2).
+        // Tenant in code. Host.Admin reads it on every Tenant request, caching nothing, and from
+        // Story 1.27 inserts the creator's Owner role. Story 8.4 adds UPDATE (role) and DELETE.
+        // gk_hosted never reads it (AD-2).
         new(
             "tenant_role",
             TableClass.Control,
             "Admins",
             new Dictionary<string, IReadOnlyList<string>>
             {
-                [Admin] = [Select],
-            }),
+                [Admin] = [Select, Insert],
+            },
+            Triggers: ["tenant_role_guard_insert"]),
 
         // Story 1.26: each Admin Session's pending fresh-assertion challenge and its verified grants,
         // bound to the Session and to the SHA-256 of their action, Tenant and target, for 5 minutes

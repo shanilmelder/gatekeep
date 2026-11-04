@@ -74,9 +74,6 @@
   summary: Give operations.job.dead a job reference, and raise the Security Alert.
   evidence: G-17.
 - source_spec: `_bmad-output/implementation-artifacts/spec-1-9-track-long-running-operations.md`
-  summary: Mark open Operation steps failed when their run or step job goes dead, so the Operation can be retried.
-  evidence: Story 1.9 review: a dead job leaves the Operation stuck active. Needed before the first production Operation type.
-- source_spec: `_bmad-output/implementation-artifacts/spec-1-9-track-long-running-operations.md`
   summary: Order Operation stages, so Tenant deletion can purge before it removes the Tenant.
   evidence: Story 1.9 runs stages unordered.
 - source_spec: `_bmad-output/implementation-artifacts/spec-1-9-track-long-running-operations.md`
@@ -182,9 +179,6 @@
   summary: Build `MachinePrincipal` from validated Management API tokens, add the Management API bearer scheme on `/api/v1/tenants/*`, and map each capability to the Management API Permission that grants it, as ADV-22 asks (Epic 17, Story 17.3).
   evidence: Story 1.24 has no `src/` construction of `MachinePrincipal` (an architecture rule holds it to that); machine denial is proven only at handler level with `TestOnlyMachinePrincipal`.
 - source_spec: `_bmad-output/implementation-artifacts/spec-1-24-enforce-capabilities-and-tenant-scoped-routes.md`
-  summary: Grant `gk_admin` `INSERT` on `tenant_role` and make a Tenant's creator its Tenant Owner; add the first Owner-only Deployment route with its HTTP refusal test for a non-Owner (Story 1.27).
-  evidence: Story 1.24 makes `tenant_role` read-only and has no Owner-only route, so AC 2 is proven by the generated matrix, the route rule and a non-Owner's empty Deployment capability list.
-- source_spec: `_bmad-output/implementation-artifacts/spec-1-24-enforce-capabilities-and-tenant-scoped-routes.md`
   summary: Tenant switching from an Admin's roles, and the "no Tenant Role" landing (Story 1.28).
   evidence: Story 1.24 adds the `tenant_role_admin` index for the switcher but no route lists an Admin's Tenants.
 - source_spec: `_bmad-output/implementation-artifacts/spec-1-24-enforce-capabilities-and-tenant-scoped-routes.md`
@@ -202,9 +196,6 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-1-24-enforce-capabilities-and-tenant-scoped-routes.md`
   summary: Catch `ARCHITECTURE-SPINE.md` up with Story 1.24: the AD-19 self-service exemption under `/api/v1/deployment`, the public ID alphabet (lowercase RFC 4648 base32, no padding, canonical only, never the empty UUID) in Conventions, the capability names in AD-20, and `tenant_role` in AD-27's Admins tables.
   evidence: Story 1.24 exempts the reviewed self-service and sessionless routes from the Deployment Owner gate and fixes the public ID encoding, which the spine doesn't yet state.
-- source_spec: `_bmad-output/implementation-artifacts/spec-1-24-enforce-capabilities-and-tenant-scoped-routes.md`
-  summary: Over-HTTP refusal of a non-Owner on a real Owner-only Deployment route.
-  evidence: Story 1.24 review; Story 1.27.
 - source_spec: `_bmad-output/implementation-artifacts/spec-1-25-open-the-admin-shell.md`
   summary: The Tenant switcher, the current Tenant's name and environment badge in the top bar, Tenant mismatch, and the final landing rules (Story 1.28).
   evidence: Story 1.25 out of scope. The top bar has the brand, the theme toggle and the avatar menu only, and the landing page is a holding page.
@@ -212,22 +203,13 @@
   summary: Help in the top bar, opening the API reference (Story 17.5).
   evidence: Story 1.25 out of scope. FR-44: a deferred feature doesn't appear in any form, so the top bar has no Help until the reference exists.
 - source_spec: `_bmad-output/implementation-artifacts/spec-1-25-open-the-admin-shell.md`
-  summary: The create-Tenant landing and the first Deployment sidebar item, Tenants (Story 1.27).
-  evidence: Story 1.25 ships the sidebar with an empty item registry (`apps/admin-dashboard/src/shell/nav.ts`) and a holding landing page.
-- source_spec: `_bmad-output/implementation-artifacts/spec-1-25-open-the-admin-shell.md`
   summary: The "role removed mid-session" and "Tenant deleted" banners (Story 8.4, Story 1.29).
   evidence: Story 1.25 out of scope. The shell reads capabilities on every navigation, so a removal counts at once, but no banner says so.
 - source_spec: `_bmad-output/implementation-artifacts/spec-1-25-open-the-admin-shell.md`
-  summary: Prove Session renewal keeps the values of a real form on a real page (Story 1.27's Create Tenant is the first).
-  evidence: Story 1.25 proves the banner slot keeps an input's value, focus and node on the fixture, and no reload or remount on a real 401 in the dashboard; no shell page has a form yet. Renewal's rule for a state-changing request (never resent) is proven by `apps/admin-dashboard/test/renewal.test.mjs` only.
-- source_spec: `_bmad-output/implementation-artifacts/spec-1-25-open-the-admin-shell.md`
   summary: Tenant page titles in `<title>`.
   evidence: Story 1.25 out of scope. Every shell page keeps the document title "Gatekeep Admin Dashboard".
-- source_spec: `_bmad-output/implementation-artifacts/spec-1-25-open-the-admin-shell.md`
-  summary: Prove a real form keeps its values across a Session renewal.
-  evidence: Story 1.25 review; Story 1.27.
 - source_spec: `_bmad-output/implementation-artifacts/spec-1-26-confirm-sensitive-actions-and-manage-admin-credentials.md`
-  summary: The Tenant-surface fresh-assertion begin, `POST /api/v1/tenants/{tenantId}/assertions`, for Tenant capability actions (Story 1.27, or the first story that maps a Tenant route with a fresh-assertion capability).
+  summary: The Tenant-surface fresh-assertion begin, `POST /api/v1/tenants/{tenantId}/assertions`, for Tenant capability actions (Story 1.28, whose Prod label removal, `tenant.label.manage` with `WhenProdTenant`, is the first Tenant route that needs it).
   evidence: Story 1.26 refuses a Tenant capability action on the Deployment begin with 400 `assertion_refused`; the binding already takes the path Tenant.
 - source_spec: `_bmad-output/implementation-artifacts/spec-1-26-confirm-sensitive-actions-and-manage-admin-credentials.md`
   summary: The first HTTP test of an `Always` capability route on a production route (Tenant deletion, Story 1.29; Admin invites and removal, Epic 8).
@@ -288,10 +270,67 @@
   evidence: Story 1.26 review; Epic 9.
 - source_spec: `_bmad-output/implementation-artifacts/spec-1-26-confirm-sensitive-actions-and-manage-admin-credentials.md`
   summary: Tenant-scoped fresh-assertion begin route.
-  evidence: Story 1.26 review; Story 1.27 or the first Tenant fresh-assertion route.
+  evidence: Story 1.26 review; Story 1.28. Story 1.27 maps no Tenant route with a fresh-assertion capability: creation is `deployment.tenants.create`, `FreshAssertion.Never`.
 - source_spec: `_bmad-output/implementation-artifacts/spec-1-26-confirm-sensitive-actions-and-manage-admin-credentials.md`
   summary: Admin removal must account for the credential floor trigger.
   evidence: Story 1.26 review; Epic 8.
 - source_spec: `_bmad-output/implementation-artifacts/spec-1-26-confirm-sensitive-actions-and-manage-admin-credentials.md`
   summary: Retire the lost credential during recovery, and handle a recovery Admin at the maximum.
   evidence: Story 1.26 review; Story 8.3.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-27-create-tenants-with-permanent-subdomains.md`
+  summary: Signing and Management keys as a Tenant creation stage, and their backfill for Tenants created before it (Story 2.3).
+  evidence: Story 1.27's `tenancy.tenant.create` has one stage, the six secret class keys. A Tenant resolves on Host.Hosted once active, with no Signing Key yet.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-27-create-tenants-with-permanent-subdomains.md`
+  summary: The built-in API record and the default Connection as Tenant creation stages (their stories).
+  evidence: Story 1.27 out of scope: every stage a later story adds runs before the completion handler activates the Tenant.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-27-create-tenants-with-permanent-subdomains.md`
+  summary: The Tenant switcher, the Tenant name and environment badge in the top bar, label changes, and the final landing rules (Story 1.28).
+  evidence: Story 1.27 out of scope. After creation, and on `/` with any Tenant, the dashboard opens Tenants, not the Applications list (Story 3.1).
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-27-create-tenants-with-permanent-subdomains.md`
+  summary: Tenant deletion, its purge contracts, and a `deleted` status that resolves to the same fixed 404 (Story 1.29).
+  evidence: Story 1.27: `tenant` and `tenant_host` rows are never deleted, and `tenant_host_guard` refuses it for every role, so deletion must soft-delete; `tenant.status` allows only `creating` and `active`.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-27-create-tenants-with-permanent-subdomains.md`
+  summary: A Tenant page that a Tenants row opens (Story 3.1 or 1.28).
+  evidence: Story 1.27: Tenants rows aren't links, as no Tenant page exists (FR-44).
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-27-create-tenants-with-permanent-subdomains.md`
+  summary: Ordered Operation stages (carried on to Story 1.29).
+  evidence: Story 1.27 adds a completion handler instead, which runs after every stage; Tenant deletion still needs purge before removal.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-27-create-tenants-with-permanent-subdomains.md`
+  summary: Restrict Operation and step status transitions (T-46, carried on).
+  evidence: Story 1.27 doesn't change the Operation grants: `gk_admin`, `gk_cli` and `gk_worker` can still set any status.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-27-create-tenants-with-permanent-subdomains.md`
+  summary: A per-Admin limit on Tenant creation.
+  evidence: Story 1.27 `[ASSUMPTION]`: only the Deployment Owner creates Tenants, unlimited, and each creation makes six Transit keys; its audit event is written per creation, unthrottled.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-27-create-tenants-with-permanent-subdomains.md`
+  summary: A Tenant host resolution cache on Host.Hosted (AD-14), if a measured need appears.
+  evidence: Story 1.27 reads `tenant_host` joined to `tenant` as `gk_hosted` on every request, with no cache, so activation is seen at once.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-27-create-tenants-with-permanent-subdomains.md`
+  summary: The Tenant name's bidi isolation in the dashboard (Story 18.3, carried on).
+  evidence: Story 1.27 shows the Admin-supplied name as text in the Tenants list and the create progress line.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-27-create-tenants-with-permanent-subdomains.md`
+  summary: Catch `ARCHITECTURE-SPINE.md` up with Story 1.27: AD-27's `tenant` columns (name, label, status, issuer, rp_id, email_link_base), the Operation completion handler in AD-30, the `opr_` prefix in Conventions, and the `creating` status that resolves to the fixed 404 in AD-6.
+  evidence: Story 1.27 builds them; the spine doesn't state them yet.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-27-create-tenants-with-permanent-subdomains.md`
+  summary: Give the Operation audit envelope an Operation target kind, so `operations.operation.retried` can name the Operation itself.
+  evidence: Story 1.27: `AuditTargetKind` has no Operation, so the retry event targets the Operation's Tenant; `tenancy.tenant.created` likewise can't carry the label, which stays on the Tenant.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-27-create-tenants-with-permanent-subdomains.md`
+  summary: Catch `ARCHITECTURE-SPINE.md` up with the Tenancy module's new reach: it carries an ASP.NET Core `FrameworkReference` and the Npgsql package (for `Host.Hosted`'s resolution middleware and its own SQL), which every module depending on Tenancy, so every host and the Cli, now gets.
+  evidence: Story 1.27 review: AD-1 doesn't yet say a module may carry a framework reference.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-27-create-tenants-with-permanent-subdomains.md`
+  summary: A per-client limit on `Host.Hosted`'s Tenant host lookup (Epic 10).
+  evidence: Story 1.27 review: the lookup has a 3-second command timeout, a 5-second connect timeout and a pool of 20 connections, so a flood answers 503, but nothing counts per client.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-27-create-tenants-with-permanent-subdomains.md`
+  summary: A browser test that polling stops when Create Tenant or Tenants unmounts.
+  evidence: Story 1.27 review: the pages stop their timers on unmount, but no browser test watches for a read after navigating away.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-27-create-tenants-with-permanent-subdomains.md`
+  summary: Widen `tenant_role_guard_insert` when Story 8.4 grants roles to other Admins.
+  evidence: Story 1.27 review: the trigger holds `gk_admin` to inserting the creator's `owner` role on a `creating` Tenant.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-27-create-tenants-with-permanent-subdomains.md`
+  summary: Per-client limit on Host.Hosted Tenant lookups.
+  evidence: Story 1.27 review; Epic 10.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-27-create-tenants-with-permanent-subdomains.md`
+  summary: Browser test that the Create Tenant poll stops on unmount.
+  evidence: Story 1.27 review.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-27-create-tenants-with-permanent-subdomains.md`
+  summary: Record Tenancy's ASP.NET Core and Npgsql dependency in the architecture spine.
+  evidence: Story 1.27 review.

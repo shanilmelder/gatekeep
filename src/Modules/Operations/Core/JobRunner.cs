@@ -71,6 +71,36 @@ internal sealed class JobRunner : IJobRunner
 
     private const string ReadPayload = "SELECT ids::text, ciphertext FROM job_payload WHERE tenant_id = @tenant_id AND job_id = @id";
 
+    private const string ReadPayloadIds = "SELECT ids::text FROM job_payload WHERE tenant_id = @tenant_id AND job_id = @id";
+
+    // A dead Operation job can't finish its steps, so they fail, and the Operation with them, which
+    // Retry then reopens (Story 1.27). Steps before the Operation: the order a step job locks them in.
+    private const string FailOpenSteps =
+        """
+        UPDATE operation_step
+        SET status = 'failed', result_code = @result_code, updated_at = now()
+        WHERE operation_id = @operation_id AND status IN ('pending', 'running')
+        """;
+
+    // A dead run job leaves a dispatched Tenant step to its own step job: only what it hadn't handed on fails.
+    private const string FailUndispatchedSteps =
+        """
+        UPDATE operation_step
+        SET status = 'failed', result_code = @result_code, updated_at = now()
+        WHERE operation_id = @operation_id
+          AND (status = 'pending' OR (tenant_id IS NULL AND status = 'running'))
+        """;
+
+    private const string FailTenantStep =
+        """
+        UPDATE operation_step
+        SET status = 'failed', result_code = @result_code, updated_at = now()
+        WHERE id = @id AND operation_id = @operation_id AND tenant_id = @tenant_id AND status IN ('pending', 'running')
+        """;
+
+    /// <summary>The result code of a step whose run or step job went dead.</summary>
+    public static readonly OperationCode JobDeadCode = new("job_dead");
+
     private static readonly AuditTypeCode JobDead = OperationsEvents.JobDead.Code;
 
     private static readonly IReadOnlyDictionary<string, Guid> NoIds = new Dictionary<string, Guid>();
@@ -309,7 +339,7 @@ internal sealed class JobRunner : IJobRunner
                 : await DeploymentScope.BeginAsync(source, lease.Token);
 
             var context = scope.CreateCommandContext();
-            var services = new JobRunServices(source, _operations);
+            var services = new JobRunServices(source, _operations, _custody);
             var run = claim.TenantId is { } tenant
                 ? await TenantRunAsync(claim, definition, tenant, context, services, lease.Token)
                 : new JobRun(claim.Id, definition.Type, null, claim.OperationId, claim.Attempt, NoIds, context, null, services);
@@ -433,42 +463,173 @@ internal sealed class JobRunner : IJobRunner
 
     private async Task FinishAsync(Claim claim, string status, string? failureCode, CancellationToken cancellationToken)
     {
-        await using CommandScope scope = claim.TenantId is { } tenantId
+        await using (CommandScope scope = claim.TenantId is { } tenantId
             ? await TenantScope.BeginAsync(Worker, tenantId, cancellationToken)
-            : await DeploymentScope.BeginAsync(Worker, cancellationToken);
-
-        var context = scope.CreateCommandContext();
-
-        await using (var mark = context.CreateCommand())
+            : await DeploymentScope.BeginAsync(Worker, cancellationToken))
         {
-            mark.CommandText = MarkFinished;
-            AddClaim(mark, claim);
-            Sql.Add(mark, "status", status);
-            Sql.Add(mark, "failure_code", failureCode);
+            var context = scope.CreateCommandContext();
 
-            // Another runner reclaimed it after this claim expired, so that run finishes it.
-            if (await mark.ExecuteNonQueryAsync(cancellationToken) == 0)
+            await using (var mark = context.CreateCommand())
             {
-                return;
-            }
-        }
+                mark.CommandText = MarkFinished;
+                AddClaim(mark, claim);
+                Sql.Add(mark, "status", status);
+                Sql.Add(mark, "failure_code", failureCode);
 
-        if (claim.TenantId is { } tenant)
-        {
-            await using var payload = context.CreateCommand();
-            payload.CommandText = status == "done" ? DeletePayload : ErasePayloadCredential;
-            Sql.Add(payload, "tenant_id", tenant);
-            Sql.Add(payload, "id", claim.Id);
-            await payload.ExecuteNonQueryAsync(cancellationToken);
+                // Another runner reclaimed it after this claim expired, so that run finishes it.
+                if (await mark.ExecuteNonQueryAsync(cancellationToken) == 0)
+                {
+                    return;
+                }
+            }
+
+            if (claim.TenantId is { } tenant)
+            {
+                // A dead job's IDs stay: only its credential goes, so its Operation step can be found after.
+                await using var payload = context.CreateCommand();
+                payload.CommandText = status == "done" ? DeletePayload : ErasePayloadCredential;
+                Sql.Add(payload, "tenant_id", tenant);
+                Sql.Add(payload, "id", claim.Id);
+                await payload.ExecuteNonQueryAsync(cancellationToken);
+            }
+
+            if (status == "dead")
+            {
+                _logger?.LogError("Job {JobId} of type {JobType} is dead after {Attempt} attempts.", claim.Id, claim.Type, claim.Attempt);
+                await _appender.AppendAsync(context, new AuditEvent(JobDead, Actor.System), null, cancellationToken);
+            }
+
+            await scope.CommitAsync(cancellationToken);
         }
 
         if (status == "dead")
         {
-            _logger?.LogError("Job {JobId} of type {JobType} is dead after {Attempt} attempts.", claim.Id, claim.Type, claim.Attempt);
-            await _appender.AppendAsync(context, new AuditEvent(JobDead, Actor.System), null, cancellationToken);
+            // In a transaction of its own, after the job is dead for good: a failure here can't keep
+            // the job from dying, or make it run again. Failing open steps is safe to repeat.
+            await FailOperationStepsAsync(claim, cancellationToken);
+        }
+    }
+
+    /// <summary>
+    /// Fails what a dead Operation job leaves open, so the Operation finishes as failed and Retry
+    /// applies (Story 1.27), in a transaction of its own, tried up to three times. A dead
+    /// <c>operations.operation.run</c> job fails its Operation's <c>pending</c> steps and its
+    /// Deployment steps, and leaves a dispatched Tenant step to its own step job. A dead
+    /// <c>operations.operation.step</c> job fails its own step, named by its payload and matched
+    /// against its Tenant; when the payload is missing or unreadable, every open step of the
+    /// Operation the job names. Any other job is left alone.
+    /// </summary>
+    private async Task FailOperationStepsAsync(Claim claim, CancellationToken cancellationToken)
+    {
+        var isRun = claim.Type == ProductionJobs.RunOperation.Value && claim.TenantId is null;
+        var isStep = claim.Type == ProductionJobs.RunOperationStep.Value && claim.TenantId is not null;
+        if (!isRun && !isStep)
+        {
+            return;
         }
 
-        await scope.CommitAsync(cancellationToken);
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                await using CommandScope scope = claim.TenantId is { } tenantId
+                    ? await TenantScope.BeginAsync(Worker, tenantId, cancellationToken)
+                    : await DeploymentScope.BeginAsync(Worker, cancellationToken);
+                var context = scope.CreateCommandContext();
+
+                if (await FailStepsAsync(context, claim, isRun, cancellationToken) is { } operationId)
+                {
+                    // Only a step failed here can make it finish: a failed step never runs a completion handler.
+                    await OperationStore.TryFinishAsync(context, _operations, operationId, cancellationToken);
+                }
+
+                await scope.CommitAsync(cancellationToken);
+                return;
+            }
+            catch (Exception e) when (!cancellationToken.IsCancellationRequested && e is not WrongJobRoleException)
+            {
+                // The type only: a message can quote a value.
+                _logger?.LogWarning(
+                    "Job {JobId}'s Operation steps couldn't be failed on attempt {Attempt}, on {ErrorType}.",
+                    claim.Id,
+                    attempt,
+                    e.GetType().Name);
+                if (attempt >= 3)
+                {
+                    return;
+                }
+            }
+        }
+    }
+
+    /// <returns>The Operation when a step was failed, else null.</returns>
+    private static async Task<Guid?> FailStepsAsync(CommandContext context, Claim claim, bool isRun, CancellationToken cancellationToken)
+    {
+        if (isRun)
+        {
+            if (claim.OperationId is not { } run)
+            {
+                return null;
+            }
+
+            return await ExecuteAsync(context, FailUndispatchedSteps, run, null, null, cancellationToken) > 0 ? run : null;
+        }
+
+        var tenantId = claim.TenantId!.Value;
+        Dictionary<string, Guid>? ids = null;
+        await using (var read = context.CreateCommand())
+        {
+            read.CommandText = ReadPayloadIds;
+            Sql.Add(read, "tenant_id", tenantId);
+            Sql.Add(read, "id", claim.Id);
+            if (await read.ExecuteScalarAsync(cancellationToken) is string json)
+            {
+                try
+                {
+                    ids = JsonSerializer.Deserialize<Dictionary<string, Guid>>(json);
+                }
+                catch (JsonException)
+                {
+                    ids = null;
+                }
+            }
+        }
+
+        if (ids is not null
+            && ids.TryGetValue(OperationJobs.OperationIdName, out var operationId)
+            && ids.TryGetValue(OperationJobs.StepIdName, out var stepId))
+        {
+            return await ExecuteAsync(context, FailTenantStep, operationId, stepId, tenantId, cancellationToken) > 0 ? operationId : null;
+        }
+
+        // No usable payload: the job's own Operation, so nothing stays stuck.
+        if (claim.OperationId is { } fallback)
+        {
+            return await ExecuteAsync(context, FailOpenSteps, fallback, null, null, cancellationToken) > 0 ? fallback : null;
+        }
+
+        return null;
+    }
+
+    private static async Task<int> ExecuteAsync(
+        CommandContext context,
+        string sql,
+        Guid operationId,
+        Guid? stepId,
+        Guid? tenantId,
+        CancellationToken cancellationToken)
+    {
+        await using var command = context.CreateCommand();
+        command.CommandText = sql;
+        Sql.Add(command, "operation_id", operationId);
+        Sql.Add(command, "result_code", JobDeadCode.Value);
+        if (stepId is { } step)
+        {
+            Sql.Add(command, "id", step);
+            Sql.Add(command, "tenant_id", tenantId);
+        }
+
+        return await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
     private static void AddClaim(DbCommand command, Claim claim)

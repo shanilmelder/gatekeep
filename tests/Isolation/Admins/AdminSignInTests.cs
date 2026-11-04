@@ -26,7 +26,7 @@ namespace Gatekeep.Tests.Isolation.Admins;
 /// </summary>
 public sealed class AdminSignInTests(PostgresFixture postgres)
 {
-    private const string RpId = "admin.gatekeep.test";
+    private const string RpId = "admin.gatekeep-admin.test";
     private const string SessionPath = "/api/v1/deployment/session";
     private const string CapabilitiesPath = "/api/v1/deployment/capabilities";
     private const string CompletePath = AdminHost.SignInPath + "/complete";
@@ -165,11 +165,11 @@ public sealed class AdminSignInTests(PostgresFixture postgres)
         { "a Tenant hostname's RP ID", new AssertionTweaks { RpId = "acme.gatekeep.test" } },
         { "the parent domain as RP ID", new AssertionTweaks { RpId = "gatekeep.test" } },
         { "another origin", new AssertionTweaks { Origin = "https://acme.gatekeep.test" } },
-        { "the origin in other case", new AssertionTweaks { Origin = "https://ADMIN.gatekeep.test" } },
-        { "the origin with its default port", new AssertionTweaks { Origin = "https://admin.gatekeep.test:443" } },
-        { "the origin over http", new AssertionTweaks { Origin = "http://admin.gatekeep.test" } },
+        { "the origin in other case", new AssertionTweaks { Origin = "https://ADMIN.gatekeep-admin.test" } },
+        { "the origin with its default port", new AssertionTweaks { Origin = "https://admin.gatekeep-admin.test:443" } },
+        { "the origin over http", new AssertionTweaks { Origin = "http://admin.gatekeep-admin.test" } },
         { "crossOrigin true", new AssertionTweaks { CrossOrigin = true } },
-        { "a top origin", new AssertionTweaks { TopOrigin = "https://admin.gatekeep.test" } },
+        { "a top origin", new AssertionTweaks { TopOrigin = "https://admin.gatekeep-admin.test" } },
         { "no user verification", new AssertionTweaks { UserVerified = false } },
         { "no user presence", new AssertionTweaks { UserPresent = false } },
         { "a registration's type", new AssertionTweaks { Type = "webauthn.create" } },

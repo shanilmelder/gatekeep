@@ -21,7 +21,7 @@ public sealed class CredentialRegistrationTests(PostgresFixture postgres)
 {
     private const string CapabilitiesPath = "/api/v1/deployment/capabilities";
     private const string SessionPath = "/api/v1/deployment/session";
-    private const string RpId = "admin.gatekeep.test";
+    private const string RpId = "admin.gatekeep-admin.test";
 
     private static CancellationToken Cancellation => TestContext.Current.CancellationToken;
 
@@ -336,11 +336,11 @@ public sealed class CredentialRegistrationTests(PostgresFixture postgres)
         { "another RP ID", new AttestationTweaks { RpId = "elsewhere.test" } },
         { "the parent domain as RP ID", new AttestationTweaks { RpId = "gatekeep.test" } },
         { "another origin", new AttestationTweaks { Origin = "https://elsewhere.test" } },
-        { "the origin in other case", new AttestationTweaks { Origin = "https://ADMIN.gatekeep.test" } },
-        { "the origin with its default port", new AttestationTweaks { Origin = "https://admin.gatekeep.test:443" } },
-        { "the origin over http", new AttestationTweaks { Origin = "http://admin.gatekeep.test" } },
+        { "the origin in other case", new AttestationTweaks { Origin = "https://ADMIN.gatekeep-admin.test" } },
+        { "the origin with its default port", new AttestationTweaks { Origin = "https://admin.gatekeep-admin.test:443" } },
+        { "the origin over http", new AttestationTweaks { Origin = "http://admin.gatekeep-admin.test" } },
         { "crossOrigin true", new AttestationTweaks { CrossOrigin = true } },
-        { "a top origin", new AttestationTweaks { TopOrigin = "https://admin.gatekeep.test" } },
+        { "a top origin", new AttestationTweaks { TopOrigin = "https://admin.gatekeep-admin.test" } },
         { "no user verification", new AttestationTweaks { UserVerified = false } },
         { "another challenge", new AttestationTweaks { Challenge = Base64Url.EncodeToString(RandomNumberGenerator.GetBytes(32)) } },
         { "an assertion's type", new AttestationTweaks { Type = "webauthn.get" } },

@@ -15,8 +15,8 @@ internal sealed class JobEnqueuer(JobRegistry registry, IKeyCustody? custody) : 
 {
     private const string InsertTenantJob =
         """
-        INSERT INTO job (id, type, tenant_id, deployment_wide, run_after)
-        VALUES (@id, @type, @tenant_id, false, @run_after)
+        INSERT INTO job (id, type, tenant_id, deployment_wide, operation_id, run_after)
+        VALUES (@id, @type, @tenant_id, false, @operation_id, @run_after)
         """;
 
     private const string InsertDeploymentJob =
@@ -36,11 +36,24 @@ internal sealed class JobEnqueuer(JobRegistry registry, IKeyCustody? custody) : 
 
     private readonly JobRegistry _registry = registry ?? throw new ArgumentNullException(nameof(registry));
 
-    public async Task<Guid> EnqueueAsync(
+    public Task<Guid> EnqueueAsync(
         CommandContext context,
         JobType type,
         JobPayload? payload,
         DateTimeOffset? runAfter,
+        CancellationToken cancellationToken) =>
+        EnqueueAsync(context, type, payload, runAfter, operationId: null, cancellationToken);
+
+    /// <summary>
+    /// A Tenant job that also names the Operation it serves, as an Operation step job does, so a
+    /// dead one whose payload is gone still finds its Operation (Story 1.27).
+    /// </summary>
+    internal async Task<Guid> EnqueueAsync(
+        CommandContext context,
+        JobType type,
+        JobPayload? payload,
+        DateTimeOffset? runAfter,
+        Guid? operationId,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(context);
@@ -86,6 +99,7 @@ internal sealed class JobEnqueuer(JobRegistry registry, IKeyCustody? custody) : 
             Sql.Add(command, "id", id);
             Sql.Add(command, "type", type.Value);
             Sql.Add(command, "tenant_id", tenantId);
+            Sql.Add(command, "operation_id", operationId);
             Sql.Add(command, "run_after", Utc(runAfter));
             await command.ExecuteNonQueryAsync(cancellationToken);
         }

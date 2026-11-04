@@ -221,6 +221,14 @@ internal static class CanaryFlows
                 new(SurfaceKind.Route, "/api/v1/deployment/signin/recovery-code"),
             ],
             RecoveryCodeAsync),
+        new(
+            "admin.tenants",
+            [
+                new(SurfaceKind.Route, "/api/v1/deployment/tenants"),
+                new(SurfaceKind.Route, "/api/v1/deployment/operations/{operationId}/retry"),
+                new(SurfaceKind.Route, "/api/v1/tenants/{tenantId}/operations/{operationId}"),
+            ],
+            TenantsAsync),
 
         // No production type carries a credential yet, so this flow takes the runner's credential
         // path with a test type: enqueue, decrypt, run, retry and dead, as every one will.
@@ -275,6 +283,12 @@ internal static class CanaryFlows
             "Its one Tenant stage stores only fixed result codes, and enqueues the ID-only purge job.",
             Reviewer,
             Reviewed),
+        new(
+            new(SurfaceKind.OperationType, "tenancy.tenant.create"),
+            "Its one Tenant stage creates the six secret class keys by name only and stores a fixed result code; its completion "
+            + "inserts an empty settings row, sets the status and writes an ID-only event. No key material leaves custody.",
+            "Story 1.27 build review",
+            new DateOnly(2026, 11, 4)),
     ];
 
     /// <summary>Every production surface: the job and Operation registries, the Cli's commands and the hosts.</summary>
@@ -893,6 +907,82 @@ internal static class CanaryFlows
         Assert.Matches(@"""LogLevel"":""(?:Trace|Debug)""", host.Output);
     }
 
+    /// <summary>
+    /// Story 1.27: the Owner's Session and CSRF token through every Tenant route: a creation, the
+    /// list, the Operation on the Tenant path and a retry, or each one's refusals.
+    /// </summary>
+    private static async Task TenantsAsync(CanaryFlowContext context, FlowRun run, bool failing)
+    {
+        await using var host = await Admins.AdminHost.StartAsync(context.Postgres, null, DebugArguments);
+        run.Database = host.Database;
+        run.Plant("role-password", PostgresFixture.Password);
+        var (cookie, csrf, _) = await host.OwnerSessionAsync();
+        run.Plant("admin-session-id", cookie);
+        run.Plant("admin-csrf-token", csrf);
+
+        const string tenants = "/api/v1/deployment/tenants";
+        var unknown = Gatekeep.Kernel.Identifiers.PublicId.Format(Gatekeep.Kernel.Identifiers.PublicIdType.Operation, Guid.CreateVersion7());
+
+        if (failing)
+        {
+            using (var reserved = await host.SendAsync(HttpMethod.Post, tenants, cookie, csrf, Admins.AdminHost.Origin, """{"name":"Acme","subdomain":"admin","label":"dev"}"""))
+            {
+                run.Capture("refused creation response", await ResponseTextAsync(reserved));
+                Assert.Equal(HttpStatusCode.BadRequest, reserved.StatusCode);
+            }
+
+            using (var malformed = await host.SendAsync(HttpMethod.Post, tenants, cookie, csrf, Admins.AdminHost.Origin, "{"))
+            {
+                run.Capture("malformed creation response", await ResponseTextAsync(malformed));
+                Assert.Equal(HttpStatusCode.BadRequest, malformed.StatusCode);
+            }
+
+            using (var cursor = await host.SendAsync(HttpMethod.Get, $"{tenants}?cursor=nope", cookie))
+            {
+                run.Capture("malformed cursor response", await ResponseTextAsync(cursor));
+                Assert.Equal(HttpStatusCode.BadRequest, cursor.StatusCode);
+            }
+
+            using var retry = await host.SendAsync(HttpMethod.Post, $"/api/v1/deployment/operations/{unknown}/retry", cookie, csrf, Admins.AdminHost.Origin);
+            run.Capture("unknown retry response", await ResponseTextAsync(retry));
+            Assert.Equal(HttpStatusCode.NotFound, retry.StatusCode);
+        }
+        else
+        {
+            string tenant;
+            string operation;
+            using (var created = await host.SendAsync(HttpMethod.Post, tenants, cookie, csrf, Admins.AdminHost.Origin, """{"name":"Acme","subdomain":"acme","label":"dev"}"""))
+            {
+                var text = await ResponseTextAsync(created);
+                run.Capture("creation response", text);
+                Assert.Equal(HttpStatusCode.Accepted, created.StatusCode);
+                using var json = System.Text.Json.JsonDocument.Parse(await created.Content.ReadAsStringAsync(CanaryFlowContext.Cancellation));
+                tenant = json.RootElement.GetProperty("tenant").GetProperty("id").GetString()!;
+                operation = json.RootElement.GetProperty("operation").GetProperty("id").GetString()!;
+            }
+
+            using (var list = await host.SendAsync(HttpMethod.Get, tenants, cookie))
+            {
+                run.Capture("list response", await ResponseTextAsync(list));
+                Assert.Equal(HttpStatusCode.OK, list.StatusCode);
+            }
+
+            using (var read = await host.SendAsync(HttpMethod.Get, $"/api/v1/tenants/{tenant}/operations/{operation}", cookie))
+            {
+                run.Capture("operation response", await ResponseTextAsync(read));
+                Assert.Equal(HttpStatusCode.OK, read.StatusCode);
+            }
+
+            using var retry = await host.SendAsync(HttpMethod.Post, $"/api/v1/deployment/operations/{operation}/retry", cookie, csrf, Admins.AdminHost.Origin);
+            run.Capture("retry response", await ResponseTextAsync(retry));
+            Assert.Equal(HttpStatusCode.Conflict, retry.StatusCode);
+        }
+
+        await host.StopAsync();
+        run.Capture("Admin output", host.Output);
+        Assert.Matches(@"""LogLevel"":""(?:Trace|Debug)""", host.Output);
+    }
+
     /// <summary>A response's status, every header and its body, as one text to scan.</summary>
     private static async Task<string> ResponseTextAsync(HttpResponseMessage response)
     {
@@ -1027,7 +1117,7 @@ internal static class CanaryFlows
         var query = run.Plant("query-token-user-agent");
         var database = await context.Postgres.NewMigratedDatabaseAsync();
         run.Database = database;
-        await PostgresFixture.ExecuteAsync(context.Postgres.SuperuserConnection(database), $"INSERT INTO tenant (id) VALUES ('{TenantA}')");
+        await PostgresFixture.ExecuteAsync(context.Postgres.SuperuserConnection(database), TestTenants.InsertSql(TenantA));
 
         var appender = AuditContract.CreateAppender();
         var auditEvent = new AuditEvent(new AuditTypeCode("tests.canary.appended"), Actor.Anonymous);

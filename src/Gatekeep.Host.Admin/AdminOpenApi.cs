@@ -105,6 +105,38 @@ internal static class AdminOpenApi
                 {
                     Enumerate(schema, "type", ["public-key"]);
                 }
+                else if (type == typeof(CreateTenantRequest))
+                {
+                    Enumerate(schema, "label", TenantsApi.Labels);
+                    Bound(schema, "subdomain", pattern: "^[a-z0-9-]{3,63}$", maxLength: 63);
+                    Bound(schema, "name", pattern: null, maxLength: 100);
+                }
+                else if (type == typeof(TenantResponse))
+                {
+                    Enumerate(schema, "label", TenantsApi.Labels);
+                    Enumerate(schema, "status", TenantsApi.TenantStatuses);
+                    Bound(schema, "id", TenantIdPattern, maxLength: null);
+                }
+                else if (type == typeof(TenantCreation))
+                {
+                    Enumerate(schema, "status", TenantsApi.CreationStatuses);
+                    Bound(schema, "operationId", OperationIdPattern, maxLength: null);
+                }
+                else if (type == typeof(TenantListResponse))
+                {
+                    Bound(schema, "nextCursor", TenantIdPattern, maxLength: null);
+                }
+                else if (type == typeof(OperationResponse))
+                {
+                    Enumerate(schema, "status", TenantsApi.OperationStatuses);
+                    Bound(schema, "id", OperationIdPattern, maxLength: null);
+                    Bound(schema, "tenantId", TenantIdPattern, maxLength: null);
+                }
+                else if (type == typeof(OperationStepResponse))
+                {
+                    Enumerate(schema, "status", TenantsApi.StepStatuses);
+                    Bound(schema, "tenantId", TenantIdPattern, maxLength: null);
+                }
                 else if (type == typeof(ApiProblem))
                 {
                     Enumerate(schema, "code", AdminResponses.ProblemCodes);
@@ -160,6 +192,19 @@ internal static class AdminOpenApi
                         "fresh_assertion_required, with the problem body, when no fresh assertion for this action and target is bound to " +
                         "the Session" + (declaration.Kind == AccessKind.Capability ? "; access_denied when the capability is refused" : string.Empty) +
                         ". No body when an earlier check refuses first: a restricted Session, or a wrong Origin or CSRF token.";
+                }
+
+                foreach (var query in metadata.OfType<QueryParameter>())
+                {
+                    operation.Parameters ??= [];
+                    operation.Parameters.Add(new OpenApiParameter
+                    {
+                        Name = query.Name,
+                        In = ParameterLocation.Query,
+                        Required = false,
+                        Description = query.Description,
+                        Schema = new OpenApiSchema { Type = JsonSchemaType.String },
+                    });
                 }
 
                 if (declaration.Tenant)
@@ -319,6 +364,8 @@ internal static class AdminOpenApi
     /// <summary>The canonical spelling: 25 base32 characters, then one whose two unused low bits are zero.</summary>
     private const string TenantIdPattern = "^ten_[a-z2-7]{25}[aeimquy4]$";
 
+    private const string OperationIdPattern = "^opr_[a-z2-7]{25}[aeimquy4]$";
+
     /// <summary>The <c>x-gatekeep-access</c> value: the declaration, and a capability's flags as the table holds them.</summary>
     private static JsonObject Access(AccessDeclaration declaration) => declaration.Kind switch
     {
@@ -342,6 +389,22 @@ internal static class AdminOpenApi
         _ => throw new InvalidOperationException("An access declaration has an unknown kind."),
     };
 
+    private static void Bound(OpenApiSchema schema, string property, string? pattern, int? maxLength)
+    {
+        if (schema.Properties?.TryGetValue(property, out var found) == true && found is OpenApiSchema target)
+        {
+            if (pattern is not null)
+            {
+                target.Pattern = pattern;
+            }
+
+            if (maxLength is { } max)
+            {
+                target.MaxLength = max;
+            }
+        }
+    }
+
     private static void Enumerate(OpenApiSchema schema, string property, IEnumerable<string> values)
     {
         if (schema.Properties?.TryGetValue(property, out var found) == true && found is OpenApiSchema target)
@@ -349,4 +412,12 @@ internal static class AdminOpenApi
             target.Enum = [.. values.Select(v => (JsonNode)JsonValue.Create(v))];
         }
     }
+}
+
+/// <summary>An optional query parameter an endpoint reads itself, for the OpenAPI document only (Story 1.27).</summary>
+internal sealed class QueryParameter(string name, string description)
+{
+    public string Name { get; } = name;
+
+    public string Description { get; } = description;
 }

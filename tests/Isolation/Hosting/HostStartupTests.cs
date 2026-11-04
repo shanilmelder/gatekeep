@@ -136,11 +136,11 @@ public sealed class HostStartupTests(PostgresFixture postgres) : IDisposable
 
     [Theory]
     [InlineData("")]
-    [InlineData("admin.gatekeep.test")]
-    [InlineData("ftp://admin.gatekeep.test")]
-    [InlineData("https://admin.gatekeep.test/path")]
-    [InlineData("https://admin.gatekeep.test?x=1")]
-    [InlineData("https://user@admin.gatekeep.test")]
+    [InlineData("admin.gatekeep-admin.test")]
+    [InlineData("ftp://admin.gatekeep-admin.test")]
+    [InlineData("https://admin.gatekeep-admin.test/path")]
+    [InlineData("https://admin.gatekeep-admin.test?x=1")]
+    [InlineData("https://user@admin.gatekeep-admin.test")]
     public async Task Admin_with_a_missing_or_malformed_origin_refuses_naming_it(string origin)
     {
         var database = await postgres.NewMigratedDatabaseAsync();
@@ -185,6 +185,43 @@ public sealed class HostStartupTests(PostgresFixture postgres) : IDisposable
         Assert.DoesNotContain("ConnectionStrings:", output);
         Assert.DoesNotContain("Custody:", output);
         Assert.DoesNotContain("Gatekeep:PublicOrigin", output);
+    }
+
+    /// <summary>
+    /// Story 1.27: the Tenant zone is required and lower-case LDH labels, at least two, and the
+    /// Admin hostname sits outside it (AD-6); the Tenant HTTPS port is optional, 1 to 65535. Each is
+    /// refused at startup by name, never per request with a 500.
+    /// </summary>
+    [Theory]
+    [InlineData("--Gatekeep:TenantZone=", "Gatekeep:TenantZone")]
+    [InlineData("--Gatekeep:TenantZone=localhost", "Gatekeep:TenantZone")]
+    [InlineData("--Gatekeep:TenantZone=Gatekeep.Test", "Gatekeep:TenantZone")]
+    [InlineData("--Gatekeep:TenantZone=-gatekeep.test", "Gatekeep:TenantZone")]
+    [InlineData("--Gatekeep:TenantZone=gatekeep.test.", "Gatekeep:TenantZone")]
+    [InlineData("--Gatekeep:TenantZone=https://gatekeep.test", "Gatekeep:TenantZone")]
+    [InlineData("--Gatekeep:TenantZone=admin.gatekeep-admin.test", "Gatekeep:TenantZone")]
+    [InlineData("--Gatekeep:TenantZone=gatekeep-admin.test", "Gatekeep:TenantZone")]
+    [InlineData("--Gatekeep:TenantHttpsPort=0", "Gatekeep:TenantHttpsPort")]
+    [InlineData("--Gatekeep:TenantHttpsPort=65536", "Gatekeep:TenantHttpsPort")]
+    [InlineData("--Gatekeep:TenantHttpsPort=443s", "Gatekeep:TenantHttpsPort")]
+    [InlineData("--Gatekeep:TenantHttpsPort=", "Gatekeep:TenantHttpsPort")]
+    public async Task Admin_with_a_malformed_Tenant_zone_or_port_refuses_naming_it(string setting, string name)
+    {
+        var database = await postgres.NewMigratedDatabaseAsync();
+
+        using var process = HostProcess.Start(
+            "Admin",
+            Connections(Databases("Admin"), database)
+                .Concat(Custody())
+                .Append(setting)
+                .Append($"--Gatekeep:HealthPort={HostProcess.FreePort()}"));
+        var output = await process.WaitForExitAsync(Timeout, Cancellation);
+
+        Assert.Equal(1, process.ExitCode);
+        Assert.Contains("Host.Admin refuses to start", output);
+        Assert.Contains(name, output);
+        Assert.DoesNotContain("Gatekeep:PublicOrigin", output);
+        Assert.DoesNotContain("ConnectionStrings:", output);
     }
 
     [Theory]

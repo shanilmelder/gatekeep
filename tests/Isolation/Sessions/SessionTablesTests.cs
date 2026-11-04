@@ -685,7 +685,7 @@ public sealed class SessionTablesTests(PostgresFixture postgres)
         await PostgresFixture.ExecuteAsync(
             postgres.SuperuserConnection(database),
             $"""
-            INSERT INTO tenant (id) VALUES ('{TenantA}'), ('{TenantB}');
+            {TestTenants.InsertSql(TenantA, TenantB)};
             INSERT INTO "user" (tenant_id, id) VALUES ('{TenantA}', '{UserA}'), ('{TenantB}', '{UserB}');
             """);
 

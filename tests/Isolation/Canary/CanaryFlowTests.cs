@@ -104,7 +104,7 @@ public sealed class CanaryFlowTests(PostgresFixture postgres) : IDisposable
     public async Task User_Agent_is_stored_with_its_credential_shapes_masked(string userAgent, string stored)
     {
         var database = await postgres.NewMigratedDatabaseAsync();
-        await PostgresFixture.ExecuteAsync(postgres.SuperuserConnection(database), $"INSERT INTO tenant (id) VALUES ('{TenantA}')");
+        await PostgresFixture.ExecuteAsync(postgres.SuperuserConnection(database), TestTenants.InsertSql(TenantA));
         var canary = new FlowRun().Plant("bearer-user-agent");
         var detail = new AuditDetail(IPAddress.Parse("192.0.2.9"), string.Format(null, userAgent, canary.Value), null);
 

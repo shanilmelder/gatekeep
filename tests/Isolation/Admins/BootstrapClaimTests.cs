@@ -282,10 +282,10 @@ public sealed partial class BootstrapClaimTests(PostgresFixture postgres)
     public async Task Origin_setting_is_compared_in_the_form_browsers_send()
     {
         // Upper case and the default port, as an Operator might write it: browsers send neither.
-        await using var host = await AdminHost.StartAsync(postgres, null, "--Gatekeep:PublicOrigin=https://ADMIN.gatekeep.test:443");
+        await using var host = await AdminHost.StartAsync(postgres, null, "--Gatekeep:PublicOrigin=https://ADMIN.Gatekeep-Admin.test:443");
         var token = await host.IssueTokenAsync();
 
-        using var claimed = await host.ClaimAsync(token, origin: "https://admin.gatekeep.test");
+        using var claimed = await host.ClaimAsync(token, origin: "https://admin.gatekeep-admin.test");
 
         Assert.Equal(HttpStatusCode.Created, claimed.StatusCode);
     }
@@ -431,8 +431,8 @@ public sealed partial class BootstrapClaimTests(PostgresFixture postgres)
     [Theory]
     [InlineData(null)]
     [InlineData("https://elsewhere.test")]
-    [InlineData("http://admin.gatekeep.test")]
-    [InlineData("https://admin.gatekeep.test:8443")]
+    [InlineData("http://admin.gatekeep-admin.test")]
+    [InlineData("https://admin.gatekeep-admin.test:8443")]
     [InlineData("null")]
     public async Task Claim_with_a_missing_or_foreign_Origin_is_403_and_changes_nothing(string? origin)
     {

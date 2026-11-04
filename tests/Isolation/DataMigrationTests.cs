@@ -109,7 +109,7 @@ public sealed class DataMigrationTests(PostgresFixture postgres)
         await PostgresFixture.ExecuteAsync(
             postgres.SuperuserConnection(database),
             $"""
-            INSERT INTO tenant (id) VALUES ('{TenantA}'), ('{FailingTenant}');
+            {TestTenants.InsertSql(TenantA, FailingTenant)};
             INSERT INTO tenant_settings (tenant_id, updated_at)
             VALUES ('{TenantA}', '{Epoch}'), ('{FailingTenant}', '{Epoch}');
             """);

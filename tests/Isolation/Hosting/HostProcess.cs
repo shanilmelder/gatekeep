@@ -9,7 +9,10 @@ namespace Gatekeep.Tests.Isolation.Hosting;
 internal sealed class HostProcess : IDisposable
 {
     /// <summary>The Admin origin a started Host.Admin has unless a test names another.</summary>
-    public const string AdminOrigin = "https://admin.gatekeep.test";
+    public const string AdminOrigin = "https://admin.gatekeep-admin.test";
+
+    /// <summary>The Tenant zone a started Host.Admin has unless a test names another (Story 1.27).</summary>
+    public const string TenantZone = "gatekeep.test";
 
     private static readonly string[] ClearedEnvironment = ["ConnectionStrings", "Database__", "Custody__", "Gatekeep__", "ASPNETCORE_", "DOTNET_URLS"];
 
@@ -56,6 +59,12 @@ internal sealed class HostProcess : IDisposable
         if (host == "Admin" && !list.Any(a => a.StartsWith("--Gatekeep:PublicOrigin=", StringComparison.Ordinal)))
         {
             list.Add($"--Gatekeep:PublicOrigin={AdminOrigin}");
+        }
+
+        // And its Tenant zone (Story 1.27), outside which its own origin sits. A test may name another.
+        if (host == "Admin" && !list.Any(a => a.StartsWith("--Gatekeep:TenantZone=", StringComparison.Ordinal)))
+        {
+            list.Add($"--Gatekeep:TenantZone={TenantZone}");
         }
 
         // And to be told who forwards to it: no proxy, unless a test names a network, or empty.

@@ -308,6 +308,70 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/deployment/tenants": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The Deployment's Tenants, oldest first, 50 a page, and the Tenant zone their hosts sit under.
+         * @description Deployment Owner only. Each Tenant's ten_ public ID, name, host as stored at creation, label, status and creation time; while it is creating, its creation Operation's opr_ ID and whether it is running or failed. No subdomain is split out of a host. nextCursor is the last Tenant's ID when another page follows, else null; pass it back as cursor. A malformed cursor is 400 tenant_invalid.
+         */
+        get: operations["ListTenants"];
+        put?: never;
+        /**
+         * Create a Tenant with its permanent Tenant Subdomain, and start the Operation that finishes it.
+         * @description Deployment Owner only. The only request that takes a Tenant Subdomain: it can never be changed, and a host once issued is never reused. In one transaction it stores the Tenant as creating, with its host and the issuer, WebAuthn RP ID and email link base derived from it once; makes the caller its Tenant Owner; starts its tenancy.tenant.create Operation; and writes tenancy.tenant.created. The Operation creates the Tenant's keys, then its settings, and makes it active; until then its host isn't served. A body that isn't JSON, is over 4096 bytes, misses a field or has the wrong type, and an invalid name or label, is 400 tenant_invalid. A malformed, reserved or taken subdomain is the same 400 subdomain_refused, which never says which. Location names the Operation on the Tenant's own path.
+         */
+        post: operations["CreateTenant"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/deployment/operations/{operationId}/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Retry a failed Tenant creation's failed steps.
+         * @description Deployment Owner only. Reopens only the failed steps of a failed tenancy.tenant.create Operation, which runs again, and writes operations.operation.retried. One that is running or succeeded is 409 operation_not_failed. An Operation of any other type, and an unknown or malformed operationId, is the unknown-path 404.
+         */
+        post: operations["RetryOperation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tenants/{tenantId}/operations/{operationId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * One Operation as the path Tenant sees it: only its own steps.
+         * @description Any Tenant Role in the path Tenant. Codes and IDs only, never a step's row ID. Another Tenant's Operation, an unknown one and a malformed operationId are the same unknown-path 404. A malformed, unknown or role-less Tenant is 403 access_denied, audited as every Tenant capability refusal is.
+         */
+        get: operations["GetTenantOperation"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -376,7 +440,7 @@ export interface components {
         };
         ApiProblem: {
             /** @enum {string} */
-            code: "bootstrap_refused" | "credential_refused" | "signin_refused" | "rate_limited" | "access_denied" | "fresh_assertion_required" | "assertion_refused" | "credentials_minimum" | "credentials_maximum" | "recovery_code_refused" | "recovery_code_superseded";
+            code: "bootstrap_refused" | "credential_refused" | "signin_refused" | "rate_limited" | "access_denied" | "fresh_assertion_required" | "assertion_refused" | "credentials_minimum" | "credentials_maximum" | "recovery_code_refused" | "recovery_code_superseded" | "tenant_invalid" | "subdomain_refused" | "operation_not_failed";
             traceId: string;
         };
         BootstrapClaimRequest: {
@@ -389,6 +453,12 @@ export interface components {
         };
         CapabilitiesResponse: {
             capabilities: ("tenant.configuration.read" | "tenant.users.read" | "tenant.logs.read" | "tenant.log_detail.read" | "tenant.applications.manage" | "tenant.application_callbacks.manage" | "tenant.apis.manage" | "tenant.roles.manage" | "tenant.users.manage" | "tenant.theme.manage" | "tenant.templates.manage" | "tenant.settings.manage" | "tenant.connections.toggle" | "tenant.configuration.export" | "tenant.client_secrets.manage" | "tenant.password_policy.manage" | "tenant.mfa_policy.manage" | "tenant.connection_credentials.manage" | "tenant.email_provider.manage" | "tenant.label.manage" | "tenant.signing_keys.rotate" | "tenant.signing_keys.revoke" | "tenant.management_access.grant" | "tenant.user_data.export" | "tenant.user_data.erase" | "tenant.incident_response.run" | "deployment.tenants.read" | "deployment.tenants.create" | "deployment.tenants.delete" | "deployment.admins.read" | "deployment.admins.manage" | "deployment.email_provider.manage" | "deployment.incident_response.run" | "deployment.log.read")[];
+        };
+        CreateTenantRequest: {
+            name: string;
+            subdomain: string;
+            /** @enum {string} */
+            label: "dev" | "staging" | "prod";
         };
         CredentialCreationOptionsResponse: {
             rp: components["schemas"]["RegistrationRelyingParty"];
@@ -421,6 +491,31 @@ export interface components {
         FreshAssertionBeginRequest: {
             action: string;
             target?: null | string;
+        };
+        OperationResponse: {
+            id: string;
+            type: string;
+            tenantId: null | string;
+            /** @enum {string} */
+            status: "running" | "failed" | "succeeded";
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+            /** Format: date-time */
+            finishedAt: null | string;
+            steps: components["schemas"]["OperationStepResponse"][];
+        };
+        OperationStepResponse: {
+            stage: string;
+            tenantId: null | string;
+            /** @enum {string} */
+            status: "pending" | "running" | "succeeded" | "failed";
+            resultCode: null | string;
+            /** Format: int32 */
+            attempts: number;
+            /** Format: date-time */
+            updatedAt: string;
         };
         RecoveryCodeConfirmRequest: {
             /** Format: uuid */
@@ -458,6 +553,32 @@ export interface components {
         };
         /** @description Shown in this response only, never stored and never shown again. */
         RevealOnceOfstring: string;
+        TenantCreatedResponse: {
+            tenant: components["schemas"]["TenantResponse"];
+            operation: components["schemas"]["OperationResponse"];
+        };
+        TenantCreation: {
+            operationId: string;
+            /** @enum {string} */
+            status: "running" | "failed";
+        };
+        TenantListResponse: {
+            tenantZone: string;
+            tenants: components["schemas"]["TenantResponse"][];
+            nextCursor: null | string;
+        };
+        TenantResponse: {
+            id: string;
+            name: string;
+            host: string;
+            /** @enum {string} */
+            label: "dev" | "staging" | "prod";
+            /** @enum {string} */
+            status: "creating" | "active";
+            /** Format: date-time */
+            createdAt: string;
+            creation: null | components["schemas"]["TenantCreation"];
+        };
     };
     responses: never;
     parameters: never;
@@ -1339,6 +1460,229 @@ export interface operations {
                 content: {
                     "application/problem+json": components["schemas"]["ApiProblem"];
                 };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    ListTenants: {
+        parameters: {
+            query?: {
+                /** @description The previous page's nextCursor: a ten_ public ID. Anything else is 400 tenant_invalid. */
+                cursor?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TenantListResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description access_denied, with the problem body, when the capability is refused. No body when an earlier check refuses first: a Session restricted to setup, or on a state-changing call a wrong Origin or CSRF token. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    CreateTenant: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateTenantRequest"];
+            };
+        };
+        responses: {
+            /** @description Accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TenantCreatedResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description access_denied, with the problem body, when the capability is refused. No body when an earlier check refuses first: a Session restricted to setup, or on a state-changing call a wrong Origin or CSRF token. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    RetryOperation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperationResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description access_denied, with the problem body, when the capability is refused. No body when an earlier check refuses first: a Session restricted to setup, or on a state-changing call a wrong Origin or CSRF token. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    GetTenantOperation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The Tenant's public ID: ten_ and the UUID's 16 bytes in lowercase RFC 4648 base32 with no padding, whose last character carries two zero bits. Only this canonical spelling, after URL decoding, names a Tenant, and the empty UUID's never does; anything else is refused like a Tenant the Admin holds no role in. */
+                tenantId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperationResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description access_denied, with the problem body, when the capability is refused. No body when an earlier check refuses first: a Session restricted to setup, or on a state-changing call a wrong Origin or CSRF token. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Service Unavailable */
             503: {

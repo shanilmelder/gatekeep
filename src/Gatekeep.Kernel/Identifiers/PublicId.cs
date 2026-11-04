@@ -11,6 +11,12 @@ public enum PublicIdType
     /// path (Story 1.26). Never the WebAuthn credential ID, which no response carries.
     /// </summary>
     AdminCredential,
+
+    /// <summary>
+    /// <c>opr_</c>: an Operation (AD-30), as <c>{operationId}</c> in a path (Story 1.27). A malformed
+    /// one is the unknown-path 404, like an unknown one.
+    /// </summary>
+    Operation,
 }
 
 /// <summary>
@@ -34,6 +40,7 @@ public static class PublicId
     {
         PublicIdType.Tenant => "ten",
         PublicIdType.AdminCredential => "acr",
+        PublicIdType.Operation => "opr",
         _ => throw new ArgumentOutOfRangeException(nameof(type)),
     };
 

@@ -43,11 +43,14 @@ public sealed class AdminEndpointTests : IDisposable
                 "/api/v1/deployment/credentials/registration",
                 "/api/v1/deployment/credentials/registration/complete",
                 "/api/v1/deployment/credentials/{credentialId}",
+                "/api/v1/deployment/operations/{operationId}/retry",
                 "/api/v1/deployment/session",
                 "/api/v1/deployment/session",
                 "/api/v1/deployment/signin",
                 "/api/v1/deployment/signin/complete",
                 "/api/v1/deployment/signin/recovery-code",
+                "/api/v1/deployment/tenants",
+                "/api/v1/deployment/tenants",
             ],
             deployment.Select(e => e.RoutePattern.RawText!).Order(StringComparer.Ordinal));
         foreach (var endpoint in deployment)
@@ -131,6 +134,7 @@ public sealed class AdminEndpointTests : IDisposable
             $"--Gatekeep:PublicPort={publicPort}",
             $"--Gatekeep:PublicOrigin={HostProcess.AdminOrigin}",
             "--Gatekeep:ForwardedBy=none",
+            $"--Gatekeep:TenantZone={HostProcess.TenantZone}",
         ];
 
         var built = new TaskCompletionSource<IHost>(TaskCreationOptions.RunContinuationsAsynchronously);

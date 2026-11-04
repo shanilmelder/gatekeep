@@ -40,7 +40,7 @@ internal sealed class AuditChains
 
         foreach (var tenant in tenants)
         {
-            await chains.SuperuserAsync($"INSERT INTO tenant (id) VALUES ('{tenant}')");
+            await chains.SuperuserAsync(TestTenants.InsertSql(tenant));
         }
 
         return chains;

@@ -51,6 +51,13 @@ public sealed class OperationAlreadyActiveException(OperationType type, Guid? te
     public Guid? TenantId { get; } = tenantId;
 }
 
+/// <summary>Only a <c>failed</c> Operation can be retried, and none with this ID is (Story 1.27).</summary>
+public sealed class OperationNotFailedException(Guid operationId)
+    : InvalidOperationException("Only a failed Operation can be retried.")
+{
+    public Guid OperationId { get; } = operationId;
+}
+
 /// <summary>
 /// Starts, retries and reads Operations (AD-30). Start and retry run in the caller's
 /// Deployment context: the Operation, its steps and its run job are written together.
@@ -81,13 +88,33 @@ public interface IOperations
     /// Sets only the <c>failed</c> steps of a <c>failed</c> Operation back to <c>pending</c>, the
     /// Operation to <c>running</c>, and enqueues its run job again. Succeeded steps never run again.
     /// </summary>
-    /// <exception cref="InvalidOperationException">No <c>failed</c> Operation has this ID, or the context has a Tenant.</exception>
+    /// <exception cref="OperationNotFailedException">No <c>failed</c> Operation has this ID.</exception>
+    /// <exception cref="InvalidOperationException">The context has a Tenant.</exception>
     [StateChanging]
     Task<OperationResource> RetryAsync(CommandContext context, Guid operationId, CancellationToken cancellationToken);
 
     /// <summary>The Operation with every step, or null.</summary>
     /// <exception cref="InvalidOperationException">The context has a Tenant: a Tenant's path reads through <see cref="GetForTenantAsync"/>.</exception>
     Task<OperationResource?> GetAsync(CommandContext context, Guid operationId, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// The <c>running</c> or <c>failed</c> Operation of <paramref name="type"/> scoped to
+    /// <paramref name="tenantId"/>, or to the Deployment when null, with every step; or null when
+    /// there is none. The one-active index allows at most one.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The context has a Tenant.</exception>
+    Task<OperationResource?> FindActiveAsync(CommandContext context, OperationType type, Guid? tenantId, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// The <c>running</c> or <c>failed</c> Operation of <paramref name="type"/> for each of
+    /// <paramref name="tenantIds"/> that has one, by Tenant, in one query, without their steps.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The context has a Tenant.</exception>
+    Task<IReadOnlyDictionary<Guid, (Guid OperationId, OperationStatus Status)>> FindActiveForTenantsAsync(
+        CommandContext context,
+        OperationType type,
+        IReadOnlyCollection<Guid> tenantIds,
+        CancellationToken cancellationToken);
 
     /// <summary>
     /// The Operation with only <paramref name="tenantId"/>'s steps. Null when it doesn't exist,

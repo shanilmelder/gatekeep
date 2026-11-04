@@ -192,10 +192,15 @@ public sealed class TenantBehaviourTests(PostgresFixture postgres)
         Assert.Contains("permission denied", error.MessageText);
     }
 
-    private Task InsertHostAsync(string database, string host, string kind) =>
-        PostgresFixture.ExecuteAsync(
+    /// <summary>A host for a fresh creating Tenant, as gk_admin: Story 1.27's guard allows a host only for one.</summary>
+    private async Task InsertHostAsync(string database, string host, string kind)
+    {
+        var tenant = Guid.CreateVersion7();
+        await TestTenants.InsertAsync(postgres.SuperuserConnection(database), tenant, status: "creating");
+        await PostgresFixture.ExecuteAsync(
             postgres.RoleConnection(TableRegistry.Admin, database),
-            $"INSERT INTO tenant_host (host, tenant_id, kind) VALUES ('{host}', '{TenantA}', '{kind}')");
+            $"INSERT INTO tenant_host (host, tenant_id, kind) VALUES ('{host}', '{tenant}', '{kind}')");
+    }
 
     private async Task<string> SeededDatabaseAsync()
     {
@@ -204,7 +209,7 @@ public sealed class TenantBehaviourTests(PostgresFixture postgres)
         await PostgresFixture.ExecuteAsync(
             postgres.SuperuserConnection(database),
             $"""
-            INSERT INTO tenant (id) VALUES ('{TenantA}'), ('{TenantB}');
+            {TestTenants.InsertSql(TenantA, TenantB)};
             INSERT INTO tenant_settings (tenant_id) VALUES ('{TenantA}'), ('{TenantB}');
             """);
 

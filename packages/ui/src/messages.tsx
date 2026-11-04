@@ -157,8 +157,6 @@ export interface Messages {
   darkTheme: string;
   /** The Admin Dashboard landing page's heading. */
   landingTitle: string;
-  /** The landing page's empty state for an Admin who can list Tenants, before any exists. */
-  landingNoTenants: string;
   /** The landing page's empty state for an Admin with no Tenant to reach (EXPERIENCE.md). */
   landingNoAccess: string;
   /** The forbidden page's heading, over the server's code and trace ID. It never says whether the page exists. */
@@ -262,6 +260,58 @@ export interface Messages {
   recoveryCodeSuperseded: string;
   /** Shown when the code on screen can no longer be confirmed in this Session. */
   recoveryCodeNotConfirmable: string;
+  /** The Deployment group's Tenants item (Story 1.27), and the Tenants page's title and its table's caption. */
+  navTenants: string;
+  /** Create Tenant's heading and its description (Story 1.27). */
+  createTenantTitle: string;
+  createTenantDescription: string;
+  /** The Name field's label, and its error when it is empty after trimming. */
+  createTenantName: string;
+  createTenantNameRequired: string;
+  /** Its error when it holds a control or invisible formatting character, or broken text. */
+  createTenantNameInvalid: string;
+  /** The Tenant Subdomain field's label and helper. No custom-domain copy: custom domains are v2. */
+  createTenantSubdomain: string;
+  createTenantSubdomainHelper: string;
+  /** The browser's own check of the subdomain rule. */
+  createTenantSubdomainRule: string;
+  /** The server's one refusal of a subdomain. It never says whether it was taken or reserved. */
+  createTenantSubdomainRefused: string;
+  /** The Environment group's legend and its three options, in the design's order. */
+  createTenantEnvironment: string;
+  environmentDevelopment: string;
+  environmentStagingOption: string;
+  environmentProduction: string;
+  /** The environment tags beside the options and in the Tenants table. */
+  environmentTagDev: string;
+  environmentTagStaging: string;
+  environmentTagProd: string;
+  /** Create Tenant's one primary action. */
+  createTenantSubmit: string;
+  /** The status line while the creation Operation runs. Placeholder: {name}. */
+  createTenantCreating: string;
+  /** The toast once the Tenant is created. */
+  createTenantCreated: string;
+  /** The banner when the creation Operation failed, over its step's code and a Retry. */
+  createTenantFailed: string;
+  /** The banner when the create request itself failed: values are kept. */
+  createTenantSaveFailed: string;
+  /** The banner when the creation Operation can't be read after a few tries; it is still read again. */
+  createTenantPollFailed: string;
+  /** The Tenants table's columns. */
+  tenantsColumnName: string;
+  tenantsColumnSubdomain: string;
+  tenantsColumnEnvironment: string;
+  tenantsColumnCreated: string;
+  /** The badges on a Tenant still being created, and on one whose creation failed. */
+  tenantsCreating: string;
+  tenantsCreationFailed: string;
+  /** A failed row's Retry, named for its Tenant. Placeholder: {name}. */
+  tenantsRetryNamed: string;
+  /** The Tenants page's empty state. */
+  tenantsEmpty: string;
+  /** The action that reads the next page of Tenants. */
+  tenantsLoadMore: string;
   /** A confirming modal's text when the Session was renewed during the action, which wasn't sent again. */
   actionRetryAfterSignIn: string;
   /** A confirming modal's text when the server refused the action outright. */
@@ -352,7 +402,6 @@ export const defaultMessages: Readonly<Messages> = Object.freeze({
   account: 'Account',
   darkTheme: 'Dark theme',
   landingTitle: 'Admin Dashboard',
-  landingNoTenants: 'No Tenants yet.',
   landingNoAccess: "You don't have access to a Tenant yet. Ask a Deployment Owner.",
   forbiddenTitle: "You don't have access to this page.",
   notFoundTitle: 'This no longer exists.',
@@ -409,6 +458,38 @@ export const defaultMessages: Readonly<Messages> = Object.freeze({
   recoveryCodeSavedRequired: "Confirm you've saved your code.",
   recoveryCodeSuperseded: 'A newer recovery code replaced this one, so it was not saved. Start again to get a new code.',
   recoveryCodeNotConfirmable: "This recovery code can no longer be confirmed. Start again.",
+  navTenants: 'Tenants',
+  createTenantTitle: 'Create your Tenant',
+  createTenantDescription: 'A Tenant is an isolated directory of Users, Applications and settings.',
+  createTenantName: 'Name',
+  createTenantNameRequired: 'Enter a name.',
+  createTenantNameInvalid: 'Remove control or invisible characters from the name.',
+  createTenantSubdomain: 'Tenant Subdomain',
+  createTenantSubdomainHelper: "Lowercase letters, numbers and hyphens. Can't be changed later.",
+  createTenantSubdomainRule: 'Lowercase letters, numbers and hyphens.',
+  createTenantSubdomainRefused: "This subdomain can't be used. Choose another.",
+  createTenantEnvironment: 'Environment',
+  environmentDevelopment: 'Development',
+  environmentStagingOption: 'Staging',
+  environmentProduction: 'Production',
+  environmentTagDev: 'DEV',
+  environmentTagStaging: 'STG',
+  environmentTagProd: 'PROD',
+  createTenantSubmit: 'Create Tenant',
+  createTenantCreating: 'Creating {name}…',
+  createTenantCreated: 'Tenant created.',
+  createTenantFailed: "We couldn't finish creating this Tenant.",
+  createTenantSaveFailed: "Couldn't create the Tenant. Try again.",
+  createTenantPollFailed: "We can't check on this Tenant's creation right now. We'll keep trying.",
+  tenantsColumnName: 'Name',
+  tenantsColumnSubdomain: 'Tenant Subdomain',
+  tenantsColumnEnvironment: 'Environment',
+  tenantsColumnCreated: 'Created',
+  tenantsCreating: 'Creating',
+  tenantsCreationFailed: 'Creation failed',
+  tenantsRetryNamed: 'Retry creating {name}',
+  tenantsEmpty: 'No Tenants yet.',
+  tenantsLoadMore: 'Load more',
   actionRetryAfterSignIn: "You're signed in again, but nothing was changed. Confirm to try again.",
   actionForbidden: "You can't do this in this session.",
 });

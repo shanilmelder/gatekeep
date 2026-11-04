@@ -508,7 +508,7 @@ internal sealed class AdminHost : IAsyncDisposable
     public async Task<Guid> InsertTenantAsync()
     {
         var id = Guid.CreateVersion7();
-        await PostgresFixture.ExecuteAsync(Superuser, $"INSERT INTO tenant (id) VALUES ('{id}')");
+        await PostgresFixture.ExecuteAsync(Superuser, TestTenants.InsertSql(id));
         return id;
     }
 

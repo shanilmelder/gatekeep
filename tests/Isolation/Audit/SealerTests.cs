@@ -368,7 +368,7 @@ public sealed class SealerTests(PostgresFixture postgres)
 
         foreach (var tenant in tenants)
         {
-            await PostgresFixture.ExecuteAsync(Superuser(database), $"INSERT INTO tenant (id) VALUES ('{tenant}')");
+            await PostgresFixture.ExecuteAsync(Superuser(database), TestTenants.InsertSql(tenant));
         }
 
         return database;
