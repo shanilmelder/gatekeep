@@ -201,6 +201,7 @@ internal static class CanaryFlows
             [
                 new(SurfaceKind.Route, "/api/v1/deployment/signin"),
                 new(SurfaceKind.Route, "/api/v1/deployment/signin/complete"),
+                new(SurfaceKind.Route, "/api/v1/tenants/{tenantId}/capabilities"),
             ],
             SignInAsync),
 
@@ -724,6 +725,14 @@ internal static class CanaryFlows
                 cookie = Admins.AdminHost.CookieValue(complete, Admins.AdminHost.Cookie)!;
                 using var json = System.Text.Json.JsonDocument.Parse(await complete.Content.ReadAsStringAsync(CanaryFlowContext.Cancellation));
                 csrf = json.RootElement.GetProperty("csrfToken").GetString()!;
+            }
+
+            // Story 1.24: the Session on the Tenant surface, refused and audited in a Tenant it holds no role in.
+            var tenant = Gatekeep.Kernel.Identifiers.PublicId.Format(Gatekeep.Kernel.Identifiers.PublicIdType.Tenant, Guid.CreateVersion7());
+            using (var denied = await host.SendAsync(HttpMethod.Get, $"/api/v1/tenants/{tenant}/capabilities", cookie))
+            {
+                run.Capture("tenant capabilities response", await ResponseTextAsync(denied));
+                Assert.Equal(HttpStatusCode.Forbidden, denied.StatusCode);
             }
 
             using var signOut = await host.SendAsync(HttpMethod.Delete, "/api/v1/deployment/session", cookie, csrf, Admins.AdminHost.Origin);

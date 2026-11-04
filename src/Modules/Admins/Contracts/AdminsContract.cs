@@ -48,6 +48,17 @@ public static class AdminsContract
         SecurityLimits.AdminSignInWindow);
 
     /// <summary>
+    /// Audited capability refusals (Story 1.24): 30 per Admin in a fixed 15-minute window, counted
+    /// in <c>admin_attempt</c> in the request checks' transaction. Within it a refusal writes
+    /// <see cref="AdminsEvents.AccessDenied"/>; past it, the same refusal is only logged (AD-9 caps
+    /// rejected events per source). The subject is the Admin's ID.
+    /// </summary>
+    public static readonly RateLimitPolicy AccessDeniedAuditPolicy = new(
+        "admins.access.denial_audit",
+        SecurityLimits.AdminAccessDeniedAuditAttempts,
+        SecurityLimits.AdminAccessDeniedAuditWindow);
+
+    /// <summary>
     /// The WebAuthn credentials an Admin registers before they can do anything else: two, so
     /// losing one device can't lock them out (FR-2, FR-46).
     /// </summary>
@@ -105,6 +116,17 @@ public static class AdminsContract
         ArgumentNullException.ThrowIfNull(appender);
         ArgumentNullException.ThrowIfNull(verifier);
         return new AdminSignIn(appender, verifier);
+    }
+
+    /// <summary>
+    /// The capability authorizer (Story 1.24) over <see cref="AdminCapabilities"/>. It runs as
+    /// <c>gk_admin</c>, in a Deployment scope, reads <c>tenant_role</c> on every call, and writes
+    /// <see cref="AdminsEvents.AccessDenied"/> through <paramref name="appender"/>.
+    /// </summary>
+    public static IAdminAuthorization CreateAuthorization(IAuditAppender appender)
+    {
+        ArgumentNullException.ThrowIfNull(appender);
+        return new AdminAuthorization(appender);
     }
 
     /// <summary>

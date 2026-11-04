@@ -54,6 +54,54 @@ public sealed class AdminEndpointTests : IDisposable
         Assert.Contains(endpoints, e => e.RoutePattern.RawText == "/api/{**path}");
     }
 
+    /// <summary>
+    /// Story 1.24: every <c>/api/</c> route of the running host but the fallback has one API
+    /// marker and exactly one access declaration, and the live routes and methods are exactly the
+    /// committed document's operations, so no route escapes the document the access rules read.
+    /// </summary>
+    [Fact]
+    public async Task Every_API_route_declares_one_access_kind_and_the_live_table_is_the_document()
+    {
+        var endpoints = await RunningEndpointsAsync();
+
+        var api = endpoints
+            .Where(e => e.RoutePattern.RawText?.StartsWith("/api/", StringComparison.OrdinalIgnoreCase) == true)
+            .Where(e => e.RoutePattern.RawText != "/api/{**path}")
+            .ToList();
+
+        Assert.Contains(api, e => e.RoutePattern.RawText == "/api/v1/tenants/{tenantId}/capabilities");
+        foreach (var endpoint in api)
+        {
+            var names = endpoint.Metadata.Select(m => m.GetType().Name).ToList();
+            var markers = names.Count(n => n is "DeploymentApiEndpoint" or "TenantApiEndpoint");
+            var declarations = names.Count(n => n is "RequiresCapability" or "SelfService" or "BootstrapClaimEndpoint" or "SignInEndpoint");
+            Assert.True(markers == 1, $"{endpoint.DisplayName} has {markers} API markers.");
+            Assert.True(declarations == 1, $"{endpoint.DisplayName} has {declarations} access declarations.");
+
+            var tenant = endpoint.RoutePattern.RawText!.StartsWith("/api/v1/tenants/{tenantId}/", StringComparison.Ordinal);
+            Assert.Equal(tenant, names.Contains("TenantApiEndpoint"));
+            if (tenant)
+            {
+                Assert.Contains("RequiresCapability", names);
+            }
+        }
+
+        var live = api
+            .SelectMany(e => (e.Metadata.GetMetadata<Microsoft.AspNetCore.Routing.HttpMethodMetadata>()?.HttpMethods ?? new[] { "*" })
+                .Select(m => $"{m.ToLowerInvariant()} {e.RoutePattern.RawText}"))
+            .Order(StringComparer.Ordinal)
+            .ToList();
+
+        using var document = System.Text.Json.JsonDocument.Parse(
+            await File.ReadAllTextAsync(Path.Combine(BuildOutput.RepositoryRoot(), "docs", "api", "openapi-v1.json"), TestContext.Current.CancellationToken));
+        var documented = document.RootElement.GetProperty("paths").EnumerateObject()
+            .SelectMany(p => p.Value.EnumerateObject().Select(o => $"{o.Name} {p.Name}"))
+            .Order(StringComparer.Ordinal)
+            .ToList();
+
+        Assert.Equal(documented, live);
+    }
+
     public void Dispose() => Directory.Delete(_directory, recursive: true);
 
     private async Task<IReadOnlyList<RouteEndpoint>> RunningEndpointsAsync()

@@ -2,7 +2,7 @@
   "openapi": "3.1.1",
   "info": {
     "title": "Gatekeep Admin API",
-    "description": "The Admin Dashboard's API on Host.Admin. Every /api/v1/deployment endpoint but the bootstrap claim and Admin sign-in needs the __Host-gk-admin Session cookie; every state-changing one also needs the exact Admin Origin and the Session's X-Gatekeep-CSRF token. The claim and sign-in need the exact Admin Origin only. A refusal's body is only a fixed code and the trace ID.",
+    "description": "The Admin Dashboard's API on Host.Admin: the Deployment surface under /api/v1/deployment and the Tenant surface under /api/v1/tenants/{tenantId}, whose Tenant comes from that path segment only. Every endpoint but the bootstrap claim and Admin sign-in needs the __Host-gk-admin Session cookie; every state-changing one also needs the exact Admin Origin and the Session's X-Gatekeep-CSRF token. The claim and sign-in need the exact Admin Origin only. Each operation's x-gatekeep-access names its one access declaration: a capability from the capability table, self-service, or sessionless. A refusal's body is only a fixed code and the trace ID.",
     "version": "v1"
   },
   "paths": {
@@ -84,7 +84,10 @@
           }
         },
         "security": [ ],
-        "x-gatekeep-setup-allowed": false
+        "x-gatekeep-setup-allowed": false,
+        "x-gatekeep-access": {
+          "kind": "sessionless"
+        }
       }
     },
     "/api/v1/deployment/signin": {
@@ -145,7 +148,10 @@
           }
         },
         "security": [ ],
-        "x-gatekeep-setup-allowed": false
+        "x-gatekeep-setup-allowed": false,
+        "x-gatekeep-access": {
+          "kind": "sessionless"
+        }
       }
     },
     "/api/v1/deployment/signin/complete": {
@@ -226,7 +232,10 @@
           }
         },
         "security": [ ],
-        "x-gatekeep-setup-allowed": false
+        "x-gatekeep-setup-allowed": false,
+        "x-gatekeep-access": {
+          "kind": "sessionless"
+        }
       }
     },
     "/api/v1/deployment/session": {
@@ -260,7 +269,10 @@
             "adminSession": [ ]
           }
         ],
-        "x-gatekeep-setup-allowed": true
+        "x-gatekeep-setup-allowed": true,
+        "x-gatekeep-access": {
+          "kind": "self"
+        }
       },
       "delete": {
         "tags": [
@@ -289,7 +301,10 @@
             "csrf": [ ]
           }
         ],
-        "x-gatekeep-setup-allowed": false
+        "x-gatekeep-setup-allowed": false,
+        "x-gatekeep-access": {
+          "kind": "self"
+        }
       }
     },
     "/api/v1/deployment/credentials/registration": {
@@ -347,7 +362,10 @@
             "csrf": [ ]
           }
         ],
-        "x-gatekeep-setup-allowed": true
+        "x-gatekeep-setup-allowed": true,
+        "x-gatekeep-access": {
+          "kind": "self"
+        }
       }
     },
     "/api/v1/deployment/credentials/registration/complete": {
@@ -425,7 +443,10 @@
             "csrf": [ ]
           }
         ],
-        "x-gatekeep-setup-allowed": true
+        "x-gatekeep-setup-allowed": true,
+        "x-gatekeep-access": {
+          "kind": "self"
+        }
       }
     },
     "/api/v1/deployment/capabilities": {
@@ -434,7 +455,7 @@
           "Deployment"
         ],
         "summary": "The Deployment capabilities the current Admin holds.",
-        "description": "Not setup-allowed: a setup Session gets 403. Empty until Story 1.24 grants capabilities.",
+        "description": "Self-service: any Admin may read their own list. Every Deployment capability for the Deployment Owner, in the table's order, and none for any other Admin: a Tenant Role grants no Deployment capability. Not setup-allowed: a setup Session gets 403.",
         "operationId": "GetCapabilities",
         "responses": {
           "200": {
@@ -462,7 +483,73 @@
             "adminSession": [ ]
           }
         ],
-        "x-gatekeep-setup-allowed": false
+        "x-gatekeep-setup-allowed": false,
+        "x-gatekeep-access": {
+          "kind": "self"
+        }
+      }
+    },
+    "/api/v1/tenants/{tenantId}/capabilities": {
+      "get": {
+        "tags": [
+          "Tenants"
+        ],
+        "summary": "The Tenant capabilities the current Admin holds in the path Tenant.",
+        "description": "The Tenant is the tenantId path segment, its public ID, and nothing else: no Session, cookie or header names one. Returns the capabilities the Admin's Tenant Role there holds, in the table's order. Being Deployment Owner adds nothing in a Tenant. A malformed, unknown or role-less Tenant is the same 403 access_denied, and writes admin.access.denied while the Admin is within 30 audited refusals in 15 minutes, and is only logged past that. A setup-restricted Session, a wrong Origin or a wrong CSRF token gets a bodiless 403 first. The role is read once per request, by the check that allows it, and the list is answered from that same read.",
+        "operationId": "GetTenantCapabilities",
+        "parameters": [
+          {
+            "name": "tenantId",
+            "in": "path",
+            "description": "The Tenant's public ID: ten_ and the UUID's 16 bytes in lowercase RFC 4648 base32 with no padding, whose last character carries two zero bits. Only this canonical spelling, after URL decoding, names a Tenant, and the empty UUID's never does; anything else is refused like a Tenant the Admin holds no role in.",
+            "required": true,
+            "schema": {
+              "pattern": "^ten_[a-z2-7]{25}[aeimquy4]$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CapabilitiesResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "access_denied, with the problem body, when the capability is refused. No body when an earlier check refuses first: a Session restricted to setup, or on a state-changing call a wrong Origin or CSRF token.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "adminSession": [ ]
+          }
+        ],
+        "x-gatekeep-setup-allowed": false,
+        "x-gatekeep-access": {
+          "kind": "capability",
+          "capability": "tenant.configuration.read",
+          "scope": "tenant",
+          "machineAllowed": true,
+          "freshAssertion": "never"
+        }
       }
     }
   },
@@ -620,7 +707,8 @@
               "bootstrap_refused",
               "credential_refused",
               "signin_refused",
-              "rate_limited"
+              "rate_limited",
+              "access_denied"
             ],
             "type": "string"
           },
@@ -665,6 +753,42 @@
           "capabilities": {
             "type": "array",
             "items": {
+              "enum": [
+                "tenant.configuration.read",
+                "tenant.users.read",
+                "tenant.logs.read",
+                "tenant.log_detail.read",
+                "tenant.applications.manage",
+                "tenant.application_callbacks.manage",
+                "tenant.apis.manage",
+                "tenant.roles.manage",
+                "tenant.users.manage",
+                "tenant.theme.manage",
+                "tenant.templates.manage",
+                "tenant.settings.manage",
+                "tenant.connections.toggle",
+                "tenant.configuration.export",
+                "tenant.client_secrets.manage",
+                "tenant.password_policy.manage",
+                "tenant.mfa_policy.manage",
+                "tenant.connection_credentials.manage",
+                "tenant.email_provider.manage",
+                "tenant.label.manage",
+                "tenant.signing_keys.rotate",
+                "tenant.signing_keys.revoke",
+                "tenant.management_access.grant",
+                "tenant.user_data.export",
+                "tenant.user_data.erase",
+                "tenant.incident_response.run",
+                "deployment.tenants.read",
+                "deployment.tenants.create",
+                "deployment.tenants.delete",
+                "deployment.admins.read",
+                "deployment.admins.manage",
+                "deployment.email_provider.manage",
+                "deployment.incident_response.run",
+                "deployment.log.read"
+              ],
               "type": "string"
             }
           }
@@ -900,6 +1024,9 @@
   "tags": [
     {
       "name": "Deployment"
+    },
+    {
+      "name": "Tenants"
     }
   ]
 }

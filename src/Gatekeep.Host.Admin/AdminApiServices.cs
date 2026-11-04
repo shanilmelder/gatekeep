@@ -42,6 +42,7 @@ internal sealed class AdminApiServices : IAsyncDisposable
         Registration = AdminsContract.CreateCredentialRegistration(AuditContract.CreateAppender(), Fido2WebAuthn.Create());
         Sessions = AdminsContract.CreateSessions(AuditContract.CreateAppender());
         SignIn = AdminsContract.CreateSignIn(AuditContract.CreateAppender(), Fido2WebAuthn.Create());
+        Authorization = AdminsContract.CreateAuthorization(AuditContract.CreateAppender());
     }
 
     public IRateLimiter Limiter { get; } = AdminsContract.CreateAttemptLimiter();
@@ -55,6 +56,9 @@ internal sealed class AdminApiServices : IAsyncDisposable
 
     /// <summary>Admin sign-in with WebAuthn (Story 1.23), verified by the same stateless adapter.</summary>
     public IAdminSignIn SignIn { get; }
+
+    /// <summary>The capability authorizer (Story 1.24): every capability route is decided by it, reading Tenant Roles on each request.</summary>
+    public IAdminAuthorization Authorization { get; }
 
     /// <summary>The claims in flight in this process: <see cref="MaxConcurrentClaims"/> slots.</summary>
     public SemaphoreSlim ClaimSlots { get; } = new(MaxConcurrentClaims, MaxConcurrentClaims);

@@ -10,6 +10,8 @@ export type ApiProblem = components['schemas']['ApiProblem'];
 export type BootstrapClaimResponse = components['schemas']['BootstrapClaimResponse'];
 export type AdminSessionResponse = components['schemas']['AdminSessionResponse'];
 export type CapabilitiesResponse = components['schemas']['CapabilitiesResponse'];
+/** The capabilities the current Admin holds in one Tenant, named by the path. */
+export type TenantCapabilities = CapabilitiesResponse;
 export type CredentialCreationOptionsResponse = components['schemas']['CredentialCreationOptionsResponse'];
 export type CredentialRegistrationRequest = components['schemas']['CredentialRegistrationRequest'];
 export type CredentialRegistrationResponse = components['schemas']['CredentialRegistrationResponse'];
@@ -126,8 +128,18 @@ export function createApiClient(options: ApiClientOptions = {}) {
     getSession: () => request('/api/v1/deployment/session', 'get'),
     /** Signs out: ends the current Admin Session. A setup Session can't. */
     endSession: () => request('/api/v1/deployment/session', 'delete'),
-    /** The Deployment capabilities the current Admin holds. */
+    /** The Deployment capabilities the current Admin holds: every one for the Deployment Owner, none for anyone else. */
     getCapabilities: () => request('/api/v1/deployment/capabilities', 'get'),
+    /**
+     * The Tenant capabilities the current Admin holds in the Tenant `tenantId` names, its public ID
+     * (`ten_…`). The ID goes into the path encoded, so it can never reach another path. A Tenant
+     * where the Admin holds no role is a 403 `access_denied`.
+     */
+    getTenantCapabilities: (tenantId: string) =>
+      request(
+        `/api/v1/tenants/${encodeURIComponent(tenantId)}/capabilities` as '/api/v1/tenants/{tenantId}/capabilities',
+        'get',
+      ),
     /** Begins a WebAuthn credential registration: the options for navigator.credentials.create. */
     beginCredentialRegistration: () => request('/api/v1/deployment/credentials/registration', 'post'),
     /** Completes it with the browser's attestation response, in WebAuthn's JSON form. */

@@ -157,6 +157,95 @@ public sealed class AdminTablesTests(PostgresFixture postgres)
             "UPDATE admin_credential SET sign_count = 7, last_used_at = clock_timestamp()");
     }
 
+    private const string ForeignKeyViolation = "23503";
+
+    // ON DELETE RESTRICT refuses at once, with its own state.
+    private const string RestrictViolation = "23001";
+
+    private static readonly Guid TenantA = Guid.Parse("01900000-0000-7000-8000-000000000a0a");
+
+    /// <summary>An Admin referenced by nothing but a tenant_role row, so only its RESTRICT can block deleting them.</summary>
+    private static readonly Guid Invitee = Guid.Parse("01900000-0000-7000-8000-000000000a0b");
+
+    [Fact]
+    public async Task Only_tenant_role_blocks_deleting_its_Tenant_or_Admin()
+    {
+        var database = await WithRoleAsync();
+        var superuser = postgres.SuperuserConnection(database);
+
+        // Each refusal above is tenant_role's own: with its rows gone, both deletes go through.
+        await PostgresFixture.ExecuteAsync(superuser, "DELETE FROM tenant_role");
+        await PostgresFixture.ExecuteAsync(superuser, $"DELETE FROM admin WHERE id = '{Invitee}'");
+        await PostgresFixture.ExecuteAsync(superuser, $"DELETE FROM tenant WHERE id = '{TenantA}'");
+    }
+
+    [Theory]
+    // Story 1.24: one role per Admin per Tenant, a known role, and keys to a real Tenant and Admin.
+    [InlineData("INSERT INTO tenant_role (tenant_id, admin_id, role) VALUES ('01900000-0000-7000-8000-000000000a0a', '01900000-0000-7000-8000-000000000a01', 'editor')", UniqueViolation)]
+    [InlineData("UPDATE tenant_role SET role = 'admin'", CheckViolation)]
+    [InlineData("UPDATE tenant_role SET role = 'Owner'", CheckViolation)]
+    [InlineData("INSERT INTO tenant_role (tenant_id, admin_id, role) VALUES (gen_random_uuid(), '01900000-0000-7000-8000-000000000a01', 'viewer')", ForeignKeyViolation)]
+    [InlineData("INSERT INTO tenant_role (tenant_id, admin_id, role) VALUES ('01900000-0000-7000-8000-000000000a0a', gen_random_uuid(), 'viewer')", ForeignKeyViolation)]
+    [InlineData("DELETE FROM tenant WHERE id = '01900000-0000-7000-8000-000000000a0a'", RestrictViolation)]
+    [InlineData("DELETE FROM admin WHERE id = '01900000-0000-7000-8000-000000000a0b'", RestrictViolation)]
+    public async Task Tenant_role_constraints_refuse_a_violation(string sql, string state)
+    {
+        var database = await WithRoleAsync();
+
+        Assert.Equal(state, await SqlStateAsync(database, sql));
+    }
+
+    public static TheoryData<string> RolesWithoutTenantRoleGrants =>
+        [.. TableRegistry.RuntimeRoles.Where(r => r != TableRegistry.Admin)];
+
+    [Theory]
+    [MemberData(nameof(RolesWithoutTenantRoleGrants))]
+    public async Task Other_roles_hold_nothing_on_tenant_role(string role)
+    {
+        var database = await WithRoleAsync();
+
+        foreach (var sql in TenantRoleWrites.Prepend("SELECT count(*) FROM tenant_role"))
+        {
+            var denied = await Assert.ThrowsAsync<PostgresException>(() => PostgresFixture.ExecuteAsync(postgres.RoleConnection(role, database), sql));
+            Assert.Equal(PermissionDenied, denied.SqlState);
+        }
+    }
+
+    [Fact]
+    public async Task Admin_only_reads_tenant_role()
+    {
+        var database = await WithRoleAsync();
+        var admin = postgres.RoleConnection(TableRegistry.Admin, database);
+
+        Assert.Equal("owner", await PostgresFixture.ScalarAsync<string>(admin, $"SELECT role FROM tenant_role WHERE admin_id = '{Owner}'"));
+        foreach (var sql in TenantRoleWrites.Append("TRUNCATE tenant_role"))
+        {
+            var denied = await Assert.ThrowsAsync<PostgresException>(() => PostgresFixture.ExecuteAsync(admin, sql));
+            Assert.Equal(PermissionDenied, denied.SqlState);
+        }
+    }
+
+    private static readonly string[] TenantRoleWrites =
+    [
+        $"INSERT INTO tenant_role (tenant_id, admin_id, role) VALUES ('{TenantA}', '{Owner}', 'viewer')",
+        "UPDATE tenant_role SET role = 'viewer'",
+        "DELETE FROM tenant_role",
+    ];
+
+    /// <summary>A seeded database with Tenant A, in which the Owner holds the <c>owner</c> Tenant Role.</summary>
+    private async Task<string> WithRoleAsync()
+    {
+        var database = await SeededAsync();
+        await PostgresFixture.ExecuteAsync(
+            postgres.SuperuserConnection(database),
+            $"""
+            INSERT INTO tenant (id) VALUES ('{TenantA}');
+            INSERT INTO admin (id, deployment_owner) VALUES ('{Invitee}', false);
+            INSERT INTO tenant_role (tenant_id, admin_id, role) VALUES ('{TenantA}', '{Owner}', 'owner'), ('{TenantA}', '{Invitee}', 'viewer');
+            """);
+        return database;
+    }
+
     /// <summary>A database with one Owner and one live setup Session.</summary>
     private async Task<string> SeededAsync()
     {

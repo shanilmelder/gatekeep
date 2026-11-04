@@ -41,15 +41,17 @@ public sealed class AdminSessionResponse
     public required string CsrfToken { get; init; }
 }
 
-/// <summary>The Deployment capabilities the current Admin holds. Story 1.24 fills it.</summary>
+/// <summary>The capabilities the current Admin holds, Deployment-wide or in the path Tenant, in the table's order (Story 1.24).</summary>
 public sealed class CapabilitiesResponse
 {
     public required IReadOnlyList<string> Capabilities { get; init; }
 }
 
 /// <summary>
-/// The Admin API's <c>/api/v1/deployment</c> endpoints (Story 1.21). Each is behind the
-/// <see cref="AdminRequestChecks"/> and returns only fixed problem codes.
+/// The Admin API's <c>/api/v1/deployment</c> (Story 1.21) and <c>/api/v1/tenants/{tenantId}</c>
+/// (Story 1.24) endpoints: every API route is mapped here, and nowhere else. Each is behind the
+/// <see cref="AdminRequestChecks"/>, declares exactly one access kind, and returns only fixed
+/// problem codes.
 /// </summary>
 internal static class AdminApi
 {
@@ -62,6 +64,8 @@ internal static class AdminApi
     private const string LockNotAvailable = "55P03";
 
     private const string Tag = "Deployment";
+
+    private const string TenantTag = "Tenants";
 
     /// <summary>How long a claim's body may take to arrive. It is read before a slot is taken.</summary>
     private static readonly TimeSpan ClaimBodyDeadline = TimeSpan.FromSeconds(10);
@@ -135,7 +139,7 @@ internal static class AdminApi
             .Produces(StatusCodes.Status503ServiceUnavailable);
 
         app.MapGet("/api/v1/deployment/session", static (HttpContext context, AdminApiServices services) => GetSessionAsync(context, services))
-            .WithMetadata(DeploymentApiEndpoint.Instance, SetupAllowed.Instance)
+            .WithMetadata(DeploymentApiEndpoint.Instance, SelfService.Instance, SetupAllowed.Instance)
             .WithName("GetSession")
             .WithTags(Tag)
             .WithSummary("The current Admin Session and its CSRF token.")
@@ -145,7 +149,7 @@ internal static class AdminApi
             .Produces(StatusCodes.Status503ServiceUnavailable);
 
         app.MapPost("/api/v1/deployment/credentials/registration", static (HttpContext context, AdminApiServices services) => CredentialRegistrationApi.BeginAsync(context, services))
-            .WithMetadata(DeploymentApiEndpoint.Instance, SetupAllowed.Instance)
+            .WithMetadata(DeploymentApiEndpoint.Instance, SelfService.Instance, SetupAllowed.Instance)
             .WithName("BeginCredentialRegistration")
             .WithTags(Tag)
             .WithSummary("Begin registering a WebAuthn credential: the options for navigator.credentials.create.")
@@ -161,7 +165,7 @@ internal static class AdminApi
             .Produces(StatusCodes.Status503ServiceUnavailable);
 
         app.MapPost("/api/v1/deployment/credentials/registration/complete", static (HttpContext context, AdminApiServices services) => CredentialRegistrationApi.CompleteAsync(context, services))
-            .WithMetadata(DeploymentApiEndpoint.Instance, SetupAllowed.Instance, new JsonRequestBody(typeof(CredentialRegistrationRequest)))
+            .WithMetadata(DeploymentApiEndpoint.Instance, SelfService.Instance, SetupAllowed.Instance, new JsonRequestBody(typeof(CredentialRegistrationRequest)))
             .WithName("CompleteCredentialRegistration")
             .WithTags(Tag)
             .WithSummary("Complete a WebAuthn credential registration with the browser's attestation response.")
@@ -179,7 +183,7 @@ internal static class AdminApi
             .Produces(StatusCodes.Status503ServiceUnavailable);
 
         app.MapDelete("/api/v1/deployment/session", static (HttpContext context, AdminApiServices services) => EndSessionAsync(context, services))
-            .WithMetadata(DeploymentApiEndpoint.Instance)
+            .WithMetadata(DeploymentApiEndpoint.Instance, SelfService.Instance)
             .WithName("EndSession")
             .WithTags(Tag)
             .WithSummary("Sign out: end the current Admin Session.")
@@ -192,14 +196,34 @@ internal static class AdminApi
             .Produces(StatusCodes.Status503ServiceUnavailable);
 
         app.MapGet("/api/v1/deployment/capabilities", static (HttpContext context, AdminApiServices services) => GetCapabilitiesAsync(context, services))
-            .WithMetadata(DeploymentApiEndpoint.Instance)
+            .WithMetadata(DeploymentApiEndpoint.Instance, SelfService.Instance)
             .WithName("GetCapabilities")
             .WithTags(Tag)
             .WithSummary("The Deployment capabilities the current Admin holds.")
-            .WithDescription("Not setup-allowed: a setup Session gets 403. Empty until Story 1.24 grants capabilities.")
+            .WithDescription(
+                "Self-service: any Admin may read their own list. Every Deployment capability for the Deployment Owner, in the " +
+                "table's order, and none for any other Admin: a Tenant Role grants no Deployment capability. Not setup-allowed: a " +
+                "setup Session gets 403.")
             .Produces<CapabilitiesResponse>(StatusCodes.Status200OK)
             .Produces(StatusCodes.Status401Unauthorized)
             .Produces(StatusCodes.Status403Forbidden)
+            .Produces(StatusCodes.Status503ServiceUnavailable);
+
+        app.MapGet("/api/v1/tenants/{tenantId}/capabilities",static (HttpContext context, AdminApiServices services) => GetTenantCapabilitiesAsync(context, services))
+            .WithMetadata(TenantApiEndpoint.Instance, new RequiresCapability(AdminCapabilities.TenantConfigurationRead))
+            .WithName("GetTenantCapabilities")
+            .WithTags(TenantTag)
+            .WithSummary("The Tenant capabilities the current Admin holds in the path Tenant.")
+            .WithDescription(
+                "The Tenant is the tenantId path segment, its public ID, and nothing else: no Session, cookie or header names one. " +
+                "Returns the capabilities the Admin's Tenant Role there holds, in the table's order. Being Deployment Owner adds " +
+                "nothing in a Tenant. A malformed, unknown or role-less Tenant is the same 403 access_denied, and writes " +
+                "admin.access.denied while the Admin is within 30 audited refusals in 15 minutes, and is only logged past that. " +
+                "A setup-restricted Session, a wrong Origin or a wrong CSRF token gets a bodiless 403 first. The role is read " +
+                "once per request, by the check that allows it, and the list is answered from that same read.")
+            .Produces<CapabilitiesResponse>(StatusCodes.Status200OK)
+            .Produces(StatusCodes.Status401Unauthorized)
+            .Produces<ApiProblem>(StatusCodes.Status403Forbidden, AdminResponses.ProblemContentType)
             .Produces(StatusCodes.Status503ServiceUnavailable);
 
         return app;
@@ -408,11 +432,36 @@ internal static class AdminApi
         context.Response.Headers.SetCookie = AdminResponses.ClearedSessionCookie;
     }
 
-    private static Task GetCapabilitiesAsync(HttpContext context, AdminApiServices services)
+    private static Task GetCapabilitiesAsync(HttpContext context, AdminApiServices services) =>
+        HeldAsync(context, services, CapabilityScope.Deployment, tenantId: null);
+
+    /// <summary>
+    /// Answered from the Tenant Role grant the request checks read to allow the request, in their
+    /// transaction: no second read, so a role changed in between can't turn an allowed request
+    /// into a 200 with a list that disagrees with the check.
+    /// </summary>
+    private static Task GetTenantCapabilitiesAsync(HttpContext context, AdminApiServices services)
     {
-        _ = AdminRequestChecks.Session(context);
         _ = services;
-        return AdminResponses.JsonAsync(context, new CapabilitiesResponse { Capabilities = [] });
+        var path = AdminRequestChecks.PathTenantGrant(context);
+        var held = AdminCapabilities.Held(AdminRequestChecks.Principal(context), CapabilityScope.Tenant, path.Grant, path.TenantId);
+        return AdminResponses.JsonAsync(context, new CapabilitiesResponse { Capabilities = [.. held.Select(c => c.Name)] });
+    }
+
+    /// <summary>The capabilities of <paramref name="scope"/> the Admin holds, read now in a Deployment scope.</summary>
+    private static async Task HeldAsync(HttpContext context, AdminApiServices services, CapabilityScope scope, Guid? tenantId)
+    {
+        var principal = AdminRequestChecks.Principal(context);
+        var cancellationToken = context.RequestAborted;
+
+        IReadOnlyList<Capability> held;
+        await using (var read = await services.BeginAsync(cancellationToken))
+        {
+            held = await services.Authorization.HeldAsync(read.CreateCommandContext(), principal, scope, tenantId, cancellationToken);
+            await read.CommitAsync(cancellationToken);
+        }
+
+        await AdminResponses.JsonAsync(context, new CapabilitiesResponse { Capabilities = [.. held.Select(c => c.Name)] });
     }
 
     private static string SessionCookie(string token) => AdminResponses.SessionCookie(token);

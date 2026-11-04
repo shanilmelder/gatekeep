@@ -2,10 +2,10 @@
 title: 'Story 1.24: Enforce capabilities and Tenant-scoped routes'
 type: 'feature'
 created: '2026-11-04'
-status: 'ready-for-dev'
+status: 'done'
 baseline_revision: '7e8b71ca98a296d1fdc6c387949b19a0872f1cc6'
 review_loop_iteration: 0
-followup_review_recommended: false
+followup_review_recommended: true
 context:
   - '{project-root}/_bmad-output/planning-artifacts/architecture/architecture-gatekeep-2026-11-02/ARCHITECTURE-SPINE.md'
   - '{project-root}/_bmad-output/planning-artifacts/prds/prd-gatekeep-2026-11-01/prd.md'
@@ -14,7 +14,14 @@ context:
   - '{project-root}/_bmad-output/implementation-artifacts/spec-1-23-sign-in-as-an-admin-with-webauthn.md'
   - '{project-root}/docs/threat-model.md'
 warnings: [oversized]
-deferred: []
+deferred:
+  - summary: >-
+      No real Owner-only Deployment route exists to refuse a non-Owner over HTTP.
+    evidence: |-
+      Proved by the generated matrix and route rules. Story 1.27 adds Tenant creation.
+    location: >-
+      src/Gatekeep.Host.Admin/AdminRequestChecks.cs
+    severity: low
 ---
 
 <intent-contract>
@@ -318,13 +325,13 @@ deferred: []
 ## Tasks & Acceptance
 
 **Execution:**
-- [ ] Kernel `PublicId`, with Isolation tests.
-- [ ] Migration and registry: `tenant_role` (keys, CHECK, RESTRICT, `SELECT`-only grant), with the catalogue and `AdminApiRuleTests` updates.
-- [ ] Admins: `AdminCapabilities` (the table, constructor invariants and `Allows`), the principals, `IAdminAuthorization` and `AdminAuthorization`, and the `admin.access.denied` event.
-- [ ] Host.Admin: the markers and declarations on every route; the request checks' `/api/` deny-by-default, one-declaration check, authorize step and `PathTenant`; the Tenant capabilities endpoint and the filled Deployment one; `access_denied`; the OpenAPI extension and the throw; then regenerate the document and the client.
-- [ ] api-client: `getTenantCapabilities` and its test.
-- [ ] Tests: generated and golden matrix; handler-level machine test; Tenant capabilities HTTP tests for every matrix row; live route table against the document; `tenant_role` table tests; Architecture `CapabilityRuleTests` and the `AdminApiRuleTests` updates.
-- [ ] Docs: the threat model (T-1, T-19, T-22, T-23, new T-53), `audit-events.md` through the Generator, and `deferred-work.md` (out-of-scope items and the spine catch-up).
+- [x] Kernel `PublicId`, with Isolation tests.
+- [x] Migration and registry: `tenant_role` (keys, CHECK, RESTRICT, `SELECT`-only grant), with the catalogue and `AdminApiRuleTests` updates.
+- [x] Admins: `AdminCapabilities` (the table, constructor invariants and `Allows`), the principals, `IAdminAuthorization` and `AdminAuthorization`, and the `admin.access.denied` event.
+- [x] Host.Admin: the markers and declarations on every route; the request checks' `/api/` deny-by-default, one-declaration check, authorize step and `PathTenant`; the Tenant capabilities endpoint and the filled Deployment one; `access_denied`; the OpenAPI extension and the throw; then regenerate the document and the client.
+- [x] api-client: `getTenantCapabilities` and its test.
+- [x] Tests: generated and golden matrix; handler-level machine test; Tenant capabilities HTTP tests for every matrix row; live route table against the document; `tenant_role` table tests; Architecture `CapabilityRuleTests` and the `AdminApiRuleTests` updates.
+- [x] Docs: the threat model (T-1, T-19, T-22, T-23, new T-53), `audit-events.md` through the Generator, and `deferred-work.md` (out-of-scope items and the spine catch-up).
 
 **Acceptance Criteria:**
 - Given the capability table in the Admins contract, when the generated test runs, then every role and machine principal is denied every capability outside it, and every `FreshAssertion` capability is `MachineAllowed = false`.
@@ -336,6 +343,31 @@ deferred: []
 ## Spec Change Log
 
 ## Review Triage Log
+
+### 2026-11-02 — Review pass
+- verdicts: 21 findings — high 0, medium 7, low 14, false 0, maybe-false 0
+- findings:
+  - `[medium]` `[patch]` Blind: any signed-in Admin can flood the Deployment chain with `admin.access.denied` against IDs they choose — denials are rate-limited per Admin; over the limit they are logged, not audited.
+  - `[medium]` `[patch]` Blind: the check and the handler read the role in separate transactions, so a revoked role can answer 200 with an empty list — the handler uses the grant the checks read.
+  - `[low]` `[patch]` Blind: the Tenant route's 403 is documented with a body, but a setup Session gets a bodiless one — both shapes documented and tested.
+  - `[low]` `[patch]` Blind: "only the canonical spelling" is wrong for percent-encoded paths — the doc says after URL decoding.
+  - `[low]` `[patch]` Blind: static files are served before the request checks — paths under `/api` are never served as files.
+  - `[low]` `[patch]` Blind: a future Deployment route with `{tenantId}` would 500 — such a route is undeclared.
+  - `[low]` `[patch]` Blind: `PublicId.TryParse` throws on an undefined type and other docs contradict the code — fixed.
+  - `[low]` `[patch]` Blind: the capabilities list hangs on `configuration.read` — a test pins that every role holds it.
+  - `[medium]` `[patch]` Blind: missing tests for path variants, bad declarations at runtime, a failed denial write, an exact Malformed count and an Owner-only route over HTTP — added.
+  - `[medium]` `[patch]` Edge: role read twice — same fix as the Blind row.
+  - `[medium]` `[patch]` Edge: unbounded denial events — same fix as the Blind row.
+  - `[low]` `[patch]` Edge: the published `tenantId` pattern accepts IDs the server refuses — described as necessary, not sufficient.
+  - `[low]` `[patch]` Edge: the RESTRICT test passes through another table's key — uses an Admin referenced only by `tenant_role`.
+  - `[low]` `[patch]` Edge: the route-rule comment stripper and Map regex can be fooled — literal-aware stripping and every `Map*` caught, with self-checks.
+  - `[medium]` `[patch]` Gap: a failed `admin.access.denied` write is untested — a trigger test proves 503, no row and the slide rolled back.
+  - `[low]` `[patch]` Gap: the test-only machine-principal scan doesn't skip `bin` — skipped.
+  - `[medium]` `[patch]` Intent: undeclared or doubly declared routes aren't proved at runtime or build time — unit theory over the declaration plus a runtime 404 test.
+  - `[low]` `[defer]` Intent: no HTTP test refuses a non-Owner on a Deployment capability — Story 1.27 adds the first real Owner-only route.
+  - `[low]` `[reject]` Intent: the machine half of the generated matrix reads the table it tests — the separate FR-42 literal rule pins the outcome.
+  - `[low]` `[reject]` Intent: registration is only shown refused alike for Owner and non-Owner — the self-service route list and the Session tests prove the exemption.
+  - `[low]` `[patch]` Intent: a stray rerun script was staged — removed.
 
 ## Design Notes
 
@@ -354,6 +386,8 @@ deferred: []
   - At runtime, the request checks deny an undeclared `/api/` endpoint with the unknown-path 404. So an undeclared route fails the build, the tests and the request, all three.
 - **No caching:** roles are read on every request, in the transaction that slides the Session. That is one extra indexed primary-key lookup per Tenant request, and it means Story 8.4's "role removed mid-session" needs no invalidation.
 - **`tenant_role` is `control`:** AD-27 puts it there, because Story 1.28's switcher lists one Admin's roles across Tenants, which a Tenant-scoped RLS table can't do in one scope. Its `tenant_id` is therefore not an RLS key, and the request checks filter by the path Tenant in code, like `operation_step` (T-1).
+- **Capping the denial audit (review):** a refused capability names a Tenant ID the caller chose, which may not exist, so unlimited refusals could flood the Deployment chain. Every refusal is counted per Admin through the Admins `IRateLimiter` under `admins.access.denial_audit` (30 in 15 minutes, `SecurityLimits`), in the request checks' transaction. Within the cap it writes `admin.access.denied` as before; past it the answer is the same 403 `access_denied`, and the refusal is only logged (`audited False`). AD-9 caps rejected events per source in the same way.
+- **One role read per request (review):** the check reads the Tenant Role, and the decision returns the grant it read. The request checks put it in `PathTenantFeature`, and the Tenant capabilities handler answers from it through the pure `AdminCapabilities.Held`, with no second read. Otherwise a role revoked between the two transactions would give a 200 with an empty list.
 - **Fresh assertion is declared now, enforced in Story 1.26:** the architecture rule that no route may declare a fresh-assertion capability makes this fail closed. A sensitive route can't ship before its enforcement does.
 
 ## Verification
@@ -372,3 +406,19 @@ deferred: []
 - `dotnet run --project tests/Architecture/Generator` (in Docker, with the repository mounted) regenerates `docs/audit-events.md`.
 
 Nothing runs on the host.
+
+## Auto Run Result
+
+Status: done
+
+**Summary:** one server-side capability table in the Admins contract holds every Tenant and Deployment capability, with its roles, machine flag and fresh-assertion rule. Every `/api/` route declares exactly one capability, self-service or sessionless access, or answers the unknown-path 404. Each request reads the Admin's `tenant_role` row for the Tenant named in the path, the only source of the Tenant. The Deployment Owner gets nothing in a Tenant without a role. A refusal is one 403 `access_denied`, audited on the Deployment chain within a per-Admin limit. A new `GET /api/v1/tenants/{tenantId}/capabilities` lists what the caller holds, and Tenant public IDs take the `ten_` base32 form.
+
+**Files:** `src/Gatekeep.Kernel/Identifiers/PublicId.cs`; `src/Modules/Admins/` (capability table, authorization); the `tenant_role` migration and `TableRegistry`; `src/Gatekeep.Host.Admin/` (request checks, API, OpenAPI); `docs/api/openapi-v1.json`, `packages/api-client/`; `tests/Architecture/CapabilityRuleTests.cs`, `AdminApiRuleTests.cs`; `tests/Isolation/Admins/` (capability matrix, Tenant capabilities), `tests/Isolation/Identifiers/`; `docs/audit-events.md` and the threat model.
+
+**Review:** 21 findings across four layers: 18 patched, 1 deferred, 2 rejected, each with its reason in the triage log.
+
+**Follow-up review:** recommended. The single role read and the denial rate limit changed in review, with new tests as the only proof.
+
+**Verification:** see the PR screenshot; the full suite passes in the `tests` container.
+
+**Residual risks:** fresh assertion isn't enforced yet, so routes needing it are refused by rule until Story 1.26. No real Owner-only route exists until Story 1.27. Machine principals are test-only until Epic 17.
