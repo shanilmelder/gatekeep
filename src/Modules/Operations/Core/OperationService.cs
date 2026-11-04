@@ -27,6 +27,15 @@ internal sealed class OperationService(OperationRegistry registry) : IOperations
         VALUES (@id, @operation_id, @position, @tenant_id, @stage, 'pending')
         """;
 
+    // Retry locks the Operation's steps before the Operation, the order the Worker takes them in.
+    private const string LockSteps = "SELECT id FROM operation_step WHERE operation_id = @id ORDER BY position FOR NO KEY UPDATE";
+
+    private const string FindActiveForTenants =
+        """
+        SELECT tenant_id, id, status FROM operation
+        WHERE type = @type AND tenant_id = ANY (@tenant_ids) AND status IN ('running', 'failed')
+        """;
+
     private const string ReopenOperation =
         """
         UPDATE operation
@@ -39,6 +48,12 @@ internal sealed class OperationService(OperationRegistry registry) : IOperations
         UPDATE operation_step
         SET status = 'pending', result_code = NULL, updated_at = now()
         WHERE operation_id = @id AND status = 'failed'
+        """;
+
+    private const string FindActive =
+        """
+        SELECT id FROM operation
+        WHERE type = @type AND tenant_id IS NOT DISTINCT FROM @tenant_id::uuid AND status IN ('running', 'failed')
         """;
 
     private readonly OperationRegistry _registry = registry ?? throw new ArgumentNullException(nameof(registry));
@@ -122,12 +137,19 @@ internal sealed class OperationService(OperationRegistry registry) : IOperations
 
         await using (var command = context.CreateCommand())
         {
+            command.CommandText = LockSteps;
+            Sql.Add(command, "id", operationId);
+            await command.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        await using (var command = context.CreateCommand())
+        {
             command.CommandText = ReopenOperation;
             Sql.Add(command, "id", operationId);
 
             if (await command.ExecuteNonQueryAsync(cancellationToken) == 0)
             {
-                throw new InvalidOperationException("Only a failed Operation can be retried.");
+                throw new OperationNotFailedException(operationId);
             }
         }
 
@@ -150,6 +172,65 @@ internal sealed class OperationService(OperationRegistry registry) : IOperations
         // Every Tenant's steps: never on a Tenant's path. That's GetForTenantAsync.
         RequireDeployment(context);
         return OperationStore.ReadAsync(context, operationId, stepTenantId: null, cancellationToken);
+    }
+
+    public async Task<OperationResource?> FindActiveAsync(
+        CommandContext context,
+        OperationType type,
+        Guid? tenantId,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        ArgumentNullException.ThrowIfNull(type);
+        RequireDeployment(context);
+
+        Guid id;
+        await using (var command = context.CreateCommand())
+        {
+            command.CommandText = FindActive;
+            Sql.Add(command, "type", type.Value);
+            Sql.Add(command, "tenant_id", tenantId);
+
+            if (await command.ExecuteScalarAsync(cancellationToken) is not Guid found)
+            {
+                return null;
+            }
+
+            id = found;
+        }
+
+        return await OperationStore.ReadAsync(context, id, stepTenantId: null, cancellationToken);
+    }
+
+    public async Task<IReadOnlyDictionary<Guid, (Guid OperationId, OperationStatus Status)>> FindActiveForTenantsAsync(
+        CommandContext context,
+        OperationType type,
+        IReadOnlyCollection<Guid> tenantIds,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        ArgumentNullException.ThrowIfNull(type);
+        ArgumentNullException.ThrowIfNull(tenantIds);
+        RequireDeployment(context);
+
+        var found = new Dictionary<Guid, (Guid, OperationStatus)>();
+        if (tenantIds.Count == 0)
+        {
+            return found;
+        }
+
+        await using var command = context.CreateCommand();
+        command.CommandText = FindActiveForTenants;
+        Sql.Add(command, "type", type.Value);
+        Sql.Add(command, "tenant_ids", tenantIds.ToArray());
+
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            found[reader.GetGuid(0)] = (reader.GetGuid(1), reader.GetString(2) == "failed" ? OperationStatus.Failed : OperationStatus.Running);
+        }
+
+        return found;
     }
 
     public async Task<OperationResource?> GetForTenantAsync(
@@ -193,6 +274,14 @@ internal sealed class OperationService(OperationRegistry registry) : IOperations
     {
         var definition = _registry.Find(type)
             ?? throw new ArgumentException($"Operation type {type} isn't in the registry.", nameof(type));
+
+        // Its completion handler runs only in its own Tenant's scope (Story 1.27): refused here, so it
+        // never throws on a success instead.
+        if (definition.OnSucceeded is not null
+            && (tenantId is null || steps.Any(s => s?.TenantId is not { } step || step != tenantId)))
+        {
+            throw new ArgumentException($"Operation type {type} has a completion handler, so it is scoped to one Tenant and every step is for it.", nameof(tenantId));
+        }
 
         if (steps.Count == 0)
         {

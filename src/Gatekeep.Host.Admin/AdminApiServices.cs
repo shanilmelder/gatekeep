@@ -6,6 +6,7 @@ using Gatekeep.Kernel.RateLimiting;
 using Gatekeep.Kernel.Secrets;
 using Gatekeep.Modules.Admins.Contracts;
 using Gatekeep.Modules.Audit.Contracts;
+using Gatekeep.Modules.Management.Contracts;
 using Npgsql;
 
 namespace Gatekeep.Host.Admin;
@@ -23,6 +24,16 @@ internal sealed class AdminApiServices : IAsyncDisposable
     public const string LockTimeoutSetting = "Gatekeep:BootstrapLockTimeoutMs";
 
     /// <summary>
+    /// The Tenant zone every Tenant Subdomain sits under (Story 1.27, AD-6), such as
+    /// <c>gatekeep.example.com</c>: required, lower-case LDH labels separated by dots, at least two,
+    /// at most 200 characters, and never the Admin hostname or above it.
+    /// </summary>
+    public const string TenantZoneSetting = "Gatekeep:TenantZone";
+
+    /// <summary>The HTTPS port Tenant hosts are reached on, which a new Tenant's issuer names when it isn't 443: optional, 1 to 65535.</summary>
+    public const string TenantHttpsPortSetting = "Gatekeep:TenantHttpsPort";
+
+    /// <summary>
     /// Claims one process runs at once. Each holds a pooled connection while it waits for the row
     /// lock, so a flood beyond this is refused at once with 503 rather than draining the pool.
     /// </summary>
@@ -31,6 +42,8 @@ internal sealed class AdminApiServices : IAsyncDisposable
     private static readonly TimeSpan DefaultLockTimeout = TimeSpan.FromSeconds(5);
 
     private readonly Lazy<NpgsqlDataSource> _dataSource;
+
+    private readonly Lazy<ITenantManagement> _tenants;
 
     // Bootstrap never reopens, so once it's seen complete the database needn't be asked again.
     // A restore of the database to before the claim needs Host.Admin restarted to be seen.
@@ -46,7 +59,17 @@ internal sealed class AdminApiServices : IAsyncDisposable
         Authorization = AdminsContract.CreateAuthorization(AuditContract.CreateAppender());
         FreshAssertions = AdminsContract.CreateFreshAssertions(AuditContract.CreateAppender(), Fido2WebAuthn.Create());
         Credentials = AdminsContract.CreateCredentials(AuditContract.CreateAppender());
+
+        // Built on first use: the OpenAPI document build has no Tenant zone.
+        _tenants = new(() => ManagementContract.CreateTenants(
+            AuditContract.CreateAppender(),
+            TryAddressing(configuration, out var addressing)
+                ? addressing
+                : throw new InvalidOperationException($"{TenantZoneSetting} or {TenantHttpsPortSetting} is malformed.")));
     }
+
+    /// <summary>Creating and listing Tenants (Story 1.27), under the configured Tenant zone and HTTPS port.</summary>
+    public ITenantManagement Tenants => _tenants.Value;
 
     public IRateLimiter Limiter { get; } = AdminsContract.CreateAttemptLimiter();
 
@@ -120,8 +143,58 @@ internal sealed class AdminApiServices : IAsyncDisposable
     }
 
     /// <summary>Host.Admin's own settings that are malformed, by name, refused at startup with the host's others.</summary>
-    public static IEnumerable<string> RefusedSettings(IConfiguration configuration) =>
-        TryLockTimeout(configuration, out _) ? [] : [LockTimeoutSetting];
+    public static IEnumerable<string> RefusedSettings(IConfiguration configuration)
+    {
+        var refused = new List<string>();
+        if (!TryLockTimeout(configuration, out _))
+        {
+            refused.Add(LockTimeoutSetting);
+        }
+
+        if (!TryHttpsPort(configuration, out _))
+        {
+            refused.Add(TenantHttpsPortSetting);
+        }
+
+        var zone = configuration[TenantZoneSetting];
+        if (!TenantAddressing.IsValidZone(zone)
+            || (OriginHost(configuration) is { } admin && TenantAddressing.ZoneCovers(zone!, admin)))
+        {
+            // Malformed, or the Admin hostname is the zone or under it (AD-6).
+            refused.Add(TenantZoneSetting);
+        }
+
+        return refused;
+    }
+
+    private static bool TryAddressing(IConfiguration configuration, out TenantAddressing addressing)
+    {
+        addressing = null!;
+        var zone = configuration[TenantZoneSetting];
+        if (!TenantAddressing.IsValidZone(zone) || !TryHttpsPort(configuration, out var port))
+        {
+            return false;
+        }
+
+        addressing = new TenantAddressing(zone!, port);
+        return true;
+    }
+
+    private static bool TryHttpsPort(IConfiguration configuration, out int port)
+    {
+        port = TenantAddressing.DefaultHttpsPort;
+        var text = configuration[TenantHttpsPortSetting];
+        if (text is null)
+        {
+            return true;
+        }
+
+        return int.TryParse(text, NumberStyles.None, CultureInfo.InvariantCulture, out port) && port is >= 1 and <= 65535;
+    }
+
+    /// <summary>The Admin origin's host, when it parses: the shared startup check refuses it otherwise.</summary>
+    private static string? OriginHost(IConfiguration configuration) =>
+        Uri.TryCreate(configuration[HostSettingNames.PublicOrigin]?.Trim(), UriKind.Absolute, out var origin) ? origin.IdnHost : null;
 
     private static TimeSpan LockTimeout(IConfiguration configuration) =>
         TryLockTimeout(configuration, out var timeout)

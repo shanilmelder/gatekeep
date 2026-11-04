@@ -203,6 +203,10 @@ services:
       # Caddy's admin-edge subnet: the X-Forwarded-For it sets is believed from there only, so
       # bootstrap claims are counted by the client's address (Story 1.21).
       Gatekeep__ForwardedBy: 10.201.2.0/24
+      # The Tenant zone and the HTTPS port Tenant hosts are reached on, the same Caddy serves:
+      # a new Tenant's issuer, RP ID and email link base are derived from them once and stored (Story 1.27).
+      Gatekeep__TenantZone: ${GATEKEEP_TENANT_ZONE:-gatekeep.localhost}
+      Gatekeep__TenantHttpsPort: ${GATEKEEP_HTTPS_PORT:-443}
       Custody__SocketPath: /run/openbao/openbao.sock
       Custody__RoleIdFile: /run/secrets/openbao_role_id
       Custody__SecretIdFile: /run/secrets/openbao_secret_id

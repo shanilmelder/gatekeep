@@ -198,7 +198,7 @@ public sealed class CapabilityMatrixTests(PostgresFixture postgres)
         var database = await postgres.NewMigratedDatabaseAsync();
         await PostgresFixture.ExecuteAsync(
             postgres.SuperuserConnection(database),
-            $"INSERT INTO tenant (id) VALUES ('{TenantA}'), ('{TenantB}')");
+            TestTenants.InsertSql(TenantA, TenantB));
         var authorization = AdminsContract.CreateAuthorization(AuditContract.CreateAppender());
         var machine = TestOnlyMachinePrincipal.For(TenantA);
 
@@ -236,7 +236,7 @@ public sealed class CapabilityMatrixTests(PostgresFixture postgres)
     public async Task Authorizer_serves_a_Deployment_scope_only()
     {
         var database = await postgres.NewMigratedDatabaseAsync();
-        await PostgresFixture.ExecuteAsync(postgres.SuperuserConnection(database), $"INSERT INTO tenant (id) VALUES ('{TenantA}')");
+        await PostgresFixture.ExecuteAsync(postgres.SuperuserConnection(database), TestTenants.InsertSql(TenantA));
         var authorization = AdminsContract.CreateAuthorization(AuditContract.CreateAppender());
 
         await using var source = NpgsqlDataSource.Create(postgres.RoleConnection(TableRegistry.Admin, database));

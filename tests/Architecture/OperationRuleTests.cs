@@ -45,6 +45,67 @@ public class OperationRuleTests
         Assert.Single(MissingEdges(tables, edges));
     }
 
+    [Fact]
+    public void Production_Operation_types_are_found_and_one_has_a_completion_handler()
+    {
+        var types = ProductionOperationTypes();
+
+        Assert.Contains(types, t => t.Type == "tenancy.tenant.create" && t.HasCompletion);
+        Assert.Contains(types, t => t.Type == "audit.chain.purge" && !t.HasCompletion);
+    }
+
+    /// <summary>
+    /// Story 1.27: a completion handler runs in the transaction of whichever job finishes the
+    /// Operation, which must be a step job in the Operation's own Tenant scope. A Deployment stage
+    /// would let the Deployment-wide run job finish it, where the handler can't run.
+    /// </summary>
+    [Fact]
+    public void Production_type_with_a_completion_handler_has_only_Tenant_stages()
+    {
+        Assert.Empty(CompletionViolations(ProductionOperationTypes()));
+    }
+
+    [Fact]
+    public void Completion_handler_beside_a_Deployment_stage_is_reported()
+    {
+        OperationTypeShape[] types =
+        [
+            new("widgets.widget.create", true, ["Tenant", "Deployment"]),
+            new("widgets.widget.purge", false, ["Deployment"]),
+            new("widgets.widget.make", true, ["Tenant"]),
+        ];
+
+        Assert.Equal(
+            ["widgets.widget.create: has a completion handler, so its stages are all Tenant stages (Story 1.27)."],
+            CompletionViolations(types));
+    }
+
+    private sealed record OperationTypeShape(string Type, bool HasCompletion, IReadOnlyList<string> StageKinds);
+
+    private static List<string> CompletionViolations(IEnumerable<OperationTypeShape> types) =>
+        [.. types
+            .Where(t => t.HasCompletion && t.StageKinds.Any(k => k != "Tenant"))
+            .Select(t => $"{t.Type}: has a completion handler, so its stages are all Tenant stages (Story 1.27).")];
+
+    private static List<OperationTypeShape> ProductionOperationTypes()
+    {
+        var output = Path.GetRelativePath(
+            Path.Combine(Root, "tests/Architecture"),
+            AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+        var assembly = Assembly.LoadFrom(Path.Combine(Root, "src/Modules/Operations", output, "Gatekeep.Modules.Operations.dll"));
+
+        var contract = assembly.GetType("Gatekeep.Modules.Operations.Contracts.OperationsContract", throwOnError: true)!;
+        var registry = contract.GetProperty("ProductionOperationRegistry")!.GetValue(null)!;
+        var definitions = (IEnumerable)registry.GetType().GetProperty("Definitions")!.GetValue(registry)!;
+
+        object? Get(object target, string name) => target.GetType().GetProperty(name)!.GetValue(target);
+
+        return [.. definitions.Cast<object>().Select(d => new OperationTypeShape(
+            Get(d, "Type")!.ToString()!,
+            Get(d, "OnSucceeded") is not null,
+            [.. ((IEnumerable)Get(d, "Stages")!).Cast<object>().Select(s => Get(s, "Kind")!.ToString()!)]))];
+    }
+
     private static List<string> MissingEdges(IEnumerable<(string Table, string Owner)> tenantTables, IReadOnlyList<Edge> edges) =>
         [.. tenantTables
             .Where(t => t.Owner != Operations)

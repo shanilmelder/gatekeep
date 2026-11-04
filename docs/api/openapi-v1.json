@@ -1049,6 +1049,282 @@
         },
         "x-gatekeep-recovery-allowed": false
       }
+    },
+    "/api/v1/deployment/tenants": {
+      "get": {
+        "tags": [
+          "Deployment"
+        ],
+        "summary": "The Deployment's Tenants, oldest first, 50 a page, and the Tenant zone their hosts sit under.",
+        "description": "Deployment Owner only. Each Tenant's ten_ public ID, name, host as stored at creation, label, status and creation time; while it is creating, its creation Operation's opr_ ID and whether it is running or failed. No subdomain is split out of a host. nextCursor is the last Tenant's ID when another page follows, else null; pass it back as cursor. A malformed cursor is 400 tenant_invalid.",
+        "operationId": "ListTenants",
+        "parameters": [
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "The previous page's nextCursor: a ten_ public ID. Anything else is 400 tenant_invalid.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TenantListResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "access_denied, with the problem body, when the capability is refused. No body when an earlier check refuses first: a Session restricted to setup, or on a state-changing call a wrong Origin or CSRF token.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "adminSession": [ ]
+          }
+        ],
+        "x-gatekeep-setup-allowed": false,
+        "x-gatekeep-access": {
+          "kind": "capability",
+          "capability": "deployment.tenants.read",
+          "scope": "deployment",
+          "machineAllowed": false,
+          "freshAssertion": "never"
+        },
+        "x-gatekeep-recovery-allowed": false
+      },
+      "post": {
+        "tags": [
+          "Deployment"
+        ],
+        "summary": "Create a Tenant with its permanent Tenant Subdomain, and start the Operation that finishes it.",
+        "description": "Deployment Owner only. The only request that takes a Tenant Subdomain: it can never be changed, and a host once issued is never reused. In one transaction it stores the Tenant as creating, with its host and the issuer, WebAuthn RP ID and email link base derived from it once; makes the caller its Tenant Owner; starts its tenancy.tenant.create Operation; and writes tenancy.tenant.created. The Operation creates the Tenant's keys, then its settings, and makes it active; until then its host isn't served. A body that isn't JSON, is over 4096 bytes, misses a field or has the wrong type, and an invalid name or label, is 400 tenant_invalid. A malformed, reserved or taken subdomain is the same 400 subdomain_refused, which never says which. Location names the Operation on the Tenant's own path.",
+        "operationId": "CreateTenant",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateTenantRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "Accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TenantCreatedResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "access_denied, with the problem body, when the capability is refused. No body when an earlier check refuses first: a Session restricted to setup, or on a state-changing call a wrong Origin or CSRF token.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "adminSession": [ ],
+            "csrf": [ ]
+          }
+        ],
+        "x-gatekeep-setup-allowed": false,
+        "x-gatekeep-access": {
+          "kind": "capability",
+          "capability": "deployment.tenants.create",
+          "scope": "deployment",
+          "machineAllowed": false,
+          "freshAssertion": "never"
+        },
+        "x-gatekeep-recovery-allowed": false
+      }
+    },
+    "/api/v1/deployment/operations/{operationId}/retry": {
+      "post": {
+        "tags": [
+          "Deployment"
+        ],
+        "summary": "Retry a failed Tenant creation's failed steps.",
+        "description": "Deployment Owner only. Reopens only the failed steps of a failed tenancy.tenant.create Operation, which runs again, and writes operations.operation.retried. One that is running or succeeded is 409 operation_not_failed. An Operation of any other type, and an unknown or malformed operationId, is the unknown-path 404.",
+        "operationId": "RetryOperation",
+        "responses": {
+          "202": {
+            "description": "Accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperationResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "access_denied, with the problem body, when the capability is refused. No body when an earlier check refuses first: a Session restricted to setup, or on a state-changing call a wrong Origin or CSRF token.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found"
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "adminSession": [ ],
+            "csrf": [ ]
+          }
+        ],
+        "x-gatekeep-setup-allowed": false,
+        "x-gatekeep-access": {
+          "kind": "capability",
+          "capability": "deployment.tenants.create",
+          "scope": "deployment",
+          "machineAllowed": false,
+          "freshAssertion": "never"
+        },
+        "x-gatekeep-recovery-allowed": false
+      }
+    },
+    "/api/v1/tenants/{tenantId}/operations/{operationId}": {
+      "get": {
+        "tags": [
+          "Tenants"
+        ],
+        "summary": "One Operation as the path Tenant sees it: only its own steps.",
+        "description": "Any Tenant Role in the path Tenant. Codes and IDs only, never a step's row ID. Another Tenant's Operation, an unknown one and a malformed operationId are the same unknown-path 404. A malformed, unknown or role-less Tenant is 403 access_denied, audited as every Tenant capability refusal is.",
+        "operationId": "GetTenantOperation",
+        "parameters": [
+          {
+            "name": "tenantId",
+            "in": "path",
+            "description": "The Tenant's public ID: ten_ and the UUID's 16 bytes in lowercase RFC 4648 base32 with no padding, whose last character carries two zero bits. Only this canonical spelling, after URL decoding, names a Tenant, and the empty UUID's never does; anything else is refused like a Tenant the Admin holds no role in.",
+            "required": true,
+            "schema": {
+              "pattern": "^ten_[a-z2-7]{25}[aeimquy4]$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperationResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "access_denied, with the problem body, when the capability is refused. No body when an earlier check refuses first: a Session restricted to setup, or on a state-changing call a wrong Origin or CSRF token.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found"
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "adminSession": [ ]
+          }
+        ],
+        "x-gatekeep-setup-allowed": false,
+        "x-gatekeep-access": {
+          "kind": "capability",
+          "capability": "tenant.configuration.read",
+          "scope": "tenant",
+          "machineAllowed": true,
+          "freshAssertion": "never"
+        },
+        "x-gatekeep-recovery-allowed": false
+      }
     }
   },
   "components": {
@@ -1302,7 +1578,10 @@
               "credentials_minimum",
               "credentials_maximum",
               "recovery_code_refused",
-              "recovery_code_superseded"
+              "recovery_code_superseded",
+              "tenant_invalid",
+              "subdomain_refused",
+              "operation_not_failed"
             ],
             "type": "string"
           },
@@ -1385,6 +1664,33 @@
               ],
               "type": "string"
             }
+          }
+        }
+      },
+      "CreateTenantRequest": {
+        "required": [
+          "name",
+          "subdomain",
+          "label"
+        ],
+        "type": "object",
+        "properties": {
+          "name": {
+            "maxLength": 100,
+            "type": "string"
+          },
+          "subdomain": {
+            "maxLength": 63,
+            "pattern": "^[a-z0-9-]{3,63}$",
+            "type": "string"
+          },
+          "label": {
+            "enum": [
+              "dev",
+              "staging",
+              "prod"
+            ],
+            "type": "string"
           }
         }
       },
@@ -1517,6 +1823,110 @@
           }
         }
       },
+      "OperationResponse": {
+        "required": [
+          "id",
+          "type",
+          "tenantId",
+          "status",
+          "createdAt",
+          "updatedAt",
+          "finishedAt",
+          "steps"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "pattern": "^opr_[a-z2-7]{25}[aeimquy4]$",
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          },
+          "tenantId": {
+            "pattern": "^ten_[a-z2-7]{25}[aeimquy4]$",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "status": {
+            "enum": [
+              "running",
+              "failed",
+              "succeeded"
+            ],
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "finishedAt": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "date-time"
+          },
+          "steps": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OperationStepResponse"
+            }
+          }
+        }
+      },
+      "OperationStepResponse": {
+        "required": [
+          "stage",
+          "tenantId",
+          "status",
+          "resultCode",
+          "attempts",
+          "updatedAt"
+        ],
+        "type": "object",
+        "properties": {
+          "stage": {
+            "type": "string"
+          },
+          "tenantId": {
+            "pattern": "^ten_[a-z2-7]{25}[aeimquy4]$",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "status": {
+            "enum": [
+              "pending",
+              "running",
+              "succeeded",
+              "failed"
+            ],
+            "type": "string"
+          },
+          "resultCode": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "attempts": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
       "RecoveryCodeConfirmRequest": {
         "required": [
           "issueId"
@@ -1643,6 +2053,120 @@
         "pattern": "^[0-9A-HJKMNP-TV-Z]{4}(-[0-9A-HJKMNP-TV-Z]{4}){3}$",
         "type": "string",
         "description": "Shown in this response only, never stored and never shown again."
+      },
+      "TenantCreatedResponse": {
+        "required": [
+          "tenant",
+          "operation"
+        ],
+        "type": "object",
+        "properties": {
+          "tenant": {
+            "$ref": "#/components/schemas/TenantResponse"
+          },
+          "operation": {
+            "$ref": "#/components/schemas/OperationResponse"
+          }
+        }
+      },
+      "TenantCreation": {
+        "required": [
+          "operationId",
+          "status"
+        ],
+        "type": "object",
+        "properties": {
+          "operationId": {
+            "pattern": "^opr_[a-z2-7]{25}[aeimquy4]$",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "running",
+              "failed"
+            ],
+            "type": "string"
+          }
+        }
+      },
+      "TenantListResponse": {
+        "required": [
+          "tenantZone",
+          "tenants",
+          "nextCursor"
+        ],
+        "type": "object",
+        "properties": {
+          "tenantZone": {
+            "type": "string"
+          },
+          "tenants": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TenantResponse"
+            }
+          },
+          "nextCursor": {
+            "pattern": "^ten_[a-z2-7]{25}[aeimquy4]$",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        }
+      },
+      "TenantResponse": {
+        "required": [
+          "id",
+          "name",
+          "host",
+          "label",
+          "status",
+          "createdAt",
+          "creation"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "pattern": "^ten_[a-z2-7]{25}[aeimquy4]$",
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "host": {
+            "type": "string"
+          },
+          "label": {
+            "enum": [
+              "dev",
+              "staging",
+              "prod"
+            ],
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "creating",
+              "active"
+            ],
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "creation": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/TenantCreation"
+              }
+            ]
+          }
+        }
       }
     },
     "securitySchemes": {

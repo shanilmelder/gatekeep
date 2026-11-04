@@ -25,8 +25,13 @@ export {
   type CapabilitiesResponse,
   type CredentialCreationOptionsResponse,
   type CredentialRegistrationRequest,
+  type CreateTenantRequest,
   type CredentialRegistrationResponse,
   type FreshAssertionBeginRequest,
+  type OperationResponse,
   type TenantCapabilities,
+  type TenantCreatedResponse,
+  type TenantListResponse,
+  type TenantResponse,
 } from './client';
 export type { components, paths } from './schema.generated';

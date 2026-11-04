@@ -378,6 +378,78 @@ internal static class AdminApi
             .Produces<ApiProblem>(StatusCodes.Status429TooManyRequests, AdminResponses.ProblemContentType)
             .Produces(StatusCodes.Status503ServiceUnavailable);
 
+        app.MapGet("/api/v1/deployment/tenants", static (HttpContext context, AdminApiServices services) => TenantsApi.ListAsync(context, services))
+            .WithMetadata(
+                DeploymentApiEndpoint.Instance,
+                new RequiresCapability(AdminCapabilities.DeploymentTenantsRead),
+                new QueryParameter(TenantsApi.CursorQuery, "The previous page's nextCursor: a ten_ public ID. Anything else is 400 tenant_invalid."))
+            .WithName("ListTenants")
+            .WithTags(Tag)
+            .WithSummary("The Deployment's Tenants, oldest first, 50 a page, and the Tenant zone their hosts sit under.")
+            .WithDescription(
+                "Deployment Owner only. Each Tenant's ten_ public ID, name, host as stored at creation, label, status and creation " +
+                "time; while it is creating, its creation Operation's opr_ ID and whether it is running or failed. No subdomain is " +
+                "split out of a host. nextCursor is the last Tenant's ID when another page follows, else null; pass it back as " +
+                "cursor. A malformed cursor is 400 tenant_invalid.")
+            .Produces<TenantListResponse>(StatusCodes.Status200OK)
+            .Produces<ApiProblem>(StatusCodes.Status400BadRequest, AdminResponses.ProblemContentType)
+            .Produces(StatusCodes.Status401Unauthorized)
+            .Produces<ApiProblem>(StatusCodes.Status403Forbidden, AdminResponses.ProblemContentType)
+            .Produces(StatusCodes.Status503ServiceUnavailable);
+
+        app.MapPost("/api/v1/deployment/tenants", static (HttpContext context, AdminApiServices services) => TenantsApi.CreateAsync(context, services))
+            .WithMetadata(
+                DeploymentApiEndpoint.Instance,
+                new RequiresCapability(AdminCapabilities.DeploymentTenantsCreate),
+                new JsonRequestBody(typeof(CreateTenantRequest)))
+            .WithName("CreateTenant")
+            .WithTags(Tag)
+            .WithSummary("Create a Tenant with its permanent Tenant Subdomain, and start the Operation that finishes it.")
+            .WithDescription(
+                "Deployment Owner only. The only request that takes a Tenant Subdomain: it can never be changed, and a host once " +
+                "issued is never reused. In one transaction it stores the Tenant as creating, with its host and the issuer, WebAuthn " +
+                "RP ID and email link base derived from it once; makes the caller its Tenant Owner; starts its tenancy.tenant.create " +
+                "Operation; and writes tenancy.tenant.created. The Operation creates the Tenant's keys, then its settings, and makes " +
+                "it active; until then its host isn't served. A body that isn't JSON, is over 4096 bytes, misses a field or has the " +
+                "wrong type, and an invalid name or label, is 400 tenant_invalid. A malformed, reserved or taken subdomain is the " +
+                "same 400 subdomain_refused, which never says which. Location names the Operation on the Tenant's own path.")
+            .Produces<TenantCreatedResponse>(StatusCodes.Status202Accepted)
+            .Produces<ApiProblem>(StatusCodes.Status400BadRequest, AdminResponses.ProblemContentType)
+            .Produces(StatusCodes.Status401Unauthorized)
+            .Produces<ApiProblem>(StatusCodes.Status403Forbidden, AdminResponses.ProblemContentType)
+            .Produces(StatusCodes.Status503ServiceUnavailable);
+
+        app.MapPost("/api/v1/deployment/operations/{operationId}/retry", static (HttpContext context, AdminApiServices services) => TenantsApi.RetryAsync(context, services))
+            .WithMetadata(DeploymentApiEndpoint.Instance, new RequiresCapability(AdminCapabilities.DeploymentTenantsCreate))
+            .WithName("RetryOperation")
+            .WithTags(Tag)
+            .WithSummary("Retry a failed Tenant creation's failed steps.")
+            .WithDescription(
+                "Deployment Owner only. Reopens only the failed steps of a failed tenancy.tenant.create Operation, which runs again, " +
+                "and writes operations.operation.retried. One that is running or succeeded is 409 operation_not_failed. An Operation " +
+                "of any other type, and an unknown or malformed operationId, is the unknown-path 404.")
+            .Produces<OperationResponse>(StatusCodes.Status202Accepted)
+            .Produces(StatusCodes.Status401Unauthorized)
+            .Produces<ApiProblem>(StatusCodes.Status403Forbidden, AdminResponses.ProblemContentType)
+            .Produces(StatusCodes.Status404NotFound)
+            .Produces<ApiProblem>(StatusCodes.Status409Conflict, AdminResponses.ProblemContentType)
+            .Produces(StatusCodes.Status503ServiceUnavailable);
+
+        app.MapGet("/api/v1/tenants/{tenantId}/operations/{operationId}", static (HttpContext context, AdminApiServices services) => TenantsApi.GetTenantOperationAsync(context, services))
+            .WithMetadata(TenantApiEndpoint.Instance, new RequiresCapability(AdminCapabilities.TenantConfigurationRead))
+            .WithName("GetTenantOperation")
+            .WithTags(TenantTag)
+            .WithSummary("One Operation as the path Tenant sees it: only its own steps.")
+            .WithDescription(
+                "Any Tenant Role in the path Tenant. Codes and IDs only, never a step's row ID. Another Tenant's Operation, an unknown " +
+                "one and a malformed operationId are the same unknown-path 404. A malformed, unknown or role-less Tenant is 403 " +
+                "access_denied, audited as every Tenant capability refusal is.")
+            .Produces<OperationResponse>(StatusCodes.Status200OK)
+            .Produces(StatusCodes.Status401Unauthorized)
+            .Produces<ApiProblem>(StatusCodes.Status403Forbidden, AdminResponses.ProblemContentType)
+            .Produces(StatusCodes.Status404NotFound)
+            .Produces(StatusCodes.Status503ServiceUnavailable);
+
         return app;
     }
 

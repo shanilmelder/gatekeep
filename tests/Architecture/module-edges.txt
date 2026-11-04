@@ -80,5 +80,8 @@ dependency Tests.Isolation -> Admins
 dependency Tests.Isolation -> Audit
 dependency Tests.Isolation -> Authentication
 dependency Tests.Isolation -> Cli
+dependency Tests.Isolation -> Keys
+dependency Tests.Isolation -> Management
 dependency Tests.Isolation -> Operations
 dependency Tests.Isolation -> Sessions
+dependency Tests.Isolation -> Tenancy

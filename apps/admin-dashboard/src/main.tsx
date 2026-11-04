@@ -20,7 +20,8 @@ const PRE_SESSION: Readonly<Record<string, ComponentType>> = {
 /**
  * The route table (Story 1.25), with no router library. The pre-Session cards follow the
  * device's scheme, as their HostedPage does; every other path is the shell, which reads the
- * Session, then picks its page: the landing page at /, a /tenants/{tenantId}/… path once the
+ * Session, then picks its page: the landing page at /, Tenants and Create Tenant under
+ * /deployment/tenants (Story 1.27), a /tenants/{tenantId}/… path once the
  * server has answered its Tenant capabilities, and not found for the rest.
  */
 function App() {

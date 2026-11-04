@@ -5,8 +5,10 @@ import { useEffect, useState } from 'react';
 
 const EVENT = 'gk:navigate';
 
-export function navigate(path: string): void {
-  window.history.pushState(null, '', path);
+/** An in-page navigation to `path`. With `replace`, it takes the current entry's place in the history, as a redirect does. */
+export function navigate(path: string, { replace = false }: { replace?: boolean } = {}): void {
+  if (replace) window.history.replaceState(null, '', path);
+  else window.history.pushState(null, '', path);
   window.dispatchEvent(new Event(EVENT));
 }
 

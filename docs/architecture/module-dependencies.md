@@ -97,6 +97,9 @@ flowchart TD
   TestsIsolation --> Audit
   TestsIsolation --> Authentication
   TestsIsolation --> Cli
+  TestsIsolation --> Keys
+  TestsIsolation --> Management
   TestsIsolation --> Operations
   TestsIsolation --> Sessions
+  TestsIsolation --> Tenancy
 ```

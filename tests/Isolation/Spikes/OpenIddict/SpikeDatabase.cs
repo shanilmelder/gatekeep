@@ -41,7 +41,7 @@ public sealed class SpikeDatabase : IAsyncDisposable
 
         foreach (var tenant in tenants.All)
         {
-            await PostgresFixture.ExecuteAsync(database.Superuser, $"INSERT INTO tenant (id) VALUES ('{tenant.Id}')");
+            await PostgresFixture.ExecuteAsync(database.Superuser, TestTenants.InsertSql(tenant.Id));
             await SeedApplicationsAsync(database.Superuser, tenant);
         }
 

@@ -5,8 +5,9 @@
 // group's item a `tenant.*` one, which these types enforce; so the Deployment group shows only to
 // an Admin holding Deployment capabilities, the Deployment Owner.
 //
-// No shell page exists yet, so the registry is empty. Each later story adds its own item with
-// its page: Story 1.27 the first Deployment item (Tenants), Epic 3 the first Tenant ones.
+// Each story adds its own item with its page: Story 1.27 the first Deployment item, Tenants,
+// which only an Admin holding deployment.tenants.read sees, the Deployment Owner; Epic 3 adds the
+// first Tenant ones.
 
 import type { AdminNavGroupId, AdminNavItem, Messages } from '@gatekeep/ui/admin';
 import type { Capability } from './capabilities';
@@ -27,7 +28,9 @@ export type NavEntry =
       requires: TenantCapability;
     };
 
-export const NAV: readonly NavEntry[] = [];
+export const NAV: readonly NavEntry[] = [
+  { group: 'deployment', label: 'navTenants', href: '/deployment/tenants', requires: 'deployment.tenants.read' },
+];
 
 /** The registry's items the Admin may reach now: held capabilities only, Tenant items only with a path Tenant. */
 export function visibleItems(

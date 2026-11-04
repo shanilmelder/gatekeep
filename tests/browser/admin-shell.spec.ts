@@ -3,7 +3,9 @@
 // RP ID. The Admin API is answered by route interception; Session renewal's sheet is answered by
 // a Chromium virtual authenticator over CDP, as in signin.spec.ts. The shell's presentational
 // parts are shell.spec.ts's, on the fixture; renewal's rules for state-changing requests, which
-// no shell page sends yet, are apps/admin-dashboard/test/renewal.test.mjs's.
+// no shell page sends yet, are apps/admin-dashboard/test/renewal.test.mjs's. From Story 1.27 the
+// Owner's landing reads the Tenants list and, with none, is the Create Tenant form, and the
+// sidebar has the Deployment group's Tenants item; their own rules are admin-tenants.spec.ts's.
 
 import AxeBuilder from '@axe-core/playwright';
 import { generateKeyPairSync, randomBytes } from 'node:crypto';
@@ -12,6 +14,7 @@ import { watchCsp } from './csp-watch';
 
 const SESSION = '/api/v1/deployment/session';
 const CAPABILITIES = '/api/v1/deployment/capabilities';
+const TENANTS = '/api/v1/deployment/tenants';
 const BEGIN = '/api/v1/deployment/signin';
 const COMPLETE = '/api/v1/deployment/signin/complete';
 const CSRF = 'S'.repeat(43);
@@ -31,6 +34,9 @@ const OWNER = [
   'deployment.incident_response.run',
   'deployment.log.read',
 ];
+
+/** The Owner's landing with no Tenants yet (Story 1.27): the Create Tenant form, in place. */
+const LANDING = 'Create your Tenant';
 
 const EXPIRED = 'Your session expired. Sign in to continue. Nothing you entered has been lost.';
 const LOAD_FAILED = "We couldn't load this page.";
@@ -122,6 +128,11 @@ async function answerApi(page: Page, baseURL: string, initial: Partial<Api['stat
         if (state.expired) return route.fulfill({ status: 401 });
         if (state.deploymentAnswer) return state.deploymentAnswer(route);
         return json(route, 200, { capabilities: state.deployment });
+      }
+      // The landing's Tenants read (Story 1.27): none yet.
+      if (pathname === TENANTS && request.method() === 'GET') {
+        if (state.expired) return route.fulfill({ status: 401 });
+        return json(route, 200, { tenantZone: 'gatekeep.test', tenants: [], nextCursor: null });
       }
       const tenant = /^\/api\/v1\/tenants\/([^/]+)\/capabilities$/.exec(pathname);
       if (tenant) {
@@ -221,7 +232,7 @@ test.use({ viewport: { width: 1280, height: 720 } });
 watchCsp(test);
 
 test.describe('shell', () => {
-  test("a Deployment Owner's shell: the top bar's brand, theme toggle and account menu, an empty Main nav, and the landing page", async ({
+  test("a Deployment Owner's shell: the top bar's brand, theme toggle and account menu, the Main nav's Deployment group, and the landing page", async ({
     page,
     baseURL,
   }) => {
@@ -230,8 +241,8 @@ test.describe('shell', () => {
     const response = await page.goto('/');
     expect(response!.headers()['content-security-policy']).toContain("default-src 'none'");
 
-    await expect(heading(page)).toHaveText('Admin Dashboard');
-    await expect(page.getByText('No Tenants yet.')).toBeVisible();
+    await expect(heading(page)).toHaveText(LANDING);
+    await expect(page.getByRole('textbox', { name: 'Name', exact: true })).toBeVisible();
     // First load: focus stays on the document.
     expect(await page.evaluate(() => document.activeElement === document.body)).toBe(true);
 
@@ -241,15 +252,22 @@ test.describe('shell', () => {
     await expect(header.getByRole('button', { name: 'Dark theme' })).toBeVisible();
     await expect(header.getByRole('button', { name: 'Account' })).toBeVisible();
     await expect(page.getByRole('searchbox')).toHaveCount(0);
-    await expect(page.getByRole('textbox')).toHaveCount(0);
-    await expect(page.getByRole('button', { name: /alerts|help|tenant/i })).toHaveCount(0);
+    // The only text boxes are the landing's Create Tenant form's: no search in the top bar.
+    await expect(header.getByRole('textbox')).toHaveCount(0);
+    await expect(page.getByRole('textbox')).toHaveCount(2);
+    await expect(header.getByRole('button', { name: /alerts|help|tenant/i })).toHaveCount(0);
     await expect(page.getByRole('link', { name: /help|api reference/i })).toHaveCount(0);
 
-    // The registry is empty: the nav is drawn at its width with no group and no link.
+    // The registry's one item (Story 1.27): the Deployment group, closed off its page, with Tenants.
     await expect(nav(page)).toBeVisible();
     expect((await nav(page).boundingBox())!.width).toBe(236);
+    const deployment = nav(page).getByRole('button', { name: 'Deployment' });
+    await expect(nav(page).getByRole('button')).toHaveCount(1);
+    await expect(deployment).toHaveAttribute('aria-expanded', 'false');
     await expect(nav(page).getByRole('link')).toHaveCount(0);
-    await expect(nav(page).getByRole('button')).toHaveCount(0);
+    await deployment.click();
+    await expect(nav(page).getByRole('link')).toHaveText(['Tenants']);
+    await expect(nav(page).getByRole('link', { name: 'Tenants' })).toHaveAttribute('href', '/deployment/tenants');
 
     // The account menu holds Your credentials, then Sign out (Story 1.26).
     await header.getByRole('button', { name: 'Account' }).click();
@@ -257,14 +275,15 @@ test.describe('shell', () => {
     await page.keyboard.press('Escape');
   });
 
-  test('an Admin with no Deployment capability lands on the no-Tenant text, with the same empty nav', async ({ page, baseURL }) => {
-    await answerApi(page, baseURL!, { deployment: [] });
+  test('an Admin with no Deployment capability lands on the no-Tenant text, with an empty nav', async ({ page, baseURL }) => {
+    const api = await answerApi(page, baseURL!, { deployment: [] });
 
     await page.goto('/');
 
     await expect(heading(page)).toHaveText('Admin Dashboard');
     await expect(page.getByText("You don't have access to a Tenant yet. Ask a Deployment Owner.")).toBeVisible();
-    await expect(page.getByText('No Tenants yet.')).toHaveCount(0);
+    await expect(page.getByRole('textbox')).toHaveCount(0);
+    expect(api.count(`GET ${TENANTS}`)).toBe(0);
     await expect(nav(page).getByRole('link')).toHaveCount(0);
     await expect(nav(page).getByRole('button')).toHaveCount(0);
   });
@@ -345,7 +364,7 @@ test.describe('shell', () => {
     await expect(heading(page)).toHaveCount(0);
 
     releaseCapabilities();
-    await expect(heading(page)).toHaveText('Admin Dashboard');
+    await expect(heading(page)).toHaveText(LANDING);
   });
 });
 
@@ -398,7 +417,7 @@ test.describe('widths', () => {
       await answerApi(page, baseURL!);
 
       await page.goto('/');
-      await expect(heading(page)).toHaveText('Admin Dashboard');
+      await expect(heading(page)).toHaveText(LANDING);
 
       expect((await nav(page).boundingBox())!.width).toBe(wide ? 236 : 52);
       const wordmark = (await brand(page).locator('[data-part="wordmark"]').boundingBox())!;
@@ -414,7 +433,7 @@ test.describe('widths', () => {
     const api = await answerApi(page, baseURL!);
 
     await page.goto('/');
-    await expect(heading(page)).toHaveText('Admin Dashboard');
+    await expect(heading(page)).toHaveText(LANDING);
     expect((await nav(page).boundingBox())!.width).toBe(52);
     await expect(page.getByRole('alert')).toHaveCount(0);
     await expect(page.getByText(/unsupported|too narrow|wider/i)).toHaveCount(0);
@@ -477,7 +496,7 @@ test.describe('pages', () => {
     await back.click();
 
     await expect(page).toHaveURL(/\/$/);
-    await expect(heading(page)).toHaveText('Admin Dashboard');
+    await expect(heading(page)).toHaveText(LANDING);
     await expect(heading(page)).toBeFocused();
     expect((await marks(page)).slice(0, 2)).toEqual(['same-window', 'same-main']);
     expect(api.count(`GET ${CAPABILITIES}`)).toBe(2);
@@ -501,14 +520,14 @@ test.describe('pages', () => {
       await expect(banner).toHaveAttribute('data-tone', 'bad');
       if (failure.traceId) await expect(banner.locator('[data-reference="trace"]')).toHaveText(failure.traceId);
       else await expect(banner.locator('[data-reference="trace"]')).toHaveCount(0);
-      await expect(page.getByText('No Tenants yet.')).toHaveCount(0);
+      await expect(page.getByTestId('create-tenant')).toHaveCount(0);
       await expect(page.getByText("You don't have access to a Tenant yet. Ask a Deployment Owner.")).toHaveCount(0);
       // The top bar still works.
       await expect(page.getByRole('button', { name: 'Dark theme' })).toBeEnabled();
 
       api.state.deploymentAnswer = null;
       await banner.getByRole('button', { name: 'Retry' }).click();
-      await expect(page.getByText('No Tenants yet.')).toBeVisible();
+      await expect(heading(page)).toHaveText(LANDING);
       await expect(failedBanner(page)).toHaveCount(0);
       expect(api.count(`GET ${CAPABILITIES}`)).toBe(2);
 
@@ -555,7 +574,7 @@ test.describe('Tenant path and Retry', () => {
     const api = await answerApi(page, baseURL!);
 
     await page.goto('/');
-    await expect(heading(page)).toHaveText('Admin Dashboard');
+    await expect(heading(page)).toHaveText(LANDING);
     await page.evaluate(() => {
       history.pushState(null, '', '/tenants/%E0%A4%A');
       dispatchEvent(new PopStateEvent('popstate'));
@@ -574,7 +593,7 @@ test.describe('Tenant path and Retry', () => {
     await failedBanner(page).getByRole('button', { name: 'Retry' }).focus();
     await page.keyboard.press('Enter');
 
-    await expect(page.getByText('No Tenants yet.')).toBeVisible();
+    await expect(heading(page)).toHaveText(LANDING);
     await expect(failedBanner(page)).toHaveCount(0);
     await expect(heading(page)).toBeFocused();
     expect(await page.locator('[data-part="status"]').textContent()).toBe('');
@@ -603,7 +622,7 @@ test.describe('Tenant path and Retry', () => {
     await page.keyboard.press('Escape');
 
     release();
-    await expect(heading(page)).toHaveText('Admin Dashboard');
+    await expect(heading(page)).toHaveText(LANDING);
     await expect(page.locator('main')).not.toHaveAttribute('aria-busy', /.+/);
     await expect(page.locator('[data-part="progress"]')).toHaveCount(0);
   });
@@ -614,7 +633,7 @@ test.describe('navigation', () => {
     const api = await answerApi(page, baseURL!);
 
     await page.goto('/');
-    await expect(heading(page)).toHaveText('Admin Dashboard');
+    await expect(heading(page)).toHaveText(LANDING);
     expect(api.count(`GET ${CAPABILITIES}`)).toBe(1);
 
     await brand(page).click();
@@ -645,7 +664,7 @@ test.describe('navigation', () => {
     await page.goto('/tenants/ten_a');
     await expect(heading(page)).toHaveText('This no longer exists.');
     await page.getByRole('link', { name: 'Back to Admin Dashboard' }).click();
-    await expect(heading(page)).toHaveText('Admin Dashboard');
+    await expect(heading(page)).toHaveText(LANDING);
 
     await page.goBack();
     await expect(heading(page)).toHaveText('This no longer exists.');
@@ -672,7 +691,7 @@ test.describe('theme', () => {
     expect(await page.evaluate((key) => localStorage.getItem(key), SCHEME_KEY)).toBe('dark');
 
     await page.reload();
-    await expect(heading(page)).toHaveText('Admin Dashboard');
+    await expect(heading(page)).toHaveText(LANDING);
     await expect(html).toHaveAttribute('data-gk-scheme', 'dark');
     await expect(toggle).toHaveAttribute('aria-pressed', 'true');
 
@@ -689,7 +708,7 @@ test.describe('theme', () => {
     await page.emulateMedia({ colorScheme: 'dark' });
 
     await page.goto('/');
-    await expect(heading(page)).toHaveText('Admin Dashboard');
+    await expect(heading(page)).toHaveText(LANDING);
     await expect(page.locator('html')).toHaveAttribute('data-gk-scheme', 'auto');
     await expect(page.getByRole('button', { name: 'Dark theme' })).toHaveAttribute('aria-pressed', 'true');
     expect(await page.evaluate(() => getComputedStyle(document.documentElement).colorScheme)).toBe('dark');
@@ -755,7 +774,7 @@ test.describe('sign out', () => {
     });
 
     await page.goto('/');
-    await expect(heading(page)).toHaveText('Admin Dashboard');
+    await expect(heading(page)).toHaveText(LANDING);
     await signOut(page);
     await expect.poll(() => api.count(`DELETE ${SESSION}`)).toBe(1);
 
@@ -781,7 +800,7 @@ test.describe('sign out', () => {
       const api = await answerApi(page, baseURL!, { signOutAnswer: (route) => route.fulfill({ status }) });
 
       await page.goto('/');
-      await expect(heading(page)).toHaveText('Admin Dashboard');
+      await expect(heading(page)).toHaveText(LANDING);
       await signOut(page);
 
       await expect(page).toHaveURL(/\/signin$/);
@@ -801,7 +820,7 @@ test.describe('sign out', () => {
       const api = await answerApi(page, baseURL!, { signOutAnswer: failure.answer });
 
       await page.goto('/');
-      await expect(heading(page)).toHaveText('Admin Dashboard');
+      await expect(heading(page)).toHaveText(LANDING);
       await signOut(page);
 
       const banner = page.locator('main').getByTestId('signout-failed');
@@ -830,14 +849,14 @@ test.describe('session renewal', () => {
     };
 
     await page.goto('/');
-    await expect(heading(page)).toHaveText('Admin Dashboard');
+    await expect(heading(page)).toHaveText(LANDING);
     await mark(page);
 
     api.state.expired = true;
     await brand(page).click();
 
     await expect.poll(() => api.count(`POST ${COMPLETE}`)).toBe(1);
-    await expect(page.getByText('No Tenants yet.')).toBeVisible();
+    await expect(heading(page)).toHaveText(LANDING);
     await expect(expiredBanner(page)).toHaveCount(0);
     expect(bannerSeen).toBe(true);
 
@@ -865,7 +884,7 @@ test.describe('session renewal', () => {
     };
 
     await page.goto('/');
-    await expect(heading(page)).toHaveText('Admin Dashboard');
+    await expect(heading(page)).toHaveText(LANDING);
     api.state.expired = true;
     await brand(page).click();
 
@@ -886,7 +905,7 @@ test.describe('session renewal', () => {
     const api = await answerApi(page, baseURL!);
 
     await page.goto('/');
-    await expect(heading(page)).toHaveText('Admin Dashboard');
+    await expect(heading(page)).toHaveText(LANDING);
     await mark(page);
     await cancelling(true);
     api.state.expired = true;
@@ -901,7 +920,7 @@ test.describe('session renewal', () => {
 
     await cancelling(false);
     await banner.getByRole('button', { name: 'Sign in' }).click();
-    await expect(page.getByText('No Tenants yet.')).toBeVisible();
+    await expect(heading(page)).toHaveText(LANDING);
     await expect(expiredBanner(page)).toHaveCount(0);
     expect(api.count(`POST ${BEGIN}`)).toBe(2);
     await expect.poll(() => api.log.filter((line) => line.endsWith(CAPABILITIES)).length).toBe(3);
@@ -917,7 +936,7 @@ test.describe('session renewal', () => {
     const api = await answerApi(page, baseURL!);
 
     await page.goto('/');
-    await expect(heading(page)).toHaveText('Admin Dashboard');
+    await expect(heading(page)).toHaveText(LANDING);
     await cancelling(true);
     api.state.expired = true;
     await brand(page).click();
@@ -940,7 +959,7 @@ test.describe('session renewal', () => {
     await page.waitForTimeout(300);
     expect(api.count(`GET ${CAPABILITIES}`)).toBe(6);
     expect(api.count(`POST ${BEGIN}`)).toBe(2);
-    await expect(page.getByText('No Tenants yet.')).toBeVisible();
+    await expect(heading(page)).toHaveText(LANDING);
   });
 
   test('the banner’s Sign in shows its pending state while a sheet is open', async ({ page, baseURL }) => {
@@ -954,7 +973,7 @@ test.describe('session renewal', () => {
     };
 
     await page.goto('/');
-    await expect(heading(page)).toHaveText('Admin Dashboard');
+    await expect(heading(page)).toHaveText(LANDING);
     api.state.expired = true;
     await brand(page).click();
 
@@ -973,7 +992,7 @@ test.describe('session renewal', () => {
     });
 
     await page.goto('/');
-    await expect(heading(page)).toHaveText('Admin Dashboard');
+    await expect(heading(page)).toHaveText(LANDING);
     api.state.expired = true;
     await brand(page).click();
 
@@ -993,7 +1012,7 @@ test.describe('session renewal', () => {
     };
 
     await page.goto('/');
-    await expect(heading(page)).toHaveText('Admin Dashboard');
+    await expect(heading(page)).toHaveText(LANDING);
     api.state.expired = true;
     await brand(page).click();
     await expect.poll(() => api.count(`POST ${BEGIN}`)).toBe(1);
@@ -1013,7 +1032,7 @@ test.describe('session renewal', () => {
     const api = await answerApi(page, baseURL!, { completeAnswer: (route) => problem(route, 400, 'signin_refused', 'trace-400') });
 
     await page.goto('/');
-    await expect(heading(page)).toHaveText('Admin Dashboard');
+    await expect(heading(page)).toHaveText(LANDING);
     api.state.expired = true;
     await brand(page).click();
 
@@ -1023,7 +1042,7 @@ test.describe('session renewal', () => {
 
     api.state.completeAnswer = null;
     await expiredBanner(page).getByRole('button', { name: 'Sign in' }).click();
-    await expect(page.getByText('No Tenants yet.')).toBeVisible();
+    await expect(heading(page)).toHaveText(LANDING);
     await expect(expiredBanner(page)).toHaveCount(0);
   });
 
@@ -1034,7 +1053,7 @@ test.describe('session renewal', () => {
       const api = await answerApi(page, baseURL!, at === 'begin' ? { beginAnswer: limited } : { completeAnswer: limited });
 
       await page.goto('/');
-      await expect(heading(page)).toHaveText('Admin Dashboard');
+      await expect(heading(page)).toHaveText(LANDING);
       api.state.expired = true;
       await brand(page).click();
 
@@ -1055,7 +1074,7 @@ test.describe('session renewal', () => {
     const api = await answerApi(page, baseURL!, { beginAnswer: (route) => problem(route, 429, 'rate_limited', 'trace-429') });
 
     await page.goto('/');
-    await expect(heading(page)).toHaveText('Admin Dashboard');
+    await expect(heading(page)).toHaveText(LANDING);
     api.state.expired = true;
     await brand(page).click();
 
@@ -1072,7 +1091,7 @@ test.describe('session renewal', () => {
       const api = await answerApi(page, baseURL!, failure.at === 'begin' ? { beginAnswer: failure.answer } : { completeAnswer: failure.answer });
 
       await page.goto('/');
-      await expect(heading(page)).toHaveText('Admin Dashboard');
+      await expect(heading(page)).toHaveText(LANDING);
       await mark(page);
       api.state.expired = true;
       await brand(page).click();
@@ -1098,7 +1117,7 @@ test.describe('session renewal', () => {
 
     await expect.poll(() => marks(page)).toEqual([null, null, null]);
     await expect(page).toHaveURL(/\/$/);
-    await expect(heading(page)).toHaveText('Admin Dashboard');
+    await expect(heading(page)).toHaveText(LANDING);
     // After the complete, the new page boots: the Session first, never the interrupted read.
     const after = api.log.slice(api.log.indexOf(`POST ${COMPLETE}`) + 1);
     expect(after[0]).toBe(`GET ${SESSION}`);
@@ -1111,7 +1130,7 @@ test.describe('session renewal', () => {
     await page.goto('/tenants/ten_a');
     await expect(heading(page)).toHaveText('This no longer exists.');
     await page.getByRole('link', { name: 'Back to Admin Dashboard' }).click();
-    await expect(heading(page)).toHaveText('Admin Dashboard');
+    await expect(heading(page)).toHaveText(LANDING);
 
     api.state.expired = true;
     await page.goBack();
@@ -1131,7 +1150,7 @@ test.describe('session renewal', () => {
     api.state.completeAnswer = (route) => json(route, 200, { adminId: ADMIN_ID, csrfToken: RENEWED_CSRF, setupComplete: true });
 
     await page.goto('/');
-    await expect(heading(page)).toHaveText('Admin Dashboard');
+    await expect(heading(page)).toHaveText(LANDING);
     api.state.expired = true;
     await brand(page).click();
 
@@ -1146,7 +1165,7 @@ test.describe('session renewal', () => {
     await expiredBanner(page).getByRole('button', { name: 'Sign in' }).click();
     await expect.poll(() => api.log.filter((line) => line.endsWith(CAPABILITIES)).length).toBe(4);
     await expect(expiredBanner(page)).toHaveCount(0);
-    await expect(page.getByText('No Tenants yet.')).toBeVisible();
+    await expect(heading(page)).toHaveText(LANDING);
     expect(api.count(`POST ${BEGIN}`)).toBe(2);
   });
 
@@ -1164,7 +1183,7 @@ test.describe('session renewal', () => {
     );
 
     await page.goto('/');
-    await expect(heading(page)).toHaveText('Admin Dashboard');
+    await expect(heading(page)).toHaveText(LANDING);
     api.state.expired = true;
     await brand(page).click();
 
@@ -1188,7 +1207,7 @@ for (const mode of ['light', 'dark, from the device', 'dark, from the toggle'] a
       });
 
       await page.goto('/');
-      await expect(heading(page)).toHaveText('Admin Dashboard');
+      await expect(heading(page)).toHaveText(LANDING);
       if (mode === 'dark, from the toggle') {
         await page.getByRole('button', { name: 'Dark theme' }).click();
         await expect(page.locator('html')).toHaveAttribute('data-gk-scheme', 'dark');

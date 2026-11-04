@@ -59,6 +59,8 @@ const host = spawn(
     // answers it by route interception.
     `--Gatekeep:PublicOrigin=http://127.0.0.1:${publicPort}`,
     '--Gatekeep:ForwardedBy=none',
+    // The Tenant zone Host.Admin requires (Story 1.27). The Tenants read is intercepted too.
+    '--Gatekeep:TenantZone=gatekeep.test',
     // Port 9 (discard) on loopback: nothing answers, and nothing here needs a database.
     '--ConnectionStrings:Admin=Host=127.0.0.1;Port=9;Database=gatekeep;Username=gk_admin;Timeout=1',
     `--Custody:SocketPath=${path.join(temporary, 'openbao.sock')}`,

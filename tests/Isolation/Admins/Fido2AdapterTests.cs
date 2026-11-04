@@ -15,7 +15,7 @@ namespace Gatekeep.Tests.Isolation.Admins;
 /// </summary>
 public sealed class Fido2AdapterTests
 {
-    private static readonly WebAuthnRelyingParty Admin = new("admin.gatekeep.test", "Gatekeep", "https://admin.gatekeep.test");
+    private static readonly WebAuthnRelyingParty Admin = new("admin.gatekeep-admin.test", "Gatekeep", "https://admin.gatekeep-admin.test");
 
     private static readonly WebAuthnRelyingParty Other = new("other.example", "Other", "https://other.example:8443");
 
@@ -64,10 +64,10 @@ public sealed class Fido2AdapterTests
     }
 
     [Theory]
-    [InlineData("https://ADMIN.gatekeep.test")]
-    [InlineData("https://admin.gatekeep.test:443")]
-    [InlineData("https://admin.gatekeep.test/")]
-    [InlineData("http://admin.gatekeep.test")]
+    [InlineData("https://ADMIN.gatekeep-admin.test")]
+    [InlineData("https://admin.gatekeep-admin.test:443")]
+    [InlineData("https://admin.gatekeep-admin.test/")]
+    [InlineData("http://admin.gatekeep-admin.test")]
     [InlineData("https://evil.gatekeep.test")]
     public async Task Origin_must_be_exactly_the_Relying_Partys(string origin)
     {
@@ -140,7 +140,7 @@ public sealed class Fido2AdapterTests
         Assert.Throws<ArgumentException>(() => verifier.BeginRegistration(
             new WebAuthnRegistrationBegin(Admin with { Origin = "https://elsewhere.test" }, User, [], new byte[32])));
         Assert.Throws<ArgumentException>(() => verifier.BeginRegistration(
-            new WebAuthnRegistrationBegin(Admin with { Origin = "https://admin.gatekeep.test/path" }, User, [], new byte[32])));
+            new WebAuthnRegistrationBegin(Admin with { Origin = "https://admin.gatekeep-admin.test/path" }, User, [], new byte[32])));
         Assert.Throws<ArgumentException>(() => verifier.BeginRegistration(
             new WebAuthnRegistrationBegin(Admin, User with { Handle = new byte[65] }, [], new byte[32])));
     }
@@ -190,7 +190,7 @@ public sealed class Fido2AdapterTests
     {
         { "another RP ID", new AssertionTweaks { RpId = Other.Id } },
         { "another origin", new AssertionTweaks { Origin = Other.Origin } },
-        { "the origin in other case", new AssertionTweaks { Origin = "https://ADMIN.gatekeep.test" } },
+        { "the origin in other case", new AssertionTweaks { Origin = "https://ADMIN.gatekeep-admin.test" } },
         { "crossOrigin true", new AssertionTweaks { CrossOrigin = true } },
         { "a top origin", new AssertionTweaks { TopOrigin = Admin.Origin } },
         { "no user verification", new AssertionTweaks { UserVerified = false } },

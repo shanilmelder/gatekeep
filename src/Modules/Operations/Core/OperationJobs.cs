@@ -110,10 +110,10 @@ internal static class OperationJobs
         foreach (var (stepId, stage) in deploymentSteps)
         {
             await OperationStore.RunStepAsync(
-                context, run.Services.Operations, operationId, stepId, type, stage, tenantId: null, cancellationToken);
+                context, run.Services.Operations, operationId, stepId, type, stage, tenantId: null, run.Services.Custody, cancellationToken);
         }
 
-        await OperationStore.TryFinishAsync(context, operationId, cancellationToken);
+        await OperationStore.TryFinishAsync(context, run.Services.Operations, operationId, cancellationToken);
     }
 
     public static async Task StepAsync(JobRun run, CancellationToken cancellationToken)
@@ -148,9 +148,10 @@ internal static class OperationJobs
         }
 
         await OperationStore.RunStepAsync(
-            context, run.Services.Operations, operationId, stepId, type, stage, tenantId, cancellationToken);
+            context, run.Services.Operations, operationId, stepId, type, stage, tenantId, run.Services.Custody, cancellationToken);
 
-        await OperationStore.TryFinishAsync(context, operationId, cancellationToken);
+        // For a type with a completion handler this is always the finisher, in the Tenant's own scope.
+        await OperationStore.TryFinishAsync(context, run.Services.Operations, operationId, cancellationToken);
     }
 
     /// <summary>
@@ -186,7 +187,7 @@ internal static class OperationJobs
             [StepIdName] = stepId,
         });
 
-        await Enqueuer.EnqueueAsync(context, ProductionJobs.RunOperationStep, payload, runAfter: null, cancellationToken);
+        await Enqueuer.EnqueueAsync(context, ProductionJobs.RunOperationStep, payload, runAfter: null, operationId, cancellationToken);
         await scope.CommitAsync(cancellationToken);
     }
 }

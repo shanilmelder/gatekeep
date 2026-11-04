@@ -42,8 +42,18 @@ public static class OperationsContract
     public static OperationCode PurgeChainStage => AuditRetentionJobs.PurgeStage;
 
     /// <summary>
-    /// The code-owned production Operation types: <see cref="PurgeChainOperation"/> so far.
-    /// Tenant creation and deletion arrive in their own stories.
+    /// Creates a new Tenant's secret class keys, then, once every stage has succeeded, its
+    /// settings, and makes it active (Story 1.27). Tenant creation starts it scoped to the new
+    /// Tenant, with one <see cref="TenantCreationStage"/> step for it.
+    /// </summary>
+    public static OperationType TenantCreationOperation => TenantCreation.Type;
+
+    /// <summary>The creation Operation's one stage so far: the six secret class keys (AD-10).</summary>
+    public static OperationCode TenantCreationStage => TenantCreation.SecretClassKeysStage;
+
+    /// <summary>
+    /// The code-owned production Operation types: <see cref="PurgeChainOperation"/> and
+    /// <see cref="TenantCreationOperation"/>. Tenant deletion arrives in its own story.
     /// </summary>
     public static OperationRegistry ProductionOperationRegistry => ProductionOperations.Registry;
 

@@ -466,9 +466,9 @@ public sealed class OperationTests(PostgresFixture postgres)
 
         var jobs = await database.ScalarAsync<long>("SELECT count(*) FROM job");
 
-        await Assert.ThrowsAsync<InvalidOperationException>(() => database.InScopeAsync(TableRegistry.Admin, null, context =>
+        await Assert.ThrowsAsync<OperationNotFailedException>(() => database.InScopeAsync(TableRegistry.Admin, null, context =>
             Operations().RetryAsync(context, operation.Id, Cancellation)));
-        await Assert.ThrowsAsync<InvalidOperationException>(() => database.InScopeAsync(TableRegistry.Admin, null, context =>
+        await Assert.ThrowsAsync<OperationNotFailedException>(() => database.InScopeAsync(TableRegistry.Admin, null, context =>
             Operations().RetryAsync(context, Guid.CreateVersion7(), Cancellation)));
 
         Assert.Equal(jobs, await database.ScalarAsync<long>("SELECT count(*) FROM job"));

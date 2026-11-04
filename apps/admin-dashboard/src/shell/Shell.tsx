@@ -20,6 +20,7 @@ import { api, setCsrfToken } from '../session';
 import { assertWithSheet } from '../webauthn';
 import { CapabilitiesProvider, capabilitiesOf, useCapabilityReads, type ShellRead } from './capabilities';
 import { CredentialsPage, type ShellRequest } from './CredentialsPage';
+import { CreateTenantPage } from './CreateTenantPage';
 import { createFreshAssertion } from './freshAssertion';
 import { ForbiddenPage } from './ForbiddenPage';
 import { LandingPage } from './LandingPage';
@@ -27,6 +28,8 @@ import { NAV, visibleItems } from './nav';
 import { NotFoundPage } from './NotFoundPage';
 import { createRenewal, type Renewal, type RenewalState } from './renewal';
 import { signInAgain } from './signInAgain';
+import { NEW_TENANT_PATH, TENANTS_PATH } from './tenants';
+import { TenantsPage } from './TenantsPage';
 import { useScheme } from './theme';
 
 /** The code Generic error shows for a failure with no problem body, such as a 503 or a lost connection. */
@@ -283,7 +286,13 @@ function ShellFrame({ adminId }: { adminId: string }) {
   else if (answered.reads.kind === 'failed') page = <UnavailablePage />;
   // No Tenant page is built yet, so an allowed Tenant path is not found too: only after the
   // server has answered its Tenant capabilities read, so not-found never answers first.
-  else if (answered.path === '/') page = <LandingPage />;
+  else if (answered.path === '/') page = <LandingPage request={shellRequest} />;
+  // Tenants and Create Tenant (Story 1.27). The shell's Deployment read has already answered, so a
+  // capability not held is the forbidden page without asking again; the server still decides.
+  else if (answered.path === TENANTS_PATH)
+    page = capabilities.has('deployment.tenants.read') ? <TenantsPage request={shellRequest} /> : <ForbiddenPage code="access_denied" traceId="" />;
+  else if (answered.path === NEW_TENANT_PATH)
+    page = capabilities.has('deployment.tenants.create') ? <CreateTenantPage request={shellRequest} /> : <ForbiddenPage code="access_denied" traceId="" />;
   // Your credentials (Story 1.26): self-service, so the Deployment read the shell makes is all it needs.
   else if (answered.path === CREDENTIALS_PATH) page = <CredentialsPage request={shellRequest} fresh={fresh} />;
   else page = <NotFoundPage />;

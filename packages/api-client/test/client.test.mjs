@@ -167,6 +167,33 @@ describe('api-client', () => {
     assert.deepEqual(result.data, { adminId: 'a', csrfToken: 'c', setupComplete: true });
   });
 
+  it('lists, creates and retries Tenants on their own paths, IDs and the cursor encoded', async () => {
+    const { calls, fetch } = fakeFetch(202, JSON.stringify({ id: 'opr_a' }));
+    const client = createApiClient({ fetch, csrfToken: () => 'csrf-1' });
+    const body = { name: 'Acme Dev', subdomain: 'acme-dev', label: 'dev' };
+
+    await client.listTenants();
+    await client.listTenants('ten_a&b=c');
+    await client.createTenant(body);
+    await client.getTenantOperation('ten_a/b', 'opr_c?d');
+    const result = await client.retryOperation('opr_e#f');
+
+    assert.equal(calls[0].input, '/api/v1/deployment/tenants');
+    assert.equal(calls[0].init.method, 'GET');
+    assert.equal(calls[1].input, '/api/v1/deployment/tenants?cursor=ten_a%26b%3Dc');
+    assert.equal(calls[2].input, '/api/v1/deployment/tenants');
+    assert.equal(calls[2].init.method, 'POST');
+    assert.equal(calls[2].init.body, JSON.stringify(body));
+    assert.equal(calls[2].init.headers[CSRF_HEADER], 'csrf-1');
+    assert.equal(calls[3].input, '/api/v1/tenants/ten_a%2Fb/operations/opr_c%3Fd');
+    assert.equal(CSRF_HEADER in calls[3].init.headers, false);
+    assert.equal(calls[4].input, '/api/v1/deployment/operations/opr_e%23f/retry');
+    assert.equal(calls[4].init.method, 'POST');
+    assert.equal(calls[4].init.body, undefined);
+    assert.equal(calls[4].init.headers[CSRF_HEADER], 'csrf-1');
+    assert.equal(result.status, 202);
+  });
+
   it('parses only a string code, and a missing trace ID as empty', () => {
     assert.equal(parseProblem(null), null);
     assert.equal(parseProblem('x'), null);

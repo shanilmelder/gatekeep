@@ -94,7 +94,7 @@ public sealed class WorkerStartupTests(PostgresFixture postgres) : IDisposable
     public async Task Configured_worker_seals_an_appended_event_within_5_seconds()
     {
         var database = await postgres.NewMigratedDatabaseAsync();
-        await PostgresFixture.ExecuteAsync(postgres.SuperuserConnection(database), $"INSERT INTO tenant (id) VALUES ('{TenantId}')");
+        await PostgresFixture.ExecuteAsync(postgres.SuperuserConnection(database), TestTenants.InsertSql(TenantId));
 
         using var process = HostProcess.Start("Worker", Configured(database));
 

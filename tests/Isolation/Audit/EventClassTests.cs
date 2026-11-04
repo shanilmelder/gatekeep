@@ -207,7 +207,7 @@ public sealed class EventClassTests(PostgresFixture postgres)
     {
         var database = await postgres.NewMigratedDatabaseAsync();
         var tenantId = Guid.CreateVersion7();
-        await PostgresFixture.ExecuteAsync(postgres.SuperuserConnection(database), $"INSERT INTO tenant (id) VALUES ('{tenantId}');");
+        await PostgresFixture.ExecuteAsync(postgres.SuperuserConnection(database), TestTenants.InsertSql(tenantId));
 
         await using var source = NpgsqlDataSource.Create(postgres.RoleConnection(TableRegistry.Hosted, database));
         await using var scope = await TenantScope.BeginAsync(source, tenantId, CancellationToken.None);

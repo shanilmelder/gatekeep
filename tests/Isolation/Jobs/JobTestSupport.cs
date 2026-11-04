@@ -45,7 +45,7 @@ internal sealed class JobDatabase
     {
         var database = new JobDatabase(postgres, await postgres.NewMigratedDatabaseAsync());
 
-        await database.SuperuserAsync($"INSERT INTO tenant (id) VALUES ('{TenantA}'), ('{TenantB}')");
+        await database.SuperuserAsync(TestTenants.InsertSql(TenantA, TenantB));
 
         if (registry is not null)
         {

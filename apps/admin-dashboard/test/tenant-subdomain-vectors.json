@@ -1,0 +1,35 @@
+{
+  "_comment": "Story 1.27: the Tenant Subdomain rule's test vectors, shared by the server's Tenancy tests and apps/admin-dashboard/test/tenantSubdomain.test.mjs. 'malformed' fails the format rule everywhere; 'reserved' passes the format but the server refuses it (the browser rule has no reserved list); 'valid' passes both.",
+  "malformed": [
+    "Acme",
+    "ab",
+    "-acme",
+    "acme-",
+    "xn--acme",
+    "ac--me",
+    "a_b",
+    " acme",
+    "acme ",
+    "",
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "ACME-DEV",
+    "acme.dev",
+    "acmé"
+  ],
+  "reserved": [
+    "admin",
+    "www",
+    "mta-sts",
+    "api",
+    "login"
+  ],
+  "valid": [
+    "acme-dev",
+    "abc",
+    "a1b",
+    "a-b-c",
+    "0acme",
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "acme--x"
+  ]
+}
