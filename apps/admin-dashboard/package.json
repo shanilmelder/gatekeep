@@ -4,7 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "tsc -p tsconfig.json --noEmit && vite build"
+    "build": "tsc -p tsconfig.json --noEmit && vite build",
+    "test": "node --test \"test/**/*.test.mjs\""
   },
   "dependencies": {
     "@gatekeep/api-client": "workspace:*",

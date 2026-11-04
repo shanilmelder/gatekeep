@@ -1,0 +1,161 @@
+/*
+ * The Admin sidebar (DESIGN.md, components.sidebar; the export's nav): sf with a bd right
+ * border, 236px wide, or a 52px icon rail when data-rail is set. The width comes from
+ * useMediaQuery alone, so no media query here can disagree with it. Controls draw their focus
+ * ring inside, where the scrolling edge can't clip it.
+ */
+
+.nav {
+  box-sizing: border-box;
+  flex: none;
+  width: 236px;
+  height: 100%;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 10px var(--gk-space-8) var(--gk-space-24);
+  border-right: 1px solid var(--gk-sidebar-border);
+  background: var(--gk-sidebar-background);
+  color: var(--gk-color-tx2);
+  font: var(--gk-font-body);
+}
+
+.nav[data-rail] {
+  width: 52px;
+}
+
+.groups,
+.items {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.items[hidden] {
+  display: none;
+}
+
+.group {
+  display: flex;
+  flex-direction: column;
+}
+
+.icon {
+  display: inline-flex;
+  flex: none;
+}
+
+.icon svg,
+.chevron {
+  width: var(--gk-space-16);
+  height: var(--gk-space-16);
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.groupButton,
+.railLink,
+.item {
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  border: 0;
+  background: transparent;
+  color: var(--gk-color-tx2);
+  font: inherit;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.groupButton {
+  gap: 9px;
+  width: 100%;
+  min-height: 30px;
+  padding: 0 var(--gk-space-8);
+  border-radius: var(--gk-radius-control);
+  font-weight: 500;
+  text-align: start;
+}
+
+.groupButton[data-current] {
+  color: var(--gk-color-tx);
+}
+
+.groupLabel {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.chevron {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  transition: transform var(--gk-motion-duration-min) var(--gk-motion-easing);
+}
+
+.groupButton[aria-expanded='true'] .chevron {
+  transform: rotate(90deg);
+}
+
+.items {
+  padding: 2px 0 6px 25px;
+}
+
+.item {
+  min-height: 28px;
+  padding: 0 9px;
+  border-left: 2px solid transparent;
+  border-radius: var(--gk-radius-control-sm);
+  overflow-wrap: anywhere;
+}
+
+.item:hover {
+  color: var(--gk-color-tx);
+}
+
+/* DESIGN's active item: tx on sf2, weight 500 and a 2px jade rule on the left. */
+.item[aria-current='page'] {
+  color: var(--gk-color-tx);
+  background: var(--gk-color-sf2);
+  border-left-color: var(--gk-color-ac);
+  font-weight: 500;
+}
+
+.railLink {
+  justify-content: center;
+  width: 100%;
+  height: 30px;
+  border-radius: var(--gk-radius-control);
+}
+
+.railLink[aria-current='true'] {
+  color: var(--gk-color-tx);
+  background: var(--gk-color-sf2);
+}
+
+.groupButton:hover,
+.railLink:hover {
+  background: var(--gk-color-sf2);
+}
+
+.groupButton:focus-visible,
+.railLink:focus-visible,
+.item:focus-visible {
+  outline-offset: calc(var(--gk-focus-ring-outline-width) * -1);
+}
+
+@media (forced-colors: active) {
+  .item[aria-current='page'] {
+    border-left-color: Highlight;
+  }
+
+  .railLink[aria-current='true'] {
+    outline: 1px solid Highlight;
+  }
+}

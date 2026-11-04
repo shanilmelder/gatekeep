@@ -114,6 +114,14 @@ for (const surface of ['admin', 'hosted'] as const) {
       }
       expect(adminOnly).toEqual(
         [
+          // The Admin shell (Story 1.25).
+          'ADMIN_NAV_GROUPS',
+          'AdminShell',
+          'SectionPage',
+          'Sidebar',
+          'ThemeToggle',
+          'TopBar',
+          'useMediaQuery',
           'ConfirmModal',
           'DataTable',
           'Drawer',

@@ -10,11 +10,21 @@ export function navigate(path: string): void {
   window.dispatchEvent(new Event(EVENT));
 }
 
-/** The current path, without a trailing slash but for the root. */
-export function usePath(): string {
-  const [path, setPath] = useState(current);
+/** Where the page is, and a key that changes on every navigation, to the same path or not. */
+export interface Location {
+  path: string;
+  key: number;
+}
+
+/**
+ * The current path and a navigation key. The key changes on every in-page navigation (a link,
+ * the brand, a sidebar item, the browser's back or forward), even one to the path already shown,
+ * so the shell reads its capabilities again each time.
+ */
+export function useLocation(): Location {
+  const [location, setLocation] = useState<Location>(() => ({ path: current(), key: 0 }));
   useEffect(() => {
-    const update = () => setPath(current());
+    const update = () => setLocation((previous) => ({ path: current(), key: previous.key + 1 }));
     window.addEventListener('popstate', update);
     window.addEventListener(EVENT, update);
     return () => {
@@ -22,7 +32,12 @@ export function usePath(): string {
       window.removeEventListener(EVENT, update);
     };
   }, []);
-  return path;
+  return location;
+}
+
+/** The current path, without a trailing slash but for the root. */
+export function usePath(): string {
+  return useLocation().path;
 }
 
 function current(): string {

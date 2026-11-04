@@ -16,7 +16,9 @@ test('loads everything, the fonts included, from its own origin', async ({ page,
   });
 
   await page.goto('/');
-  // The page's own text, styled by the body rule, must bring Geist in by itself.
+  // The page's own text, styled by the body rule, must bring Geist in by itself. The Admin
+  // shell renders nothing until its Session read answers (Story 1.25), so wait for text first.
+  await page.waitForFunction(() => document.body.innerText.trim() !== '');
   await page.evaluate(() => document.fonts.ready);
   const rendered = await page.evaluate(() => {
     const style = getComputedStyle(document.body);

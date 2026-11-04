@@ -78,9 +78,14 @@ public class InstallDocTests
         [
             @"^## Not yet covered$",
         ],
-        ["no working Admin Dashboard yet (Stories 1.21 to 1.25)"] =
+        ["Admin Dashboard below 768px is unsupported (NFR-17)"] =
         [
-            @"\*\*A working Admin Dashboard\.\*\*[^\n]*\(Stories 1\.21 to 1\.25\)",
+            @"^## Using the Admin Dashboard$",
+            @"\*\*Below 768px: unsupported\.\*\*",
+        ],
+        ["no Admin Dashboard pages yet (from Story 1.27)"] =
+        [
+            @"\*\*A working Admin Dashboard\.\*\*[^\n]*from Story 1\.27 on",
         ],
         ["no Certificate Transparency alerts yet (Epic 11)"] =
         [

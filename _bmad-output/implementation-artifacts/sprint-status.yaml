@@ -60,7 +60,7 @@ development_status:
   1-22-register-admin-webauthn-credentials: done
   1-23-sign-in-as-an-admin-with-webauthn: done
   1-24-enforce-capabilities-and-tenant-scoped-routes: done
-  1-25-open-the-admin-shell: backlog
+  1-25-open-the-admin-shell: done
   1-26-confirm-sensitive-actions-and-manage-admin-credentials: backlog
   1-27-create-tenants-with-permanent-subdomains: backlog
   1-28-switch-tenants-and-set-the-environment-label: backlog

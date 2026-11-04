@@ -8,10 +8,15 @@
 import AxeBuilder from '@axe-core/playwright';
 import { generateKeyPairSync, randomBytes } from 'node:crypto';
 import { expect, test, type CDPSession, type Page, type Request, type Route } from '@playwright/test';
+import { watchCsp } from './csp-watch';
+
+// Every test, not only those that check it in place, fails on a CSP violation (Story 1.25).
+watchCsp(test);
 
 const BEGIN = '/api/v1/deployment/signin';
 const COMPLETE = '/api/v1/deployment/signin/complete';
 const SESSION = '/api/v1/deployment/session';
+const CAPABILITIES = '/api/v1/deployment/capabilities';
 const CSRF = 'S'.repeat(43);
 const ADMIN_ID = '01900000-0000-7000-8000-000000000123';
 const REFUSED = "That credential wasn't recognised.";
@@ -95,6 +100,7 @@ async function answerApi(page: Page, baseURL: string, { beginAnswer, completeAns
   const signOuts: Request[] = [];
   const challenges: string[] = [];
   const state = { signedIn: false };
+  await answerCapabilities(page);
 
   await page.route(path(BEGIN), (route) => {
     begins.push(route.request());
@@ -138,6 +144,18 @@ const problem = (status: number, code: string, traceId: string) => (route: Route
 
 const signInButton = (page: Page) => page.getByRole('button', { name: 'Sign in' });
 
+/** Sign out, in the shell's avatar menu since Story 1.25. */
+async function signOut(page: Page) {
+  await page.getByRole('button', { name: 'Account' }).click();
+  await page.getByRole('menuitem', { name: 'Sign out' }).click();
+}
+
+/** The shell's Deployment capabilities read (Story 1.25), for a signed-in Admin. */
+const answerCapabilities = (page: Page) =>
+  page.route(path(CAPABILITIES), (route) =>
+    route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ capabilities: [] }) }),
+  );
+
 async function axe(page: Page) {
   await page.evaluate(() => Promise.allSettled(document.getAnimations().map((animation) => animation.finished)).then(() => undefined));
   return (await new AxeBuilder({ page }).analyze()).violations.map((violation) => ({
@@ -171,7 +189,7 @@ test('a sign-in sends the assertion for this origin and goes to the root, whose 
   await signInButton(page).click();
 
   await expect(page).toHaveURL(/\/$/);
-  await expect(page.getByText('Admin Dashboard')).toBeVisible();
+  await expect(page.getByRole('heading', { level: 1, name: 'Admin Dashboard' })).toBeVisible();
 
   // Begin needs no Session or CSRF token; the complete is the credential the browser chose
   // itself, as none was listed: for this origin and the begin's challenge, with its user handle.
@@ -198,7 +216,7 @@ test('a sign-in sends the assertion for this origin and goes to the root, whose 
   expect(Buffer.from(body.response.authenticatorData, 'base64url')[32]! & 0x05).toBe(0x05);
 
   // Sign out carries the Session's CSRF token, and lands back on sign-in.
-  await page.getByRole('button', { name: 'Sign out' }).click();
+  await signOut(page);
   await expect(page).toHaveURL(/\/signin$/);
   await expect(signInButton(page)).toBeVisible();
   expect(api.signOuts).toHaveLength(1);
@@ -314,7 +332,7 @@ test('an Admin still without two credentials who signs in goes on to credential 
 
   await expect(page).toHaveURL(/\/setup\/credentials$/);
   await expect(page.getByTestId('credential-setup-step')).toHaveText('Step 2 of 2');
-  await expect(page.getByRole('button', { name: 'Sign out' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Account' })).toHaveCount(0);
 });
 
 test('a begin that answers 2xx with no options shows Generic error, and sends no complete', async ({ page, baseURL }) => {
@@ -337,6 +355,7 @@ for (const answer of [
 ]) {
   test("the root's Session read failing with " + answer.name + ' shows Generic error with no Sign out, and its action loads the root again', async ({ page }) => {
     let failing = true;
+    await answerCapabilities(page);
     await page.route(path(SESSION), (route) =>
       failing
         ? answer.fulfill(route)
@@ -352,13 +371,14 @@ for (const answer of [
     const error = page.getByTestId('root-error');
     await expect(error.getByRole('heading', { level: 1, name: 'Something went wrong' })).toBeVisible();
     await expect(error.locator('[data-reference="code"]')).toHaveText(answer.code);
-    await expect(page.getByRole('button', { name: 'Sign out' })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Account' })).toHaveCount(0);
 
     failing = false;
     const back = error.getByRole('link', { name: 'Back to Gatekeep' });
     await expect(back).toHaveAttribute('href', '/');
     await back.click();
-    await expect(page.getByRole('button', { name: 'Sign out' })).toBeVisible();
+    await page.getByRole('button', { name: 'Account' }).click();
+    await expect(page.getByRole('menuitem', { name: 'Sign out' })).toBeVisible();
   });
 }
 
@@ -380,12 +400,12 @@ test('a refused sign-out keeps the Admin on the root with a banner, and a gone S
   await signInButton(page).click();
   await expect(page).toHaveURL(/\/$/);
 
-  await page.getByRole('button', { name: 'Sign out' }).click();
+  await signOut(page);
   await expect(page.getByTestId('signout-failed')).toBeVisible();
   await expect(page).toHaveURL(/\/$/);
 
   status = 401;
-  await page.getByRole('button', { name: 'Sign out' }).click();
+  await signOut(page);
   await expect(page).toHaveURL(/\/signin$/);
   expect(api.signOuts).toHaveLength(2);
 });

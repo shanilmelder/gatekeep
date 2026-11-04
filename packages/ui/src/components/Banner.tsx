@@ -9,6 +9,10 @@ export type BannerTone = 'info' | 'warn' | 'bad';
 export interface BannerAction {
   label: ReactNode;
   onClick: () => void;
+  /** The action is under way: the button shows its pending state and ignores activation. */
+  pending?: boolean;
+  /** The action can't be taken now, such as during a rate limit: drawn disabled, still focusable. */
+  disabled?: boolean;
 }
 
 export interface BannerProps extends Omit<HTMLAttributes<HTMLDivElement>, 'role' | 'children'> {
@@ -92,7 +96,13 @@ export function Banner({ tone = 'info', children, action, live, surface, classNa
       </svg>
       <div className={styles.text}>{children}</div>
       {action && (
-        <Button size="sm" className={styles.action} onClick={action.onClick}>
+        <Button
+          size="sm"
+          className={styles.action}
+          pending={action.pending}
+          aria-disabled={action.disabled || undefined}
+          onClick={action.onClick}
+        >
           {action.label}
         </Button>
       )}

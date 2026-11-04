@@ -248,11 +248,21 @@ docker compose -f deploy/compose.yaml up -d --wait --force-recreate
 - **OpenBao stays unhealthy** after starting: it hasn't been set up. Run step 6's `openbao-setup`.
 - **A setup tool prints a WARNING about ownership or modes**: the secrets directory is on a file system that ignores them, such as a Docker Desktop bind mount from Windows or macOS. Fine for trying Gatekeep out; not for a Deployment.
 
+## Using the Admin Dashboard
+
+The Admin Dashboard is desktop-first (NFR-17):
+
+- **1100px and wider:** the full sidebar.
+- **768 to 1099px:** the sidebar becomes an icon rail. Each icon is named by its group, and the rest of the page is unchanged.
+- **Below 768px: unsupported.** The layout isn't designed or tested there, and the page shows no notice. Use a wider window.
+
+The light and dark toggle in the top bar is kept per browser, in that browser's own storage. Until it's used, the Dashboard follows the device's colour scheme. The sign-in and setup pages always follow the device.
+
 ## Not yet covered
 
 These steps install the stack, not a usable product. What they can't deliver yet, and the work that owns each:
 
-- **A working Admin Dashboard.** After install every host reports healthy, but there's no Admin sign-in, bootstrap or Dashboard to use yet (Stories 1.21 to 1.25).
+- **A working Admin Dashboard.** Bootstrap, Admin sign-in and the Dashboard's shell work, but the shell has no pages to open yet. Tenant and Deployment pages arrive from Story 1.27 on.
 - **Certificate Transparency alerts.** Gatekeep raises none yet (Epic 11). Until then watch CT logs yourself for the wildcard `*.id.example.com` and the Admin hostname `admin.example.com`: search crt.sh regularly, or subscribe both names to a CT monitoring service that emails you on each new certificate. Any certificate Caddy didn't obtain is misissued.
 - **Emergency certificate replacement.** No procedure or rehearsal exists yet for a stolen key or misissued certificate (Story 13.6). As a stopgap: revoke the certificate with the CA that issued it (Let's Encrypt or ZeroSSL, through ACME revocation or the CA's own process); roll the Cloudflare token in the dashboard and write the new one to `cloudflare/dns-token`; then remove the certificates from `caddy-data` and restart Caddy, which obtains new ones and a new key:
 
