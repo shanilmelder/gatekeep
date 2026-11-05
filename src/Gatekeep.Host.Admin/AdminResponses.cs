@@ -76,6 +76,21 @@ internal static class AdminResponses
     /// <summary>A label change on a Tenant that is still being created (Story 1.28).</summary>
     public const string TenantNotActive = "tenant_not_active";
 
+    /// <summary>A deletion of a Tenant already being deleted, or deleted, or a creation retry of one (Story 1.29).</summary>
+    public const string TenantDeleted = "tenant_deleted";
+
+    /// <summary>A deletion of a Tenant whose creation Operation is still running (Story 1.29).</summary>
+    public const string TenantBusy = "tenant_busy";
+
+    /// <summary>A deletion whose typed confirmation isn't the Tenant's stored host, exactly (Story 1.29).</summary>
+    public const string ConfirmationMismatch = "confirmation_mismatch";
+
+    /// <summary>The Tenancy guard's SQLSTATE for a status change outside a Tenant's lifecycle (Story 1.29).</summary>
+    public const string StatusRefused = "GK007";
+
+    /// <summary>The role guard's SQLSTATE for Host.Admin deleting a role of a Tenant that isn't deleting (Story 1.29).</summary>
+    public const string RoleDeleteRefused = "GK009";
+
     /// <summary>The SQLSTATE the credential floor and maximum triggers raise, and nothing else (Story 1.26).</summary>
     public const string RaisedByTrigger = "GK001";
 
@@ -85,10 +100,15 @@ internal static class AdminResponses
     /// <summary>
     /// The Tenancy guards' own SQLSTATEs (Story 1.27): a host refused (<c>GK002</c>), a Tenant inserted
     /// as other than creating (<c>GK003</c>), a role refused (<c>GK004</c>), an activation without
-    /// settings (<c>GK005</c>) and, from Story 1.28, a label change on a Tenant that isn't active
-    /// (<c>GK006</c>). Each is a refusal, never a 500.
+    /// settings (<c>GK005</c>), from Story 1.28 a label change on a Tenant that isn't active
+    /// (<c>GK006</c>), and from Story 1.29 a status change outside the lifecycle, such as a deletion
+    /// start that lost a race (<c>GK007</c>), and a role delete of a Tenant that isn't deleting
+    /// (<c>GK009</c>). Each is a refusal, never a 500. <c>GK008</c> reaches only the Worker.
     /// </summary>
-    public static readonly IReadOnlyList<string> TenancyGuardStates = ["GK002", "GK003", "GK004", "GK005", LabelRefused];
+    public static readonly IReadOnlyList<string> TenancyGuardStates = ["GK002", "GK003", "GK004", "GK005", LabelRefused, StatusRefused, RoleDeleteRefused];
+
+    /// <summary>The guard states a deletion's start or retry maps to 409 <c>tenant_deleted</c> (Story 1.29).</summary>
+    public static readonly IReadOnlyList<string> DeletionGuardStates = [StatusRefused, RoleDeleteRefused];
 
     /// <summary>A foreign key a write broke, such as a credential removed under a grant being stored.</summary>
     public const string ForeignKeyViolation = "23503";
@@ -112,6 +132,9 @@ internal static class AdminResponses
         OperationNotFailed,
         TenantMismatch,
         TenantNotActive,
+        TenantDeleted,
+        TenantBusy,
+        ConfirmationMismatch,
     ];
 
     /// <summary>The Session cookie, expired: sent with a sign-out and a 401 for a stale cookie.</summary>

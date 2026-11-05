@@ -11,6 +11,7 @@ import {
   StatusBadge,
   formatMessage,
   useMessages,
+  useToast,
   type DataTableColumn,
 } from '@gatekeep/ui/admin';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -19,13 +20,10 @@ import { api } from '../session';
 import { useCapabilities } from './capabilities';
 import type { ShellRequest } from './CredentialsPage';
 import { TenantsReadState, environmentTag } from './CreateTenantPage';
-import { NEW_TENANT_PATH, readTenants, type TenantsRead } from './tenants';
-
-/** How often the list is read again while a Tenant on it is still being created. */
-export const REFRESH_MS = 2000;
-
-/** The most refreshes one read of the page makes, so a creation stuck running stops costing reads. */
-export const REFRESH_LIMIT = 60;
+import { DeleteTenantModal, type DeletionAction, type DeletionOutcome } from './DeleteTenantModal';
+import type { FreshAssertion } from './freshAssertion';
+import { inProgress, merge, reaches, refreshDelay } from './refresh';
+import { NEW_TENANT_PATH, isPermanent, readTenants, type TenantsRead } from './tenants';
 
 const DATE = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' });
 
@@ -35,23 +33,41 @@ function when(iso: string): string {
   return Number.isNaN(date.getTime()) ? iso : DATE.format(date);
 }
 
+
+/** Whether a row may be deleted: an active Tenant, or one whose creation failed. */
+function deletable(row: TenantResponse): boolean {
+  return row.status === 'active' || (row.status === 'creating' && row.creation?.status === 'failed');
+}
+
+export interface TenantsPageProps {
+  request: ShellRequest;
+  fresh: FreshAssertion;
+  /** Reads the shell's lists again, so the switcher drops a Tenant being deleted at once. */
+  onTenantsChanged: () => void;
+}
+
 /**
  * Tenants (Story 1.27): the Deployment's Tenants, oldest first, with each one's name, its stored
  * host, its environment tag and when it was created, and Load more for the next page. A Tenant
- * still being created says so, and one whose creation failed has its own Retry. Rows aren't links:
- * no Tenant page exists yet. Create Tenant shows only with deployment.tenants.create, and the
+ * still being created says so, and one whose creation failed has its own Retry. From Story 1.29,
+ * with deployment.tenants.delete, a trailing Delete opens Delete Tenant; a Tenant being deleted
+ * says so, and one whose deletion failed has its own Retry; a deleted one leaves the list. Rows
+ * aren't links: no Tenant page exists yet. The actions show only with their capability, and the
  * server still decides every request.
  */
-export function TenantsPage({ request }: { request: ShellRequest }) {
+export function TenantsPage({ request, fresh, onTenantsChanged }: TenantsPageProps) {
   const messages = useMessages();
+  const toast = useToast();
   const { has } = useCapabilities();
   const canCreate = has('deployment.tenants.create');
+  const canDelete = has('deployment.tenants.delete');
   const [read, setRead] = useState<TenantsRead | null>(null);
   const [attempt, setAttempt] = useState(0);
   const [more, setMore] = useState<'idle' | 'loading' | 'failed'>('idle');
   const [retrying, setRetrying] = useState<string | null>(null);
   const [refusal, setRefusal] = useState<{ kind: 'saveFailed'; code: string; traceId: string } | { kind: 'forbidden' } | null>(null);
-  const creating = read?.kind === 'ready' && read.list.tenants.some((row) => row.status === 'creating');
+  const [deletion, setDeletion] = useState<DeletionAction | null>(null);
+  const busy = read?.kind === 'ready' && read.list.tenants.some(inProgress);
   // The page's own life: a late answer after unmount lands nowhere.
   const alive = useRef(new AbortController());
 
@@ -66,36 +82,59 @@ export function TenantsPage({ request }: { request: ShellRequest }) {
     return () => controller.abort();
   }, [request, attempt]);
 
-  // While a Tenant is still being created, the first page is read again every REFRESH_MS, at most
-  // REFRESH_LIMIT times, and its rows replace the same Tenants' rows. A failed refresh changes
-  // nothing. Unmounting, or a new read, stops it.
+  // The loaded rows, for the refresh to know how far to read without restarting on every merge.
+  const loaded = useRef<readonly TenantResponse[]>([]);
+  loaded.current = read?.kind === 'ready' ? read.list.tenants : [];
+
+  // While a Tenant is still being created or deleted by a running Operation, the list is read
+  // again, from the first page through every page that holds a loaded row, after refreshDelay: 2
+  // seconds, backing off to 30, and never stopping, so a long deletion is never shown "Deleting"
+  // for good. Its rows replace the same Tenants' rows; a Tenant deleted since leaves the list. A
+  // refresh that failed for now changes nothing; one that would fail the same way every time, such
+  // as a 403, stops the refreshes. A failed creation or deletion isn't in progress: it waits for
+  // its Retry. Unmounting, or a new read, stops them too.
   useEffect(() => {
-    if (!creating) return;
+    if (!busy) return;
     const controller = new AbortController();
     let timer: ReturnType<typeof setTimeout> | undefined;
-    let left = REFRESH_LIMIT;
+    let done = 0;
     const tick = async () => {
-      left -= 1;
-      const fresh = await readTenants(request, undefined, controller.signal);
-      if (controller.signal.aborted) return;
-      if (fresh.kind === 'ready') {
-        const byId = new Map(fresh.list.tenants.map((row) => [row.id, row] as const));
-        // Once no row is creating, the effect ends with the state that says so.
+      done += 1;
+      let fresh: TenantResponse[] = [];
+      let cursor: string | null | undefined;
+      let failure = null;
+      // Through the last loaded row: a busy row past the first page is read again too.
+      for (;;) {
+        const next = await readTenants(request, cursor ?? undefined, controller.signal);
+        if (controller.signal.aborted) return;
+        if (next.kind !== 'ready') {
+          failure = next.failure;
+          break;
+        }
+        fresh = [...fresh, ...next.list.tenants];
+        cursor = next.list.nextCursor;
+        if (reaches({ tenants: fresh, nextCursor: cursor }, loaded.current)) break;
+      }
+
+      if (failure === null) {
+        // Once no row is in progress, the effect ends with the state that says so.
         setRead((current) =>
           current?.kind === 'ready'
-            ? { kind: 'ready', list: { ...current.list, tenants: current.list.tenants.map((row) => byId.get(row.id) ?? row) } }
+            ? { kind: 'ready', list: { ...current.list, tenants: merge(current.list.tenants, { tenants: fresh, nextCursor: cursor }) } }
             : current,
         );
+      } else if (isPermanent(failure)) {
+        return;
       }
-      if (left > 0) timer = setTimeout(() => void tick(), REFRESH_MS);
+      timer = setTimeout(() => void tick(), refreshDelay(done));
     };
-    timer = setTimeout(() => void tick(), REFRESH_MS);
+    timer = setTimeout(() => void tick(), refreshDelay(0));
     return () => {
       controller.abort();
       clearTimeout(timer);
     };
-    // Only a new read, or the page going from creating to not, restarts or ends the refreshes.
-  }, [creating, request, attempt]);
+    // Only a new read, or the page going from busy to not, restarts or ends the refreshes.
+  }, [busy, request, attempt]);
 
   const loadMore = useCallback(async () => {
     if (read?.kind !== 'ready' || read.list.nextCursor == null || more === 'loading') return;
@@ -128,7 +167,8 @@ export function TenantsPage({ request }: { request: ShellRequest }) {
       // The renewal brought the Admin back and didn't send it again: they press Retry once more.
       return;
     }
-    // 202 runs it again, and a 409 says it isn't failed any more: the list read next says where it stands.
+    // 202 runs it again, and a 409 says it isn't failed any more, or the Tenant is being deleted
+    // (Story 1.29): the list read next says where it stands.
     if (result !== null && (result.status === 202 || result.status === 409)) {
       setAttempt((n) => n + 1);
       return;
@@ -139,6 +179,15 @@ export function TenantsPage({ request }: { request: ShellRequest }) {
     }
     const problem = result === null || result.ok ? null : result.problem;
     setRefusal({ kind: 'saveFailed', code: problem?.code ?? 'unavailable', traceId: problem?.traceId ?? '' });
+  }
+
+  function deleted(outcome: DeletionOutcome) {
+    setDeletion(null);
+    setRefusal(null);
+    if (outcome === 'started') toast(messages.deleteTenantStarted);
+    // The list, and the shell's lists, so the switcher drops the Tenant at once.
+    setAttempt((n) => n + 1);
+    onTenantsChanged();
   }
 
   const create = () => navigate(NEW_TENANT_PATH);
@@ -166,6 +215,20 @@ export function TenantsPage({ request }: { request: ShellRequest }) {
                 </StatusBadge>
               </>
             )}
+            {row.status === 'deleting' && row.deletion?.status !== 'failed' && (
+              <>
+                {' '}
+                <DraftBadge data-testid="tenant-deleting">{messages.tenantsDeleting}</DraftBadge>
+              </>
+            )}
+            {row.status === 'deleting' && row.deletion?.status === 'failed' && (
+              <>
+                {' '}
+                <StatusBadge status="blocked" data-testid="tenant-deletion-failed">
+                  {messages.tenantsDeletionFailed}
+                </StatusBadge>
+              </>
+            )}
           </>
         ),
       },
@@ -177,12 +240,14 @@ export function TenantsPage({ request }: { request: ShellRequest }) {
       },
       { key: 'created', header: messages.tenantsColumnCreated, cell: (row) => when(row.createdAt) },
     ];
-    if (canCreate && rows.some((row) => row.creation?.status === 'failed')) {
+    const creationRetry = (row: TenantResponse) => canCreate && row.status === 'creating' && row.creation?.status === 'failed';
+    const deletionRetry = (row: TenantResponse) => canDelete && row.status === 'deleting' && row.deletion?.status === 'failed';
+    if (rows.some((row) => creationRetry(row) || deletionRetry(row))) {
       list.push({
         key: 'retry',
         header: messages.retry,
         cell: (row) =>
-          row.creation?.status === 'failed' ? (
+          creationRetry(row) ? (
             <Button
               variant="secondary"
               size="sm"
@@ -191,6 +256,32 @@ export function TenantsPage({ request }: { request: ShellRequest }) {
               onClick={() => void retry(row)}
             >
               {messages.retry}
+            </Button>
+          ) : deletionRetry(row) ? (
+            <Button
+              variant="secondary"
+              size="sm"
+              aria-label={formatMessage(messages.tenantsRetryDeletingNamed, { name: row.name })}
+              onClick={() => setDeletion({ mode: 'retry', tenant: row })}
+            >
+              {messages.retry}
+            </Button>
+          ) : null,
+      });
+    }
+    if (canDelete) {
+      list.push({
+        key: 'delete',
+        header: messages.tenantsDelete,
+        cell: (row) =>
+          deletable(row) ? (
+            <Button
+              variant="destructive"
+              size="sm"
+              aria-label={formatMessage(messages.tenantsDeleteNamed, { name: row.name })}
+              onClick={() => setDeletion({ mode: 'delete', tenant: row })}
+            >
+              {messages.tenantsDelete}
             </Button>
           ) : null,
       });
@@ -253,6 +344,7 @@ export function TenantsPage({ request }: { request: ShellRequest }) {
           </div>
         )}
       </TenantsReadState>
+      <DeleteTenantModal action={deletion} request={request} fresh={fresh} onClose={() => setDeletion(null)} onDone={deleted} />
     </SectionPage>
   );
 }

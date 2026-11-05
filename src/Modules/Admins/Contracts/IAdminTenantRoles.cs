@@ -24,4 +24,15 @@ public interface IAdminTenantRoles
     /// </summary>
     /// <exception cref="InvalidOperationException">The context has a Tenant.</exception>
     Task<IReadOnlyList<Guid>> ListTenantIdsAsync(CommandContext context, Guid adminId, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Deletes every <c>tenant_role</c> row in <paramref name="tenantId"/>, in a Deployment context
+    /// (Story 1.29), so every Tenant route refuses its former members at once: the authorizer reads
+    /// roles on every request and caches nothing. Called only by Tenant deletion's start, once the
+    /// Tenant is <c>deleting</c>; the trigger refuses it for any other Tenant.
+    /// </summary>
+    /// <returns>How many roles ended.</returns>
+    /// <exception cref="InvalidOperationException">The context has a Tenant.</exception>
+    [StateChanging]
+    Task<int> RemoveAllForTenantAsync(CommandContext context, Guid tenantId, CancellationToken cancellationToken);
 }

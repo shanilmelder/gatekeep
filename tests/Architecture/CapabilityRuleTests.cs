@@ -179,7 +179,27 @@ public class CapabilityRuleTests
         Assert.Null(Fresh(operations["put /api/v1/tenants/{tenantId}/label"])!.Target);
         Assert.Equal("tenant.label.manage", Fresh(operations["put /api/v1/tenants/{tenantId}/label"])!.Action);
         Assert.Equal(HandlerEnforced.Order(), operations.Where(o => Fresh(o.Value)?.EnforcedBy == "handler").Select(o => o.Key).Order());
+
+        // Story 1.29: the first production Always routes, a deletion's start and retry, are
+        // checks-enforced and bound to the Tenant they act on.
+        foreach (var route in DeletionRoutes)
+        {
+            var fresh = Fresh(operations[route])!;
+            Assert.Equal("checks", fresh.EnforcedBy);
+            Assert.Equal("deployment.tenants.delete", fresh.Action);
+            Assert.Equal("targetTenantId", fresh.Target);
+        }
+
+        Assert.Equal(
+            DeletionRoutes.Order(StringComparer.Ordinal),
+            operations.Where(o => Fresh(o.Value)?.Action == "deployment.tenants.delete").Select(o => o.Key).Order(StringComparer.Ordinal));
     }
+
+    private static readonly string[] DeletionRoutes =
+    [
+        "post /api/v1/deployment/tenants/{targetTenantId}/deletion",
+        "post /api/v1/deployment/tenants/{targetTenantId}/deletion/retry",
+    ];
 
     [Theory]
     [MemberData(nameof(Violations))]

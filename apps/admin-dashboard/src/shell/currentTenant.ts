@@ -17,6 +17,7 @@ export interface Listed {
 export interface Store {
   getItem(key: string): string | null;
   setItem(key: string, value: string): void;
+  removeItem?(key: string): void;
 }
 
 const TENANT_PATH = /^\/tenants\/([^/]+)(\/.*)?$/;
@@ -91,6 +92,15 @@ export function remember(adminId: string, tenantId: string, store?: Store | null
     storage(store)?.setItem(rememberKey(adminId), tenantId);
   } catch {
     // Storage blocked or full: the top bar falls back to the first listed Tenant.
+  }
+}
+
+/** Forgets the Admin's last Tenant in this browser (Story 1.29), as when it is lost. A failure forgets nothing. */
+export function forget(adminId: string, store?: Store | null): void {
+  try {
+    storage(store)?.removeItem?.(rememberKey(adminId));
+  } catch {
+    // Storage blocked: the remembered Tenant is still filtered to the listed ones, so it grants nothing.
   }
 }
 

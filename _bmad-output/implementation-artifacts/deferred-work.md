@@ -62,8 +62,8 @@
   summary: Set a secret ID lifetime and write the replacement procedure for one leaked secret ID.
   evidence: Story 1.7 setup uses secret_id_ttl=0. Story 1.10 delivers secret IDs.
 - source_spec: `_bmad-output/implementation-artifacts/spec-1-8-run-tenant-scoped-jobs.md`
-  summary: Decide job retention for dead jobs and for Tenant deletion, since job and job_payload keys are ON DELETE RESTRICT.
-  evidence: Story 1.8 purges only done jobs.
+  summary: Decide job retention for dead jobs.
+  evidence: Story 1.8 purges only done jobs. Story 1.29 takes the Tenant deletion half: the `tenant` row is a tombstone and is never deleted, so no `RESTRICT` key to it fires, and the completion purges the Tenant's `job_payload` rows.
 - source_spec: `_bmad-output/implementation-artifacts/spec-1-8-run-tenant-scoped-jobs.md`
   summary: Guard who may attach a job_payload row, so only the enqueuing transaction can.
   evidence: Story 1.8 review: the enqueuing roles cannot read job and SECURITY DEFINER is banned.
@@ -74,8 +74,8 @@
   summary: Give operations.job.dead a job reference, and raise the Security Alert.
   evidence: G-17.
 - source_spec: `_bmad-output/implementation-artifacts/spec-1-9-track-long-running-operations.md`
-  summary: Order Operation stages, so Tenant deletion can purge before it removes the Tenant.
-  evidence: Story 1.9 runs stages unordered.
+  summary: Order Operation stages, if a later Operation needs one stage to finish before another starts.
+  evidence: Story 1.9 runs stages unordered. Story 1.29 no longer needs it: a deleted Tenant is a tombstone marked deleted by the completion handler, which runs after every stage, and its purge and key destruction are independent stages.
 - source_spec: `_bmad-output/implementation-artifacts/spec-1-9-track-long-running-operations.md`
   summary: Restrict Operation and step status transitions and step inserts to the transitions start, retry and the Worker make.
   evidence: Column grants let gk_admin, gk_cli and gk_worker set any status and add steps. T-46.
@@ -179,9 +179,6 @@
   summary: Build `MachinePrincipal` from validated Management API tokens, add the Management API bearer scheme on `/api/v1/tenants/*`, and map each capability to the Management API Permission that grants it, as ADV-22 asks (Epic 17, Story 17.3).
   evidence: Story 1.24 has no `src/` construction of `MachinePrincipal` (an architecture rule holds it to that); machine denial is proven only at handler level with `TestOnlyMachinePrincipal`.
 - source_spec: `_bmad-output/implementation-artifacts/spec-1-24-enforce-capabilities-and-tenant-scoped-routes.md`
-  summary: Make a deleted Tenant's roles grant nothing (Story 1.29).
-  evidence: Story 1.24's authorizer doesn't read `tenant` (AD-1), and `tenant_role` keeps `RESTRICT` keys, so deletion isn't designed yet.
-- source_spec: `_bmad-output/implementation-artifacts/spec-1-24-enforce-capabilities-and-tenant-scoped-routes.md`
   summary: Grant `UPDATE (role)` and `DELETE` on `tenant_role`, audit role changes, guard the last Tenant Owner, and show the "role removed mid-session" banner (Story 8.4).
   evidence: Story 1.24 reads roles on every request, so a removal counts at once, but nothing writes or audits role changes.
 - source_spec: `_bmad-output/implementation-artifacts/spec-1-24-enforce-capabilities-and-tenant-scoped-routes.md`
@@ -197,14 +194,14 @@
   summary: Help in the top bar, opening the API reference (Story 17.5).
   evidence: Story 1.25 out of scope. FR-44: a deferred feature doesn't appear in any form, so the top bar has no Help until the reference exists.
 - source_spec: `_bmad-output/implementation-artifacts/spec-1-25-open-the-admin-shell.md`
-  summary: The "role removed mid-session" and "Tenant deleted" banners (Story 8.4, Story 1.29).
-  evidence: Story 1.25 out of scope. The shell reads capabilities on every navigation, so a removal counts at once, but no banner says so.
+  summary: Prove the lost-Tenant banner for a removed role (Story 8.4).
+  evidence: Story 1.25 out of scope. Story 1.29 shows one banner, "It was deleted, or your role in it was removed", when a Tenant the shell listed drops out; only deletion can make that happen until Story 8.4 removes single roles.
 - source_spec: `_bmad-output/implementation-artifacts/spec-1-25-open-the-admin-shell.md`
   summary: Tenant page titles in `<title>`.
   evidence: Story 1.25 out of scope. Every shell page keeps the document title "Gatekeep Admin Dashboard".
 - source_spec: `_bmad-output/implementation-artifacts/spec-1-26-confirm-sensitive-actions-and-manage-admin-credentials.md`
-  summary: The first HTTP test of an `Always` capability route on a production route (Tenant deletion, Story 1.29; Admin invites and removal, Epic 8).
-  evidence: Story 1.26 proves the checks' consume on a test-only route in `RequestChecksTests`; no production route declares an `Always` capability yet.
+  summary: The first HTTP test of an `Always` capability route for Admin invites and removal (Epic 8).
+  evidence: Story 1.26 proves the checks' consume on a test-only route in `RequestChecksTests`. Story 1.29's Tenant deletion start and retry are the first production `Always` routes, tested in `TenantDeletionTests`.
 - source_spec: `_bmad-output/implementation-artifacts/spec-1-26-confirm-sensitive-actions-and-manage-admin-credentials.md`
   summary: The `WhenProdTenant` predicate for callback URLs (`tenant.application_callbacks.manage`, Epic 3) and the `WhenLoweringPolicy` predicate (Epic 6), each evaluated in its route's handler before `FreshAssertionGate.RequireAsync`.
   evidence: Story 1.26 builds the gate, the `EvaluatesFreshAssertion` marker and the reviewed handler-enforced list; registration begin is its only caller. Story 1.28 evaluates `WhenProdTenant` for `tenant.label.manage` only, on the locked label.
@@ -272,14 +269,8 @@
   summary: The built-in API record and the default Connection as Tenant creation stages (their stories).
   evidence: Story 1.27 out of scope: every stage a later story adds runs before the completion handler activates the Tenant.
 - source_spec: `_bmad-output/implementation-artifacts/spec-1-27-create-tenants-with-permanent-subdomains.md`
-  summary: Tenant deletion, its purge contracts, and a `deleted` status that resolves to the same fixed 404 (Story 1.29).
-  evidence: Story 1.27: `tenant` and `tenant_host` rows are never deleted, and `tenant_host_guard` refuses it for every role, so deletion must soft-delete; `tenant.status` allows only `creating` and `active`.
-- source_spec: `_bmad-output/implementation-artifacts/spec-1-27-create-tenants-with-permanent-subdomains.md`
   summary: A Tenant page that a Tenants row opens (Story 3.1).
   evidence: Story 1.27: Tenants rows aren't links, as no Tenant page exists (FR-44). Story 1.28 keeps rows plain text: a Deployment Owner may hold no role in a listed Tenant, so a row link would often lead to the forbidden page.
-- source_spec: `_bmad-output/implementation-artifacts/spec-1-27-create-tenants-with-permanent-subdomains.md`
-  summary: Ordered Operation stages (carried on to Story 1.29).
-  evidence: Story 1.27 adds a completion handler instead, which runs after every stage; Tenant deletion still needs purge before removal.
 - source_spec: `_bmad-output/implementation-artifacts/spec-1-27-create-tenants-with-permanent-subdomains.md`
   summary: Restrict Operation and step status transitions (T-46, carried on).
   evidence: Story 1.27 doesn't change the Operation grants: `gk_admin`, `gk_cli` and `gk_worker` can still set any status.
@@ -338,8 +329,8 @@
   summary: The `X-Gatekeep-Tenant` mismatch rule for the Management API's bearer scheme (Story 17.3).
   evidence: Story 1.28 applies it to Admin Sessions, the only principals today.
 - source_spec: `_bmad-output/implementation-artifacts/spec-1-28-switch-tenants-and-set-the-environment-label.md`
-  summary: The "role removed mid-session" and "Tenant deleted" banners (Story 8.4, Story 1.29, carried on).
-  evidence: Story 1.28 reads the switcher's list on every navigation, so a removed role drops out of it at once, but no banner says so.
+  summary: Prove the lost-Tenant banner for a removed role (Story 8.4, carried on).
+  evidence: Story 1.28 reads the switcher's list on every navigation. Story 1.29's banner covers both causes, and is proven for deletion only.
 - source_spec: `_bmad-output/implementation-artifacts/spec-1-28-switch-tenants-and-set-the-environment-label.md`
   summary: Tenant page titles in `<title>` (carried on from Story 1.25).
   evidence: Story 1.28's Tenant settings page keeps the document title "Gatekeep Admin Dashboard".
@@ -349,3 +340,39 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-1-28-switch-tenants-and-set-the-environment-label.md`
   summary: Every later rule that reads the label (the 90-day Prod retention floor, Prod callback confirmation, Dev-only email verification off, the conformance Tenant) reads it when its own setting changes, and never rewrites a setting because the label changed.
   evidence: Story 1.28: no setting reads the label yet, so removing Prod writes only `tenant.label`; threat model T-56.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-29-delete-a-tenant-without-touching-others.md`
+  summary: Destroy a deleted Tenant's `sig-` and `mgmt-` keys and purge its `signing_key` rows in the Keys purge (Story 2.3).
+  evidence: Story 1.29 destroys the six secret class keys only; Signing and Management keys don't exist before Story 2.3.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-29-delete-a-tenant-without-touching-others.md`
+  summary: A caller for the `audit.chain.purge` Operation, to schedule a Tenant's chain purge again after its job went dead.
+  evidence: Story 1.29's completion enqueues the purge job itself, from the Tenant's scope; the Operation stays registered with no production caller.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-29-delete-a-tenant-without-touching-others.md`
+  summary: Cancel or fail a deleted Tenant's pending jobs.
+  evidence: Story 1.29 leaves them: each later job type must re-check the Tenant's status (AD-15). The completion purges their payloads.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-29-delete-a-tenant-without-touching-others.md`
+  summary: Have the retention sweep skip a deleted Tenant whose chain is purged.
+  evidence: Story 1.29: the sweep lists every `tenant` row, tombstones included, so it keeps enqueuing apply jobs that find nothing to cut.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-29-delete-a-tenant-without-touching-others.md`
+  summary: Show tombstones, and read a deleted Tenant's Logs, from the Dashboard (Epic 7).
+  evidence: Story 1.29 `[ASSUMPTION]`: a deleted Tenant leaves the Tenants list; its chain is kept but no page reads it.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-29-delete-a-tenant-without-touching-others.md`
+  summary: A Tenants list refresh that covers rows loaded with Load more.
+  evidence: Story 1.29: the bounded refresh re-reads the first page only, so a deleting row on a later page keeps "Deleting" until the page reloads.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-29-delete-a-tenant-without-touching-others.md`
+  summary: An HTTP test for the start route mapping `GK007` and `GK009` to 409 `tenant_deleted`.
+  evidence: Story 1.29 review: the start holds the Tenant's row lock before it writes, so a concurrent start waits and finds the Tenant deleting; reaching either guard needs a fault seam.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-29-delete-a-tenant-without-touching-others.md`
+  summary: A test for the purge stage's `GK008` savepoint rollback (`purge_refused`).
+  evidence: Story 1.29 review: the stage re-checks the Tenant is deleting under its own `FOR UPDATE` lock before it deletes settings, so the guard is unreachable without a fault seam.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-29-delete-a-tenant-without-touching-others.md`
+  summary: Map `GK010` (a Tenant row written for a Tenant being deleted, or deleted) on Host.Hosted's first write route to its fixed 404 or 503, never a 500 (Epic 2).
+  evidence: Story 1.29 review: `tenant_row_guard` raises it on every purged table, but Host.Hosted has no write route yet, so there is nothing to map.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-29-delete-a-tenant-without-touching-others.md`
+  summary: Close the residual race on purged-table writes: a statement that passed `tenant_row_guard` before the deletion started but runs its foreign-key check only after the purge stage's lock commits keeps its row.
+  evidence: Story 1.29 review: no runtime role but gk_admin and gk_worker may lock `tenant` rows, so the guard's read takes no lock; the purge stage's `FOR UPDATE` waits out every writer whose foreign-key check already holds the row, which leaves only a statement stalled between its row trigger and its check across the whole start-to-purge interval.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-29-delete-a-tenant-without-touching-others.md`
+  summary: Fault seam to test the deletion guard mappings that the locks make unreachable.
+  evidence: Story 1.29 review.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-29-delete-a-tenant-without-touching-others.md`
+  summary: Destroy a deleted Tenant's Signing Keys.
+  evidence: Story 1.29 review; Story 2.3.

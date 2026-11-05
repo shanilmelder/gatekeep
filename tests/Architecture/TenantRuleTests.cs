@@ -23,7 +23,18 @@ public class TenantRuleTests
 
     private static readonly string Root = EdgeList.FindRepositoryRoot(AppContext.BaseDirectory);
 
-    private static readonly string[] Writes = ["put", "patch", "delete"];
+    private static readonly string[] Writes = ["post", "put", "patch", "delete"];
+
+    /// <summary>
+    /// The reviewed writes under the Deployment Tenants path: creation (Story 1.27), and a deletion's
+    /// start and retry (Story 1.29). A Tenant is never changed there, and a delete or patch is reported.
+    /// </summary>
+    private static readonly string[] ReviewedWrites =
+    [
+        "post /api/v1/deployment/tenants",
+        "post /api/v1/deployment/tenants/{targetTenantId}/deletion",
+        "post /api/v1/deployment/tenants/{targetTenantId}/deletion/retry",
+    ];
 
     /// <summary>Where <c>tenant_host</c> may appear: Tenancy, and the schema it lives in.</summary>
     private static readonly string[] TenantHostOwners = ["src/Modules/Tenancy/", "src/Adapters/Postgres/"];
@@ -75,7 +86,10 @@ public class TenantRuleTests
     {
         using var document = JsonDocument.Parse(File.ReadAllText(Path.Combine(Root, Document)));
 
-        Assert.Contains(Operations(document), o => o.Path == CreatePath);
+        Assert.Equal(ReviewedWrites.Order(StringComparer.Ordinal), Operations(document)
+            .Where(o => IsUnderTenantsPath(o.Path) && Writes.Contains(o.Method))
+            .Select(o => $"{o.Method} {o.Path}")
+            .Order(StringComparer.Ordinal));
         Assert.Empty(WriteViolations(document));
     }
 
@@ -86,15 +100,58 @@ public class TenantRuleTests
             """
             { "paths": {
                 "/api/v1/deployment/tenants": { "get": {}, "post": {} },
+                "/api/v1/deployment/tenants/{targetTenantId}/deletion": { "post": {}, "get": {}, "delete": {} },
                 "/api/v1/deployment/tenants/{id}": { "delete": {}, "patch": {} },
+                "/api/v1/deployment/tenants/{id}/rename": { "post": {} },
                 "/api/v1/deployment/tenantsx": { "put": {} }
             } }
             """);
 
         Assert.Equal(
-            ["delete /api/v1/deployment/tenants/{id}", "patch /api/v1/deployment/tenants/{id}"],
+            [
+                "delete /api/v1/deployment/tenants/{id}",
+                "delete /api/v1/deployment/tenants/{targetTenantId}/deletion",
+                "patch /api/v1/deployment/tenants/{id}",
+                "post /api/v1/deployment/tenants/{id}/rename",
+            ],
             WriteViolations(document));
     }
+
+    /// <summary>Story 1.29: only the delete body carries a typed confirmation.</summary>
+    [Fact]
+    public void Only_the_delete_request_has_a_confirmation()
+    {
+        using var document = JsonDocument.Parse(File.ReadAllText(Path.Combine(Root, Document)));
+
+        Assert.True(HasProperty(document.RootElement.GetProperty("components").GetProperty("schemas").GetProperty(DeleteRequest), "confirmation"));
+        Assert.Empty(ConfirmationViolations(document));
+    }
+
+    [Fact]
+    public void A_second_confirmation_is_reported()
+    {
+        using var document = JsonDocument.Parse(
+            """
+            { "components": { "schemas": {
+                "DeleteTenantRequest": { "properties": { "confirmation": { "type": "string" } } },
+                "RemoveUserRequest": { "properties": { "Confirmation": { "type": "string" } } },
+                "CreateTenantRequest": { "properties": { "name": { "type": "string" } } }
+            } } }
+            """);
+
+        Assert.Equal(["RemoveUserRequest has a confirmation property: only DeleteTenantRequest may."], ConfirmationViolations(document));
+    }
+
+    private const string DeleteRequest = "DeleteTenantRequest";
+
+    private static List<string> ConfirmationViolations(JsonDocument document) =>
+        [.. document.RootElement.GetProperty("components").GetProperty("schemas").EnumerateObject()
+            .Where(s => s.Name != DeleteRequest && HasProperty(s.Value, "confirmation"))
+            .Select(s => $"{s.Name} has a confirmation property: only {DeleteRequest} may.")
+            .Order(StringComparer.Ordinal)];
+
+    private static bool IsUnderTenantsPath(string path) =>
+        path == CreatePath || path.StartsWith(CreatePath + "/", StringComparison.Ordinal);
 
     [Fact]
     public void Host_Hosted_resolves_its_Tenant_before_anything_else()
@@ -479,8 +536,9 @@ public class TenantRuleTests
 
     private static List<string> WriteViolations(JsonDocument document) =>
         [.. Operations(document)
-            .Where(o => (o.Path == CreatePath || o.Path.StartsWith(CreatePath + "/", StringComparison.Ordinal)) && Writes.Contains(o.Method))
+            .Where(o => IsUnderTenantsPath(o.Path) && Writes.Contains(o.Method))
             .Select(o => $"{o.Method} {o.Path}")
+            .Where(w => !ReviewedWrites.Contains(w))
             .Order(StringComparer.Ordinal)];
 
     /// <summary>

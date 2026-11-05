@@ -251,6 +251,13 @@ public sealed class OpenBaoKeyCustody : IKeyCustody, IDisposable
     {
         ArgumentNullException.ThrowIfNull(key);
 
+        // A key already gone is destroyed: a repeat, or a rerun part way, succeeds (Story 1.29). The
+        // read is under the same policy paths, so a role that may not delete is still refused here.
+        if (!await ExistsAsync(key, KeyOperation.Delete, cancellationToken))
+        {
+            return;
+        }
+
         // Transit refuses to delete a key until its config allows it.
         await SendAsync(
             key,
@@ -300,6 +307,42 @@ public sealed class OpenBaoKeyCustody : IKeyCustody, IDisposable
 
         using var second = await SendOnceAsync(key, operation, method, $"v1/{Mount}/{path}", body, token, cancellationToken);
         return await ReadAsync(key, operation, second, cancellationToken);
+    }
+
+    /// <summary>
+    /// Whether <c>transit/keys/{key}</c> exists: a 404 is false, a 200 true, and anything else fails as
+    /// <see cref="SendAsync"/> does, a 403 as <see cref="KeyCustodyFailure.Refused"/>, with one login
+    /// and one retry for a reused token.
+    /// </summary>
+    private async Task<bool> ExistsAsync(KeyName key, KeyOperation operation, CancellationToken cancellationToken)
+    {
+        var path = $"v1/{Mount}/keys/{key}";
+        var (token, fresh) = await TokenAsync(key, operation, stale: null, cancellationToken);
+
+        using (var first = await SendOnceAsync(key, operation, HttpMethod.Get, path, null, token, cancellationToken))
+        {
+            if (first.StatusCode == HttpStatusCode.NotFound)
+            {
+                return false;
+            }
+
+            if (first.StatusCode != HttpStatusCode.Forbidden || fresh)
+            {
+                await ReadAsync(key, operation, first, cancellationToken);
+                return true;
+            }
+        }
+
+        (token, _) = await TokenAsync(key, operation, stale: token, cancellationToken);
+
+        using var second = await SendOnceAsync(key, operation, HttpMethod.Get, path, null, token, cancellationToken);
+        if (second.StatusCode == HttpStatusCode.NotFound)
+        {
+            return false;
+        }
+
+        await ReadAsync(key, operation, second, cancellationToken);
+        return true;
     }
 
     private async Task<HttpResponseMessage> SendOnceAsync(

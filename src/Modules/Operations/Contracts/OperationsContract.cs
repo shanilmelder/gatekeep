@@ -33,8 +33,9 @@ public static class OperationsContract
     public static JobType PurgeChain => ProductionJobs.PurgeChain;
 
     /// <summary>
-    /// The Operation that purges a deleted Tenant's audit chain once its retention ends. Its
-    /// future caller, Tenant deletion, starts it with one <see cref="PurgeChainStage"/> step for the Tenant.
+    /// The Operation that purges a deleted Tenant's audit chain once its retention ends, with one
+    /// <see cref="PurgeChainStage"/> step for the Tenant. It has no production caller yet: a deletion's
+    /// completion enqueues the purge job itself (Story 1.29).
     /// </summary>
     public static OperationType PurgeChainOperation => AuditRetentionJobs.PurgeOperation;
 
@@ -52,8 +53,29 @@ public static class OperationsContract
     public static OperationCode TenantCreationStage => TenantCreation.SecretClassKeysStage;
 
     /// <summary>
-    /// The code-owned production Operation types: <see cref="PurgeChainOperation"/> and
-    /// <see cref="TenantCreationOperation"/>. Tenant deletion arrives in its own story.
+    /// Purges a deleting Tenant's data in every module but Audit, and destroys its secret class keys,
+    /// then, once both stages have succeeded, marks it deleted and schedules its chain's purge (Story
+    /// 1.29). Tenant deletion starts it scoped to the Tenant, with one <see cref="TenantPurgeStage"/>
+    /// and one <see cref="SecretClassKeysDestroyStage"/> step for it.
+    /// </summary>
+    public static OperationType TenantDeletionOperation => TenantDeletion.Type;
+
+    /// <summary>The deletion's stage calling each module's Tenant purge, in <see cref="TenantPurgeModules"/> order.</summary>
+    public static OperationCode TenantPurgeStage => TenantDeletion.PurgeStage;
+
+    /// <summary>The deletion's stage destroying the six secret class keys (AD-10).</summary>
+    public static OperationCode SecretClassKeysDestroyStage => TenantDeletion.DestroyKeysStage;
+
+    /// <summary>
+    /// The modules whose Tenant data a deletion purges, in order: every owner of a <c>tenant</c>
+    /// table but Audit, whose chain is kept until its retention ends. Operations' own is last, in
+    /// the completion. The architecture tests hold it to the table registry.
+    /// </summary>
+    public static IReadOnlyList<string> TenantPurgeModules => TenantDeletion.PurgeModules;
+
+    /// <summary>
+    /// The code-owned production Operation types: <see cref="PurgeChainOperation"/>,
+    /// <see cref="TenantCreationOperation"/> and <see cref="TenantDeletionOperation"/>.
     /// </summary>
     public static OperationRegistry ProductionOperationRegistry => ProductionOperations.Registry;
 

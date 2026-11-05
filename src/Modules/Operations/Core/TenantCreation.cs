@@ -30,11 +30,24 @@ internal static class TenantCreation
         [new OperationStage(SecretClassKeysStage, OperationStageKind.Tenant, CreateSecretClassKeysAsync)],
         ActivateAsync);
 
-    /// <summary>Creating a key that exists returns it unchanged, so a rerun or retry is harmless.</summary>
+    /// <summary>A stage for a Tenant that stopped being created, by a deletion's start: no key is created (Story 1.29).</summary>
+    public static readonly OperationCode TenantNotCreating = new("tenant_not_creating");
+
+    /// <summary>
+    /// Creating a key that exists returns it unchanged, so a rerun or retry is harmless. The Tenant's
+    /// status is re-checked first under <c>FOR SHARE</c> (Story 1.29): a deletion's start, which
+    /// conflicts with it, either ran before and is seen, or waits, so no key is created after a
+    /// deletion's destroy stage looked.
+    /// </summary>
     private static async Task<OperationStepResult> CreateSecretClassKeysAsync(OperationStepRun run, CancellationToken cancellationToken)
     {
         var tenantId = run.TenantId
             ?? throw new InvalidOperationException("The secret class keys stage runs for one Tenant.");
+
+        if (await Tenants.LockStatusAsync(run.Context, tenantId, cancellationToken) != TenantStatus.Creating)
+        {
+            return OperationStepResult.Failure(TenantNotCreating);
+        }
 
         if (run.Custody is not { } custody)
         {
@@ -53,6 +66,7 @@ internal static class TenantCreation
         return OperationStepResult.Success();
     }
 
+    /// <summary>Does nothing to a Tenant that isn't creating, so a deleted one never gets settings back (Story 1.29).</summary>
     private static Task ActivateAsync(OperationCompletion completion, CancellationToken cancellationToken) =>
         Tenants.ActivateAsync(completion.Context, completion.TenantId, cancellationToken);
 }

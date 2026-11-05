@@ -1,4 +1,4 @@
-import type { AdminSignInOptionsResponse, AdminSignInRequest, ApiProblem } from '@gatekeep/api-client';
+import type { AdminSignInOptionsResponse, AdminSignInRequest, AdminTenant, ApiProblem } from '@gatekeep/api-client';
 import { GenericErrorScreen } from '@gatekeep/hosted-screens';
 import {
   AdminShell,
@@ -19,10 +19,12 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { navigate, useLocation } from '../navigation';
 import { api, setCsrfToken } from '../session';
 import { assertWithSheet } from '../webauthn';
-import { CapabilitiesProvider, capabilitiesOf, pathTenant, useCapabilityReads, type ShellRead } from './capabilities';
-import { current as currentTenant, remember, remembered, switchHref, tenantOfPath } from './currentTenant';
+import { CapabilitiesProvider, capabilitiesOf, pathTenant, useCapabilityReads, type Answered, type ShellRead } from './capabilities';
+import { current as currentTenant, forget, remember, remembered, switchHref, tenantOfPath } from './currentTenant';
 import { CredentialsPage, type ShellRequest } from './CredentialsPage';
 import { CreateTenantPage } from './CreateTenantPage';
+import { fillNodes } from './DeleteTenantModal';
+import { isLost, lostName, refusedInPageTenant } from './lostTenant';
 import { createFreshAssertion } from './freshAssertion';
 import { ForbiddenPage } from './ForbiddenPage';
 import { LandingPage } from './LandingPage';
@@ -228,6 +230,10 @@ function ShellFrame({ adminId }: { adminId: string }) {
   // again. A 409 tenant_mismatch also sets the shell's banner naming both Tenants (Story 1.28),
   // from what that very answer says it sent; the answer still reaches the page, which keeps its values.
   const [mismatch, setMismatch] = useState<Mismatch | null>(null);
+  // The page path whose refusal already made the shell read its lists again: once per page, so a
+  // page whose every request is refused never sets the shell reading over and over. The Admin's
+  // next navigation clears it.
+  const rereadFor = useRef<string | null>(null);
   const shellRequest = useMemo<ShellRequest>(
     () => async (method, call, signal) => {
       const answer = await (renewal.current ? renewal.current.request(method, call, signal) : call());
@@ -237,6 +243,16 @@ function ShellFrame({ adminId }: { adminId: string }) {
         if (typeof action === 'string') {
           setMismatch({ actionTenant: action, pageTenant: typeof sent.pageTenant === 'string' ? sent.pageTenant : null });
         }
+      }
+      // A refusal in the page's own Tenant (Story 1.29): its lists are read again, so a Tenant
+      // deleted, or a role removed, since they were read is found lost. The answer still reaches the page.
+      const page = tenantOfPath(window.location.pathname);
+      if (
+        refusedInPageTenant(answer.status, sent.problem?.code, sent.path, typeof page === 'string' ? page : null) &&
+        rereadFor.current !== window.location.pathname
+      ) {
+        rereadFor.current = window.location.pathname;
+        setAttempt((n) => n + 1);
       }
       return answer;
     },
@@ -297,6 +313,51 @@ function ShellFrame({ adminId }: { adminId: string }) {
   useEffect(() => {
     if (listedPath && pathId !== null) remember(adminId, pathId);
   }, [adminId, pathId, listedPath]);
+
+  // The lost Tenant (Story 1.29): the switcher list this document held before the last answer,
+  // and the one that answer read, kept per answer. A list that failed to read tells nothing, so
+  // the one held before it stands.
+  // Decided once per answer, so forgetting the remembered Tenant doesn't undo the decision.
+  const lists = useRef<{ answered: Answered | null; now: readonly AdminTenant[]; lostId: string | null; lostAs: string | null }>({
+    answered: null,
+    now: [],
+    lostId: null,
+    lostAs: null,
+  });
+  if (answered !== lists.current.answered) {
+    const read = held.tenantsFailure === null;
+    const before = lists.current.now;
+    // A Tenant path whose reads came back forbidden, gone from the list just read, and listed
+    // before or remembered here: deleted, or the Admin's role in it removed. Never a Tenant never
+    // listed, and never on a list that failed to read.
+    const answeredTenant = answered ? tenantOfPath(answered.path) : null;
+    const lostId =
+      answered?.reads.kind === 'forbidden' && read && typeof answeredTenant === 'string' && isLost(answeredTenant, before, remembered(adminId), held.tenants)
+        ? answeredTenant
+        : null;
+    lists.current = { answered, now: read ? held.tenants : before, lostId, lostAs: lostId === null ? null : lostName(lostId, before) };
+  }
+  const { lostId, lostAs } = lists.current;
+  const [lost, setLost] = useState<{ id: string; name: string | null } | null>(null);
+  // The banner survives the redirects that follow (the shell's own, then the landing's), and
+  // clears on the Admin's next navigation. Declared before the effect that sets it: when the
+  // Admin's navigation and the answer that finds the Tenant lost commit together, this runs first,
+  // so it can't clear the banner that answer sets.
+  useEffect(() => {
+    if (!location.replaced) {
+      setLost(null);
+      rereadFor.current = null;
+    }
+  }, [location.key]);
+  useEffect(() => {
+    if (lostId === null) return;
+    // The landing's rules then apply, with no remembered Tenant. Unsaved changes on the page left
+    // behind can't be saved, so nothing asks about them.
+    forget(adminId);
+    setLost({ id: lostId, name: lostAs });
+    navigate('/', { replace: true });
+    // Once per answer: a later answer that finds it lost again is its own.
+  }, [answered, lostId]);
 
   // The top bar's Tenant: the path's on a Tenant path, else the remembered one, else the first.
   const shown = currentTenant(answered?.path ?? location.path, held.tenants, remembered(adminId));
@@ -371,6 +432,11 @@ function ShellFrame({ adminId }: { adminId: string }) {
 
   const banner = (
     <>
+      {lost && (
+        <Banner tone="warn" data-testid="tenant-lost">
+          {fillNodes(messages.tenantLost, { tenant: lost.name !== null ? <bdi>{lost.name}</bdi> : <code>{lost.id}</code> })}
+        </Banner>
+      )}
       {mismatch && (
         <Banner tone="warn" action={{ label: messages.reload, onClick: () => window.location.reload() }} data-testid="tenant-mismatch">
           {mismatchText(messages.tenantMismatch, {
@@ -408,6 +474,8 @@ function ShellFrame({ adminId }: { adminId: string }) {
   // the content area hold a skeleton. Its navigation, not a Retry, is what moves focus to the h1.
   let page;
   if (!answered) page = <SkeletonRows rows={3} caption={false} />;
+  // A lost Tenant's page is replaced by the landing, with the banner, not the forbidden page (Story 1.29).
+  else if (lostId !== null) page = <SkeletonRows rows={3} caption={false} />;
   else if (answered.reads.kind === 'forbidden') page = <ForbiddenPage code={answered.reads.failure.code} traceId={answered.reads.failure.traceId} />;
   else if (answered.reads.kind === 'failed') page = <UnavailablePage />;
   else if (answered.path === '/')
@@ -423,7 +491,11 @@ function ShellFrame({ adminId }: { adminId: string }) {
   // Tenants and Create Tenant (Story 1.27). The shell's Deployment read has already answered, so a
   // capability not held is the forbidden page without asking again; the server still decides.
   else if (answered.path === TENANTS_PATH)
-    page = capabilities.has('deployment.tenants.read') ? <TenantsPage request={shellRequest} /> : <ForbiddenPage code="access_denied" traceId="" />;
+    page = capabilities.has('deployment.tenants.read') ? (
+      <TenantsPage request={shellRequest} fresh={fresh} onTenantsChanged={() => setAttempt((n) => n + 1)} />
+    ) : (
+      <ForbiddenPage code="access_denied" traceId="" />
+    );
   else if (answered.path === NEW_TENANT_PATH)
     page = capabilities.has('deployment.tenants.create') ? <CreateTenantPage request={shellRequest} /> : <ForbiddenPage code="access_denied" traceId="" />;
   // Your credentials (Story 1.26): self-service, so the Deployment read the shell makes is all it needs.
@@ -462,7 +534,7 @@ function ShellFrame({ adminId }: { adminId: string }) {
           <TopBar onBrandNavigate={guardedNavigate} dark={dark} onToggleTheme={toggle} accountItems={accountItems} tenantSwitcher={tenantSwitcher} />
         }
         sidebar={<Sidebar items={items} currentHref={location.path} onNavigate={guardedNavigate} data-testid="sidebar" />}
-        banner={renewalMessage !== null || signOutFailed || failure || mismatch ? banner : null}
+        banner={renewalMessage !== null || signOutFailed || failure || mismatch || lost ? banner : null}
       >
         <UnsavedChangesProvider registry={unsaved.registry}>{page}</UnsavedChangesProvider>
         <ConfirmModal

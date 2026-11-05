@@ -206,6 +206,34 @@ describe('api-client', () => {
     assert.equal(result.status, 202);
   });
 
+  it('deletes a Tenant, reads and retries its deletion on the Deployment paths, the ID encoded', async () => {
+    const { calls, fetch } = fakeFetch(202, JSON.stringify({ id: 'opr_a' }));
+    const client = createApiClient({ fetch, csrfToken: () => 'csrf-1', pageTenant: () => 'ten_page' });
+    const body = { confirmation: 'acme.id.example.com' };
+
+    const deleted = await client.deleteTenant('ten_a/b', body);
+    await client.getTenantDeletion('ten_c?d');
+    const retried = await client.retryTenantDeletion('ten_e#f');
+
+    assert.equal(calls[0].input, '/api/v1/deployment/tenants/ten_a%2Fb/deletion');
+    assert.equal(calls[0].init.method, 'POST');
+    assert.equal(calls[0].init.body, JSON.stringify(body));
+    assert.equal(calls[0].init.headers['Content-Type'], 'application/json');
+    assert.equal(calls[0].init.headers[CSRF_HEADER], 'csrf-1');
+    // The Deployment surface: no page Tenant is ever sent.
+    assert.equal(TENANT_HEADER in calls[0].init.headers, false);
+    assert.equal(deleted.status, 202);
+    assert.equal(calls[1].input, '/api/v1/deployment/tenants/ten_c%3Fd/deletion');
+    assert.equal(calls[1].init.method, 'GET');
+    assert.equal(CSRF_HEADER in calls[1].init.headers, false);
+    assert.equal(calls[2].input, '/api/v1/deployment/tenants/ten_e%23f/deletion/retry');
+    assert.equal(calls[2].init.method, 'POST');
+    assert.equal(calls[2].init.body, undefined);
+    assert.equal(calls[2].init.headers[CSRF_HEADER], 'csrf-1');
+    assert.equal(TENANT_HEADER in calls[2].init.headers, false);
+    assert.equal(retried.status, 202);
+  });
+
   it('sends the page Tenant only on state-changing Tenant-surface calls, when there is one', async () => {
     const { calls, fetch } = fakeFetch(200, JSON.stringify({ label: 'dev' }));
     let page = 'ten_a';

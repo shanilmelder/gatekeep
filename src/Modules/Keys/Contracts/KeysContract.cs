@@ -28,4 +28,21 @@ public static class KeysContract
             await custody.CreateKeyAsync(key, cancellationToken);
         }
     }
+
+    /// <summary>
+    /// Destroys <see cref="SecretClassKeys"/> through <paramref name="custody"/>, in order, with every
+    /// version of each (Story 1.29). Only <c>Host.Worker</c>'s and the Cli's custody policies may
+    /// (AD-10). A key already gone counts as destroyed, so a repeat, or a rerun after a failure part
+    /// way, is harmless. No other key is ever destroyed here.
+    /// </summary>
+    /// <exception cref="KeyCustodyException">Custody refused or couldn't be reached. Keys destroyed before it stay destroyed.</exception>
+    public static async Task DestroySecretClassKeysAsync(IKeyCustody custody, Guid tenantId, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(custody);
+
+        foreach (var key in SecretClassKeys(tenantId))
+        {
+            await custody.DeleteAsync(key, cancellationToken);
+        }
+    }
 }

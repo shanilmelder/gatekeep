@@ -24,4 +24,7 @@ internal static class FailureCode
     public const string UnknownType = "unknown_type";
     public const string CustodyFailed = "custody_failed";
     public const string LeaseExpired = "lease_expired";
+
+    /// <summary>A pending job of a Tenant whose deletion completed (Story 1.29): it never runs.</summary>
+    public const string TenantDeleted = "tenant_deleted";
 }

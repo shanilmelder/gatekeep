@@ -98,13 +98,17 @@ public sealed class SessionTablesTests(PostgresFixture postgres)
 
     public static TheoryData<string> HostedWritableTables => [.. Tables.Where(t => t != "user")];
 
-    /// <summary>Every runtime role but <c>gk_hosted</c>, on every table: none has any grant.</summary>
+    /// <summary>
+    /// Every runtime role but <c>gk_hosted</c> and <c>gk_worker</c>, on every table: none has any grant.
+    /// From Story 1.29 <c>gk_worker</c> deletes them for a Tenant's purge, reading only <c>tenant_id</c>,
+    /// which <c>TenantTablesTests.Worker_reads_no_purged_tables_content</c> holds.
+    /// </summary>
     public static TheoryData<string, string> UngrantedRoles
     {
         get
         {
             var data = new TheoryData<string, string>();
-            foreach (var role in TableRegistry.RuntimeRoles.Where(r => r != TableRegistry.Hosted))
+            foreach (var role in TableRegistry.RuntimeRoles.Where(r => r != TableRegistry.Hosted && r != TableRegistry.Worker))
             {
                 foreach (var table in Tables)
                 {

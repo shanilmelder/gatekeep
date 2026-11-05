@@ -42,4 +42,22 @@ public static class TenancyEvents
     public static readonly AuditEventDefinition ProdLabelRemoved = new(
         new AuditTypeCode("tenancy.tenant.prod_label_removed"),
         "A Tenant Owner removed a Tenant's Prod label after a fresh WebAuthn assertion. No setting changed with it.");
+
+    /// <summary>
+    /// Written on the Deployment chain by a Tenant deletion's start (Story 1.29), in the transaction
+    /// that sets the Tenant deleting, removes every Tenant Role in it and starts its deletion
+    /// Operation. The Actor is the Admin; the target the Tenant.
+    /// </summary>
+    public static readonly AuditEventDefinition DeletionStarted = new(
+        new AuditTypeCode("tenancy.tenant.deletion_started"),
+        "A Deployment Owner deleted a Tenant after typing its Tenant Subdomain and a fresh WebAuthn assertion: its host stops resolving, its roles end, its deletion Operation starts. Names the Tenant only.");
+
+    /// <summary>
+    /// Written on the deleted Tenant's own chain, with a <c>system</c> Actor and the Tenant as target,
+    /// in the transaction that marks its deletion Operation succeeded and the Tenant deleted (Story
+    /// 1.29). It is the chain's last event: its purge is due once this is past retention.
+    /// </summary>
+    public static readonly AuditEventDefinition TenantDeleted = new(
+        new AuditTypeCode("tenancy.tenant.deleted"),
+        "A Tenant's deletion Operation succeeded: every module's Tenant data is purged and its keys are destroyed. Its Logs are kept until their retention ends.");
 }

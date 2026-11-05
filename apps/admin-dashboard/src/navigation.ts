@@ -5,17 +5,30 @@ import { useEffect, useState } from 'react';
 
 const EVENT = 'gk:navigate';
 
+/** Whether the navigation being dispatched replaces the current entry: read while it is dispatched. */
+let replacing = false;
+
 /** An in-page navigation to `path`. With `replace`, it takes the current entry's place in the history, as a redirect does. */
 export function navigate(path: string, { replace = false }: { replace?: boolean } = {}): void {
   if (replace) window.history.replaceState(null, '', path);
   else window.history.pushState(null, '', path);
-  window.dispatchEvent(new Event(EVENT));
+  replacing = replace;
+  try {
+    window.dispatchEvent(new Event(EVENT));
+  } finally {
+    replacing = false;
+  }
 }
 
-/** Where the page is, and a key that changes on every navigation, to the same path or not. */
+/**
+ * Where the page is, and a key that changes on every navigation, to the same path or not, and
+ * whether that navigation replaced the entry, as a redirect does (Story 1.29), rather than being
+ * the Admin's own: a link, the brand, a sidebar item, back or forward.
+ */
 export interface Location {
   path: string;
   key: number;
+  replaced: boolean;
 }
 
 /**
@@ -24,14 +37,16 @@ export interface Location {
  * so the shell reads its capabilities again each time.
  */
 export function useLocation(): Location {
-  const [location, setLocation] = useState<Location>(() => ({ path: current(), key: 0 }));
+  const [location, setLocation] = useState<Location>(() => ({ path: current(), key: 0, replaced: false }));
   useEffect(() => {
-    const update = () => setLocation((previous) => ({ path: current(), key: previous.key + 1 }));
-    window.addEventListener('popstate', update);
-    window.addEventListener(EVENT, update);
+    const update = (replaced: boolean) => () => setLocation((previous) => ({ path: current(), key: previous.key + 1, replaced }));
+    const onPop = update(false);
+    const onNavigate = () => update(replacing)();
+    window.addEventListener('popstate', onPop);
+    window.addEventListener(EVENT, onNavigate);
     return () => {
-      window.removeEventListener('popstate', update);
-      window.removeEventListener(EVENT, update);
+      window.removeEventListener('popstate', onPop);
+      window.removeEventListener(EVENT, onNavigate);
     };
   }, []);
   return location;

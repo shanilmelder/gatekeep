@@ -388,9 +388,10 @@ internal static class AdminApi
             .WithSummary("The Deployment's Tenants, oldest first, 50 a page, and the Tenant zone their hosts sit under.")
             .WithDescription(
                 "Deployment Owner only. Each Tenant's ten_ public ID, name, host as stored at creation, label, status and creation " +
-                "time; while it is creating, its creation Operation's opr_ ID and whether it is running or failed. No subdomain is " +
-                "split out of a host. nextCursor is the last Tenant's ID when another page follows, else null; pass it back as " +
-                "cursor. A malformed cursor is 400 tenant_invalid.")
+                "time; while it is creating, its creation Operation's opr_ ID and whether it is running or failed; while it is " +
+                "deleting, its deletion Operation's, alike. A deleted Tenant is never listed. No subdomain is split out of a host. " +
+                "nextCursor is the last Tenant's ID when another page follows, else null; pass it back as cursor, which works even " +
+                "when it names a Tenant deleted since. A malformed cursor is 400 tenant_invalid.")
             .Produces<TenantListResponse>(StatusCodes.Status200OK)
             .Produces<ApiProblem>(StatusCodes.Status400BadRequest, AdminResponses.ProblemContentType)
             .Produces(StatusCodes.Status401Unauthorized)
@@ -426,8 +427,75 @@ internal static class AdminApi
             .WithSummary("Retry a failed Tenant creation's failed steps.")
             .WithDescription(
                 "Deployment Owner only. Reopens only the failed steps of a failed tenancy.tenant.create Operation, which runs again, " +
-                "and writes operations.operation.retried. One that is running or succeeded is 409 operation_not_failed. An Operation " +
-                "of any other type, and an unknown or malformed operationId, is the unknown-path 404.")
+                "and writes operations.operation.retried. One that is running or succeeded is 409 operation_not_failed, and one whose " +
+                "Tenant is being deleted, or deleted, is 409 tenant_deleted, and never runs again. An Operation of any other type, a " +
+                "deletion included, and an unknown or malformed operationId, is the unknown-path 404.")
+            .Produces<OperationResponse>(StatusCodes.Status202Accepted)
+            .Produces(StatusCodes.Status401Unauthorized)
+            .Produces<ApiProblem>(StatusCodes.Status403Forbidden, AdminResponses.ProblemContentType)
+            .Produces(StatusCodes.Status404NotFound)
+            .Produces<ApiProblem>(StatusCodes.Status409Conflict, AdminResponses.ProblemContentType)
+            .Produces(StatusCodes.Status503ServiceUnavailable);
+
+        app.MapPost("/api/v1/deployment/tenants/{targetTenantId}/deletion", static (HttpContext context, AdminApiServices services) => TenantsApi.StartDeletionAsync(context, services))
+            .WithMetadata(
+                DeploymentApiEndpoint.Instance,
+                new RequiresCapability(AdminCapabilities.DeploymentTenantsDelete),
+                new FreshAssertionTarget(TenantsApi.TargetTenantRouteValue),
+                new JsonRequestBody(typeof(DeleteTenantRequest)))
+            .WithName("DeleteTenant")
+            .WithTags(Tag)
+            .WithSummary("Delete a Tenant: its host stops resolving, every Tenant Role in it ends, and its deletion Operation starts.")
+            .WithDescription(
+                "Deployment Owner only, after a fresh assertion for deployment.tenants.delete with this targetTenantId as its target, " +
+                "begun on POST /api/v1/deployment/assertions, which the request checks use up before anything else, whatever follows, " +
+                "or 403 fresh_assertion_required: a refusal after it needs a new confirmation. The body's confirmation must be the " +
+                "Tenant's host exactly as the Tenants list shows it, with no trimming or case folding, or 400 confirmation_mismatch. " +
+                "In one transaction it sets the Tenant deleting, so its host gets the same 404 as an unknown host at once; removes " +
+                "every Tenant Role in it, so every Tenant route refuses its former members; starts its tenancy.tenant.delete Operation; " +
+                "and writes tenancy.tenant.deletion_started. The Operation purges every module's data of the Tenant but its Logs, " +
+                "destroys its keys and marks it deleted; its Logs are kept for at least 90 days after, whatever its label. The Tenant " +
+                "and its host are never reused. A body that isn't JSON, is over 4096 bytes, or misses confirmation or has the wrong " +
+                "type is 400 tenant_invalid. A Tenant already being deleted, or deleted, is 409 tenant_deleted, and one whose creation " +
+                "is still running 409 tenant_busy. An unknown or malformed targetTenantId is the unknown-path 404. Location names the " +
+                "deletion.")
+            .Produces<OperationResponse>(StatusCodes.Status202Accepted)
+            .Produces<ApiProblem>(StatusCodes.Status400BadRequest, AdminResponses.ProblemContentType)
+            .Produces(StatusCodes.Status401Unauthorized)
+            .Produces<ApiProblem>(StatusCodes.Status403Forbidden, AdminResponses.ProblemContentType)
+            .Produces(StatusCodes.Status404NotFound)
+            .Produces<ApiProblem>(StatusCodes.Status409Conflict, AdminResponses.ProblemContentType)
+            .Produces(StatusCodes.Status503ServiceUnavailable);
+
+        app.MapGet("/api/v1/deployment/tenants/{targetTenantId}/deletion", static (HttpContext context, AdminApiServices services) => TenantsApi.GetDeletionAsync(context, services))
+            .WithMetadata(DeploymentApiEndpoint.Instance, new RequiresCapability(AdminCapabilities.DeploymentTenantsRead))
+            .WithName("GetTenantDeletion")
+            .WithTags(Tag)
+            .WithSummary("A Tenant's newest deletion Operation, with every step.")
+            .WithDescription(
+                "Deployment Owner only. The newest tenancy.tenant.delete Operation of the Tenant, whatever its status, with every " +
+                "step's codes and IDs, never a step's row ID. A Tenant never deleted, and an unknown or malformed targetTenantId, " +
+                "is the unknown-path 404.")
+            .Produces<OperationResponse>(StatusCodes.Status200OK)
+            .Produces(StatusCodes.Status401Unauthorized)
+            .Produces<ApiProblem>(StatusCodes.Status403Forbidden, AdminResponses.ProblemContentType)
+            .Produces(StatusCodes.Status404NotFound)
+            .Produces(StatusCodes.Status503ServiceUnavailable);
+
+        app.MapPost("/api/v1/deployment/tenants/{targetTenantId}/deletion/retry", static (HttpContext context, AdminApiServices services) => TenantsApi.RetryDeletionAsync(context, services))
+            .WithMetadata(
+                DeploymentApiEndpoint.Instance,
+                new RequiresCapability(AdminCapabilities.DeploymentTenantsDelete),
+                new FreshAssertionTarget(TenantsApi.TargetTenantRouteValue))
+            .WithName("RetryTenantDeletion")
+            .WithTags(Tag)
+            .WithSummary("Retry a Tenant's failed deletion's failed steps.")
+            .WithDescription(
+                "Deployment Owner only, after a new fresh assertion for deployment.tenants.delete with this targetTenantId as its " +
+                "target, which the request checks use up, or 403 fresh_assertion_required. No body and no typed confirmation. " +
+                "Reopens only the failed steps of the Tenant's failed tenancy.tenant.delete Operation, which runs again, and writes " +
+                "operations.operation.retried. A deletion that is running or succeeded, and a Tenant that isn't being deleted, is " +
+                "409 operation_not_failed. An unknown or malformed targetTenantId is the unknown-path 404.")
             .Produces<OperationResponse>(StatusCodes.Status202Accepted)
             .Produces(StatusCodes.Status401Unauthorized)
             .Produces<ApiProblem>(StatusCodes.Status403Forbidden, AdminResponses.ProblemContentType)

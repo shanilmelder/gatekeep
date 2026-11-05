@@ -2,10 +2,10 @@
 title: 'Story 1.29: Delete a Tenant without touching others'
 type: 'feature'
 created: '2026-11-05'
-status: 'ready-for-dev'
+status: 'done'
 baseline_revision: '34d8b8d282ab4e4c6bd06c904ec5abec5e87cad0'
 review_loop_iteration: 0
-followup_review_recommended: false
+followup_review_recommended: true
 context:
   - '{project-root}/_bmad-output/planning-artifacts/architecture/architecture-gatekeep-2026-11-02/ARCHITECTURE-SPINE.md'
   - '{project-root}/_bmad-output/planning-artifacts/prds/prd-gatekeep-2026-11-01/prd.md'
@@ -20,7 +20,21 @@ context:
   - '{project-root}/_bmad-output/implementation-artifacts/spec-1-28-switch-tenants-and-set-the-environment-label.md'
   - '{project-root}/design/Gatekeep Admin.dc.html'
 warnings: []
-deferred: []
+deferred:
+  - summary: >-
+      Start-route GK007/GK009 mapping and the purge GK008 rollback have no test.
+    evidence: |-
+      Both are unreachable while the locks hold; a fault seam is needed.
+    location: >-
+      src/Modules/Operations/Core/TenantDeletion.cs
+    severity: low
+  - summary: >-
+      Deleting a Tenant doesn't destroy Signing Keys.
+    evidence: |-
+      Signing Keys arrive with Story 2.3.
+    location: >-
+      src/Modules/Operations/Core/TenantDeletion.cs
+    severity: medium
 ---
 
 <intent-contract>
@@ -471,16 +485,16 @@ Not taken in: "Admin removal must account for the credential floor trigger" (Sto
 ## Tasks & Acceptance
 
 **Execution:**
-- [ ] Schema:
+- [x] Schema:
   - the migration and registry entries;
   - `TenantTablesTests` covers each guard row of the matrix, the grants (column `tenant_id` only for the five tables), and that every Story 1.27 and 1.28 trigger rule still holds.
-- [ ] Kernel and Keys:
+- [x] Kernel and Keys:
   - `ITenantPurge`;
   - idempotent `DeleteAsync`;
   - `DestroySecretClassKeysAsync`;
   - `SecretClassKeyTests` for destroy, repeat, the refused policies, and another Tenant's keys untouched.
-- [ ] Module purges: Sessions, Authentication, Identity and Tenancy, each with its SQL in its own module.
-- [ ] Tenancy, Admins, Operations, Management:
+- [x] Module purges: Sessions, Authentication, Identity and Tenancy, each with its SQL in its own module.
+- [x] Tenancy, Admins, Operations, Management:
   - the lifecycle calls and events;
   - `RemoveAllForTenantAsync`;
   - `TenantDeletion` with its stages, completion and `SchedulePurgeAsync`;
@@ -488,12 +502,12 @@ Not taken in: "Admin removal must account for the credential floor trigger" (Sto
   - `FindLatestAsync`;
   - `DeleteAsync`, `GetDeletionAsync` and `RetryDeletionAsync`;
   - the creation retry refusal and the list changes, with AD-5 re-checks.
-- [ ] Host.Admin:
+- [x] Host.Admin:
   - the three routes;
   - the problem codes, and the `GK007` and `GK009` mapping;
   - the OpenAPI text.
   - Then regenerate the contract with `sh deploy/docker/api-contract.sh --write <abs dir>`.
-- [ ] Architecture tests:
+- [x] Architecture tests:
   - the purge-owner rule with its self-check;
   - the fresh-assertion route assertions;
   - the Tenant path and body rules;
@@ -501,20 +515,20 @@ Not taken in: "Admin removal must account for the credential floor trigger" (Sto
   - the registry row;
   - the catalogue, with `docs/audit-events.md` regenerated;
   - the unchanged edge list.
-- [ ] Isolation tests:
+- [x] Isolation tests:
   - every server row of the I/O matrix;
   - the registry-driven purge test, which fails for a `tenant` table with no seed and for one whose rows a purge leaves;
   - the two-Tenant proof over every registry table, the keys in the real OpenBao and the audit chain;
   - the canary row.
-- [ ] api-client: the three calls and `client.test.mjs`.
-- [ ] Dashboard:
+- [x] api-client: the three calls and `client.test.mjs`.
+- [x] Dashboard:
   - `DeleteTenantModal`;
   - the Tenants column, badges, refresh and Retry;
   - `lostTenant.ts` with its Node test;
   - the shell's banner and redirect;
   - the catalogue keys.
-- [ ] Browser tests: `admin-tenant-delete.spec.ts` (every browser row, `watchCsp`, axe in light and dark at 1100 and 768), the updated `admin-tenants.spec.ts`, and the config.
-- [ ] Docs:
+- [x] Browser tests: `admin-tenant-delete.spec.ts` (every browser row, `watchCsp`, axe in light and dark at 1100 and 768), the updated `admin-tenants.spec.ts`, and the config.
+- [x] Docs:
   - threat model (header, T-1, T-22, T-31, T-46, T-53, T-55, new T-57, G-18 closed);
   - `install.md`;
   - `deferred-work.md`:
@@ -537,6 +551,39 @@ Not taken in: "Admin removal must account for the credential floor trigger" (Sto
 ## Spec Change Log
 
 ## Review Triage Log
+
+### 2026-11-02 — Review pass
+- verdicts: 29 findings — high 3, medium 9, low 17, false 0, maybe-false 0
+- findings:
+  - `[high]` `[patch]` Blind: a Hosted request resolved before the start can insert rows after the purge, which then outlive the tombstone — insert guards on every purged table refuse a non-active Tenant.
+  - `[high]` `[patch]` Blind: the audit chain purge can go dead and is never rescheduled, keeping the Logs forever — it can no longer be lost.
+  - `[medium]` `[patch]` Blind: `tenant_settings` inserts and updates ignore the Tenant's status — guarded.
+  - `[medium]` `[patch]` Blind: the completion deletes payloads still-pending jobs need — the Tenant's other jobs end dead first.
+  - `[low]` `[patch]` Blind: purge-stage FK and serialization failures aren't coded — `purge_conflict`.
+  - `[medium]` `[patch]` Blind: the modal sends the stored host, not what was typed — the typed value is sent.
+  - `[medium]` `[patch]` Blind: failed rows refresh pointlessly and a long deletion shows Deleting forever — fixed.
+  - `[low]` `[patch]` Blind: `merge()` never refreshes busy rows past the first page — fixed and unit-tested.
+  - `[low]` `[patch]` Blind: GK007's role check is a deny-list — an allow-list.
+  - `[low]` `[patch]` Blind: the completion's rerun doc comment is wrong — fixed.
+  - `[low]` `[patch]` Blind: an empty spec file was staged at the repo root — removed.
+  - `[high]` `[patch]` Edge: late Hosted writes survive the purge — same fix as the Blind row.
+  - `[medium]` `[patch]` Edge: pending jobs are orphaned at completion — same fix as the Blind row.
+  - `[low]` `[patch]` Edge: a 403 page makes the shell re-read its lists repeatedly — at most once per answer.
+  - `[low]` `[patch]` Edge: a guard SQLSTATE during Retry answers 503 — 409.
+  - `[low]` `[patch]` Edge: a Tenant with no host row can never be deleted — a confirmation mismatch instead.
+  - `[low]` `[patch]` Edge: a custody policy refusal is reported as unavailable — `custody_refused`.
+  - `[medium]` `[patch]` Gap: deleting rows on a later page are untested in `merge()` — tested.
+  - `[medium]` `[patch]` Gap: a failed switcher list deciding nothing about lost Tenants is untested — tested.
+  - `[medium]` `[patch]` Gap: a list cursor naming a deleted Tenant is untested — tested.
+  - `[medium]` `[patch]` Gap: `ExistsAsync`'s login-again retry is untested — tested.
+  - `[low]` `[defer]` Gap: the start route's GK007/GK009 to 409 mapping is unreachable through the lock — needs a fault seam.
+  - `[low]` `[defer]` Gap: the purge stage's GK008 savepoint rollback is unreachable — needs a fault seam.
+  - `[low]` `[patch]` Intent: the log test doesn't check the internal Tenant ID or the Worker's output — both checked.
+  - `[low]` `[patch]` Intent: the two-Tenant proof doesn't show the other Tenant still resolves — a Host.Hosted probe added.
+  - `[low]` `[patch]` Intent: retry while running and a whole-handler rerun are weakly proved — tested.
+  - `[low]` `[defer]` Intent: Signing Keys aren't destroyed — they arrive with Story 2.3.
+  - `[low]` `[defer]` Patch: the insert guard can't lock `tenant` FOR SHARE without UPDATE rights, so a statement whose FK check lands after the purge can keep its row — narrow race, recorded in T-57.
+  - `[low]` `[defer]` Patch: GK010 has no Host.Hosted mapping yet because Hosted has no write route — the first Hosted write route (Epic 2).
 
 ## Design Notes
 
@@ -577,3 +624,19 @@ Not taken in: "Admin removal must account for the credential floor trigger" (Sto
 - After changing the endpoints, regenerate the contract in Docker with `sh deploy/docker/api-contract.sh --write <abs dir>` (as `docker compose -f deploy/compose.test.yaml run --rm --build -v "<repository>:/out" tests sh deploy/docker/api-contract.sh --write /out`). Regenerate the audit catalogue with the Generator. Commit both.
 
 Nothing runs on the host.
+
+## Auto Run Result
+
+Status: done
+
+**Summary:** a Deployment Owner deletes a Tenant after typing its host and confirming with a fresh assertion bound to it. The Tenant becomes a tombstone: its roles end at once and its subdomain is never reused, so it gets the fixed 404 and creation with that name is refused. A Worker Operation runs each module's Tenant purge in one transaction, destroys the Tenant's secret class keys and marks it deleted. Its security Logs are kept and purged 90 days later, whatever its label. A test seeds every registry table and fails for any later table without a purge, and another proves a second Tenant's data, keys and Logs are unchanged. An Admin working in the deleted Tenant returns to the landing page with a banner.
+
+**Files:** the deletion migration and `TableRegistry`; `src/Gatekeep.Kernel/` (`ITenantPurge`, custody delete); the Sessions, Authentication, Identity and Tenancy purges; `src/Modules/Operations/` (Tenant deletion, purge scheduling); `src/Modules/Management/`; `src/Adapters/OpenBao/`; `src/Gatekeep.Host.Admin/` (deletion routes, OpenAPI); `docs/api/openapi-v1.json`, `packages/api-client/`; `apps/admin-dashboard/src/shell/` (Delete Tenant modal, Tenants page, lost-Tenant banner); `tests/Isolation/Tenancy/`, `Operations/`, `Custody/`, `tests/Architecture/`, `tests/browser/admin-tenant-delete.spec.ts`; `docs/audit-events.md`, the threat model and `install.md`.
+
+**Review:** 29 findings across four layers: 24 patched, 5 deferred, 0 rejected, each with its reason in the triage log.
+
+**Follow-up review:** recommended. Insert guards, the purge-job safety and job handling at completion changed in review, with new tests as the only proof.
+
+**Verification:** see the PR screenshot; the full suite passes in the `tests` container.
+
+**Residual risks:** Signing Keys aren't destroyed until Story 2.3. Two guard mappings are unreachable and untested until a fault seam exists.

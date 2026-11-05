@@ -56,6 +56,14 @@ internal sealed class OperationService(OperationRegistry registry) : IOperations
         WHERE type = @type AND tenant_id IS NOT DISTINCT FROM @tenant_id::uuid AND status IN ('running', 'failed')
         """;
 
+    private const string FindLatest =
+        """
+        SELECT id FROM operation
+        WHERE type = @type AND tenant_id = @tenant_id
+        ORDER BY created_at DESC, id DESC
+        LIMIT 1
+        """;
+
     private readonly OperationRegistry _registry = registry ?? throw new ArgumentNullException(nameof(registry));
 
     private readonly JobEnqueuer _enqueuer = new(ProductionJobs.Registry, custody: null);
@@ -188,6 +196,34 @@ internal sealed class OperationService(OperationRegistry registry) : IOperations
         await using (var command = context.CreateCommand())
         {
             command.CommandText = FindActive;
+            Sql.Add(command, "type", type.Value);
+            Sql.Add(command, "tenant_id", tenantId);
+
+            if (await command.ExecuteScalarAsync(cancellationToken) is not Guid found)
+            {
+                return null;
+            }
+
+            id = found;
+        }
+
+        return await OperationStore.ReadAsync(context, id, stepTenantId: null, cancellationToken);
+    }
+
+    public async Task<OperationResource?> FindLatestAsync(
+        CommandContext context,
+        OperationType type,
+        Guid tenantId,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        ArgumentNullException.ThrowIfNull(type);
+        RequireDeployment(context);
+
+        Guid id;
+        await using (var command = context.CreateCommand())
+        {
+            command.CommandText = FindLatest;
             Sql.Add(command, "type", type.Value);
             Sql.Add(command, "tenant_id", tenantId);
 

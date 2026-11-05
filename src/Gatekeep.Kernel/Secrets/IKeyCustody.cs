@@ -92,7 +92,10 @@ public interface IKeyCustody
         KeyCiphertext ciphertext,
         CancellationToken cancellationToken);
 
-    /// <summary>Destroys the key and every version of it.</summary>
+    /// <summary>
+    /// Destroys the key and every version of it. A key that doesn't exist counts as destroyed, so a
+    /// repeat is harmless (Story 1.29).
+    /// </summary>
     Task DeleteAsync(KeyName key, CancellationToken cancellationToken);
 
     Task<IReadOnlyList<KeyPublicVersion>> GetPublicKeysAsync(KeyName key, CancellationToken cancellationToken);

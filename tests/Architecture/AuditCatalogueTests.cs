@@ -219,6 +219,18 @@ public class AuditCatalogueTests
         allowed.UnionWith(Types("ProductionRegistry"));
         allowed.UnionWith(Types("ProductionOperationRegistry"));
 
+        // Stage codes share the shape too (Story 1.29: tenancy.tenant.purge, keys.secret_classes.destroy):
+        // each stage a production Operation type declares is allowed.
+        var operations = contract.GetProperty("ProductionOperationRegistry")!.GetValue(null)!;
+        foreach (var definition in ((IEnumerable)operations.GetType().GetProperty("Definitions")!.GetValue(operations)!).Cast<object>())
+        {
+            foreach (var stage in ((IEnumerable)definition.GetType().GetProperty("Stages")!.GetValue(definition)!).Cast<object>())
+            {
+                var code = stage.GetType().GetProperty("Code")!.GetValue(stage)!;
+                allowed.Add((string)code.GetType().GetProperty("Value")!.GetValue(code)!);
+            }
+        }
+
         // Rate limit policy codes share the shape (AD-14): each one a contract publishes is allowed.
         foreach (var module in Directory.EnumerateDirectories(Path.Combine(Root, "src", "Modules")).Select(Path.GetFileName))
         {
