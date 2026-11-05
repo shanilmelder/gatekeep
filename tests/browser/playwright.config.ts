@@ -21,6 +21,7 @@
 // Story 1.26: Your credentials and the re-authentication gate (admin-credentials.spec.ts), and
 // Admin Recovery Codes (admin-recovery.spec.ts), on that same host.
 // Story 1.27: creating and listing Tenants, with Session renewal on a real form (admin-tenants.spec.ts), on that same host.
+// Story 1.28: the Tenant switcher, the landing rules, Tenant settings' environment and the mismatch banner (admin-tenant-switcher.spec.ts), on that same host.
 
 import { existsSync } from 'node:fs';
 import path from 'node:path';
@@ -58,7 +59,7 @@ export default defineConfig({
       name,
       // Every spec that isn't another project's own, so a new spec runs by default.
       testMatch: '*.spec.ts',
-      testIgnore: ['admin-csp.spec.ts', 'bootstrap.spec.ts', 'credential-setup.spec.ts', 'signin.spec.ts', 'controls.spec.ts', 'data.spec.ts', 'overlay.spec.ts', 'drawer.spec.ts', 'hosted.spec.ts', 'shell.spec.ts', 'admin-shell.spec.ts', 'admin-credentials.spec.ts', 'admin-recovery.spec.ts', 'admin-tenants.spec.ts'],
+      testIgnore: ['admin-csp.spec.ts', 'bootstrap.spec.ts', 'credential-setup.spec.ts', 'signin.spec.ts', 'controls.spec.ts', 'data.spec.ts', 'overlay.spec.ts', 'drawer.spec.ts', 'hosted.spec.ts', 'shell.spec.ts', 'admin-shell.spec.ts', 'admin-credentials.spec.ts', 'admin-recovery.spec.ts', 'admin-tenants.spec.ts', 'admin-tenant-switcher.spec.ts'],
       use: { baseURL: `http://127.0.0.1:${port}` },
     })),
     { name: fixture.name, testMatch: 'controls.spec.ts', use: { baseURL: `http://127.0.0.1:${fixture.port}` } },
@@ -123,6 +124,13 @@ export default defineConfig({
     {
       name: 'admin-tenants',
       testMatch: 'admin-tenants.spec.ts',
+      use: { baseURL: `http://localhost:${adminHost.port}` },
+    },
+    // Switching Tenants and the environment label (Story 1.28), from localhost, with a virtual
+    // authenticator answering the Prod removal's sheet.
+    {
+      name: 'admin-tenant-switcher',
+      testMatch: 'admin-tenant-switcher.spec.ts',
       use: { baseURL: `http://localhost:${adminHost.port}` },
     },
   ],

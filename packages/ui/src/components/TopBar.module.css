@@ -76,6 +76,21 @@
   border: 0;
 }
 
+/* The design's thin slash between the brand and the Tenant switcher. */
+.separator {
+  flex: none;
+  color: var(--gk-color-bd2);
+  font-size: 18px;
+  font-weight: 300;
+}
+
+/* The switcher may shrink, so its name truncates and the right end stays in view. */
+.tenant {
+  display: flex;
+  min-width: 0;
+  flex: 0 1 auto;
+}
+
 .end {
   display: flex;
   align-items: center;

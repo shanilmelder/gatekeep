@@ -10,7 +10,8 @@ namespace Gatekeep.Modules.Management.Core;
 /// <summary>
 /// Tenant creation's start command (Story 1.27, FR-7): one Deployment transaction writes the
 /// Tenant, its host, its creator's Owner role and its creation Operation, or nothing. The
-/// Operation then does what only Host.Worker may (AD-10, AD-30).
+/// Operation then does what only Host.Worker may (AD-10, AD-30). From Story 1.28 also the Tenant
+/// switcher's list of an Admin's Tenants and the Tenant Owner's label change.
 /// </summary>
 internal sealed class TenantManagement(IAuditAppender appender, TenantAddressing addressing) : ITenantManagement
 {
@@ -202,6 +203,109 @@ internal sealed class TenantManagement(IAuditAppender appender, TenantAddressing
             cancellationToken);
 
         return new OperationRetryResult(OperationRetryStatus.Retried, Managed(retried));
+    }
+
+    public async Task<IReadOnlyList<AdminTenant>> ListForAdminAsync(CommandContext context, AdminPrincipal principal, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        ArgumentNullException.ThrowIfNull(principal);
+
+        // The Admin's own role rows' Tenants, then those Tenants' records: never the role itself.
+        var ids = await _roles.ListTenantIdsAsync(context, principal.AdminId, cancellationToken);
+        var tenants = await _tenants.ListActiveAsync(context, ids, cancellationToken);
+        return [.. tenants.Select(t => new AdminTenant(t.Id, t.Name, t.Host, TenantValues.Stored(t.Label)))];
+    }
+
+    public async Task<TenantLabelRead> GetLabelAsync(
+        CommandContext tenantContext,
+        AdminPrincipal principal,
+        TenantRoleGrant? grant,
+        Guid tenantId,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(tenantContext);
+        ArgumentNullException.ThrowIfNull(principal);
+
+        // Authorization runs in the module too (AD-5), from the grant the checks read: no second read.
+        if (!AdminCapabilities.Allows(AdminCapabilities.TenantConfigurationRead, principal, grant, tenantId))
+        {
+            return new TenantLabelRead(Allowed: false, Label: null);
+        }
+
+        // A plain read: it never waits behind a label change, and sees the label before or after it.
+        var state = await _tenants.GetLabelAsync(tenantContext, tenantId, cancellationToken);
+        return state is null
+            ? new TenantLabelRead(Allowed: false, Label: null)
+            : new TenantLabelRead(Allowed: true, TenantValues.Stored(state.Label), TenantValues.Stored(state.Status));
+    }
+
+    public async Task<LabelChangeResult> ChangeLabelAsync(
+        CommandContext tenantContext,
+        AdminPrincipal principal,
+        TenantRoleGrant? grant,
+        Guid tenantId,
+        string? requested,
+        Func<CancellationToken, Task<bool>> requireFreshAssertion,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(tenantContext);
+        ArgumentNullException.ThrowIfNull(principal);
+        ArgumentNullException.ThrowIfNull(requireFreshAssertion);
+
+        // 1. Authorization runs in the module too (AD-5), from the grant the checks read.
+        if (!AdminCapabilities.Allows(AdminCapabilities.TenantLabelManage, principal, grant, tenantId))
+        {
+            return new LabelChangeResult(LabelChangeStatus.Forbidden);
+        }
+
+        // 2. One of the three stored spellings, or nothing is locked.
+        if (!TenantValues.TryParseLabel(requested, out var label))
+        {
+            return new LabelChangeResult(LabelChangeStatus.Invalid);
+        }
+
+        // 3. The row lock, held to the end of the caller's transaction: the predicate below is
+        // decided on the label this write replaces, never on one read earlier.
+        var state = await _tenants.LockLabelAsync(tenantContext, tenantId, cancellationToken);
+        if (state is null)
+        {
+            // The checks allowed a role there, so this is a Tenant gone since: refused alike.
+            return new LabelChangeResult(LabelChangeStatus.Forbidden);
+        }
+
+        if (state.Status != TenantStatus.Active)
+        {
+            return new LabelChangeResult(LabelChangeStatus.NotActive);
+        }
+
+        // 4. Nothing to change: no write, no event, and no grant used.
+        if (state.Label == label)
+        {
+            return new LabelChangeResult(LabelChangeStatus.Unchanged, TenantValues.Stored(label));
+        }
+
+        // 5. WhenProdTenant (FR-46): only removing Prod needs a fresh assertion. The gate uses up
+        // the grant in its own committed transaction, so a failure after this still uses it.
+        var removesProd = TenantLabelChange.RemovesProd(state.Label, label);
+        if (removesProd && !await requireFreshAssertion(cancellationToken))
+        {
+            return new LabelChangeResult(LabelChangeStatus.FreshAssertionRequired);
+        }
+
+        // 6. The label, and nothing else, and its event on the Tenant's own chain. Once a grant is
+        // used up nothing may stop the write a client going away: so never the request's token.
+        try
+        {
+            await _tenants.SetLabelAsync(
+                tenantContext, tenantId, label, Actor.Admin(principal.AdminId), removesProd, removesProd ? CancellationToken.None : cancellationToken);
+        }
+        catch (InvalidOperationException)
+        {
+            // The locked row stopped being an active Tenant: a refusal, never a 500.
+            return new LabelChangeResult(LabelChangeStatus.NotActive);
+        }
+
+        return new LabelChangeResult(LabelChangeStatus.Changed, TenantValues.Stored(label));
     }
 
     private static ManagedOperation Managed(OperationResource operation) => new(

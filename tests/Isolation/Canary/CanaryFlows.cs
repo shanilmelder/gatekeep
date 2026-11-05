@@ -229,6 +229,14 @@ internal static class CanaryFlows
                 new(SurfaceKind.Route, "/api/v1/tenants/{tenantId}/operations/{operationId}"),
             ],
             TenantsAsync),
+        new(
+            "admin.tenant-label",
+            [
+                new(SurfaceKind.Route, "/api/v1/deployment/my-tenants"),
+                new(SurfaceKind.Route, "/api/v1/tenants/{tenantId}/label"),
+                new(SurfaceKind.Route, "/api/v1/tenants/{tenantId}/assertions"),
+            ],
+            TenantLabelAsync),
 
         // No production type carries a credential yet, so this flow takes the runner's credential
         // path with a test type: enqueue, decrypt, run, retry and dead, as every one will.
@@ -976,6 +984,91 @@ internal static class CanaryFlows
             using var retry = await host.SendAsync(HttpMethod.Post, $"/api/v1/deployment/operations/{operation}/retry", cookie, csrf, Admins.AdminHost.Origin);
             run.Capture("retry response", await ResponseTextAsync(retry));
             Assert.Equal(HttpStatusCode.Conflict, retry.StatusCode);
+        }
+
+        await host.StopAsync();
+        run.Capture("Admin output", host.Output);
+        Assert.Matches(@"""LogLevel"":""(?:Trace|Debug)""", host.Output);
+    }
+
+    /// <summary>
+    /// Story 1.28: the Owner's Session and CSRF token through the switcher's list, the label read,
+    /// the Tenant-surface begin and complete and a Prod removal; failing, a mismatched page Tenant, a
+    /// malformed body, an unconfirmed removal and a refused begin.
+    /// </summary>
+    private static async Task TenantLabelAsync(CanaryFlowContext context, FlowRun run, bool failing)
+    {
+        await using var host = await Admins.AdminHost.StartAsync(context.Postgres, null, DebugArguments);
+        run.Database = host.Database;
+        run.Plant("role-password", PostgresFixture.Password);
+        var tenant = await Tenancy.TenantRequests.InsertAsync(host, "prod");
+        var (cookie, csrf, _, authenticators) = await Tenancy.TenantRequests.OwnerOfAsync(host, tenant);
+        run.Plant("admin-session-id", cookie);
+        run.Plant("admin-csrf-token", csrf);
+        var id = Tenancy.TenantRequests.Id(tenant);
+
+        using (var list = await host.SendAsync(HttpMethod.Get, Tenancy.TenantRequests.MyTenantsPath, cookie))
+        {
+            run.Capture("my tenants response", await ResponseTextAsync(list));
+            Assert.Equal(HttpStatusCode.OK, list.StatusCode);
+        }
+
+        using (var read = await Tenancy.TenantRequests.GetLabelAsync(host, cookie, tenant))
+        {
+            run.Capture("label response", await ResponseTextAsync(read));
+            Assert.Equal(HttpStatusCode.OK, read.StatusCode);
+        }
+
+        if (failing)
+        {
+            using (var mismatch = await Tenancy.TenantRequests.SetLabelAsync(host, cookie, csrf, tenant, "dev", "ten_other"))
+            {
+                run.Capture("mismatch response", await ResponseTextAsync(mismatch));
+                Assert.Equal(HttpStatusCode.Conflict, mismatch.StatusCode);
+            }
+
+            using (var malformed = await Tenancy.TenantRequests.SetBodyAsync(host, cookie, csrf, Tenancy.TenantRequests.LabelPath(tenant), "{", id))
+            {
+                run.Capture("malformed label response", await ResponseTextAsync(malformed));
+                Assert.Equal(HttpStatusCode.BadRequest, malformed.StatusCode);
+            }
+
+            using (var unconfirmed = await Tenancy.TenantRequests.SetLabelAsync(host, cookie, csrf, tenant, "dev"))
+            {
+                run.Capture("unconfirmed removal response", await ResponseTextAsync(unconfirmed));
+                Assert.Equal(HttpStatusCode.Forbidden, unconfirmed.StatusCode);
+            }
+
+            var (refused, _) = await Tenancy.TenantRequests.BeginAsync(host, cookie, csrf, tenant, """{"action":"self.credentials.add","target":null}""");
+            using (refused)
+            {
+                run.Capture("refused begin response", await ResponseTextAsync(refused));
+                Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
+            }
+        }
+        else
+        {
+            var (begin, options) = await Tenancy.TenantRequests.BeginAsync(host, cookie, csrf, tenant, """{"action":"tenant.label.manage","target":null}""");
+            using (begin)
+            {
+                run.Capture("tenant begin response", await ResponseTextAsync(begin));
+                Assert.Equal(HttpStatusCode.OK, begin.StatusCode);
+            }
+
+            using (var complete = await host.CompleteAssertionAsync(cookie, csrf, authenticators[0].Assert(options, Admins.AdminHost.Origin)))
+            {
+                run.Capture("complete response", await ResponseTextAsync(complete));
+                Assert.Equal(HttpStatusCode.NoContent, complete.StatusCode);
+            }
+
+            using var removed = await Tenancy.TenantRequests.SetLabelAsync(host, cookie, csrf, tenant, "staging");
+            run.Capture("removal response", await ResponseTextAsync(removed));
+            Assert.Equal(HttpStatusCode.OK, removed.StatusCode);
+        }
+
+        foreach (var authenticator in authenticators)
+        {
+            authenticator.Dispose();
         }
 
         await host.StopAsync();

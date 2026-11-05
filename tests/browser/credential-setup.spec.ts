@@ -81,7 +81,11 @@ async function answerApi(page: Page, baseURL: string, { credentials = 0, kind, b
   const completes: Request[] = [];
   const challenges: string[] = [];
 
-  // The shell's Deployment capabilities read, on the landing page setup goes on to (Story 1.25).
+  // The shell's Tenants list (Story 1.28) and Deployment capabilities read, on the landing page
+  // setup goes on to (Story 1.25).
+  await page.route(path('/api/v1/deployment/my-tenants'), (route) =>
+    route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ tenants: [] }) }),
+  );
   await page.route(path('/api/v1/deployment/capabilities'), (route) =>
     route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ capabilities: [] }) }),
   );

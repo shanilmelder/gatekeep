@@ -514,9 +514,7 @@ internal sealed class AdminHost : IAsyncDisposable
 
     /// <summary>Gives <paramref name="adminId"/> <paramref name="role"/> (<c>viewer</c>, <c>editor</c> or <c>owner</c>) in the Tenant, as the superuser.</summary>
     public Task GrantTenantRoleAsync(Guid tenantId, Guid adminId, string role) =>
-        PostgresFixture.ExecuteAsync(
-            Superuser,
-            $"INSERT INTO tenant_role (tenant_id, admin_id, role) VALUES ('{tenantId}', '{adminId}', '{role}')");
+        TestTenants.GrantRoleAsync(Superuser, tenantId, adminId, role);
 
     /// <summary>Removes the Admin's role in the Tenant, as the superuser, since removing roles is Story 8.4's.</summary>
     public Task RevokeTenantRoleAsync(Guid tenantId, Guid adminId) =>

@@ -450,6 +450,84 @@ internal static class AdminApi
             .Produces(StatusCodes.Status404NotFound)
             .Produces(StatusCodes.Status503ServiceUnavailable);
 
+        app.MapGet("/api/v1/deployment/my-tenants", static (HttpContext context, AdminApiServices services) => TenantsApi.ListMineAsync(context, services))
+            .WithMetadata(DeploymentApiEndpoint.Instance, SelfService.Instance)
+            .WithName("ListMyTenants")
+            .WithTags(Tag)
+            .WithSummary("The active Tenants the current Admin holds a Tenant Role in, for the Tenant switcher.")
+            .WithDescription(
+                "Self-service, full Sessions only: any Admin may read their own list. Each active Tenant the Admin holds a Tenant " +
+                "Role in, oldest first, with its ten_ public ID, name, host as stored at creation and label; never the role, and no " +
+                "Tenant still being created. A Deployment Owner holding no Tenant Role gets an empty list, as any other Admin does. " +
+                "No paging. A setup or recovery Session gets 403.")
+            .Produces<AdminTenantListResponse>(StatusCodes.Status200OK)
+            .Produces(StatusCodes.Status401Unauthorized)
+            .Produces(StatusCodes.Status403Forbidden)
+            .Produces(StatusCodes.Status503ServiceUnavailable);
+
+        app.MapGet("/api/v1/tenants/{tenantId}/label", static (HttpContext context, AdminApiServices services) => TenantLabelApi.GetAsync(context, services))
+            .WithMetadata(TenantApiEndpoint.Instance, new RequiresCapability(AdminCapabilities.TenantConfigurationRead))
+            .WithName("GetTenantLabel")
+            .WithTags(TenantTag)
+            .WithSummary("The path Tenant's environment label: dev, staging or prod.")
+            .WithDescription(
+                "Any Tenant Role in the path Tenant, whatever the Tenant's status, which it returns too: only an active Tenant's label changes. It takes no lock, so it never waits behind a change. A malformed, unknown or role-less Tenant is 403 " +
+                "access_denied, audited as every Tenant capability refusal is.")
+            .Produces<TenantLabelResponse>(StatusCodes.Status200OK)
+            .Produces(StatusCodes.Status401Unauthorized)
+            .Produces<ApiProblem>(StatusCodes.Status403Forbidden, AdminResponses.ProblemContentType)
+            .Produces(StatusCodes.Status503ServiceUnavailable);
+
+        app.MapPut("/api/v1/tenants/{tenantId}/label", static (HttpContext context, AdminApiServices services) => TenantLabelApi.SetAsync(context, services))
+            .WithMetadata(
+                TenantApiEndpoint.Instance,
+                new RequiresCapability(AdminCapabilities.TenantLabelManage),
+                EvaluatesFreshAssertion.Instance,
+                new JsonRequestBody(typeof(SetTenantLabelRequest)))
+            .WithName("SetTenantLabel")
+            .WithTags(TenantTag)
+            .WithSummary("Change the path Tenant's environment label.")
+            .WithDescription(
+                "Tenant Owner only, in an active Tenant. The only request that changes a Tenant's label after creation, and it " +
+                "changes nothing else: no setting or policy changes with it. Removing the Prod label needs a fresh " +
+                "assertion for tenant.label.manage in this Tenant, begun on POST /api/v1/tenants/{tenantId}/assertions, which is " +
+                "used up once the locked label is found to be Prod, whatever follows; raising a label, moving between dev and " +
+                "staging, and an unchanged label need none, and any change uses up an unused grant this Session holds for it. A change writes tenancy.tenant.label_changed, or " +
+                "tenancy.tenant.prod_label_removed, on the Tenant's own Log. An unchanged label writes nothing and is 200. A body " +
+                "that isn't JSON, is over 4096 bytes, misses label or has the wrong type, and an unknown label, is 400 " +
+                "tenant_invalid. A Tenant still being created is 409 tenant_not_active.")
+            .Produces<TenantLabelResponse>(StatusCodes.Status200OK)
+            .Produces<ApiProblem>(StatusCodes.Status400BadRequest, AdminResponses.ProblemContentType)
+            .Produces(StatusCodes.Status401Unauthorized)
+            .Produces<ApiProblem>(StatusCodes.Status403Forbidden, AdminResponses.ProblemContentType)
+            .Produces<ApiProblem>(StatusCodes.Status409Conflict, AdminResponses.ProblemContentType)
+            .Produces(StatusCodes.Status503ServiceUnavailable);
+
+        app.MapPost("/api/v1/tenants/{tenantId}/assertions", static (HttpContext context, AdminApiServices services) => FreshAssertionApi.BeginForTenantAsync(context, services))
+            .WithMetadata(
+                TenantApiEndpoint.Instance,
+                new RequiresCapability(AdminCapabilities.TenantConfigurationRead),
+                new JsonRequestBody(typeof(FreshAssertionBeginRequest)))
+            .WithName("BeginTenantFreshAssertion")
+            .WithTags(TenantTag)
+            .WithSummary("Begin confirming a sensitive action in the path Tenant with a fresh WebAuthn assertion.")
+            .WithDescription(
+                "Any Tenant Role in the path Tenant reaches it; the body names the action, a Tenant capability whose fresh " +
+                "assertion isn't never, and its target exactly as the action's request will name it, or null. The action's own " +
+                "capability is then decided from the same role: refused, it is 403 access_denied, counted and audited against the " +
+                "path Tenant. A self-service action, a Deployment capability, a never capability, an unknown action, a target for an action whose route names none, or a body that " +
+                "isn't JSON is 400 assertion_refused, with no challenge stored. Otherwise as the Deployment begin: request options " +
+                "for the Admin RP ID with user verification required and no credential listed, bound to this Session, the action, " +
+                "this Tenant and the target, answered once within 5 minutes on POST /api/v1/deployment/assertions/complete. A grant " +
+                "for one Tenant never serves another. Each begin and complete counts towards 10 per Session in 15 minutes, then 429.")
+            .Produces<AdminSignInOptionsResponse>(StatusCodes.Status200OK)
+            .Produces<ApiProblem>(StatusCodes.Status400BadRequest, AdminResponses.ProblemContentType)
+            .Produces(StatusCodes.Status401Unauthorized)
+            .Produces<ApiProblem>(StatusCodes.Status403Forbidden, AdminResponses.ProblemContentType)
+            .Produces<ApiProblem>(StatusCodes.Status409Conflict, AdminResponses.ProblemContentType)
+            .Produces<ApiProblem>(StatusCodes.Status429TooManyRequests, AdminResponses.ProblemContentType)
+            .Produces(StatusCodes.Status503ServiceUnavailable);
+
         return app;
     }
 

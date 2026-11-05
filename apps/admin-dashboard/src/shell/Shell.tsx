@@ -3,6 +3,7 @@ import { GenericErrorScreen } from '@gatekeep/hosted-screens';
 import {
   AdminShell,
   Banner,
+  ConfirmModal,
   ErrorReference,
   HostedPage,
   SectionPage,
@@ -14,11 +15,12 @@ import {
   useMessages,
   type MenuItem,
 } from '@gatekeep/ui/admin';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { navigate, useLocation } from '../navigation';
 import { api, setCsrfToken } from '../session';
 import { assertWithSheet } from '../webauthn';
-import { CapabilitiesProvider, capabilitiesOf, useCapabilityReads, type ShellRead } from './capabilities';
+import { CapabilitiesProvider, capabilitiesOf, pathTenant, useCapabilityReads, type ShellRead } from './capabilities';
+import { current as currentTenant, remember, remembered, switchHref, tenantOfPath } from './currentTenant';
 import { CredentialsPage, type ShellRequest } from './CredentialsPage';
 import { CreateTenantPage } from './CreateTenantPage';
 import { createFreshAssertion } from './freshAssertion';
@@ -29,8 +31,11 @@ import { NotFoundPage } from './NotFoundPage';
 import { createRenewal, type Renewal, type RenewalState } from './renewal';
 import { signInAgain } from './signInAgain';
 import { NEW_TENANT_PATH, TENANTS_PATH } from './tenants';
+import { TenantSettingsPage } from './TenantSettingsPage';
 import { TenantsPage } from './TenantsPage';
+import { TenantSwitcher } from './TenantSwitcher';
 import { useScheme } from './theme';
+import { UnsavedChangesProvider, useUnsavedRegistry } from './unsavedChanges';
 
 /** The code Generic error shows for a failure with no problem body, such as a 503 or a lost connection. */
 const UNAVAILABLE = 'unavailable';
@@ -146,6 +151,31 @@ function renewalText(state: RenewalState, messages: ReturnType<typeof useMessage
   }
 }
 
+/** A 409 tenant_mismatch's two Tenants: the one the action's path named, and the page's it carried. */
+interface Mismatch {
+  actionTenant: string;
+  pageTenant: string | null;
+}
+
+/** A Tenant path's page (Story 1.28): the Tenant's landing, its settings, or another page of it. */
+const TENANT_ROUTE = /^\/tenants\/[^/]+(\/settings)?$/;
+
+/** Replaces the URL with `to` once mounted, as a redirect does: /tenants/{tenantId} is its settings until Story 3.1. */
+function Redirect({ to }: { to: string }) {
+  useEffect(() => navigate(to, { replace: true }), [to]);
+  return null;
+}
+
+/**
+ * The mismatch banner's text (Story 1.28): the catalogue's template with each Tenant's name in
+ * <bdi>, or its ten_ ID in code type when the switcher's list lacks it.
+ */
+function mismatchText(template: string, names: Record<'actionTenant' | 'pageTenant', ReactNode>): ReactNode[] {
+  return template.split(/(\{actionTenant\}|\{pageTenant\})/).map((part, index) =>
+    part === '{actionTenant}' ? <span key={index}>{names.actionTenant}</span> : part === '{pageTenant}' ? <span key={index}>{names.pageTenant}</span> : part,
+  );
+}
+
 /** What a route shows under the failure banner while its reads failed: the dashboard's heading and nothing else. */
 function UnavailablePage() {
   const messages = useMessages();
@@ -194,16 +224,35 @@ function ShellFrame({ adminId }: { adminId: string }) {
     () => (call, signal) => (renewal.current ? renewal.current.request('get', call, signal) : call()),
     [],
   );
-  // Every request a page sends, through the same renewal: a 401 renews, and only a read is sent again.
+  // Every request a page sends, through the same renewal: a 401 renews, and only a read is sent
+  // again. A 409 tenant_mismatch also sets the shell's banner naming both Tenants (Story 1.28),
+  // from what that very answer says it sent; the answer still reaches the page, which keeps its values.
+  const [mismatch, setMismatch] = useState<Mismatch | null>(null);
   const shellRequest = useMemo<ShellRequest>(
-    () => (method, call, signal) => (renewal.current ? renewal.current.request(method, call, signal) : call()),
+    () => async (method, call, signal) => {
+      const answer = await (renewal.current ? renewal.current.request(method, call, signal) : call());
+      const sent = answer as { problem?: { code?: unknown } | null; path?: unknown; pageTenant?: unknown };
+      if (answer.status === 409 && sent.problem?.code === 'tenant_mismatch' && typeof sent.path === 'string') {
+        const action = tenantOfPath(new URL(sent.path, window.location.origin).pathname.replace(/^\/api\/v1/, ''));
+        if (typeof action === 'string') {
+          setMismatch({ actionTenant: action, pageTenant: typeof sent.pageTenant === 'string' ? sent.pageTenant : null });
+        }
+      }
+      return answer;
+    },
     [],
   );
   // Fresh assertions for sensitive actions (Story 1.26): each call through the renewal too.
   const fresh = useMemo(
     () =>
       createFreshAssertion({
-        begin: (binding) => shellRequest('post', () => api.beginFreshAssertion(binding)),
+        // A Tenant action begins on the Tenant surface, bound to its Tenant (Story 1.28).
+        begin: (binding) =>
+          shellRequest('post', () =>
+            binding.tenantId
+              ? api.beginTenantFreshAssertion(binding.tenantId, { action: binding.action, target: binding.target })
+              : api.beginFreshAssertion({ action: binding.action, target: binding.target }),
+          ),
         complete: (assertion) => shellRequest('post', () => api.completeFreshAssertion(assertion as AdminSignInRequest)),
         assert: (options, signal) => assertWithSheet(options as AdminSignInOptionsResponse, signal),
       }),
@@ -213,6 +262,75 @@ function ShellFrame({ adminId }: { adminId: string }) {
   const { reads, answered, held } = useCapabilityReads(location.path, location.key, attempt, read);
   const capabilities = useMemo(() => capabilitiesOf(held), [held]);
   const items = visibleItems(NAV, capabilities.has, held.tenantId, messages);
+  const unsaved = useUnsavedRegistry();
+  // A navigation waiting on "Discard unsaved changes?", and whether it switches Tenant.
+  const [leaving, setLeaving] = useState<{ go: () => void; switching: boolean } | null>(null);
+  // Set once the Admin chose to discard, so the browser's own prompt doesn't ask again.
+  const discarded = useRef(false);
+
+  /** Runs `go` now, or after "Discard unsaved changes?" when a page holds unsaved changes. */
+  const guard = useCallback(
+    (go: () => void, switching = false) => {
+      if (unsaved.any()) setLeaving({ go, switching });
+      else go();
+    },
+    [unsaved],
+  );
+
+  // A reload, a closed tab or a typed URL with unsaved changes gets the browser's own prompt.
+  useEffect(() => {
+    const onBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (discarded.current || !unsaved.any()) return;
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', onBeforeUnload);
+    return () => window.removeEventListener('beforeunload', onBeforeUnload);
+  }, [unsaved]);
+
+  // A navigation starts afresh: an earlier mismatch's banner was for the page left behind.
+  useEffect(() => setMismatch(null), [location.key]);
+
+  // The path Tenant is remembered, for the top bar on Deployment pages, once the reads list it.
+  const pathId = held.tenantId;
+  const listedPath = pathId !== null && held.tenants.some((tenant) => tenant.id === pathId);
+  useEffect(() => {
+    if (listedPath && pathId !== null) remember(adminId, pathId);
+  }, [adminId, pathId, listedPath]);
+
+  // The top bar's Tenant: the path's on a Tenant path, else the remembered one, else the first.
+  const shown = currentTenant(answered?.path ?? location.path, held.tenants, remembered(adminId));
+  const canCreateTenant = capabilities.has('deployment.tenants.create');
+
+  /** A full document load in the new Tenant: nothing of the old one survives (Story 1.28). */
+  const switchTo = useCallback((tenantId: string) => {
+    window.location.assign(switchHref(window.location.pathname, tenantId));
+  }, []);
+
+  const guardedNavigate = (href: string) => guard(() => navigate(href));
+
+  const tenantSwitcher =
+    held.tenants.length > 0 || canCreateTenant || held.tenantsFailure !== null ? (
+      <TenantSwitcher
+        tenants={held.tenants}
+        current={shown}
+        canCreate={canCreateTenant}
+        failed={held.tenantsFailure !== null}
+        onRetry={() => setAttempt((n) => n + 1)}
+        onChoose={(tenant) =>
+          guard(() => {
+            discarded.current = true;
+            switchTo(tenant.id);
+          }, true)
+        }
+        onCreate={() => guardedNavigate(NEW_TENANT_PATH)}
+      />
+    ) : null;
+
+  const tenantName = (id: string): ReactNode => {
+    const listed = held.tenants.find((tenant) => tenant.id === id);
+    return listed ? <bdi>{listed.name}</bdi> : <code>{id}</code>;
+  };
 
   async function signOut() {
     if (signOutInFlight.current) return;
@@ -241,8 +359,8 @@ function ShellFrame({ adminId }: { adminId: string }) {
   }
 
   const accountItems: MenuItem[] = [
-    { label: messages.credentialsTitle, onSelect: () => navigate(CREDENTIALS_PATH), disabled: signingOut, key: 'credentials' },
-    { label: messages.signOut, onSelect: () => void signOut(), disabled: signingOut, key: 'sign-out' },
+    { label: messages.credentialsTitle, onSelect: () => guardedNavigate(CREDENTIALS_PATH), disabled: signingOut, key: 'credentials' },
+    { label: messages.signOut, onSelect: () => guard(() => void signOut()), disabled: signingOut, key: 'sign-out' },
   ];
 
   const renewalMessage = renewalText(renewalState, messages);
@@ -253,6 +371,14 @@ function ShellFrame({ adminId }: { adminId: string }) {
 
   const banner = (
     <>
+      {mismatch && (
+        <Banner tone="warn" action={{ label: messages.reload, onClick: () => window.location.reload() }} data-testid="tenant-mismatch">
+          {mismatchText(messages.tenantMismatch, {
+            actionTenant: tenantName(mismatch.actionTenant),
+            pageTenant: mismatch.pageTenant === null ? messages.tenantMismatchNoPage : tenantName(mismatch.pageTenant),
+          })}
+        </Banner>
+      )}
       {renewalMessage !== null && (
         <Banner
           tone="warn"
@@ -284,9 +410,16 @@ function ShellFrame({ adminId }: { adminId: string }) {
   if (!answered) page = <SkeletonRows rows={3} caption={false} />;
   else if (answered.reads.kind === 'forbidden') page = <ForbiddenPage code={answered.reads.failure.code} traceId={answered.reads.failure.traceId} />;
   else if (answered.reads.kind === 'failed') page = <UnavailablePage />;
-  // No Tenant page is built yet, so an allowed Tenant path is not found too: only after the
-  // server has answered its Tenant capabilities read, so not-found never answers first.
-  else if (answered.path === '/') page = <LandingPage request={shellRequest} />;
+  else if (answered.path === '/')
+    page = (
+      <LandingPage
+        request={shellRequest}
+        tenants={held.tenants}
+        tenantsFailure={held.tenantsFailure}
+        onRetry={() => setAttempt((n) => n + 1)}
+        current={currentTenant('/', held.tenants, remembered(adminId))}
+      />
+    );
   // Tenants and Create Tenant (Story 1.27). The shell's Deployment read has already answered, so a
   // capability not held is the forbidden page without asking again; the server still decides.
   else if (answered.path === TENANTS_PATH)
@@ -295,7 +428,27 @@ function ShellFrame({ adminId }: { adminId: string }) {
     page = capabilities.has('deployment.tenants.create') ? <CreateTenantPage request={shellRequest} /> : <ForbiddenPage code="access_denied" traceId="" />;
   // Your credentials (Story 1.26): self-service, so the Deployment read the shell makes is all it needs.
   else if (answered.path === CREDENTIALS_PATH) page = <CredentialsPage request={shellRequest} fresh={fresh} />;
-  else page = <NotFoundPage />;
+  // A Tenant's pages (Story 1.28). The path Tenant's capabilities have already answered, so a
+  // refused Tenant is the forbidden page above; this page is keyed by its Tenant, so another
+  // Tenant's page never reuses its form state.
+  else if (TENANT_ROUTE.test(answered.path) && answered.reads.kind === 'ready') {
+    const tenant = pathTenant(answered.path);
+    const tenantId = tenant !== null && tenant !== 'malformed' ? tenant.tenantId : null;
+    if (tenantId === null) page = <NotFoundPage />;
+    else if (!answered.path.endsWith('/settings'))
+      page = <Redirect to={`/tenants/${encodeURIComponent(tenantId)}/settings`} />;
+    else
+      page = (
+        <TenantSettingsPage
+          key={tenantId}
+          request={shellRequest}
+          fresh={fresh}
+          tenantId={tenantId}
+          tenant={held.tenants.find((listed) => listed.id === tenantId) ?? null}
+          onSaved={() => setAttempt((n) => n + 1)}
+        />
+      );
+  } else page = <NotFoundPage />;
 
   return (
     <CapabilitiesProvider value={capabilities}>
@@ -305,11 +458,28 @@ function ShellFrame({ adminId }: { adminId: string }) {
         pageKey={answered?.navigation}
         busy={reads.kind === 'pending'}
         announcement={announcement}
-        topBar={<TopBar onBrandNavigate={navigate} dark={dark} onToggleTheme={toggle} accountItems={accountItems} />}
-        sidebar={<Sidebar items={items} currentHref={location.path} onNavigate={navigate} data-testid="sidebar" />}
-        banner={renewalMessage !== null || signOutFailed || failure ? banner : null}
+        topBar={
+          <TopBar onBrandNavigate={guardedNavigate} dark={dark} onToggleTheme={toggle} accountItems={accountItems} tenantSwitcher={tenantSwitcher} />
+        }
+        sidebar={<Sidebar items={items} currentHref={location.path} onNavigate={guardedNavigate} data-testid="sidebar" />}
+        banner={renewalMessage !== null || signOutFailed || failure || mismatch ? banner : null}
       >
-        {page}
+        <UnsavedChangesProvider registry={unsaved.registry}>{page}</UnsavedChangesProvider>
+        <ConfirmModal
+          open={leaving !== null}
+          onCancel={() => setLeaving(null)}
+          onConfirm={() => {
+            const go = leaving?.go;
+            setLeaving(null);
+            go?.();
+          }}
+          title={messages.unsavedTitle}
+          confirmLabel={leaving?.switching ? messages.unsavedDiscard : messages.unsavedLeave}
+          cancelLabel={messages.unsavedKeep}
+          data-testid="unsaved-changes"
+        >
+          <p>{messages.unsavedBody}</p>
+        </ConfirmModal>
       </AdminShell>
       </ToastProvider>
     </CapabilitiesProvider>

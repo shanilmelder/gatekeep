@@ -316,6 +316,51 @@ export interface Messages {
   actionRetryAfterSignIn: string;
   /** A confirming modal's text when the server refused the action outright. */
   actionForbidden: string;
+  /** The Settings group's Tenant item (Story 1.28), which opens the Tenant settings page. */
+  navTenant: string;
+  /** The Tenant switcher's name: the Tenant's name and its tag first (WCAG 2.5.3). Placeholders: {name}, {tag}. */
+  tenantSwitcherNamed: string;
+  /** The switcher's trigger when no Tenant is current yet. */
+  tenantSwitcherChoose: string;
+  /** The switcher's footer item, for an Admin who may create Tenants. */
+  tenantSwitcherCreate: string;
+  /** The banner when an action named another Tenant than the page shows. Placeholders: {actionTenant}, {pageTenant}. */
+  tenantMismatch: string;
+  /** The mismatch banner's {pageTenant} when the request carried none. */
+  tenantMismatchNoPage: string;
+  /** The mismatch banner's action, which loads the page again. */
+  reload: string;
+  /** The switcher's one item when its list couldn't be read: it reads again. */
+  tenantSwitcherRetry: string;
+  /** The Tenant settings page's heading. */
+  tenantSettingsTitle: string;
+  /** The Environment group's helper: what removing Prod asks for. */
+  tenantEnvironmentHelper: string;
+  /** The Environment group's helper when the Admin can't change it. */
+  tenantOwnerOnly: string;
+  /** The banner on a Tenant page for an Admin who can change nothing there. */
+  tenantViewOnly: string;
+  /** The Tenant settings page's primary action. */
+  tenantSave: string;
+  /** The modal before removing the Prod label. Placeholder in the body: {name}. */
+  tenantRemoveProdTitle: string;
+  tenantRemoveProdBody: string;
+  tenantRemoveProdConfirm: string;
+  /** The toast once the environment is saved. */
+  tenantEnvironmentSaved: string;
+  /** The banner when saving the environment failed: the choice is kept. */
+  tenantSaveFailed: string;
+  /** The banner when the Tenant is still being created, so its environment can't change yet. */
+  tenantNotActive: string;
+  /** The prompt before leaving a page with unsaved changes for another Tenant. */
+  unsavedTitle: string;
+  unsavedBody: string;
+  unsavedDiscard: string;
+  /** "Discard unsaved changes?"'s confirm for any other navigation than a switch. */
+  unsavedLeave: string;
+  unsavedKeep: string;
+  /** Sign-in's Generic error before bootstrap (Story 1.23): the way on to setting up the Deployment. */
+  signInSetUpDeployment: string;
 }
 
 export const defaultMessages: Readonly<Messages> = Object.freeze({
@@ -492,6 +537,31 @@ export const defaultMessages: Readonly<Messages> = Object.freeze({
   tenantsLoadMore: 'Load more',
   actionRetryAfterSignIn: "You're signed in again, but nothing was changed. Confirm to try again.",
   actionForbidden: "You can't do this in this session.",
+  navTenant: 'Tenant',
+  tenantSwitcherNamed: '{name} {tag}, switch Tenant',
+  tenantSwitcherChoose: 'Choose a Tenant',
+  tenantSwitcherCreate: '+ Create Tenant',
+  tenantMismatch: 'This action was for {actionTenant}, but this page shows {pageTenant}. Nothing was changed.',
+  tenantMismatchNoPage: 'no Tenant',
+  reload: 'Reload',
+  tenantSwitcherRetry: "Couldn't load your Tenants. Retry",
+  tenantSettingsTitle: 'Tenant settings',
+  tenantEnvironmentHelper: "Removing the Prod label needs you to confirm it's you.",
+  tenantOwnerOnly: 'Tenant Owner only',
+  tenantViewOnly: 'You have view-only access to this Tenant.',
+  tenantSave: 'Save',
+  tenantRemoveProdTitle: 'Remove the Prod label?',
+  tenantRemoveProdBody: '{name} will no longer be marked Prod. No other setting changes.',
+  tenantRemoveProdConfirm: 'Remove Prod label',
+  tenantEnvironmentSaved: 'Environment saved.',
+  tenantSaveFailed: "Couldn't save the environment. Try again.",
+  tenantNotActive: 'This Tenant is still being created.',
+  unsavedTitle: 'Discard unsaved changes?',
+  unsavedBody: "Your changes on this page aren't saved.",
+  unsavedDiscard: 'Discard and switch',
+  unsavedLeave: 'Discard and leave',
+  unsavedKeep: 'Keep editing',
+  signInSetUpDeployment: 'Set up this Deployment',
 });
 
 /**

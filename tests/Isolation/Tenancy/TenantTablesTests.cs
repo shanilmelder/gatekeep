@@ -14,7 +14,8 @@ namespace Gatekeep.Tests.Isolation.Tenancy;
 /// Story 1.27 (AD-6, AD-27): <c>tenant</c>'s new columns, its guard trigger, <c>tenant_host</c>'s
 /// guard against every update, delete and truncate for every role and the migrator, and the grants:
 /// gk_worker may only set a Tenant's status and insert its settings, gk_admin may insert the
-/// creator's role, and gk_hosted only reads.
+/// creator's role, and gk_hosted only reads. Story 1.28: gk_admin may update a Tenant's label and
+/// nothing else of it, and only while it is active (<c>GK006</c>), whoever runs the update.
 /// </summary>
 public sealed class TenantTablesTests(PostgresFixture postgres)
 {
@@ -26,6 +27,7 @@ public sealed class TenantTablesTests(PostgresFixture postgres)
     private const string HostRefused = "GK002";
     private const string TenantInsertRefused = "GK003";
     private const string ActivationRefused = "GK005";
+    private const string LabelRefused = "GK006";
 
     private const string PreviousMigration = "20261104010000_ConfirmSensitiveActions";
 
@@ -169,6 +171,11 @@ public sealed class TenantTablesTests(PostgresFixture postgres)
     [InlineData(TableRegistry.Worker, "DELETE FROM tenant")]
     [InlineData(TableRegistry.Admin, "UPDATE tenant SET status = 'active'")]
     [InlineData(TableRegistry.Admin, "UPDATE tenant SET issuer = 'https://evil.test/'")]
+    [InlineData(TableRegistry.Admin, "UPDATE tenant SET name = 'Renamed'")]
+    [InlineData(TableRegistry.Admin, "DELETE FROM tenant")]
+    [InlineData(TableRegistry.Worker, "UPDATE tenant SET label = 'prod'")]
+    [InlineData(TableRegistry.Hosted, "UPDATE tenant SET label = 'prod'")]
+    [InlineData(TableRegistry.Cli, "UPDATE tenant SET label = 'prod'")]
     [InlineData(TableRegistry.Hosted, "UPDATE tenant SET status = 'active'")]
     [InlineData(TableRegistry.Hosted, "INSERT INTO tenant_host (host, tenant_id, kind) SELECT 'new.tenants.gatekeep.test', id, 'subdomain' FROM tenant")]
     [InlineData(TableRegistry.Hosted, "INSERT INTO tenant_role (tenant_id, admin_id, role) SELECT id, gen_random_uuid(), 'owner' FROM tenant")]
@@ -224,6 +231,72 @@ public sealed class TenantTablesTests(PostgresFixture postgres)
         // Back to creating is refused for the Worker too, by the trigger.
         var back = await Assert.ThrowsAsync<PostgresException>(() => PostgresFixture.ExecuteAsync(worker, $"UPDATE tenant SET status = 'creating' WHERE id = '{TenantA}'"));
         Assert.Equal(RaisedException, back.SqlState);
+    }
+
+    /// <summary>Story 1.28: gk_admin may update a Tenant's label, and no other column of it.</summary>
+    [Fact]
+    public async Task Admin_may_update_only_the_label()
+    {
+        var database = await postgres.NewMigratedDatabaseAsync();
+
+        var columns = await ReadAsync(
+            database,
+            """
+            SELECT attname FROM pg_attribute
+            WHERE attrelid = 'public.tenant'::regclass AND attnum > 0 AND NOT attisdropped
+              AND has_column_privilege('gk_admin', 'public.tenant', attname, 'UPDATE')
+            ORDER BY attname
+            """);
+
+        Assert.Equal(["label"], columns);
+        Assert.False(await ScalarAsync<bool>(database, "SELECT has_table_privilege('gk_admin', 'public.tenant', 'UPDATE')"));
+        Assert.False(await ScalarAsync<bool>(database, "SELECT has_table_privilege('gk_admin', 'public.tenant', 'DELETE')"));
+    }
+
+    [Fact]
+    public async Task Admin_changes_an_active_Tenants_label_and_the_trigger_keeps_the_rest()
+    {
+        var database = await SeededAsync();
+        var admin = postgres.RoleConnection(TableRegistry.Admin, database);
+
+        await PostgresFixture.ExecuteAsync(admin, $"UPDATE tenant SET label = 'prod' WHERE id = '{TenantA}'");
+        Assert.Equal("prod", await ScalarAsync<string>(database, $"SELECT label FROM tenant WHERE id = '{TenantA}'"));
+
+        // A label change can't carry another one with it, for the migrator either.
+        var failure = await Assert.ThrowsAsync<PostgresException>(() => PostgresFixture.ExecuteAsync(
+            postgres.RoleConnection(TableRegistry.Migrator, database),
+            $"UPDATE tenant SET label = 'dev', issuer = 'https://evil.test/' WHERE id = '{TenantA}'"));
+        Assert.Equal(RaisedException, failure.SqlState);
+        Assert.Equal("prod", await ScalarAsync<string>(database, $"SELECT label FROM tenant WHERE id = '{TenantA}'"));
+    }
+
+    [Theory]
+    [InlineData(TableRegistry.Admin)]
+    [InlineData(TableRegistry.Migrator)]
+    public async Task A_creating_Tenants_label_never_changes_GK006(string role)
+    {
+        var database = await SeededAsync(status: "creating");
+
+        var failure = await Assert.ThrowsAsync<PostgresException>(() => PostgresFixture.ExecuteAsync(
+            postgres.RoleConnection(role, database),
+            $"UPDATE tenant SET label = 'prod' WHERE id = '{TenantA}'"));
+
+        Assert.Equal(LabelRefused, failure.SqlState);
+        Assert.Equal("dev", await ScalarAsync<string>(database, $"SELECT label FROM tenant WHERE id = '{TenantA}'"));
+    }
+
+    [Fact]
+    public async Task Activation_with_an_unchanged_label_still_passes()
+    {
+        var database = await SeededAsync(status: "creating");
+        var worker = postgres.RoleConnection(TableRegistry.Worker, database);
+
+        await PostgresFixture.ExecuteAsync(
+            worker,
+            $"BEGIN; SELECT set_config('gatekeep.tenant_id', '{TenantA}', true); INSERT INTO tenant_settings (tenant_id) VALUES ('{TenantA}'); " +
+            $"UPDATE tenant SET status = 'active' WHERE id = '{TenantA}'; COMMIT;");
+
+        Assert.Equal("active|dev", await ScalarAsync<string>(database, $"SELECT status || '|' || label FROM tenant WHERE id = '{TenantA}'"));
     }
 
     [Fact]

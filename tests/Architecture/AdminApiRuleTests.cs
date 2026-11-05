@@ -74,7 +74,7 @@ public class AdminApiRuleTests
         "tenant",
         "Control",
         new[] { "gk_admin INSERT", "gk_admin SELECT", "gk_cli SELECT", "gk_hosted SELECT", "gk_worker SELECT" },
-        new[] { "gk_sealer SELECT id", "gk_worker UPDATE status" },
+        new[] { "gk_admin UPDATE label", "gk_sealer SELECT id", "gk_worker UPDATE status" },
         new[] { "tenant_guard_insert", "tenant_guard_update" })]
     [InlineData(
         "tenant_host",
@@ -258,6 +258,7 @@ public class AdminApiRuleTests
                 "/api/v1/deployment/credentials/registration",
                 "/api/v1/deployment/credentials/registration/complete",
                 "/api/v1/deployment/credentials/{credentialId}",
+                "/api/v1/deployment/my-tenants",
                 "/api/v1/deployment/session",
                 "/api/v1/deployment/session",
             ],

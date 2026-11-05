@@ -365,7 +365,9 @@ internal sealed class SignInEndpoint
 /// Session's (403); a setup Session, or any Session of an Admin with fewer than two WebAuthn
 /// credentials, reaches only setup-allowed endpoints (403); and a capability endpoint's
 /// capability must be allowed by the authorizer, for a Tenant endpoint in the Tenant its
-/// <c>{tenantId}</c> path segment names and no other (403 <c>access_denied</c>, audited).
+/// <c>{tenantId}</c> path segment names and no other (403 <c>access_denied</c>, audited); and a
+/// Tenant endpoint's state-changing request must carry <see cref="TenantHeader"/> once, equal to
+/// that segment (409 <c>tenant_mismatch</c>, logged only), before any fresh-assertion grant is used up.
 /// </summary>
 internal static class AdminRequestChecks
 {
@@ -383,6 +385,14 @@ internal static class AdminRequestChecks
     public const string SignInCookie = "__Host-gk-admin-signin";
 
     public const string CsrfHeader = "X-Gatekeep-CSRF";
+
+    /// <summary>
+    /// The Tenant the page shows (Story 1.28, FR-9), its <c>ten_</c> ID, which every Admin-Session
+    /// state-changing request on the Tenant surface carries. It is only compared, as a string, with
+    /// the <c>{tenantId}</c> path segment: never parsed, stored, logged or passed on, and it never
+    /// selects or authorizes a Tenant (AD-4, AD-19). Only this file names it.
+    /// </summary>
+    public const string TenantHeader = "X-Gatekeep-Tenant";
 
     public static IApplicationBuilder UseAdminRequestChecks(this IApplicationBuilder app) =>
         app.Use(static (context, next) => CheckAsync(context, next));
@@ -613,6 +623,12 @@ internal static class AdminRequestChecks
                     refusal = Refusal.AccessDenied;
                     audited = await DenyAsync(command, services, principal, pathTenant, cancellationToken);
                 }
+                else if (declaration.Tenant && stateChanging && !PageTenantMatches(context))
+                {
+                    // After the capability decision, so a cross-Tenant attempt is still audited as
+                    // access_denied, and before any grant is used up: nothing of the action runs.
+                    refusal = Refusal.TenantMismatch;
+                }
             }
 
             if (refusal == Refusal.None && declaration.FreshAssertion is { EnforcedBy: FreshAssertionEnforcement.Checks } fresh)
@@ -659,6 +675,19 @@ internal static class AdminRequestChecks
             case Refusal.FreshAssertionRequired:
                 await FreshAssertionGate.RequiredAsync(context, declaration.FreshAssertion!);
                 return false;
+
+            case Refusal.TenantMismatch:
+                // Both values are the caller's own, so this discloses nothing: logged, never audited,
+                // and neither value is in the line.
+                context.RequestServices.GetRequiredService<ILoggerFactory>()
+                    .CreateLogger("Gatekeep.Host.Admin")
+                    .LogInformation(
+                        "An Admin request was refused with {Problem} for {Capability}, trace {TraceId}.",
+                        AdminResponses.TenantMismatch,
+                        declaration.Capability!.Name,
+                        AdminResponses.TraceId(context));
+                await AdminResponses.ProblemAsync(context, StatusCodes.Status409Conflict, AdminResponses.TenantMismatch);
+                return false;
         }
 
         context.Features.Set(session!);
@@ -677,7 +706,18 @@ internal static class AdminRequestChecks
         Forbidden,
         AccessDenied,
         FreshAssertionRequired,
+        TenantMismatch,
     }
+
+    /// <summary>
+    /// Whether <see cref="TenantHeader"/> was sent exactly once and equals, ordinally, the
+    /// <c>{tenantId}</c> route value as routing decoded it. A string compare only: the header is
+    /// never parsed, so it can't select, widen or authorize anything.
+    /// </summary>
+    private static bool PageTenantMatches(HttpContext context) =>
+        SingleValue(context.Request.Headers[TenantHeader]) is { } page
+        && context.GetRouteValue(TenantRouteValue) is string path
+        && string.Equals(page, path, StringComparison.Ordinal);
 
     /// <summary>
     /// A capability refusal's accounting, in the caller's transaction: counted per Admin, and within

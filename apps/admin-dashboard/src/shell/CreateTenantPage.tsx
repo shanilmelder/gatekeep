@@ -20,6 +20,7 @@ import { navigate } from '../navigation';
 import { api } from '../session';
 import type { ShellRequest } from './CredentialsPage';
 import styles from './CreateTenantPage.module.css';
+import { ENVIRONMENTS } from './environments';
 import { TENANTS_PATH, readTenants, type TenantsRead } from './tenants';
 import { NAME_MAX_LENGTH, checkTenantName } from './tenantName';
 import { isTenantSubdomain } from './tenantSubdomain';
@@ -33,19 +34,8 @@ export const POLL_MAX_BACKOFF_MS = 10_000;
 /** Failed reads in a row before the page says it can't check, while it keeps trying. */
 export const POLL_FAILURES_SHOWN = 3;
 
-type Messages = ReturnType<typeof useMessages>;
 
-/** The environments, in the design's order (wiz.s0), with each one's option text and tag. */
-const ENVIRONMENTS: readonly { value: Environment; option: keyof Messages; tag: keyof Messages }[] = [
-  { value: 'dev', option: 'environmentDevelopment', tag: 'environmentTagDev' },
-  { value: 'staging', option: 'environmentStagingOption', tag: 'environmentTagStaging' },
-  { value: 'prod', option: 'environmentProduction', tag: 'environmentTagProd' },
-];
-
-/** The tag for a stored label, such as DEV, on its environment's tone. */
-export function environmentTag(label: Environment, messages: Messages): string {
-  return messages[ENVIRONMENTS.find((environment) => environment.value === label)?.tag ?? 'environmentTagDev'] as string;
-}
+export { environmentTag } from './environments';
 
 type Creation = { tenantId: string; operationId: string; name: string };
 
@@ -77,7 +67,7 @@ function failedCode(operation: OperationResponse): string {
  * The Create Tenant form (Story 1.27; wiz.s0 without Region): Name, Tenant Subdomain with the
  * zone beside it, and Environment. The browser checks the name and the subdomain rule first, as
  * feedback only. A 202 keeps the form read-only and reads the creation Operation every second
- * until it isn't running: success is a toast and the Tenants page, failure a banner with the
+ * until it isn't running: success is a toast and the new Tenant's page, failure a banner with the
  * failed step's code and Retry. A 401 on the POST is Story 1.25's renewal: the page stays as it
  * is, every value, node and focus kept, and the POST is never sent again; the Admin presses
  * Create Tenant once signed in. Nothing here decides access: the server decides every request.
@@ -129,8 +119,9 @@ export function CreateTenantForm({ request, zone, onCancel }: { request: ShellRe
       }
       if (controller.signal.aborted) return;
       if (operation?.status === 'succeeded') {
+        // Success is the new Tenant's landing (EXPERIENCE; Story 1.28), which the next reads list.
         toast(messages.createTenantCreated);
-        navigate(TENANTS_PATH);
+        navigate(`/tenants/${encodeURIComponent(creation.tenantId)}`);
         return;
       }
       if (operation?.status === 'failed') {

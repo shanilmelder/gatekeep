@@ -43,6 +43,8 @@ async function answerApi(
     async (route) => {
       const request = route.request();
       const pathname = new URL(request.url()).pathname;
+      // The shell's Tenants list (Story 1.28): none, and outside the log this spec's rules read.
+      if (pathname === '/api/v1/deployment/my-tenants') return json(route, 200, { tenants: [] });
       log.push(`${request.method()} ${pathname}`);
       requests.push(request);
       if (pathname === SESSION && request.method() === 'DELETE') return route.fulfill({ status: 204 });

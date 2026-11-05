@@ -43,6 +43,7 @@ public sealed class AdminEndpointTests : IDisposable
                 "/api/v1/deployment/credentials/registration",
                 "/api/v1/deployment/credentials/registration/complete",
                 "/api/v1/deployment/credentials/{credentialId}",
+                "/api/v1/deployment/my-tenants",
                 "/api/v1/deployment/operations/{operationId}/retry",
                 "/api/v1/deployment/session",
                 "/api/v1/deployment/session",

@@ -126,6 +126,20 @@ internal static class AdminOpenApi
                 {
                     Bound(schema, "nextCursor", TenantIdPattern, maxLength: null);
                 }
+                else if (type == typeof(AdminTenantResponse))
+                {
+                    Enumerate(schema, "label", TenantsApi.Labels);
+                    Bound(schema, "id", TenantIdPattern, maxLength: null);
+                }
+                else if (type == typeof(SetTenantLabelRequest))
+                {
+                    Enumerate(schema, "label", TenantsApi.Labels);
+                }
+                else if (type == typeof(TenantLabelResponse))
+                {
+                    Enumerate(schema, "label", TenantsApi.Labels);
+                    Enumerate(schema, "status", TenantsApi.TenantStatuses);
+                }
                 else if (type == typeof(OperationResponse))
                 {
                     Enumerate(schema, "status", TenantsApi.OperationStatuses);
@@ -228,6 +242,34 @@ internal static class AdminOpenApi
                             "the empty UUID's never does; anything else is refused like a Tenant the Admin holds no role in.",
                         Schema = new OpenApiSchema { Type = JsonSchemaType.String, Pattern = TenantIdPattern },
                     });
+
+                    var tenantMethod = context.Description.HttpMethod ?? string.Empty;
+                    if (!(HttpMethods.IsGet(tenantMethod) || HttpMethods.IsHead(tenantMethod)))
+                    {
+                        // The page's Tenant, compared with the path and nothing else (Story 1.28, FR-9).
+                        operation.Parameters.Insert(1, new OpenApiParameter
+                        {
+                            Name = AdminRequestChecks.TenantHeader,
+                            In = ParameterLocation.Header,
+                            Required = true,
+                            Description =
+                                "The Tenant the page shows, its ten_ ID: it must equal {tenantId}, or 409 tenant_mismatch. It never " +
+                                "selects a Tenant.",
+                            Schema = new OpenApiSchema { Type = JsonSchemaType.String, Pattern = TenantIdPattern },
+                        });
+
+                        // Its refusal is the problem body: the build fails on a route that doesn't declare it.
+                        if (operation.Responses?.TryGetValue("409", out var conflict) != true || conflict is not OpenApiResponse conflictResponse
+                            || conflictResponse.Content?.ContainsKey(AdminResponses.ProblemContentType) != true)
+                        {
+                            throw new InvalidOperationException(
+                                $"{context.Description.HttpMethod} {context.Description.RelativePath} changes state on the Tenant surface, so it declares the 409 problem.");
+                        }
+
+                        conflictResponse.Description =
+                            $"tenant_mismatch, with the problem body, when {AdminRequestChecks.TenantHeader} is missing, sent twice or " +
+                            "isn't {tenantId}, and nothing ran; or another conflict the operation's description names.";
+                    }
                 }
 
                 if (declaration.Kind == AccessKind.Capability && declaration.FreshAssertion is null

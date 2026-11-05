@@ -87,6 +87,8 @@ async function answerApi(page: Page, baseURL: string, initial: Partial<State> = 
       const request = route.request();
       const pathname = new URL(request.url()).pathname;
       const method = request.method();
+      // The shell's Tenants list (Story 1.28): none, and outside the log this spec's rules read.
+      if (pathname === '/api/v1/deployment/my-tenants') return json(route, 200, { tenants: [] });
       log.push(`${method} ${pathname}`);
       requests.push(request);
 

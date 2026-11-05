@@ -31,6 +31,8 @@ Every audit type code Gatekeep writes, declared in its module's contract. Codes 
 | `sessions.session.started` | Sessions | A User's Session started. Names the User only: the Session ID is stored only as its hash. | None |
 | `tenancy.tenant.activated` | Tenancy | A Tenant's creation Operation succeeded: its settings exist and its Tenant Subdomain now resolves. | None |
 | `tenancy.tenant.created` | Tenancy | A Deployment Owner created a Tenant and became its Tenant Owner, and its creation Operation started. Names the Tenant only. | None |
+| `tenancy.tenant.label_changed` | Tenancy | A Tenant Owner changed a Tenant's environment label, other than removing Prod. Names the Tenant only. | None |
+| `tenancy.tenant.prod_label_removed` | Tenancy | A Tenant Owner removed a Tenant's Prod label after a fresh WebAuthn assertion. No setting changed with it. | None |
 
 ## FR-40 Tenant Log classes
 

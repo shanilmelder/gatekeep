@@ -18,14 +18,7 @@ internal static class FreshAssertionGate
     /// <exception cref="InvalidOperationException">The endpoint declares no handler-enforced requirement.</exception>
     public static async Task<bool> RequireAsync(HttpContext context, AdminApiServices services, CancellationToken cancellationToken)
     {
-        var endpoint = context.GetEndpoint();
-        var requirement = (endpoint is null ? null : AccessDeclaration.Of(endpoint.Metadata, (endpoint as RouteEndpoint)?.RoutePattern.RawText))
-            ?.FreshAssertion;
-        if (requirement is not { EnforcedBy: FreshAssertionEnforcement.Handler })
-        {
-            throw new InvalidOperationException("The gate is only for an endpoint whose handler enforces its fresh assertion.");
-        }
-
+        var requirement = Requirement(context);
         var session = AdminRequestChecks.Session(context);
         Guid? tenant = context.Features.Get<PathTenantFeature>()?.TenantId;
         var binding = new FreshAssertionBinding(requirement.Action, tenant, Target(context, requirement));
@@ -47,6 +40,34 @@ internal static class FreshAssertionGate
 
         context.Features.Set(new FreshAssertionFeature(confirmedWith));
         return true;
+    }
+
+    /// <summary>
+    /// Uses up, unused, any grant this Session holds for this endpoint's handler-enforced action,
+    /// path Tenant and target (Story 1.28), in a transaction of its own: a change made without
+    /// needing the grant replaces what the grant was earned for, so it mustn't serve a later one.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The endpoint declares no handler-enforced requirement.</exception>
+    public static async Task DiscardAsync(HttpContext context, AdminApiServices services, CancellationToken cancellationToken)
+    {
+        var requirement = Requirement(context);
+        var session = AdminRequestChecks.Session(context);
+        Guid? tenant = context.Features.Get<PathTenantFeature>()?.TenantId;
+        var binding = new FreshAssertionBinding(requirement.Action, tenant, Target(context, requirement));
+
+        await using var scope = await services.BeginAsync(cancellationToken);
+        await services.FreshAssertions.ConsumeAsync(scope.CreateCommandContext(), session, binding, cancellationToken);
+        await scope.CommitAsync(cancellationToken);
+    }
+
+    private static FreshAssertionRequirement Requirement(HttpContext context)
+    {
+        var endpoint = context.GetEndpoint();
+        var requirement = (endpoint is null ? null : AccessDeclaration.Of(endpoint.Metadata, (endpoint as RouteEndpoint)?.RoutePattern.RawText))
+            ?.FreshAssertion;
+        return requirement is { EnforcedBy: FreshAssertionEnforcement.Handler }
+            ? requirement
+            : throw new InvalidOperationException("The gate is only for an endpoint whose handler enforces its fresh assertion.");
     }
 
     /// <summary>The target route value exactly as the request names it, never parsed. Null when the requirement names none.</summary>

@@ -6,8 +6,9 @@
 // an Admin holding Deployment capabilities, the Deployment Owner.
 //
 // Each story adds its own item with its page: Story 1.27 the first Deployment item, Tenants,
-// which only an Admin holding deployment.tenants.read sees, the Deployment Owner; Epic 3 adds the
-// first Tenant ones.
+// which only an Admin holding deployment.tenants.read sees, the Deployment Owner; Story 1.28 the
+// first Tenant one, Settings → Tenant, which any Tenant Role in the path Tenant sees; Epic 3 adds
+// the Applications ones.
 
 import type { AdminNavGroupId, AdminNavItem, Messages } from '@gatekeep/ui/admin';
 import type { Capability } from './capabilities';
@@ -30,6 +31,12 @@ export type NavEntry =
 
 export const NAV: readonly NavEntry[] = [
   { group: 'deployment', label: 'navTenants', href: '/deployment/tenants', requires: 'deployment.tenants.read' },
+  {
+    group: 'settings',
+    label: 'navTenant',
+    href: (tenantId) => `/tenants/${encodeURIComponent(tenantId)}/settings`,
+    requires: 'tenant.configuration.read',
+  },
 ];
 
 /** The registry's items the Admin may reach now: held capabilities only, Tenant items only with a path Tenant. */

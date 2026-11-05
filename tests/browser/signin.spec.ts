@@ -150,11 +150,15 @@ async function signOut(page: Page) {
   await page.getByRole('menuitem', { name: 'Sign out' }).click();
 }
 
-/** The shell's Deployment capabilities read (Story 1.25), for a signed-in Admin. */
-const answerCapabilities = (page: Page) =>
-  page.route(path(CAPABILITIES), (route) =>
+/** The shell's Deployment capabilities read (Story 1.25) and its Tenants list (Story 1.28), for a signed-in Admin. */
+const answerCapabilities = async (page: Page) => {
+  await page.route(path('/api/v1/deployment/my-tenants'), (route) =>
+    route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ tenants: [] }) }),
+  );
+  await page.route(path(CAPABILITIES), (route) =>
     route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ capabilities: [] }) }),
   );
+};
 
 async function axe(page: Page) {
   await page.evaluate(() => Promise.allSettled(document.getAnimations().map((animation) => animation.finished)).then(() => undefined));
@@ -320,10 +324,26 @@ for (const failure of failures) {
 
     const back = error.getByRole('link', { name: 'Back to Gatekeep' });
     await expect(back).toHaveAttribute('href', '/signin');
+    // Only before bootstrap is there a way on to setting up the Deployment (Story 1.28 review).
+    await expect(page.getByTestId('signin-set-up')).toHaveCount(failure.code === 'signin_unavailable' ? 1 : 0);
     await back.click();
     await expect(signInButton(page)).toBeVisible();
   });
 }
+
+test('before bootstrap, Generic error offers "Set up this Deployment", to the Bootstrap page', async ({ page, baseURL }) => {
+  const noViolations = await watchViolations(page);
+  await authenticator(page, new URL(baseURL!).hostname);
+  await answerApi(page, baseURL!, { beginAnswer: (route) => route.fulfill({ status: 404 }) });
+
+  await page.goto('/signin');
+  await signInButton(page).click();
+
+  const link = page.getByRole('link', { name: 'Set up this Deployment' });
+  await expect(link).toHaveAttribute('href', '/bootstrap');
+  expect(await axe(page)).toEqual([]);
+  await noViolations();
+});
 
 test('an Admin still without two credentials who signs in goes on to credential setup', async ({ page, baseURL }) => {
   await authenticator(page, new URL(baseURL!).hostname);

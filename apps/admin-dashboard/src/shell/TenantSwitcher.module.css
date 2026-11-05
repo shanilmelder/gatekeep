@@ -1,0 +1,64 @@
+/*
+ * The Tenant switcher (Story 1.28; the export's top bar): the trigger holds the Tenant's name and
+ * its environment badge; each item its name over its host in the code type, and its tag. Below
+ * 1100px the name truncates, and the badge and the accessible name stay whole. Tokens only.
+ */
+
+.switcher {
+  min-width: 0;
+}
+
+.switcher [data-menu-trigger] {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--gk-space-8);
+  min-width: 0;
+}
+
+.name {
+  min-width: 0;
+  overflow: hidden;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.trigger > [data-badge] {
+  flex: none;
+}
+
+@media (max-width: 1099px) {
+  .name {
+    max-width: calc(var(--gk-space-48) * 3);
+  }
+}
+
+.item {
+  display: flex;
+  align-items: center;
+  gap: var(--gk-space-12);
+  width: 100%;
+  padding-block: var(--gk-space-4);
+}
+
+.text {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.3;
+}
+
+.itemName {
+  font-weight: 500;
+}
+
+.host {
+  font: var(--gk-font-code);
+  color: var(--gk-color-tx2);
+}

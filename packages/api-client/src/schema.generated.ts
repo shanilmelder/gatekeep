@@ -372,6 +372,70 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/deployment/my-tenants": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The active Tenants the current Admin holds a Tenant Role in, for the Tenant switcher.
+         * @description Self-service, full Sessions only: any Admin may read their own list. Each active Tenant the Admin holds a Tenant Role in, oldest first, with its ten_ public ID, name, host as stored at creation and label; never the role, and no Tenant still being created. A Deployment Owner holding no Tenant Role gets an empty list, as any other Admin does. No paging. A setup or recovery Session gets 403.
+         */
+        get: operations["ListMyTenants"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tenants/{tenantId}/label": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The path Tenant's environment label: dev, staging or prod.
+         * @description Any Tenant Role in the path Tenant, whatever the Tenant's status, which it returns too: only an active Tenant's label changes. It takes no lock, so it never waits behind a change. A malformed, unknown or role-less Tenant is 403 access_denied, audited as every Tenant capability refusal is.
+         */
+        get: operations["GetTenantLabel"];
+        /**
+         * Change the path Tenant's environment label.
+         * @description Tenant Owner only, in an active Tenant. The only request that changes a Tenant's label after creation, and it changes nothing else: no setting or policy changes with it. Removing the Prod label needs a fresh assertion for tenant.label.manage in this Tenant, begun on POST /api/v1/tenants/{tenantId}/assertions, which is used up once the locked label is found to be Prod, whatever follows; raising a label, moving between dev and staging, and an unchanged label need none, and any change uses up an unused grant this Session holds for it. A change writes tenancy.tenant.label_changed, or tenancy.tenant.prod_label_removed, on the Tenant's own Log. An unchanged label writes nothing and is 200. A body that isn't JSON, is over 4096 bytes, misses label or has the wrong type, and an unknown label, is 400 tenant_invalid. A Tenant still being created is 409 tenant_not_active.
+         */
+        put: operations["SetTenantLabel"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tenants/{tenantId}/assertions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Begin confirming a sensitive action in the path Tenant with a fresh WebAuthn assertion.
+         * @description Any Tenant Role in the path Tenant reaches it; the body names the action, a Tenant capability whose fresh assertion isn't never, and its target exactly as the action's request will name it, or null. The action's own capability is then decided from the same role: refused, it is 403 access_denied, counted and audited against the path Tenant. A self-service action, a Deployment capability, a never capability, an unknown action, a target for an action whose route names none, or a body that isn't JSON is 400 assertion_refused, with no challenge stored. Otherwise as the Deployment begin: request options for the Admin RP ID with user verification required and no credential listed, bound to this Session, the action, this Tenant and the target, answered once within 5 minutes on POST /api/v1/deployment/assertions/complete. A grant for one Tenant never serves another. Each begin and complete counts towards 10 per Session in 15 minutes, then 429.
+         */
+        post: operations["BeginTenantFreshAssertion"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -438,9 +502,19 @@ export interface components {
             csrfToken: string;
             setupComplete: boolean;
         };
+        AdminTenantListResponse: {
+            tenants: components["schemas"]["AdminTenantResponse"][];
+        };
+        AdminTenantResponse: {
+            id: string;
+            name: string;
+            host: string;
+            /** @enum {string} */
+            label: "dev" | "staging" | "prod";
+        };
         ApiProblem: {
             /** @enum {string} */
-            code: "bootstrap_refused" | "credential_refused" | "signin_refused" | "rate_limited" | "access_denied" | "fresh_assertion_required" | "assertion_refused" | "credentials_minimum" | "credentials_maximum" | "recovery_code_refused" | "recovery_code_superseded" | "tenant_invalid" | "subdomain_refused" | "operation_not_failed";
+            code: "bootstrap_refused" | "credential_refused" | "signin_refused" | "rate_limited" | "access_denied" | "fresh_assertion_required" | "assertion_refused" | "credentials_minimum" | "credentials_maximum" | "recovery_code_refused" | "recovery_code_superseded" | "tenant_invalid" | "subdomain_refused" | "operation_not_failed" | "tenant_mismatch" | "tenant_not_active";
             traceId: string;
         };
         BootstrapClaimRequest: {
@@ -553,6 +627,10 @@ export interface components {
         };
         /** @description Shown in this response only, never stored and never shown again. */
         RevealOnceOfstring: string;
+        SetTenantLabelRequest: {
+            /** @enum {string} */
+            label: "dev" | "staging" | "prod";
+        };
         TenantCreatedResponse: {
             tenant: components["schemas"]["TenantResponse"];
             operation: components["schemas"]["OperationResponse"];
@@ -561,6 +639,12 @@ export interface components {
             operationId: string;
             /** @enum {string} */
             status: "running" | "failed";
+        };
+        TenantLabelResponse: {
+            /** @enum {string} */
+            label: "dev" | "staging" | "prod";
+            /** @enum {string} */
+            status: "creating" | "active";
         };
         TenantListResponse: {
             tenantZone: string;
@@ -1683,6 +1767,246 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    ListMyTenants: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminTenantListResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    GetTenantLabel: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The Tenant's public ID: ten_ and the UUID's 16 bytes in lowercase RFC 4648 base32 with no padding, whose last character carries two zero bits. Only this canonical spelling, after URL decoding, names a Tenant, and the empty UUID's never does; anything else is refused like a Tenant the Admin holds no role in. */
+                tenantId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TenantLabelResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description access_denied, with the problem body, when the capability is refused. No body when an earlier check refuses first: a Session restricted to setup, or on a state-changing call a wrong Origin or CSRF token. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    SetTenantLabel: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description The Tenant the page shows, its ten_ ID: it must equal {tenantId}, or 409 tenant_mismatch. It never selects a Tenant. */
+                "X-Gatekeep-Tenant": string;
+            };
+            path: {
+                /** @description The Tenant's public ID: ten_ and the UUID's 16 bytes in lowercase RFC 4648 base32 with no padding, whose last character carries two zero bits. Only this canonical spelling, after URL decoding, names a Tenant, and the empty UUID's never does; anything else is refused like a Tenant the Admin holds no role in. */
+                tenantId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetTenantLabelRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TenantLabelResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description fresh_assertion_required, with the problem body, when no fresh assertion for this action and target is bound to the Session; access_denied when the capability is refused. No body when an earlier check refuses first: a restricted Session, or a wrong Origin or CSRF token. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description tenant_mismatch, with the problem body, when X-Gatekeep-Tenant is missing, sent twice or isn't {tenantId}, and nothing ran; or another conflict the operation's description names. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    BeginTenantFreshAssertion: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description The Tenant the page shows, its ten_ ID: it must equal {tenantId}, or 409 tenant_mismatch. It never selects a Tenant. */
+                "X-Gatekeep-Tenant": string;
+            };
+            path: {
+                /** @description The Tenant's public ID: ten_ and the UUID's 16 bytes in lowercase RFC 4648 base32 with no padding, whose last character carries two zero bits. Only this canonical spelling, after URL decoding, names a Tenant, and the empty UUID's never does; anything else is refused like a Tenant the Admin holds no role in. */
+                tenantId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FreshAssertionBeginRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminSignInOptionsResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description access_denied, with the problem body, when the capability is refused. No body when an earlier check refuses first: a Session restricted to setup, or on a state-changing call a wrong Origin or CSRF token. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description tenant_mismatch, with the problem body, when X-Gatekeep-Tenant is missing, sent twice or isn't {tenantId}, and nothing ran; or another conflict the operation's description names. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    /** @description Whole seconds until the rate-limit window allows another request. */
+                    "Retry-After": number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
             };
             /** @description Service Unavailable */
             503: {
