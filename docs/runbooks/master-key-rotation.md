@@ -128,4 +128,5 @@ The stack check (`deploy/ci/stack-check.sh`) rehearses the whole rotation on a f
 
 | Date | Environment | Commit | Result |
 | --- | --- | --- | --- |
-| 2026-11-05 | Docker Desktop Linux VM | `feature/12-7-rotate-the-master-key`, uncommitted work on `c68541d` | Passed: `deploy/ci/stack-check.sh` ended `rotation rehearsal passed` and `passed`. The first run failed at `finish` (`shred` refused the `0400` file on the Docker Desktop bind mount), which `finish` now fixes by making the file writable first |
+| 2026-11-05 | Docker Desktop Linux VM | before the review fixes (uncommitted, on `c68541d`) | Passed after one fix: the first run failed at `finish`, because `shred` refused the `0400` file on the Docker Desktop bind mount; `finish` now makes the file writable first |
+| 2026-11-05 | Docker Desktop Linux VM | `bb097926f5fccb2233703204b8b2ffe24df66c57` | Passed: `deploy/ci/stack-check.sh` ended `rotation rehearsal passed` and `passed`, with the root-step marker, the key-term check and the root-token sweep in place |

@@ -190,7 +190,7 @@ development_status:
   12-4-replay-revocations-after-restore: backlog
   12-5-sign-release-images: done
   12-6-upgrade-between-releases: backlog
-  12-7-rotate-the-master-key: in-progress
+  12-7-rotate-the-master-key: done
   epic-12-retrospective: optional
 
   epic-13: backlog
