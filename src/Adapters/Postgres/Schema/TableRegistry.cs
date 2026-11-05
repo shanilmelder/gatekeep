@@ -468,6 +468,33 @@ public static class TableRegistry
                 [Admin] = [new ColumnGrant(Update, ["confirmed_at", "used_at"])],
             },
             ["admin_recovery_code_guard"]),
+
+        // Story 2.3 (AD-10, AD-11): each Tenant's Signing and Management key rows, and its token
+        // protection key, only as the Transit wrap. Host.Worker creates them at Tenant creation and in
+        // the hourly backfill; Host.Hosted only reads them, for discovery and JWKS. Story 2.4: Host.Worker
+        // rotates, retires and destroys keys through their state and lifecycle times only, the trigger
+        // holds every change to AD-11's transitions. Only a Tenant's deletion deletes a row (Story 1.29), which
+        // the triggers allow only while the Tenant is deleting, and no row reaches a Tenant past creating or active.
+        new(
+            "signing_key",
+            TableClass.Tenant,
+            "Keys",
+            new Dictionary<string, IReadOnlyList<string>>
+            {
+                [Hosted] = [Select],
+                // Story 1.29: the deletion Operation's Keys purge deletes a deleting Tenant's rows.
+                [Worker] = [Select, Insert, Delete],
+            },
+            new Dictionary<string, IReadOnlyList<ColumnGrant>>
+            {
+                [Worker] = [new ColumnGrant(Update, ["state", "promoted_at", "rotated_at", "retired_at", "destroyed_at"])],
+            },
+            ["signing_key_guard_delete", "signing_key_guard_update", "tenant_row_guard"]),
+        new("protection_key_wrap", TableClass.Tenant, "Keys", new Dictionary<string, IReadOnlyList<string>>
+        {
+            [Hosted] = [Select],
+            [Worker] = [Select, Insert, Delete],
+        }, Triggers: ["protection_key_wrap_guard_delete", "tenant_row_guard"]),
     ];
 
     private static IReadOnlyList<string> EventTriggers(string table) =>

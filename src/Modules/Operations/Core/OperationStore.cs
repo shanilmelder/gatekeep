@@ -1,15 +1,17 @@
 using Gatekeep.Kernel.Persistence;
 using Gatekeep.Kernel.Secrets;
 using Gatekeep.Modules.Operations.Contracts;
+using Microsoft.Extensions.Logging;
 using Npgsql;
 
 namespace Gatekeep.Modules.Operations.Core;
 
 /// <summary>
 /// What Operations' own job handlers need beyond the context: the run-as database, the Operation
-/// registry, and the runner's key custody for stage handlers, null when the Worker has none.
+/// registry, the runner's key custody for stage handlers, null when the Worker has none, and the
+/// runner's logger, for a handler that reports a failure it doesn't throw (Story 2.3).
 /// </summary>
-internal sealed record JobRunServices(NpgsqlDataSource Source, OperationRegistry Operations, IKeyCustody? Custody = null)
+internal sealed record JobRunServices(NpgsqlDataSource Source, OperationRegistry Operations, IKeyCustody? Custody = null, ILogger? Logger = null)
 {
     public override string ToString() => nameof(JobRunServices);
 }

@@ -17,7 +17,7 @@ namespace Gatekeep.Modules.Operations.Core;
 /// resolving, removed every Tenant Role in it, and written this Operation, scoped to it. Its two
 /// Tenant stages are independent, so they run in either order on a Tenant nobody can reach: one
 /// purges every module's <c>tenant</c> tables but Audit's, the other destroys the six secret class
-/// keys, which only Host.Worker's custody policy may (AD-10). Each re-checks the Tenant is
+/// keys and every Signing and Management key (Story 2.3), which only Host.Worker's custody policy may (AD-10). Each re-checks the Tenant is
 /// <c>deleting</c> under <c>FOR SHARE</c> first. Once both have succeeded, its completion purges
 /// Operations' own <c>job_payload</c> rows, marks the Tenant <c>deleted</c> with
 /// <c>tenancy.tenant.deleted</c> on its chain, and schedules the chain's purge for when that event is
@@ -56,6 +56,7 @@ internal static class TenantDeletion
         ("Sessions", SessionsContract.TenantPurge),
         ("Authentication", AuthenticationContract.TenantPurge),
         ("Identity", IdentityContract.TenantPurge),
+        ("Keys", KeysContract.TenantPurge),
         ("Tenancy", TenancyContract.TenantPurge),
     ];
 
@@ -128,7 +129,11 @@ internal static class TenantDeletion
         return OperationStepResult.Success();
     }
 
-    /// <summary>A key already gone counts as destroyed, so a rerun or retry finishes what is left.</summary>
+    /// <summary>
+    /// The six secret class keys, then every Signing and Management key, read from the rows the purge may not
+    /// have reached yet and listed from custody. A key already gone counts as destroyed, so a rerun or retry
+    /// finishes what is left.
+    /// </summary>
     private static async Task<OperationStepResult> DestroySecretClassKeysAsync(OperationStepRun run, CancellationToken cancellationToken)
     {
         var tenantId = run.TenantId
@@ -147,6 +152,7 @@ internal static class TenantDeletion
         try
         {
             await KeysContract.DestroySecretClassKeysAsync(custody, tenantId, cancellationToken);
+            await KeysContract.DestroyTenantRowKeysAsync(run.Context, custody, tenantId, cancellationToken);
         }
         catch (KeyCustodyException e)
         {

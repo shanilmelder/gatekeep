@@ -496,6 +496,27 @@ public sealed class TenantTablesTests(PostgresFixture postgres)
         Assert.Equal(1L, await ScalarAsync<long>(database, "SELECT count(*) FROM tenant_settings"));
     }
 
+    /// <summary>Story 1.29, after Story 2.3: a Tenant's key rows go only with its deletion, so rotation can never delete one (GK008).</summary>
+    [Theory]
+    [InlineData("signing_key", "active")]
+    [InlineData("signing_key", "creating")]
+    [InlineData("protection_key_wrap", "active")]
+    [InlineData("protection_key_wrap", "creating")]
+    public async Task Key_rows_go_only_while_the_Tenant_is_deleting_GK008(string table, string status)
+    {
+        var database = await SeededAsync(status: status);
+        var seed = TenantSeeds.Seeds.Single(s => s.Table == table).Sql(TenantA, Guid.CreateVersion7());
+        await PostgresFixture.ExecuteAsync(
+            postgres.SuperuserConnection(database), $"SET session_replication_role = replica; {seed}; SET session_replication_role = DEFAULT");
+
+        var failure = await Assert.ThrowsAsync<PostgresException>(() => PostgresFixture.ExecuteAsync(
+            postgres.RoleConnection(TableRegistry.Worker, database),
+            $"BEGIN; SELECT set_config('gatekeep.tenant_id', '{TenantA}', true); DELETE FROM {table} WHERE tenant_id = '{TenantA}'; COMMIT;"));
+
+        Assert.Equal(SettingsDeleteRefused, failure.SqlState);
+        Assert.Equal(1L, await ScalarAsync<long>(database, $"SELECT count(*) FROM {table}"));
+    }
+
     [Theory]
     [InlineData("active")]
     [InlineData("creating")]

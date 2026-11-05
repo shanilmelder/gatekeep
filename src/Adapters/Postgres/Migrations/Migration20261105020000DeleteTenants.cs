@@ -14,10 +14,10 @@ namespace Gatekeep.Adapters.Postgres.Migrations;
 /// <c>active</c> to <c>deleting</c> (<c>gk_admin</c>), and <c>deleting</c> to <c>deleted</c>
 /// (<c>gk_worker</c>, once no settings row is left). Nothing leaves <c>deleted</c>.</item>
 /// <item><c>tenant_settings_guard_delete</c> lets a settings row go only while its Tenant is
-/// <c>deleting</c>, for every role. <c>tenant_role_guard_delete</c> holds <c>gk_admin</c>'s
+/// <c>deleting</c>, for every role, and so does each <c>signing_key</c> and <c>protection_key_wrap</c> row (Story 2.3). <c>tenant_role_guard_delete</c> holds <c>gk_admin</c>'s
 /// <c>DELETE</c> to a <c>deleting</c> Tenant's roles, until Story 8.4 removes single roles.</item>
 /// <item><c>gk_admin</c> may set a Tenant's status and delete its roles, the deletion's start;
-/// <c>gk_worker</c> may delete a <c>deleting</c> Tenant's settings, and the Identity, Sessions and
+/// <c>gk_worker</c> may delete a <c>deleting</c> Tenant's settings and key rows, and the Identity, Sessions and
 /// Authentication rows its purges delete, reading only their <c>tenant_id</c>.</item>
 /// </list>
 /// The triggers hold every DML by any role; a table owner or superuser can still disable triggers.
@@ -32,8 +32,8 @@ namespace Gatekeep.Adapters.Postgres.Migrations;
 /// <c>job.failure_code</c> gains <c>tenant_deleted</c>, for a deleted Tenant's pending jobs.
 /// </summary>
 [DbContext(typeof(MigrationsContext))]
-[Migration("20261105000000_DeleteTenants")]
-public sealed class Migration20261105000000DeleteTenants : Migration
+[Migration("20261105020000_DeleteTenants")]
+public sealed class Migration20261105020000DeleteTenants : Migration
 {
     protected override void Up(MigrationBuilder migrationBuilder)
     {
@@ -90,11 +90,11 @@ public sealed class Migration20261105000000DeleteTenants : Migration
 
             REVOKE EXECUTE ON FUNCTION tenant_guard_update() FROM PUBLIC;
 
-            -- A Tenant's settings go only with its deletion, whoever deletes them.
+            -- A Tenant's settings, and from Story 2.3 its key rows, go only with its deletion, whoever deletes them.
             CREATE FUNCTION tenant_settings_guard_delete() RETURNS trigger LANGUAGE plpgsql AS $$
             BEGIN
               IF NOT EXISTS (SELECT 1 FROM tenant WHERE id = OLD.tenant_id AND status = 'deleting') THEN
-                RAISE EXCEPTION 'a tenant''s settings are deleted only while it is deleting' USING ERRCODE = 'GK008';
+                RAISE EXCEPTION 'a tenant''s settings and key rows are deleted only while it is deleting' USING ERRCODE = 'GK008';
               END IF;
 
               RETURN OLD;
@@ -179,6 +179,21 @@ public sealed class Migration20261105000000DeleteTenants : Migration
             GRANT SELECT (tenant_id), DELETE ON "authorization" TO gk_worker;
             GRANT SELECT (tenant_id), DELETE ON token TO gk_worker;
             GRANT SELECT (tenant_id), DELETE ON signin_transaction TO gk_worker;
+
+            -- Keys (Story 2.3): no key row reaches a Tenant once its deletion has started, and a key
+            -- row goes only with its Tenant's deletion, whoever deletes it. Rotation never deletes one.
+            CREATE TRIGGER tenant_row_guard BEFORE INSERT ON signing_key
+              FOR EACH ROW EXECUTE FUNCTION tenant_row_guard('creating', 'active');
+            CREATE TRIGGER tenant_row_guard BEFORE INSERT ON protection_key_wrap
+              FOR EACH ROW EXECUTE FUNCTION tenant_row_guard('creating', 'active');
+
+            CREATE TRIGGER signing_key_guard_delete BEFORE DELETE ON signing_key
+              FOR EACH ROW EXECUTE FUNCTION tenant_settings_guard_delete();
+            CREATE TRIGGER protection_key_wrap_guard_delete BEFORE DELETE ON protection_key_wrap
+              FOR EACH ROW EXECUTE FUNCTION tenant_settings_guard_delete();
+
+            GRANT DELETE ON signing_key TO gk_worker;
+            GRANT DELETE ON protection_key_wrap TO gk_worker;
             """);
     }
 

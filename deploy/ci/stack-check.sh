@@ -1,5 +1,5 @@
 #!/bin/sh
-# Stack check (Stories 1.10, 1.11 and 1.20). Runs inside the stack container of deploy/compose.test.yaml,
+# Stack check (Stories 1.10, 1.11, 1.20 and 12.7). Runs inside the stack container of deploy/compose.test.yaml,
 # never on the machine itself:
 #
 #   GATEKEEP_HOST_REPO=<this repository's path on the Docker host> \
@@ -10,7 +10,8 @@
 # environment; the hardening each container really runs with; no egress; the edge (Story
 # 1.11): both of Caddy's sites over HTTPS through its published ports and every refusal,
 # which container can reach which, Caddy's key files and its settings checks; PostgreSQL
-# stopped; OpenBao stopped; the Master Key missing. Nothing here calls Cloudflare: Caddy
+# stopped; OpenBao stopped; the Master Key missing; and a rehearsal of the Master Key
+# rotation in docs/runbooks/master-key-rotation.md, from prepare to rotate-transit-keys. Nothing here calls Cloudflare: Caddy
 # uses its internal CA, and cloudflare mode is only validated, with no network. It always tears down, volumes and
 # secrets included. Every wait polls for a defined state, with a deadline.
 set -eu
@@ -29,6 +30,8 @@ case "$GATEKEEP_SECRETS_DIR" in
 esac
 
 C="docker compose -f deploy/compose.yaml"
+# The Master Key rotation overlay (Story 12.7), used only by the rehearsal.
+R="$C -f deploy/compose.rotate.yaml"
 BUSYBOX=busybox:1.37.0@sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec
 # This container's own image: it has Node, for HTTP checks and the key search.
 TOOLS=gatekeep/tests:local
@@ -45,7 +48,7 @@ say() { echo "stack-check: $*"; }
 fail() { echo "stack-check: FAIL $*" >&2; $C ps -a >&2 || true; $C logs --tail 40 >&2 || true; exit 1; }
 
 cleanup() {
-    $C --profile tools --profile setup down --volumes --remove-orphans > /dev/null 2>&1 || true
+    $R --profile tools --profile setup --profile rotate down --volumes --remove-orphans > /dev/null 2>&1 || true
     # The secrets directory holds root-owned files, so a container removes it, through
     # its parent, which works whether the directory is relative or absolute.
     docker run --rm -v "$(dirname "$SECRETS"):/parent" "$BUSYBOX" rm -rf "/parent/$(basename "$SECRETS")" > /dev/null 2>&1 || true
@@ -143,23 +146,30 @@ done
 [ "$(docker run --rm -v "$SECRETS/bootstrap:/b:ro" "$BUSYBOX" sh -c 'ls -A /b')" = bootstrap-token ] \
     || fail "init left files beside the bootstrap token."
 
+# Fails unless the key at $1, a path under master/ in the secrets directory, is in no volume,
+# built image or container environment of this project.
+search_key() {
+    key="/key/$1"
+    for volume in $(docker volume ls -q --filter "label=com.docker.compose.project=$COMPOSE_PROJECT_NAME"); do
+        find_key -v "$volume:/scan:ro" "$TOOLS" node /ci/find-key.mjs "$key" /scan \
+            || fail "volume $volume holds the Master Key ($1)."
+    done
+    for image in $BUILT; do
+        id="$(docker create "$image")"
+        docker export "$id" | find_key "$TOOLS" node /ci/find-key.mjs "$key" - || { docker rm "$id" > /dev/null; fail "image $image holds the Master Key ($1)."; }
+        docker rm "$id" > /dev/null
+        docker history --no-trunc --format '{{.CreatedBy}}' "$image" | find_key "$TOOLS" node /ci/find-key.mjs "$key" - \
+            || fail "the history of $image holds the Master Key ($1)."
+    done
+    for id in $(docker ps -aq --filter "label=com.docker.compose.project=$COMPOSE_PROJECT_NAME"); do
+        docker inspect --format '{{json .Config.Env}}{{json .Config.Labels}}{{json .Config.Cmd}}' "$id" \
+            | find_key "$TOOLS" node /ci/find-key.mjs "$key" - \
+            || fail "container $id has the Master Key ($1) in its environment or configuration."
+    done
+}
+
 say "the Master Key is in no volume, built image or container environment."
-for volume in $(docker volume ls -q --filter "label=com.docker.compose.project=$COMPOSE_PROJECT_NAME"); do
-    find_key -v "$volume:/scan:ro" "$TOOLS" node /ci/find-key.mjs /key/master-key /scan \
-        || fail "volume $volume holds the Master Key."
-done
-for image in $BUILT; do
-    id="$(docker create "$image")"
-    docker export "$id" | find_key "$TOOLS" node /ci/find-key.mjs /key/master-key - || { docker rm "$id" > /dev/null; fail "image $image holds the Master Key."; }
-    docker rm "$id" > /dev/null
-    docker history --no-trunc --format '{{.CreatedBy}}' "$image" | find_key "$TOOLS" node /ci/find-key.mjs /key/master-key - \
-        || fail "the history of $image holds the Master Key."
-done
-for id in $(docker ps -aq --filter "label=com.docker.compose.project=$COMPOSE_PROJECT_NAME"); do
-    docker inspect --format '{{json .Config.Env}}{{json .Config.Labels}}{{json .Config.Cmd}}' "$id" \
-        | find_key "$TOOLS" node /ci/find-key.mjs /key/master-key - \
-        || fail "container $id has the Master Key in its environment or configuration."
-done
+search_key master-key
 
 say "hardening of each running container."
 for service in $HOSTS caddy; do
@@ -492,5 +502,84 @@ $C rm -fs openbao > /dev/null
 docker run --rm -v "$SECRETS/master:/m" "$BUSYBOX" sh -c 'rm -rf /m/master-key && mv /m/master-key.aside /m/master-key'
 $C up -d --wait openbao || fail "openbao didn't come back with its Master Key."
 wait_healthz "200 healthy"
+
+# --- Master Key rotation rehearsal (Story 12.7), as docs/runbooks/master-key-rotation.md has it ---
+
+say "rotation rehearsal: every chain intact before it."
+$C run --rm cli audit verify > /dev/null || fail "audit verify failed before the rotation."
+
+say "rotation rehearsal: prepare."
+prepared="$($R run --rm master-key-rotate prepare)" || fail "master-key-rotate prepare didn't exit 0."
+echo "$prepared" | grep -q "moved generation 1 to /secrets/previous/master-key" || fail "prepare didn't move generation 1: $prepared"
+echo "$prepared" | grep -q "wrote generation 2 to /secrets/master-key" || fail "prepare didn't write generation 2: $prepared"
+echo "$prepared" | grep -qE "master-key-gen2-[0-9]{4}-[0-9]{2}-[0-9]{2}" || fail "prepare printed no escrow label: $prepared"
+if $R run --rm master-key-rotate prepare > /dev/null 2>&1; then
+    fail "a second prepare ran while master/previous/ held a key."
+fi
+[ "$(docker run --rm -v "$SECRETS/master:/m:ro" "$BUSYBOX" sh -c 'cat /m/master-key-id /m/previous/master-key-id' | tr '\n' ' ')" \
+    = "gatekeep-master-2 gatekeep-master-1 " ] || fail "the key IDs aren't generation 2 current and 1 previous."
+
+say "rotation rehearsal: the root step refuses outside rotation mode, before reading a share."
+if output="$(echo | $R run --rm -T master-key-rotate-root 2>&1)"; then
+    fail "the root step ran outside rotation mode."
+fi
+case "$output" in *"isn't in rotation mode"*"No share was read"*) ;; *) fail "the root step refused for another reason: $output" ;; esac
+
+say "rotation rehearsal: OpenBao in rotation mode."
+$R up -d --wait openbao || fail "openbao didn't come up healthy in rotation mode."
+wait_healthz "200 healthy"
+
+say "rotation rehearsal: both generations are in no volume, image or container environment."
+search_key master-key
+search_key previous/master-key
+
+say "rotation rehearsal: the root step, with the stack's own recovery shares."
+rooted="$(docker run --rm -v "$SECRETS/recovery:/r:ro" "$BUSYBOX" cat /r/openbao-init.json \
+    | $R run --rm -T master-key-rotate-root)" || fail "the root step didn't exit 0."
+echo "$rooted" | grep -q "the key term is now 2" || fail "the root step didn't report key term 2: $rooted"
+# Checked inside a container, so no share is printed here: none is in the step's output.
+printf '%s\n' "$rooted" | docker run --rm -i -v "$SECRETS/recovery:/r:ro" "$BUSYBOX" sh -c '
+    sed -n "/recovery_keys_b64/,/]/p" /r/openbao-init.json | grep -o "\"[A-Za-z0-9+/=]*\"" | tr -d "\"" > /tmp/shares
+    [ "$(grep -c . /tmp/shares)" -eq 5 ] && ! grep -qF -f /tmp/shares' \
+    || fail "the root step printed a recovery share, or the escrow file doesn't hold five."
+
+say "rotation rehearsal: OpenBao back in base mode, on generation 2 alone, then finish."
+$C up -d --wait openbao || fail "openbao didn't come up healthy on generation 2 alone."
+# Kept aside for the check that generation 1 alone stays sealed, then shredded.
+docker run --rm -v "$SECRETS/master:/m" "$BUSYBOX" cp -p /m/previous/master-key /m/.generation-1-check
+finished="$($R run --rm master-key-rotate finish)" || fail "master-key-rotate finish didn't exit 0."
+echo "$finished" | grep -q "keep that generation escrowed until the last backup" || fail "finish didn't print the retirement rule: $finished"
+[ -z "$(docker run --rm -v "$SECRETS/master:/m:ro" "$BUSYBOX" ls -A /m/previous)" ] || fail "finish left files in master/previous/."
+
+say "rotation rehearsal: rotate-transit-keys, twice."
+for run in 1 2; do
+    rotated="$($C run --rm cli rotate-transit-keys)" || fail "cli rotate-transit-keys (run $run) didn't exit 0."
+    [ "$rotated" = "Rotated 2 Transit keys for the Deployment and 0 Tenants, and skipped 0 that don't exist." ] \
+        || fail "rotate-transit-keys (run $run) printed '$rotated'."
+done
+
+say "rotation rehearsal: every service healthy, and every chain intact."
+$C up -d --wait || fail "the stack isn't healthy after the rotation."
+wait_healthz "200 healthy"
+$C run --rm cli audit verify > /dev/null || fail "audit verify failed after the rotation."
+
+say "rotation rehearsal: generation 1 alone, with its own ID, stays sealed."
+$C stop openbao > /dev/null
+docker run --rm -v "$SECRETS/master:/m" "$BUSYBOX" sh -c '
+    mv /m/master-key /m/.generation-2 && mv /m/master-key-id /m/.generation-2-id
+    mv /m/.generation-1-check /m/master-key && echo gatekeep-master-1 > /m/master-key-id'
+$C rm -fs openbao > /dev/null
+$C up -d --no-deps openbao > /dev/null 2>&1 || fail "Compose didn't create openbao with generation 1."
+old_key_refused() { docker logs "$(container openbao)" 2>&1 | grep -q 'unknown key id'; }
+until_true 60 old_key_refused || fail "openbao with generation 1 alone didn't refuse its data."
+[ "$(health_of "$(container openbao)")" != healthy ] || fail "openbao is healthy on generation 1 alone."
+$C rm -fs openbao > /dev/null
+docker run --rm -v "$SECRETS/master:/m" "$BUSYBOX" sh -c '
+    chmod u+w /m/master-key && shred -u /m/master-key && rm -f /m/master-key-id
+    mv /m/.generation-2 /m/master-key && mv /m/.generation-2-id /m/master-key-id'
+$C up -d --wait openbao || fail "openbao didn't come back on generation 2."
+$C up -d --wait || fail "the stack isn't healthy after the old-key check."
+wait_healthz "200 healthy"
+say "rotation rehearsal passed."
 
 say "passed."

@@ -45,6 +45,9 @@ public class KeyCustodyRuleTests
         + @"|^transit/(?:keys|sign|verify|encrypt|decrypt|hmac|rewrap)/dep-(?:email|payload|hmac|records|\*)$",
         RegexOptions.Compiled);
 
+    /// <summary>The one Transit path that names no key: the key list.</summary>
+    private const string ListPath = "transit/keys";
+
     private static readonly Regex Listener = new(@"listener\s+""(?<type>\w+)""\s*\{(?<body>[^}]*)\}", RegexOptions.Singleline | RegexOptions.Compiled);
 
     public static TheoryData<string> PolicyFiles =>
@@ -83,8 +86,10 @@ public class KeyCustodyRuleTests
     }
 
     /// <summary>
-    /// Story 1.29 (AD-10): a key is destroyed only through <c>KeysContract</c>, which destroys a deleted
-    /// Tenant's six secret class keys, and nowhere else under <c>src/</c> but the adapter itself.
+    /// Story 1.29 (AD-10): a key is destroyed only inside the Keys module, through <c>KeysContract</c>,
+    /// which destroys a deleted Tenant's six secret class keys and, from Story 2.3, its Signing and
+    /// Management keys (and Story 2.4's retired and orphaned ones), and nowhere else under <c>src/</c>
+    /// but the adapter itself.
     /// </summary>
     [Fact]
     public void Only_KeysContract_destroys_a_key()
@@ -101,6 +106,8 @@ public class KeyCustodyRuleTests
     [InlineData("src/Modules/Operations/Core/TenantDeletion.cs", "// custody.DeleteAsync(key, ct) is KeysContract's alone.", 0)]
     [InlineData("src/Modules/Operations/Core/TenantDeletion.cs", "await KeysContract.DestroySecretClassKeysAsync(custody, id, ct);", 0)]
     [InlineData(KeysContractFile, "await custody.DeleteAsync(key, cancellationToken);", 0)]
+    [InlineData("src/Modules/Keys/Core/KeysPurge.cs", "await custody.DeleteAsync(key, cancellationToken);", 0)]
+    [InlineData("src/Modules/Operations/Core/SigningKeyJobs.cs", "await custody.DeleteAsync(key, ct);", 1)]
     [InlineData("src/Adapters/OpenBao/OpenBaoKeyCustody.cs", "await other.DeleteAsync(key, ct);", 0)]
     [InlineData("src/Gatekeep.Host.Admin/TenantsApi.cs", "await services.Tenants.DeleteAsync(context, principal, id, typed, ct);", 0)]
     public void Key_destroy_detection(string path, string source, int expected)
@@ -110,14 +117,16 @@ public class KeyCustodyRuleTests
 
     private const string KeysContractFile = "src/Modules/Keys/Contracts/KeysContract.cs";
 
+    private const string KeysModule = "src/Modules/Keys/";
+
     /// <summary>A <c>DeleteAsync</c> call on a receiver named for custody: a Tenant's or anything else's <c>DeleteAsync</c> isn't a key.</summary>
     private static readonly Regex DestroysKey = new(@"\b\w*[Cc]ustody\w*\s*\.\s*DeleteAsync\s*\(", RegexOptions.Compiled);
 
     private static List<string> DestroyViolations(IEnumerable<(string Path, string Source)> sources) =>
         [.. sources
-            .Where(s => s.Path != KeysContractFile && !s.Path.StartsWith(AdapterDirectory, StringComparison.Ordinal))
+            .Where(s => !s.Path.StartsWith(KeysModule, StringComparison.Ordinal) && !s.Path.StartsWith(AdapterDirectory, StringComparison.Ordinal))
             .Where(s => DestroysKey.IsMatch(Comment.Replace(s.Source, string.Empty)))
-            .Select(s => $"{s.Path} destroys a key: only {KeysContractFile} may (AD-10).")];
+            .Select(s => $"{s.Path} destroys a key: only the Keys module, through {KeysContractFile}, may (AD-10).")];
 
     [Fact]
     public void No_source_makes_asymmetric_or_AEAD_keys()
@@ -176,6 +185,10 @@ public class KeyCustodyRuleTests
     [InlineData("path \"transit/keys/sig-*\" {\n  capabilities = [\"read\"]\n}", 0)]
     [InlineData("# path \"transit/backup/*\" {}\npath \"transit/hmac/dep-hmac\" {\n  capabilities = [\"update\"]\n}", 0)]
     [InlineData("", 1)]
+    [InlineData("path \"transit/keys\" {\n  capabilities = [\"list\"]\n}", 0)]
+    [InlineData("path \"transit/keys\" {\n  capabilities = [\"list\", \"update\"]\n}", 1)]
+    [InlineData("path \"transit/keys\" {\n  capabilities = [\"read\"]\n}", 1)]
+    [InlineData("path \"transit/keys/*\" {\n  capabilities = [\"list\"]\n}", 1)]
     public void Policy_violation_detection(string policy, int violations)
     {
         Assert.Equal(violations, PolicyViolations(policy).Count);
@@ -212,9 +225,35 @@ public class KeyCustodyRuleTests
         Assert.NotEmpty(service);
         Assert.Contains("current_key    = \"file:///run/secrets/master_key\"", config);
         Assert.Matches(@"(?m)^      - master_key$", service);
+        Assert.Matches(@"(?m)^      - master_key_id$", service);
+        Assert.DoesNotContain("master_key_previous", service);
         Assert.DoesNotContain("environment:", service);
         Assert.DoesNotContain("env_file", service);
         Assert.DoesNotContain("SECRETS_DIR", service);
+    }
+
+    /// <summary>
+    /// Story 12.7: the previous generation reaches OpenBao only from the rotation overlay, as two
+    /// more secret files, and the rendered key IDs never come from anything but the ID file.
+    /// </summary>
+    [Fact]
+    public void Previous_generation_reaches_OpenBao_only_through_the_rotation_overlay()
+    {
+        var overlay = File.ReadAllText(Path.Combine(Root, "deploy", "compose.rotate.yaml")).ReplaceLineEndings("\n");
+        var service = Regex.Match(overlay, @"(?m)^  openbao:\n(?<body>(?:(?:    .*)?\n)*)").Groups["body"].Value;
+
+        Assert.Equal(["master_key_previous", "master_key_previous_id"], Regex.Matches(service, @"(?m)^      - (\S+)$").Select(m => m.Groups[1].Value));
+        Assert.DoesNotContain("environment:", service);
+        Assert.DoesNotContain("volumes:", service);
+
+        var config = HclComment.Replace(File.ReadAllText(Path.Combine(Root, DeployDirectory, "openbao.hcl")), string.Empty);
+        Assert.Contains("current_key_id = \"@MASTER_KEY_ID@\"", config);
+        Assert.DoesNotContain("previous_key", config);
+
+        var start = File.ReadAllText(Path.Combine(Root, DeployDirectory, "start-openbao.sh"));
+        Assert.Contains("KEY_ID_FILE=/run/secrets/master_key_id", start);
+        Assert.Contains("PREVIOUS_KEY_FILE=/run/secrets/master_key_previous", start);
+        Assert.Contains("PREVIOUS_ID_FILE=/run/secrets/master_key_previous_id", start);
     }
 
     [Fact]
@@ -245,6 +284,17 @@ public class KeyCustodyRuleTests
         {
             var path = match.Groups["path"].Value;
             var body = match.Groups["body"].Value;
+
+            // The key list (Story 2.4's orphan sweep) shows names only, so it may list and do nothing else.
+            if (path == ListPath)
+            {
+                if (Capabilities.Match(body).Groups["caps"].Value.Trim() != "\"list\"")
+                {
+                    violations.Add($"{path}: may only list");
+                }
+
+                continue;
+            }
 
             if (!AllowedPolicyPath.IsMatch(path))
             {

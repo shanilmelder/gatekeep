@@ -1,0 +1,85 @@
+# Master Key rotation (Story 12.7), added on top of deploy/compose.yaml for the rotation's
+# duration only. docs/runbooks/master-key-rotation.md has every step; in short:
+#
+#   docker compose -f deploy/compose.yaml -f deploy/compose.rotate.yaml run --rm master-key-rotate prepare
+#   docker compose -f deploy/compose.yaml -f deploy/compose.rotate.yaml up -d --wait openbao
+#   docker compose -f deploy/compose.yaml -f deploy/compose.rotate.yaml run --rm master-key-rotate-root
+#   docker compose -f deploy/compose.yaml up -d --wait openbao
+#   docker compose -f deploy/compose.yaml -f deploy/compose.rotate.yaml run --rm master-key-rotate finish
+#   docker compose -f deploy/compose.yaml run --rm cli rotate-transit-keys
+#
+# With this file, openbao also gets the previous generation from master/previous/, which
+# puts it in rotation mode: it unseals with either, re-wraps its root key under the new one,
+# and its socket answers the unauthenticated generate-root endpoints, which the root-key
+# step needs and base mode never allows. YAML anchors don't reach across files, so the
+# hardening of deploy/compose.yaml is repeated here.
+
+x-rotate-limits: &rotate-limits
+  pids_limit: 256
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
+
+services:
+  openbao:
+    secrets:
+      - master_key_previous
+      - master_key_previous_id
+
+  # prepare and finish: moves and writes keys in master/, so root with only the capabilities
+  # that needs, as keygen. It mounts master/ and the socket, which finish asks whether
+  # OpenBao is unsealed on the new generation alone.
+  master-key-rotate:
+    # The OpenBao image, as keygen uses it: the release digest when deploy/release.env is
+    # passed (docs/install.md), else the local build. Never pulled by this name.
+    image: ${GATEKEEP_OPENBAO_IMAGE:-gatekeep/openbao:local}
+    pull_policy: never
+    profiles: [rotate]
+    <<: *rotate-limits
+    read_only: true
+    network_mode: none
+    user: "0:0"
+    group_add: ["4500"]
+    cap_drop: [ALL]
+    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER]
+    security_opt: ["no-new-privileges:true"]
+    restart: "no"
+    environment:
+      HOME: /tmp
+    tmpfs: ["/tmp:size=16m,mode=1777"]
+    entrypoint: ["sh", "/opt/gatekeep/openbao/rotate-master-key.sh"]
+    volumes:
+      - ${GATEKEEP_SECRETS_DIR:-./secrets}/master:/secrets
+      - openbao-socket:/run/openbao
+
+  # The root-key step: the socket only, never master/. Recovery shares are typed at its
+  # prompt, or arrive on standard input with run --rm -T, so they're in no file, argument or
+  # variable Compose sees.
+  master-key-rotate-root:
+    # The OpenBao image, as keygen uses it: the release digest when deploy/release.env is
+    # passed (docs/install.md), else the local build. Never pulled by this name.
+    image: ${GATEKEEP_OPENBAO_IMAGE:-gatekeep/openbao:local}
+    pull_policy: never
+    profiles: [rotate]
+    <<: *rotate-limits
+    read_only: true
+    network_mode: none
+    user: "100:1000"
+    group_add: ["4500"]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    restart: "no"
+    environment:
+      HOME: /tmp
+    tmpfs: ["/tmp:size=16m,mode=1777"]
+    entrypoint: ["sh", "/opt/gatekeep/openbao/rotate-root-key.sh"]
+    volumes:
+      - openbao-socket:/run/openbao
+
+secrets:
+  master_key_previous:
+    file: ${GATEKEEP_SECRETS_DIR:-./secrets}/master/previous/master-key
+  master_key_previous_id:
+    file: ${GATEKEEP_SECRETS_DIR:-./secrets}/master/previous/master-key-id

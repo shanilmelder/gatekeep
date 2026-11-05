@@ -15,5 +15,8 @@ internal static class JobSchedule
         new(OperationsContract.PurgeJobs, TimeSpan.FromDays(1)),
         new(OperationsContract.SweepRetention, TimeSpan.FromDays(1)),
         new(OperationsContract.DeploymentRetention, TimeSpan.FromDays(1)),
+        new(OperationsContract.BackfillTenantKeys, TimeSpan.FromHours(1)),
+        new(OperationsContract.RotateSigningKeys, TimeSpan.FromDays(1)),
+        new(OperationsContract.SweepTransitKeys, TimeSpan.FromDays(1)),
     ];
 }

@@ -28,13 +28,6 @@ deferred:
     location: >-
       src/Modules/Operations/Core/TenantDeletion.cs
     severity: low
-  - summary: >-
-      Deleting a Tenant doesn't destroy Signing Keys.
-    evidence: |-
-      Signing Keys arrive with Story 2.3.
-    location: >-
-      src/Modules/Operations/Core/TenantDeletion.cs
-    severity: medium
 ---
 
 <intent-contract>
@@ -314,7 +307,7 @@ Not taken in: "Admin removal must account for the credential floor trigger" (Sto
     - **T-46:** the deletion Operation, its re-checks, and retry needing a new assertion.
     - **T-53:** a deleted Tenant's roles are removed in the start's transaction.
     - **T-55:** a deleted Tenant's host and `tenant` row are kept, so the subdomain is refused for good.
-    - **New T-57:** "Deleting one Tenant changes another, leaves its data or keys behind, loses its evidence, or is done by mistake". Its controls:
+    - **New T-58:** "Deleting one Tenant changes another, leaves its data or keys behind, loses its evidence, or is done by mistake". Its controls:
       - the tombstone, and the fixed 404;
       - removing roles at the start;
       - per-module purges in the Tenant's own scope;
@@ -323,11 +316,11 @@ Not taken in: "Admin removal must account for the credential floor trigger" (Sto
       - the creation re-check and retry refusal;
       - audit excluded from the purge;
       - typed confirmation, and the fresh assertion.
-    - What T-57 leaves:
+    - What T-58 leaves:
       - Applications holding tokens can verify them against a cached JWKS until they expire;
       - the tombstone keeps the Tenant's name, which is Admin-entered and not personal data;
       - later `tenant` tables fail the purge test until their purge exists;
-      - Signing Keys arrive with Story 2.3, whose purge must destroy them.
+      - Signing Keys arrived with Story 2.3 before this story merged: Keys' purge deletes their rows and the destroy stage destroys their Transit keys.
     - **G-18:** closed by Story 1.29, with test names. `operation` and `operation_step` rows stay as history, because the `tenant` row is never deleted.
   - **`docs/install.md`:** the "Not yet covered" Admin Dashboard item says the Dashboard also deletes Tenants.
   - **`docs/audit-events.md`:** regenerated.
@@ -357,7 +350,7 @@ Not taken in: "Admin removal must account for the credential floor trigger" (Sto
 - No Tenant name, host, typed value or Tenant ID in a log line. No placeholder named `{Code}`.
 - No inline style or script, no CSP change, and no new runtime dependency in `apps/admin-dashboard` or `packages/ui`.
 - **Out of scope**, recorded in `deferred-work.md`:
-  - Destroying `sig-` and `mgmt-` keys and purging `signing_key` rows in Keys' purge (Story 2.3).
+  - (Done on the merge after Story 2.3) destroying `sig-` and `mgmt-` keys and purging `signing_key` rows in Keys' purge.
   - A caller for the `audit.chain.purge` Operation, to schedule a purge again after its job went dead.
   - Cancelling or failing a deleted Tenant's pending jobs. Each later job type re-checks the Tenant's status (AD-15).
   - The retention sweep skipping a deleted Tenant whose chain is purged.
@@ -529,7 +522,7 @@ Not taken in: "Admin removal must account for the credential floor trigger" (Sto
   - the catalogue keys.
 - [x] Browser tests: `admin-tenant-delete.spec.ts` (every browser row, `watchCsp`, axe in light and dark at 1100 and 768), the updated `admin-tenants.spec.ts`, and the config.
 - [x] Docs:
-  - threat model (header, T-1, T-22, T-31, T-46, T-53, T-55, new T-57, G-18 closed);
+  - threat model (header, T-1, T-22, T-31, T-46, T-53, T-55, new T-58, G-18 closed);
   - `install.md`;
   - `deferred-work.md`:
     - remove the taken-in items: Story 1.24's deleted-Tenant roles, Story 1.27's deletion item and its carried ordered-stages item;
@@ -581,8 +574,8 @@ Not taken in: "Admin removal must account for the credential floor trigger" (Sto
   - `[low]` `[patch]` Intent: the log test doesn't check the internal Tenant ID or the Worker's output — both checked.
   - `[low]` `[patch]` Intent: the two-Tenant proof doesn't show the other Tenant still resolves — a Host.Hosted probe added.
   - `[low]` `[patch]` Intent: retry while running and a whole-handler rerun are weakly proved — tested.
-  - `[low]` `[defer]` Intent: Signing Keys aren't destroyed — they arrive with Story 2.3.
-  - `[low]` `[defer]` Patch: the insert guard can't lock `tenant` FOR SHARE without UPDATE rights, so a statement whose FK check lands after the purge can keep its row — narrow race, recorded in T-57.
+  - `[low]` `[patch]` Intent: Signing Keys aren't destroyed — done on the merge after Story 2.3: Keys' purge deletes the rows, and the destroy stage destroys every `sig-` and `mgmt-` key.
+  - `[low]` `[defer]` Patch: the insert guard can't lock `tenant` FOR SHARE without UPDATE rights, so a statement whose FK check lands after the purge can keep its row — narrow race, recorded in T-58.
   - `[low]` `[defer]` Patch: GK010 has no Host.Hosted mapping yet because Hosted has no write route — the first Hosted write route (Epic 2).
 
 ## Design Notes
@@ -633,10 +626,10 @@ Status: done
 
 **Files:** the deletion migration and `TableRegistry`; `src/Gatekeep.Kernel/` (`ITenantPurge`, custody delete); the Sessions, Authentication, Identity and Tenancy purges; `src/Modules/Operations/` (Tenant deletion, purge scheduling); `src/Modules/Management/`; `src/Adapters/OpenBao/`; `src/Gatekeep.Host.Admin/` (deletion routes, OpenAPI); `docs/api/openapi-v1.json`, `packages/api-client/`; `apps/admin-dashboard/src/shell/` (Delete Tenant modal, Tenants page, lost-Tenant banner); `tests/Isolation/Tenancy/`, `Operations/`, `Custody/`, `tests/Architecture/`, `tests/browser/admin-tenant-delete.spec.ts`; `docs/audit-events.md`, the threat model and `install.md`.
 
-**Review:** 29 findings across four layers: 24 patched, 5 deferred, 0 rejected, each with its reason in the triage log.
+**Review:** 29 findings across four layers: 25 patched (one on the merge after Story 2.3), 4 deferred, 0 rejected, each with its reason in the triage log.
 
 **Follow-up review:** recommended. Insert guards, the purge-job safety and job handling at completion changed in review, with new tests as the only proof.
 
 **Verification:** see the PR screenshot; the full suite passes in the `tests` container.
 
-**Residual risks:** Signing Keys aren't destroyed until Story 2.3. Two guard mappings are unreachable and untested until a fault seam exists.
+**Residual risks:** a Signing Key custody couldn't list during deletion is left to the 24-hour orphan sweep. Two guard mappings are unreachable and untested until a fault seam exists.

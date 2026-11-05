@@ -30,6 +30,7 @@ dependency Host.Worker -> Adapters.Hosting
 dependency Cli -> Operations
 dependency Cli -> Admins
 dependency Cli -> Audit
+dependency Cli -> Keys
 dependency Cli -> Adapters.OpenBao
 dependency Cli -> Adapters.Postgres
 dependency Protocol -> Authentication
@@ -83,5 +84,6 @@ dependency Tests.Isolation -> Cli
 dependency Tests.Isolation -> Keys
 dependency Tests.Isolation -> Management
 dependency Tests.Isolation -> Operations
+dependency Tests.Isolation -> Protocol
 dependency Tests.Isolation -> Sessions
 dependency Tests.Isolation -> Tenancy

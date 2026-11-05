@@ -27,6 +27,9 @@ public sealed record KeyHmac(int KeyVersion, byte[] Value);
 /// <summary>The public half of one version of a signing key, as PEM.</summary>
 public sealed record KeyPublicVersion(int KeyVersion, string PublicKeyPem);
 
+/// <summary>A Signing or Management key that exists in custody, and when custody created it.</summary>
+public sealed record ListedKey(KeyName Key, DateTimeOffset CreatedAt);
+
 /// <summary>
 /// The only way to reach a key (AD-10). Keys stay in custody and are never exported:
 /// signing, encryption and HMAC happen there, and only a wrapped data key ever leaves.
@@ -99,4 +102,13 @@ public interface IKeyCustody
     Task DeleteAsync(KeyName key, CancellationToken cancellationToken);
 
     Task<IReadOnlyList<KeyPublicVersion>> GetPublicKeysAsync(KeyName key, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Every key in custody whose name is a <c>sig-</c> or <c>mgmt-</c> row key
+    /// (<see cref="KeyName.TryParseRowKey"/>), with when its first version was created (Story 2.4).
+    /// Any other name is skipped without being read, and a row key that can't be read (deleted
+    /// meanwhile, refused, unavailable or with no creation time) is left out rather than failing the list. A failed list itself throws.
+    /// Only <c>Host.Worker</c>'s custody policy may list keys.
+    /// </summary>
+    Task<IReadOnlyList<ListedKey>> ListRowKeysAsync(CancellationToken cancellationToken);
 }

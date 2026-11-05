@@ -178,6 +178,26 @@ public sealed class PolicyMatrixTests(OpenBaoFixture bao)
     }
 
     [Theory]
+    [MemberData(nameof(Roles))]
+    public async Task Only_the_Worker_lists_keys_and_the_list_holds_only_row_keys(string role)
+    {
+        using var custody = bao.Custody(role);
+
+        if (role != OpenBaoFixture.Worker)
+        {
+            var refused = await Assert.ThrowsAsync<KeyCustodyException>(() => custody.ListRowKeysAsync(Cancellation));
+            Assert.Equal(KeyCustodyFailure.Refused, refused.Failure);
+            return;
+        }
+
+        var listed = await custody.ListRowKeysAsync(Cancellation);
+        var signing = Assert.Single(listed, k => k.Key.Equals(bao.SigningA));
+        Assert.InRange(signing.CreatedAt, DateTimeOffset.UtcNow - TimeSpan.FromHours(2), DateTimeOffset.UtcNow + TimeSpan.FromMinutes(5));
+        Assert.Contains(listed, k => k.Key.Equals(bao.ManagementA));
+        Assert.All(listed, k => Assert.True(KeyName.TryParseRowKey(k.Key.Value, out _)));
+    }
+
+    [Theory]
     [InlineData(OpenBaoFixture.Cli, "dep-records")]
     [InlineData(OpenBaoFixture.Worker, "dep-records")]
     [InlineData(OpenBaoFixture.Admin, "sig")]

@@ -45,6 +45,7 @@
     <ProjectReference Include="../../src/Modules/Keys/Gatekeep.Modules.Keys.csproj" />
     <ProjectReference Include="../../src/Modules/Management/Gatekeep.Modules.Management.csproj" />
     <ProjectReference Include="../../src/Modules/Operations/Gatekeep.Modules.Operations.csproj" />
+    <ProjectReference Include="../../src/Modules/Protocol/Gatekeep.Modules.Protocol.csproj" />
     <ProjectReference Include="../../src/Modules/Sessions/Gatekeep.Modules.Sessions.csproj" />
     <ProjectReference Include="../../src/Modules/Tenancy/Gatekeep.Modules.Tenancy.csproj" />
   </ItemGroup>

@@ -70,7 +70,7 @@ internal sealed class TenantManagement(IAuditAppender appender, TenantAddressing
             context,
             CreationType,
             tenantId,
-            [new OperationStepPlan(OperationsContract.TenantCreationStage, tenantId)],
+            [.. OperationsContract.TenantCreationStages.Select(stage => new OperationStepPlan(stage, tenantId))],
             cancellationToken);
 
         await _appender.AppendAsync(

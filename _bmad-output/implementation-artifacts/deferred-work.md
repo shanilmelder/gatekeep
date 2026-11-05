@@ -341,9 +341,6 @@
   summary: Every later rule that reads the label (the 90-day Prod retention floor, Prod callback confirmation, Dev-only email verification off, the conformance Tenant) reads it when its own setting changes, and never rewrites a setting because the label changed.
   evidence: Story 1.28: no setting reads the label yet, so removing Prod writes only `tenant.label`; threat model T-56.
 - source_spec: `_bmad-output/implementation-artifacts/spec-1-29-delete-a-tenant-without-touching-others.md`
-  summary: Destroy a deleted Tenant's `sig-` and `mgmt-` keys and purge its `signing_key` rows in the Keys purge (Story 2.3).
-  evidence: Story 1.29 destroys the six secret class keys only; Signing and Management keys don't exist before Story 2.3.
-- source_spec: `_bmad-output/implementation-artifacts/spec-1-29-delete-a-tenant-without-touching-others.md`
   summary: A caller for the `audit.chain.purge` Operation, to schedule a Tenant's chain purge again after its job went dead.
   evidence: Story 1.29's completion enqueues the purge job itself, from the Tenant's scope; the Operation stays registered with no production caller.
 - source_spec: `_bmad-output/implementation-artifacts/spec-1-29-delete-a-tenant-without-touching-others.md`
@@ -373,6 +370,42 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-1-29-delete-a-tenant-without-touching-others.md`
   summary: Fault seam to test the deletion guard mappings that the locks make unreachable.
   evidence: Story 1.29 review.
-- source_spec: `_bmad-output/implementation-artifacts/spec-1-29-delete-a-tenant-without-touching-others.md`
-  summary: Destroy a deleted Tenant's Signing Keys.
-  evidence: Story 1.29 review; Story 2.3.
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-3-publish-discovery-and-jwks-per-tenant.md`
+  summary: Bound or fan out the hourly key backfill, so a first run over many pre-2.3 Tenants can't outlive its job lease.
+  evidence: Story 2.3 review: `TenantKeyBackfill.RunAsync` provisions every active Tenant in one job run (up to four RSA-3072 Transit keys plus a wrap each).
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-3-publish-discovery-and-jwks-per-tenant.md`
+  summary: A test that concurrent cold requests share one Tenant runtime build, alongside Story 2.5's token-endpoint load test.
+  evidence: Story 2.3 review: every Protocol test sends requests one at a time.
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-3-publish-discovery-and-jwks-per-tenant.md`
+  summary: Rotation and revocation (Stories 2.4, 9.x) must never commit a Tenant with a `next` and no `current`, or `EnsureTenantKeysAsync` would create a `current` that was never published ahead.
+  evidence: Story 2.3 review: the backfill creates whatever (purpose, state) is missing.
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-3-publish-discovery-and-jwks-per-tenant.md`
+  summary: A stored, unique, dot-free `tenant.public_id` before Story 2.9 issues codes.
+  evidence: Story 2.3 left it out by spec; only `PublicId.Format` exists.
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-3-publish-discovery-and-jwks-per-tenant.md`
+  summary: Story 2.4 adds the `NOTIFY` that clears Host.Hosted's 5-second Tenant runtime cache on a key state change.
+  evidence: Story 2.3 caches each runtime for at most 5 seconds, with no NOTIFY yet.
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-4-rotate-signing-keys-automatically.md`
+  summary: An alert when a `current` Signing Key passes 180 days because rotation keeps failing (Epic 11).
+  evidence: Story 2.4 review: the daily rotation only logs a failed Tenant by type and retries.
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-4-rotate-signing-keys-automatically.md`
+  summary: Destruction for `revoked` Signing Keys (Epic 9).
+  evidence: Story 2.4 destroys only `retired` keys; `destroyed_at` is CHECKed to `retired` rows.
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-4-rotate-signing-keys-automatically.md`
+  summary: Decide whether to rotate on a 75/75-day cadence (time served) instead of counting age from creation, which double-rotates every cycle.
+  evidence: Story 2.4 review: alternate keys sign about 1 day and about 149 days; still within 180 days.
+- source_spec: `_bmad-output/implementation-artifacts/spec-12-7-rotate-the-master-key.md`
+  summary: Prove that `sys/rotate/root` changes the root key, so that an old generation plus a snapshot taken before the rotation can't open data written afterwards.
+  evidence: Story 12.7 checks that the keyring term rises. Removing the root-key call still passes every test. It needs a snapshot-and-restore harness, which comes with Stories 12.1 and 12.2.
+- source_spec: `_bmad-output/implementation-artifacts/spec-12-7-rotate-the-master-key.md`
+  summary: Rewrap or re-encrypt existing ciphertext to the new Transit versions, and then retire the old versions (G-16).
+  evidence: Story 12.7 only rotates the versions. OpenBao 2.7.2 rewrap ignores `associated_data`. The threat model assigns this to Stories 12.2 and 13.4.
+- source_spec: `_bmad-output/implementation-artifacts/spec-12-7-rotate-the-master-key.md`
+  summary: Sign in before and after a Master Key rotation in the stack check, once a sign-in flow exists (Epic 2).
+  evidence: Story 12.7 shows "sign-in keeps working" only on the custody operations sign-in uses, because Hosted still answers 404.
+- source_spec: `_bmad-output/implementation-artifacts/spec-12-7-rotate-the-master-key.md`
+  summary: Check the escrow retention rule and "never in a backup" against the real backup set and manifest (Story 12.1).
+  evidence: Story 12.7 states the rule in the runbook, and `finish` prints it. Its stack check searches volumes, images and environments for both generations, but no backup exists yet.
+- source_spec: `_bmad-output/implementation-artifacts/spec-12-7-rotate-the-master-key.md`
+  summary: Make the root-token census in `MasterKeyRotationTests.Full_rotation_keeps_every_value_and_leaves_the_old_generation_unable_to_unseal` stable under load.
+  evidence: While merging `main` into Story 1.29 on 2026-11-05, the census step (line 155) printed nothing in 2 of 5 local Docker runs alongside other classes, and passed alone and on rerun. Story 1.29 doesn't touch root tokens.

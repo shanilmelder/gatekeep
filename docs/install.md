@@ -35,7 +35,7 @@ The secrets directory is `deploy/secrets` unless `GATEKEEP_SECRETS_DIR` says oth
    docker compose -f deploy/compose.yaml --profile tools --profile setup build
    ```
 
-3. **Make the Master Key.** The `keygen` service writes 32 random bytes to `master/master-key`, owned by OpenBao's user with mode `0400`, and refuses to replace a key that exists.
+3. **Make the Master Key.** The `keygen` service writes 32 random bytes to `master/master-key`, owned by OpenBao's user with mode `0400`, and its ID, `gatekeep-master-1`, to `master/master-key-id`, and refuses to replace either. Replacing the key later is a rotation: `docs/runbooks/master-key-rotation.md`.
 
    ```sh
    docker compose -f deploy/compose.yaml run --rm keygen
@@ -223,7 +223,7 @@ docker compose -f deploy/compose.yaml up -d --wait --force-recreate
 
 ## What the stack enforces
 
-- **Secrets only as files.** Each secret reaches only the containers that need it, as a Compose secret under `/run/secrets`. No secret is in an image, an environment variable or `compose.yaml`. Only `keygen` can see `master/`; `passwords` sees only `postgres/`, `bootstrap-dir` only `bootstrap/`, and `openbao-setup` only `recovery/` and `approle/`. All four have no network. The `cli` service mounts `bootstrap/` alone of them, to write the bootstrap token.
+- **Secrets only as files.** Each secret reaches only the containers that need it, as a Compose secret under `/run/secrets`. No secret is in an image, an environment variable or `compose.yaml`. Only `keygen` can see `master/`, and during a Master Key rotation `master-key-rotate`; `passwords` sees only `postgres/`, `bootstrap-dir` only `bootstrap/`, and `openbao-setup` only `recovery/` and `approle/`. All of them have no network. The `cli` service mounts `bootstrap/` alone of them, to write the bootstrap token.
 - **Refusal of missing or default secrets.** Each host refuses to start if a required setting is missing, empty, a known default such as `changeme` or `postgres`, or a password under 16 characters. That includes its key custody settings: every host uses OpenBao. It logs the setting's name, never its value, and exits non-zero, so Compose shows it restarting. `gatekeep migrate` refuses an unsafe password the same way.
 - **Hardened containers.** `Host.Hosted`, `Host.Admin`, `Host.Worker` and `cli` run as their own non-root user, with a read-only root filesystem, every capability dropped and `no-new-privileges`, as do PostgreSQL and OpenBao. Every service has a process limit and rotated logs. No runtime service has the Docker socket.
 - **One way in.** Only Caddy publishes ports, 80 and 443. It runs as its own non-root user, read-only, with every capability dropped and no admin API.
@@ -246,6 +246,13 @@ docker compose -f deploy/compose.yaml up -d --wait --force-recreate
 
 - **Port 80 or 443 is taken** and Caddy won't start: free it, or on a machine that isn't a Deployment set `GATEKEEP_HTTP_PORT` and `GATEKEEP_HTTPS_PORT` to others.
 - **OpenBao won't start** and its log mentions `seal "static"`: the Master Key file is missing from `master/`. Don't run `keygen` again unless this is a new install: a new key can't open data sealed by the old one. Restore the file from escrow.
+- **OpenBao won't start** and its log starts `start-openbao: refusing to start:` naming `master_key_id`: `master/master-key-id` is missing, or doesn't hold `gatekeep-master-<N>`. An install from before Story 12.7 has no ID file: its key is generation 1, so write `gatekeep-master-1` there, as below. Compose leaves an empty directory where a missing secret file should be, and the command removes it first. After a rotation, write the generation the key's escrow label names.
+
+  ```sh
+  docker compose -f deploy/compose.yaml run --rm --entrypoint sh keygen -c 'if [ -d /secrets/master-key-id ]; then rmdir /secrets/master-key-id; fi && echo gatekeep-master-1 > /secrets/master-key-id && chown 100:1000 /secrets/master-key-id && chmod 0444 /secrets/master-key-id'
+  ```
+
+- **OpenBao stays sealed** after a Master Key rotation: follow "If a step fails" in `docs/runbooks/master-key-rotation.md`.
 - **OpenBao stays unhealthy** after starting: it hasn't been set up. Run step 6's `openbao-setup`.
 - **A setup tool prints a WARNING about ownership or modes**: the secrets directory is on a file system that ignores them, such as a Docker Desktop bind mount from Windows or macOS. Fine for trying Gatekeep out; not for a Deployment.
 

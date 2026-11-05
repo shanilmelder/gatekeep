@@ -143,7 +143,7 @@ internal static class CanaryFlows
 {
     private const string HealthEndpoint = "/healthz";
 
-    /// <summary>The <c>migrate</c>, <c>audit verify</c> and <c>init</c> commands, from the Cli's <c>args switch</c>.</summary>
+    /// <summary>The <c>migrate</c>, <c>audit verify</c>, <c>init</c> and <c>rotate-transit-keys</c> commands, from the Cli's <c>args switch</c>.</summary>
     private const string CliProgram = "src/Gatekeep.Cli/Program.cs";
 
     private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(60);
@@ -178,6 +178,7 @@ internal static class CanaryFlows
         new("cli.migrate", [new(SurfaceKind.CliCommand, "migrate")], MigrateAsync),
         new("cli.audit-verify", [new(SurfaceKind.CliCommand, "audit verify")], AuditVerifyAsync),
         new("cli.init", [new(SurfaceKind.CliCommand, "init")], InitAsync),
+        new("cli.rotate-transit-keys", [new(SurfaceKind.CliCommand, "rotate-transit-keys")], RotateTransitKeysAsync),
         new("host.hosted", [new(SurfaceKind.HostStartup, "Hosted"), new(SurfaceKind.Route, HealthEndpoint)], HostAsync("Hosted")),
         new("host.admin", [new(SurfaceKind.HostStartup, "Admin"), new(SurfaceKind.Route, HealthEndpoint)], HostAsync("Admin")),
         new("host.worker", [new(SurfaceKind.HostStartup, "Worker"), new(SurfaceKind.Route, HealthEndpoint)], HostAsync("Worker")),
@@ -299,15 +300,41 @@ internal static class CanaryFlows
             Reviewer,
             Reviewed),
         new(
+            new(SurfaceKind.JobType, "keys.tenant_keys.backfill"),
+            "Deployment-wide, so it carries no payload. Reads active Tenant IDs; per Tenant it creates keys by name in custody "
+            + "and stores only key names, versions and Transit's wrapped ciphertext, with an ID-only event. No key material leaves custody.",
+            "Story 2.3 build review",
+            new DateOnly(2026, 11, 5)),
+        new(
+            new(SurfaceKind.JobType, "keys.signing_keys.rotate"),
+            "Deployment-wide, so it carries no payload. Reads active Tenant IDs; per Tenant it changes key row states and times, "
+            + "creates keys by name in custody, stores only names and versions, enqueues ID-only jobs and writes ID-only events. No key material leaves custody.",
+            "Story 2.4 build review",
+            new DateOnly(2026, 11, 5)),
+        new(
+            new(SurfaceKind.JobType, "keys.signing_key.destroy"),
+            "May not carry a credential: its payload is one signing_key row ID. It deletes a key by the name the row's own IDs make "
+            + "and writes ID-only events. Failures are logged by type only.",
+            "Story 2.4 build review",
+            new DateOnly(2026, 11, 5)),
+        new(
+            new(SurfaceKind.JobType, "keys.transit_keys.sweep"),
+            "Deployment-wide, so it carries no payload. Lists key names and creation times in custody, deletes unnamed old sig-/mgmt- keys "
+            + "and writes ID-only Deployment events. Failures are logged by type only, never a key name.",
+            "Story 2.4 build review",
+            new DateOnly(2026, 11, 5)),
+        new(
             new(SurfaceKind.OperationType, "tenancy.tenant.create"),
-            "Its one Tenant stage creates the six secret class keys by name only and stores a fixed result code; its completion "
-            + "inserts an empty settings row, sets the status and writes an ID-only event. No key material leaves custody.",
-            "Story 1.27 build review",
-            new DateOnly(2026, 11, 4)),
+            "Its Tenant stages create the six secret class keys, then the Signing and Management keys and the wrapped token "
+            + "protection key, by name only, storing key names, versions, Transit's ciphertext and fixed result codes; its "
+            + "completion inserts an empty settings row, sets the status and writes an ID-only event. No key material leaves custody.",
+            "Story 2.3 build review",
+            new DateOnly(2026, 11, 5)),
         new(
             new(SurfaceKind.OperationType, "tenancy.tenant.delete"),
-            "Its two Tenant stages delete the Tenant's rows by its ID and destroy its six secret class keys by name only, and store "
-            + "fixed result codes; its completion sets the status, writes an ID-only event and enqueues the ID-only purge job.",
+            "Its two Tenant stages delete the Tenant's rows by its ID and destroy its six secret class keys and its Signing and "
+            + "Management keys by name only, and store fixed result codes; its completion sets the status, writes an ID-only event "
+            + "and enqueues the ID-only purge job.",
             "Story 1.29 build review",
             new DateOnly(2026, 11, 5)),
     ];
@@ -504,6 +531,48 @@ internal static class CanaryFlows
         var result = await CliProcess.RunCapturedAsync(
             DebugEnvironment, "audit", "verify", "--connection-file", context.File(connection), "--password-file", context.File(password.Value + "\n"));
         run.Capture("audit verify", result);
+
+        Assert.True(result.ExitCode == (failing ? 1 : 0), result.StandardOutput + result.StandardError);
+    }
+
+    /// <summary>
+    /// <c>gatekeep rotate-transit-keys</c> (Story 12.7) at Trace, with a canary AppRole secret ID and
+    /// OpenBao token on the stand-in socket, as <c>gk_cli</c>, which answers every rotation. Failing,
+    /// the database refuses the connection before any key is touched.
+    /// </summary>
+    private static async Task RotateTransitKeysAsync(CanaryFlowContext context, FlowRun run, bool failing)
+    {
+        var secretId = run.Plant("approle-secret-id");
+        var token = run.Plant("openbao-token");
+        var socket = context.Socket();
+        socket.Body = $$$"""{"auth":{"client_token":"{{{token.Value}}}","lease_duration":900},"data":{}}""";
+
+        string connection;
+        Canary password;
+        if (failing)
+        {
+            password = run.Plant("password-file");
+            connection = RefusedConnection(TableRegistry.Cli);
+        }
+        else
+        {
+            run.Database = await context.Postgres.NewMigratedDatabaseAsync();
+            await TestTenants.InsertAsync(context.Postgres.SuperuserConnection(run.Database), TenantA);
+            password = run.Plant("role-password", PostgresFixture.Password);
+            connection = Passwordless(context.Postgres.RoleConnection(TableRegistry.Cli, run.Database));
+        }
+
+        var environment = new Dictionary<string, string>(DebugEnvironment)
+        {
+            ["GATEKEEP_CLI_CONNECTION_FILE"] = context.File(connection),
+            ["GATEKEEP_CLI_PASSWORD_FILE"] = context.File(password.Value + "\n"),
+            ["GATEKEEP_CUSTODY_SOCKET"] = socket.Path,
+            ["GATEKEEP_CUSTODY_ROLE_ID_FILE"] = context.File(Guid.NewGuid().ToString()),
+            ["GATEKEEP_CUSTODY_SECRET_ID_FILE"] = context.File(secretId.Value + "\n"),
+        };
+
+        var result = await CliProcess.RunCapturedAsync(environment, "rotate-transit-keys");
+        run.Capture("rotate-transit-keys", result);
 
         Assert.True(result.ExitCode == (failing ? 1 : 0), result.StandardOutput + result.StandardError);
     }

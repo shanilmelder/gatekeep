@@ -70,6 +70,54 @@ public sealed class WorkerStartupTests(PostgresFixture postgres) : IDisposable
     }
 
     [Fact]
+    public async Task Configured_worker_enqueues_the_key_backfill_and_runs_it_to_done()
+    {
+        // No Tenant yet, so the hourly backfill (Story 2.3) runs with custody and finds nothing to do.
+        var database = await postgres.NewMigratedDatabaseAsync();
+
+        using var process = HostProcess.Start("Worker", Configured(database));
+
+        var deadline = DateTimeOffset.UtcNow + Timeout;
+        var done = 0L;
+        while (done == 0 && !process.HasExited && DateTimeOffset.UtcNow < deadline)
+        {
+            await Task.Delay(TimeSpan.FromMilliseconds(250), Cancellation);
+            done = await PostgresFixture.ScalarAsync<long>(
+                postgres.SuperuserConnection(database),
+                "SELECT count(*) FROM job WHERE type = 'keys.tenant_keys.backfill' AND deployment_wide AND status = 'done'");
+        }
+
+        Assert.False(process.HasExited, "Host.Worker stopped instead of running.");
+        Assert.Equal(1L, done);
+    }
+
+    [Fact]
+    public async Task Configured_worker_enqueues_the_key_rotation_and_orphan_sweep_and_runs_both_to_done()
+    {
+        // Story 2.4: no Tenant yet, so the rotation finds nothing; the sweep lists an empty mount
+        // (OpenBao answers 404) and deletes nothing.
+        _openBao.Respond = path => path.Contains("/auth/", StringComparison.Ordinal)
+            ? (200, """{"auth":{"client_token":"fake-token","lease_duration":900}}""")
+            : (404, """{"errors":[]}""");
+        var database = await postgres.NewMigratedDatabaseAsync();
+
+        using var process = HostProcess.Start("Worker", Configured(database));
+
+        const string Done =
+            "SELECT count(DISTINCT type) FROM job WHERE type IN ('keys.signing_keys.rotate', 'keys.transit_keys.sweep') AND deployment_wide AND status = 'done'";
+        var deadline = DateTimeOffset.UtcNow + Timeout;
+        var done = 0L;
+        while (done < 2 && !process.HasExited && DateTimeOffset.UtcNow < deadline)
+        {
+            await Task.Delay(TimeSpan.FromMilliseconds(250), Cancellation);
+            done = await PostgresFixture.ScalarAsync<long>(postgres.SuperuserConnection(database), Done);
+        }
+
+        Assert.False(process.HasExited, "Host.Worker stopped instead of running.");
+        Assert.Equal(2L, done);
+    }
+
+    [Fact]
     public async Task Configured_worker_hands_its_key_custody_to_the_job_runner()
     {
         // No production job type carries a credential yet, so the runner says at start

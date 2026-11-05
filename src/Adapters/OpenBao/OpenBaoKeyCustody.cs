@@ -25,6 +25,9 @@ public sealed class OpenBaoKeyCustody : IKeyCustody, IDisposable
     private const int DataKeyBits = 256;
     private const int HmacKeySize = 32;
 
+    /// <summary>What a failure of the list itself names, since it is about no one key.</summary>
+    private const string ListedName = "transit/keys";
+
     private readonly HttpClient _http;
     private readonly OpenBaoOptions _options;
     private readonly TimeProvider _time;
@@ -278,18 +281,131 @@ public sealed class OpenBaoKeyCustody : IKeyCustody, IDisposable
         return PublicKeys(key, KeyOperation.ReadPublicKey, data);
     }
 
+    public async Task<IReadOnlyList<ListedKey>> ListRowKeysAsync(CancellationToken cancellationToken)
+    {
+        // Transit answers 404, and only 404, when the mount holds no key at all. Any other failure stands.
+        var data = await SendCoreAsync(
+            ListedName, KeyOperation.List, HttpMethod.Get, "keys?list=true", null, notFoundIsEmpty: true, cancellationToken);
+        if (data is null)
+        {
+            return [];
+        }
+
+        if (data is not { ValueKind: JsonValueKind.Object } d
+            || !d.TryGetProperty("keys", out var names)
+            || names.ValueKind != JsonValueKind.Array)
+        {
+            throw new KeyCustodyException(ListedName, KeyOperation.List, KeyCustodyFailure.Unavailable);
+        }
+
+        var listed = new List<ListedKey>();
+        foreach (var name in names.EnumerateArray())
+        {
+            // Only row keys are read: this login may not read any other key, and the sweep needs no other.
+            if (!KeyName.TryParseRowKey(name.GetString(), out var key))
+            {
+                continue;
+            }
+
+            // One key that can't be read (deleted since the list, refused, unavailable, or with no
+            // creation time) is left out; the others are still listed. A failed login stands.
+            try
+            {
+                var read = await SendAsync(key, KeyOperation.List, HttpMethod.Get, $"keys/{key}", null, cancellationToken);
+                listed.Add(new ListedKey(key, FirstCreated(key, read)));
+            }
+            catch (KeyCustodyException e) when (e.Failure != KeyCustodyFailure.LoginFailed)
+            {
+            }
+        }
+
+        return listed;
+    }
+
     public void Dispose()
     {
         _http.Dispose();
         _loginLock.Dispose();
     }
 
-    private async Task<JsonElement?> SendAsync(
+    /// <summary>The earliest <c>keys.{version}.creation_time</c> of an asymmetric key's read.</summary>
+    private static DateTimeOffset FirstCreated(KeyName key, JsonElement? data)
+    {
+        if (data is not { ValueKind: JsonValueKind.Object } d
+            || !d.TryGetProperty("keys", out var versions)
+            || versions.ValueKind != JsonValueKind.Object)
+        {
+            throw new KeyCustodyException(key.Value, KeyOperation.List, KeyCustodyFailure.Unavailable);
+        }
+
+        DateTimeOffset? first = null;
+        foreach (var version in versions.EnumerateObject())
+        {
+            if (version.Value.ValueKind == JsonValueKind.Object
+                && version.Value.TryGetProperty("creation_time", out var created)
+                && ParseTime(created.GetString()) is { } time
+                && (first is null || time < first))
+            {
+                first = time;
+            }
+        }
+
+        return first ?? throw new KeyCustodyException(key.Value, KeyOperation.List, KeyCustodyFailure.Unavailable);
+    }
+
+    /// <summary>RFC 3339 with up to nanoseconds, as OpenBao writes it; .NET reads at most seven fraction digits.</summary>
+    private static DateTimeOffset? ParseTime(string? text)
+    {
+        if (string.IsNullOrEmpty(text))
+        {
+            return null;
+        }
+
+        var dot = text.IndexOf('.', StringComparison.Ordinal);
+        if (dot >= 0)
+        {
+            var end = dot + 1;
+            while (end < text.Length && char.IsAsciiDigit(text[end]))
+            {
+                end++;
+            }
+
+            if (end - dot - 1 > 7)
+            {
+                text = string.Concat(text.AsSpan(0, dot + 8), text.AsSpan(end));
+            }
+        }
+
+        return DateTimeOffset.TryParse(text, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var time)
+            ? time.ToUniversalTime()
+            : null;
+    }
+
+    private Task<JsonElement?> SendAsync(
         KeyName key,
         KeyOperation operation,
         HttpMethod method,
         string path,
         JsonObject? body,
+        CancellationToken cancellationToken) =>
+        SendAsync(key.Value, operation, method, path, body, cancellationToken);
+
+    private Task<JsonElement?> SendAsync(
+        string key,
+        KeyOperation operation,
+        HttpMethod method,
+        string path,
+        JsonObject? body,
+        CancellationToken cancellationToken) =>
+        SendCoreAsync(key, operation, method, path, body, notFoundIsEmpty: false, cancellationToken);
+
+    private async Task<JsonElement?> SendCoreAsync(
+        string key,
+        KeyOperation operation,
+        HttpMethod method,
+        string path,
+        JsonObject? body,
+        bool notFoundIsEmpty,
         CancellationToken cancellationToken)
     {
         var (token, fresh) = await TokenAsync(key, operation, stale: null, cancellationToken);
@@ -298,7 +414,7 @@ public sealed class OpenBaoKeyCustody : IKeyCustody, IDisposable
         {
             if (first.StatusCode != HttpStatusCode.Forbidden || fresh)
             {
-                return await ReadAsync(key, operation, first, cancellationToken);
+                return await ReadAsync(key, operation, first, notFoundIsEmpty, cancellationToken);
             }
         }
 
@@ -306,7 +422,7 @@ public sealed class OpenBaoKeyCustody : IKeyCustody, IDisposable
         (token, _) = await TokenAsync(key, operation, stale: token, cancellationToken);
 
         using var second = await SendOnceAsync(key, operation, method, $"v1/{Mount}/{path}", body, token, cancellationToken);
-        return await ReadAsync(key, operation, second, cancellationToken);
+        return await ReadAsync(key, operation, second, notFoundIsEmpty, cancellationToken);
     }
 
     /// <summary>
@@ -314,39 +430,11 @@ public sealed class OpenBaoKeyCustody : IKeyCustody, IDisposable
     /// <see cref="SendAsync"/> does, a 403 as <see cref="KeyCustodyFailure.Refused"/>, with one login
     /// and one retry for a reused token.
     /// </summary>
-    private async Task<bool> ExistsAsync(KeyName key, KeyOperation operation, CancellationToken cancellationToken)
-    {
-        var path = $"v1/{Mount}/keys/{key}";
-        var (token, fresh) = await TokenAsync(key, operation, stale: null, cancellationToken);
-
-        using (var first = await SendOnceAsync(key, operation, HttpMethod.Get, path, null, token, cancellationToken))
-        {
-            if (first.StatusCode == HttpStatusCode.NotFound)
-            {
-                return false;
-            }
-
-            if (first.StatusCode != HttpStatusCode.Forbidden || fresh)
-            {
-                await ReadAsync(key, operation, first, cancellationToken);
-                return true;
-            }
-        }
-
-        (token, _) = await TokenAsync(key, operation, stale: token, cancellationToken);
-
-        using var second = await SendOnceAsync(key, operation, HttpMethod.Get, path, null, token, cancellationToken);
-        if (second.StatusCode == HttpStatusCode.NotFound)
-        {
-            return false;
-        }
-
-        await ReadAsync(key, operation, second, cancellationToken);
-        return true;
-    }
+    private async Task<bool> ExistsAsync(KeyName key, KeyOperation operation, CancellationToken cancellationToken) =>
+        await SendCoreAsync(key.Value, operation, HttpMethod.Get, $"keys/{key.Value}", null, notFoundIsEmpty: true, cancellationToken) is not null;
 
     private async Task<HttpResponseMessage> SendOnceAsync(
-        KeyName key,
+        string key,
         KeyOperation operation,
         HttpMethod method,
         string path,
@@ -373,16 +461,22 @@ public sealed class OpenBaoKeyCustody : IKeyCustody, IDisposable
             && !cancellationToken.IsCancellationRequested)
         {
             // The inner exception isn't kept: only the key and operation are named.
-            throw new KeyCustodyException(key.Value, operation, KeyCustodyFailure.Unavailable);
+            throw new KeyCustodyException(key, operation, KeyCustodyFailure.Unavailable);
         }
     }
 
     private static async Task<JsonElement?> ReadAsync(
-        KeyName key,
+        string key,
         KeyOperation operation,
         HttpResponseMessage response,
+        bool notFoundIsEmpty,
         CancellationToken cancellationToken)
     {
+        if (notFoundIsEmpty && response.StatusCode == HttpStatusCode.NotFound)
+        {
+            return null;
+        }
+
         var failure = response.StatusCode switch
         {
             HttpStatusCode.OK or HttpStatusCode.NoContent => (KeyCustodyFailure?)null,
@@ -393,7 +487,7 @@ public sealed class OpenBaoKeyCustody : IKeyCustody, IDisposable
 
         if (failure is { } f)
         {
-            throw new KeyCustodyException(key.Value, operation, f);
+            throw new KeyCustodyException(key, operation, f);
         }
 
         if (response.StatusCode == HttpStatusCode.NoContent)
@@ -410,13 +504,13 @@ public sealed class OpenBaoKeyCustody : IKeyCustody, IDisposable
         }
         catch (JsonException)
         {
-            throw new KeyCustodyException(key.Value, operation, KeyCustodyFailure.Unavailable);
+            throw new KeyCustodyException(key, operation, KeyCustodyFailure.Unavailable);
         }
     }
 
     /// <summary>Returns a token and whether this call logged in to get it.</summary>
     private async Task<(string Token, bool Fresh)> TokenAsync(
-        KeyName key,
+        string key,
         KeyOperation operation,
         string? stale,
         CancellationToken cancellationToken)
@@ -444,7 +538,7 @@ public sealed class OpenBaoKeyCustody : IKeyCustody, IDisposable
         }
     }
 
-    private async Task<LoginToken> LoginAsync(KeyName key, KeyOperation operation, CancellationToken cancellationToken)
+    private async Task<LoginToken> LoginAsync(string key, KeyOperation operation, CancellationToken cancellationToken)
     {
         string roleId;
         string secretId;
@@ -455,7 +549,7 @@ public sealed class OpenBaoKeyCustody : IKeyCustody, IDisposable
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
-            throw new KeyCustodyException(key.Value, operation, KeyCustodyFailure.LoginFailed);
+            throw new KeyCustodyException(key, operation, KeyCustodyFailure.LoginFailed);
         }
 
         var body = new JsonObject { ["role_id"] = roleId, ["secret_id"] = secretId };
@@ -468,7 +562,7 @@ public sealed class OpenBaoKeyCustody : IKeyCustody, IDisposable
         {
             // Only a refused credential is a login failure. A sealed or down OpenBao is unavailable.
             throw new KeyCustodyException(
-                key.Value,
+                key,
                 operation,
                 response.StatusCode is HttpStatusCode.BadRequest or HttpStatusCode.Forbidden
                     ? KeyCustodyFailure.LoginFailed
@@ -485,7 +579,7 @@ public sealed class OpenBaoKeyCustody : IKeyCustody, IDisposable
 
             if (string.IsNullOrEmpty(token))
             {
-                throw new KeyCustodyException(key.Value, operation, KeyCustodyFailure.LoginFailed);
+                throw new KeyCustodyException(key, operation, KeyCustodyFailure.LoginFailed);
             }
 
             var renewAt = lease > 0 ? issuedAt + TimeSpan.FromSeconds(lease * 3 / 4.0) : DateTimeOffset.MaxValue;
@@ -493,7 +587,7 @@ public sealed class OpenBaoKeyCustody : IKeyCustody, IDisposable
         }
         catch (Exception exception) when (exception is JsonException or KeyNotFoundException or InvalidOperationException)
         {
-            throw new KeyCustodyException(key.Value, operation, KeyCustodyFailure.LoginFailed);
+            throw new KeyCustodyException(key, operation, KeyCustodyFailure.LoginFailed);
         }
     }
 

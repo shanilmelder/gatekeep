@@ -43,17 +43,44 @@ public static class OperationsContract
     public static OperationCode PurgeChainStage => AuditRetentionJobs.PurgeStage;
 
     /// <summary>
-    /// Creates a new Tenant's secret class keys, then, once every stage has succeeded, its
-    /// settings, and makes it active (Story 1.27). Tenant creation starts it scoped to the new
-    /// Tenant, with one <see cref="TenantCreationStage"/> step for it.
+    /// Creates a new Tenant's secret class keys (Story 1.27) and its Signing Keys (Story 2.3), then,
+    /// once every stage has succeeded, its settings, and makes it active. Tenant creation starts it
+    /// scoped to the new Tenant, with one step for it per <see cref="TenantCreationStages"/>.
     /// </summary>
     public static OperationType TenantCreationOperation => TenantCreation.Type;
 
-    /// <summary>The creation Operation's one stage so far: the six secret class keys (AD-10).</summary>
+    /// <summary>The creation Operation's first stage: the six secret class keys (AD-10).</summary>
     public static OperationCode TenantCreationStage => TenantCreation.SecretClassKeysStage;
 
     /// <summary>
-    /// Purges a deleting Tenant's data in every module but Audit, and destroys its secret class keys,
+    /// The creation Operation's second stage (Story 2.3): the Tenant's current and next Signing and
+    /// Management keys and its wrapped token protection key, through <c>KeysContract.EnsureTenantKeysAsync</c>.
+    /// </summary>
+    public static OperationCode TenantSigningKeysStage => TenantCreation.SigningKeysStage;
+
+    /// <summary>Every stage Tenant creation plans, one step each for the new Tenant.</summary>
+    public static IReadOnlyList<OperationCode> TenantCreationStages => TenantCreation.Stages;
+
+    /// <summary>
+    /// Gives every active Tenant the keys it lacks, as Tenant creation does (Story 2.3). Scheduled hourly.
+    /// </summary>
+    public static JobType BackfillTenantKeys => ProductionJobs.BackfillTenantKeys;
+
+    /// <summary>
+    /// Rotates and retires every active Tenant's Signing and Management keys (Story 2.4, AD-11). Scheduled daily.
+    /// </summary>
+    public static JobType RotateSigningKeys => ProductionJobs.RotateSigningKeys;
+
+    /// <summary>Destroys one retired key's Transit key, in its Tenant's scope. Enqueued by the rotation, never scheduled.</summary>
+    public static JobType DestroySigningKey => ProductionJobs.DestroySigningKey;
+
+    /// <summary>
+    /// Deletes <c>sig-</c> and <c>mgmt-</c> Transit keys at least 24 hours old that no row names when checked (Story 2.4). Scheduled daily.
+    /// </summary>
+    public static JobType SweepTransitKeys => ProductionJobs.SweepTransitKeys;
+
+    /// <summary>
+    /// Purges a deleting Tenant's data in every module but Audit, and destroys its secret class, Signing and Management keys,
     /// then, once both stages have succeeded, marks it deleted and schedules its chain's purge (Story
     /// 1.29). Tenant deletion starts it scoped to the Tenant, with one <see cref="TenantPurgeStage"/>
     /// and one <see cref="SecretClassKeysDestroyStage"/> step for it.
@@ -63,7 +90,7 @@ public static class OperationsContract
     /// <summary>The deletion's stage calling each module's Tenant purge, in <see cref="TenantPurgeModules"/> order.</summary>
     public static OperationCode TenantPurgeStage => TenantDeletion.PurgeStage;
 
-    /// <summary>The deletion's stage destroying the six secret class keys (AD-10).</summary>
+    /// <summary>The deletion's stage destroying the six secret class keys and every Signing and Management key (AD-10).</summary>
     public static OperationCode SecretClassKeysDestroyStage => TenantDeletion.DestroyKeysStage;
 
     /// <summary>

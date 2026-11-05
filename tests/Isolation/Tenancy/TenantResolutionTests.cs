@@ -81,7 +81,6 @@ public sealed class TenantResolutionTests(PostgresFixture postgres) : IDisposabl
             (Deleted, HttpMethod.Get, "/.well-known/jwks.json"),
             (Deleted, HttpMethod.Post, "/connect/token"),
             (Active, HttpMethod.Get, "/"),
-            (Active, HttpMethod.Get, "/.well-known/openid-configuration"),
             (Active, HttpMethod.Put, "/random/path?with=query"),
             ("ACME-DEV.gatekeep.test:8443", HttpMethod.Get, "/"),
             (Active + ".", HttpMethod.Get, "/"),
@@ -93,6 +92,23 @@ public sealed class TenantResolutionTests(PostgresFixture postgres) : IDisposabl
         }
 
         Assert.Equal(FixedNotFound, Assert.Single(snapshots.Distinct()));
+
+        // Story 2.3: the active Tenant's own discovery and JWKS, its issuer the stored one. This
+        // Tenant has no keys yet, so its JWKS is empty and no custody call is made.
+        using (var discovery = await SendAsync(http, port, Active, HttpMethod.Get, "/.well-known/openid-configuration"))
+        {
+            Assert.Equal(HttpStatusCode.OK, discovery.StatusCode);
+            using var document = JsonDocument.Parse(await discovery.Content.ReadAsStringAsync(Cancellation));
+            Assert.Equal($"https://{Active}/", document.RootElement.GetProperty("issuer").GetString());
+            Assert.Equal($"https://{Active}/.well-known/jwks", document.RootElement.GetProperty("jwks_uri").GetString());
+        }
+
+        using (var jwks = await SendAsync(http, port, Active, HttpMethod.Get, "/.well-known/jwks"))
+        {
+            Assert.Equal(HttpStatusCode.OK, jwks.StatusCode);
+            using var document = JsonDocument.Parse(await jwks.Content.ReadAsStringAsync(Cancellation));
+            Assert.Equal(0, document.RootElement.GetProperty("keys").GetArrayLength());
+        }
     }
 
     [Fact]

@@ -1,4 +1,5 @@
 using Gatekeep.Adapters.Postgres.Schema;
+using Gatekeep.Kernel.Secrets;
 using Gatekeep.Modules.Admins.Contracts;
 using Gatekeep.Modules.Audit.Contracts;
 using Gatekeep.Modules.Management.Contracts;
@@ -43,7 +44,9 @@ public sealed class TenantDeletionOperationTests(PostgresFixture postgres)
         Assert.Equal("succeeded/succeeded", await StepsAsync(database, operation));
         Assert.Equal("deleted", await StatusAsync(database, tenant));
         Assert.Empty(await TenantSeeds.RowsLeftAsync(Superuser(database), tenant));
-        Assert.Equal([.. SecretClassPrefixes.Select(p => $"{p}-{tenant:D}")], custody.Deleted);
+        // The six secret class keys first, then only this Tenant's Signing and Management keys (Story 2.3).
+        Assert.Equal([.. SecretClassPrefixes.Select(p => $"{p}-{tenant:D}")], custody.Deleted.Take(6));
+        Assert.All(custody.Deleted.Skip(6), name => Assert.True(KeyName.TryParseRowKey(name, out var key) && key.TenantId == tenant, name));
 
         // The deletion's own event closes the chain, and every earlier event is kept.
         Assert.Equal(
@@ -136,7 +139,7 @@ public sealed class TenantDeletionOperationTests(PostgresFixture postgres)
         await DrainAsync(database, custody);
 
         Assert.Equal("deleted", await StatusAsync(database, tenant));
-        Assert.Equal(6, custody.Deleted.Count);
+        Assert.Equal([.. SecretClassPrefixes.Select(p => $"{p}-{tenant:D}")], custody.Deleted.Take(6));
 
         // The completion's marking again: the Tenant is deleted already, so nothing is written.
         var tenants = TenancyContract.CreateTenants(AuditContract.CreateAppender());
@@ -159,11 +162,16 @@ public sealed class TenantDeletionOperationTests(PostgresFixture postgres)
         var (database, tenant, _) = await ActiveAsync("dev");
         await TenantSeeds.SeedAsync(Superuser(database), tenant);
         var pending = await database.ScalarAsync<Guid>($"SELECT id FROM job WHERE tenant_id = '{tenant}' AND type = 'audit.retention.apply' AND status = 'pending'");
+        // A retired key's pending destruction (Story 2.4) ends dead with the rest: its row is purged.
+        var destroy = Guid.CreateVersion7();
+        await database.SuperuserAsync(
+            $"SET session_replication_role = replica; INSERT INTO job (id, type, tenant_id, deployment_wide, run_after) VALUES ('{destroy}', 'keys.signing_key.destroy', '{tenant}', false, now() + interval '1 day'); SET session_replication_role = DEFAULT");
         await DeleteAsync(database, tenant);
 
         await DrainAsync(database, new RecordingCustody());
 
         Assert.Equal("dead|tenant_deleted", await database.ScalarAsync<string>($"SELECT status || '|' || failure_code FROM job WHERE id = '{pending}'"));
+        Assert.Equal("dead|tenant_deleted", await database.ScalarAsync<string>($"SELECT status || '|' || failure_code FROM job WHERE id = '{destroy}'"));
         Assert.Equal(0L, await database.ScalarAsync<long>($"SELECT count(*) FROM job_payload WHERE tenant_id = '{tenant}'"));
         Assert.Equal(0L, await database.ScalarAsync<long>($"SELECT count(*) FROM job WHERE tenant_id = '{tenant}' AND status IN ('pending', 'running') AND type <> 'audit.chain.purge'"));
         Assert.Equal(1L, await database.ScalarAsync<long>($"SELECT count(*) FROM job WHERE tenant_id = '{tenant}' AND type = 'audit.chain.purge' AND status = 'pending'"));

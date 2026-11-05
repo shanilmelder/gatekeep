@@ -16,7 +16,7 @@ namespace Gatekeep.Tests.Isolation.Tenancy;
 /// <summary>
 /// Story 1.29 (FR-7, FR-8, AD-4): deleting one Tenant leaves every other Tenant's data, keys and
 /// Logs unchanged. Two Tenants are seeded in every registry table, given their six secret class
-/// keys in the real OpenBao and events on their chains; one is deleted through the real Operation
+/// keys and their Signing and Management keys (Story 2.3) in the real OpenBao and events on their chains; one is deleted through the real Operation
 /// with the real <c>host-worker</c> policy; every row of the other, in every registry table, its
 /// keys with their versions, and its chain are identical before and after.
 /// </summary>
@@ -37,6 +37,7 @@ public sealed class TenantDeletionIsolationTests(PostgresFixture postgres, OpenB
         {
             await TenantSeeds.SeedAsync(superuser, tenant);
             await KeysContract.CreateSecretClassKeysAsync(worker, tenant, Cancellation);
+            await EnsureRowKeysAsync(database, worker, tenant);
             await AppendAsync(database, tenant);
         }
 
@@ -44,7 +45,8 @@ public sealed class TenantDeletionIsolationTests(PostgresFixture postgres, OpenB
         var rowsOfB = await TenantSeeds.SnapshotAsync(superuser, b);
         var keysOfB = await VersionsAsync(b);
         var chainOfA = await database.ScalarAsync<long>($"SELECT count(*) FROM audit_event WHERE tenant_id = '{a}'");
-        Assert.Equal(6, keysOfB.Count);
+        // Six secret class keys and a current and next Signing and Management key each (Story 2.3); the seeded retired row names no Transit key.
+        Assert.Equal(10, keysOfB.Count);
         Assert.Contains(rowsOfB, r => r.Key == "user_session" && r.Value.Length > 0);
 
         await TenantPurgeRegistryTests.DeleteAsync(database, a, TestTenants.Host(a));
@@ -124,6 +126,10 @@ public sealed class TenantDeletionIsolationTests(PostgresFixture postgres, OpenB
         Assert.Equal(6, (await VersionsAsync(a)).Count);
     }
 
+    private static Task<bool> EnsureRowKeysAsync(JobDatabase database, IKeyCustody worker, Guid tenant) =>
+        database.InScopeAsync(TableRegistry.Worker, tenant, context =>
+            KeysContract.EnsureTenantKeysAsync(context, worker, AuditContract.CreateAppender(), tenant, Cancellation));
+
     private static async Task AppendAsync(JobDatabase database, Guid tenant) =>
         await database.InScopeAsync(TableRegistry.Worker, tenant, async context =>
         {
@@ -143,7 +149,10 @@ public sealed class TenantDeletionIsolationTests(PostgresFixture postgres, OpenB
         }
     }
 
-    /// <summary>Each of the Tenant's secret class keys that exists, and its latest version, read as the Worker.</summary>
+    /// <summary>
+    /// Each of the Tenant's keys that exists, and its latest version, read as the Worker: its secret class
+    /// keys, and every Signing and Management key custody lists under its ID.
+    /// </summary>
     private async Task<Dictionary<string, int>> VersionsAsync(Guid tenant)
     {
         var token = await bao.LoginAsync(OpenBaoFixture.Worker);
@@ -151,7 +160,9 @@ public sealed class TenantDeletionIsolationTests(PostgresFixture postgres, OpenB
         http.DefaultRequestHeaders.Add("X-Vault-Token", token);
 
         var versions = new Dictionary<string, int>(StringComparer.Ordinal);
-        foreach (var key in KeysContract.SecretClassKeys(tenant))
+        using var custody = bao.Custody(OpenBaoFixture.Worker);
+        var rowKeys = (await custody.ListRowKeysAsync(Cancellation)).Select(k => k.Key).Where(k => k.TenantId == tenant);
+        foreach (var key in KeysContract.SecretClassKeys(tenant).Concat(rowKeys))
         {
             using var response = await http.GetAsync($"v1/transit/keys/{key.Value}", Cancellation);
             if (response.StatusCode == System.Net.HttpStatusCode.NotFound)

@@ -415,6 +415,7 @@
           "Gatekeep.Kernel": "[0.1.0, )",
           "Gatekeep.Modules.Admins": "[0.1.0, )",
           "Gatekeep.Modules.Audit": "[0.1.0, )",
+          "Gatekeep.Modules.Keys": "[0.1.0, )",
           "Gatekeep.Modules.Operations": "[0.1.0, )"
         }
       },
@@ -540,6 +541,20 @@
           "Gatekeep.Modules.Sessions": "[0.1.0, )",
           "Gatekeep.Modules.Tenancy": "[0.1.0, )",
           "Npgsql": "[10.0.3, )"
+        }
+      },
+      "gatekeep.modules.protocol": {
+        "type": "Project",
+        "dependencies": {
+          "Gatekeep.Kernel": "[0.1.0, )",
+          "Gatekeep.Modules.Authentication": "[0.1.0, )",
+          "Gatekeep.Modules.Directory": "[0.1.0, )",
+          "Gatekeep.Modules.Identity": "[0.1.0, )",
+          "Gatekeep.Modules.Keys": "[0.1.0, )",
+          "Gatekeep.Modules.Sessions": "[0.1.0, )",
+          "Gatekeep.Modules.Tenancy": "[0.1.0, )",
+          "Npgsql": "[10.0.3, )",
+          "OpenIddict.Server.AspNetCore": "[7.7.2, )"
         }
       },
       "gatekeep.modules.sessions": {

@@ -36,6 +36,12 @@ internal static class TenantSeeds
         ("signin_transaction", (t, n) =>
             "INSERT INTO signin_transaction (tenant_id, id, application_id, binding_hash, parameters, created_at, expires_at) " +
             $"VALUES ('{t}', '{n}', gen_random_uuid(), sha256(convert_to('{t}{n}', 'UTF8')), '{{}}', now(), now() + interval '10 minutes')"),
+        ("signing_key", (t, n) =>
+            // Retired, so it never collides with the current and next keys a real creation makes.
+            "INSERT INTO signing_key (id, tenant_id, purpose, state, transit_name, transit_version, published_at, promoted_at, rotated_at, retired_at) " +
+            $"VALUES ('{n}', '{t}', 'signing', 'retired', 'sig-{t}-{n}', 1, now(), now(), now(), now())"),
+        ("protection_key_wrap", (t, _) =>
+            $"INSERT INTO protection_key_wrap (tenant_id, ciphertext) VALUES ('{t}', 'vault:v1:AAAA') ON CONFLICT DO NOTHING"),
     ];
 
     private static CancellationToken Cancellation => TestContext.Current.CancellationToken;

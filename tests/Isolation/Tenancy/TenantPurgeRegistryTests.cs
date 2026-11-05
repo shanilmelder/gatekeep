@@ -95,6 +95,7 @@ public sealed class TenantPurgeRegistryTests(PostgresFixture postgres)
         {
             await Gatekeep.Modules.Sessions.Contracts.SessionsContract.TenantPurge.PurgeAsync(context, Cancellation);
             await Gatekeep.Modules.Authentication.Contracts.AuthenticationContract.TenantPurge.PurgeAsync(context, Cancellation);
+            await Gatekeep.Modules.Keys.Contracts.KeysContract.TenantPurge.PurgeAsync(context, Cancellation);
             await Gatekeep.Modules.Tenancy.Contracts.TenancyContract.TenantPurge.PurgeAsync(context, Cancellation);
             return 0;
         });
@@ -113,6 +114,7 @@ public sealed class TenantPurgeRegistryTests(PostgresFixture postgres)
             Gatekeep.Modules.Sessions.Contracts.SessionsContract.TenantPurge,
             Gatekeep.Modules.Authentication.Contracts.AuthenticationContract.TenantPurge,
             IdentityPurge(),
+            Gatekeep.Modules.Keys.Contracts.KeysContract.TenantPurge,
             Gatekeep.Modules.Tenancy.Contracts.TenancyContract.TenantPurge,
         ];
 

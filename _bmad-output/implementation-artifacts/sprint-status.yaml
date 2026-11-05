@@ -73,8 +73,8 @@ development_status:
   epic-2: in-progress
   2-1-prove-per-tenant-options-and-transit-signing: done
   2-2-prove-custom-stores-and-revocation-commit: done
-  2-3-publish-discovery-and-jwks-per-tenant: backlog
-  2-4-rotate-signing-keys-automatically: backlog
+  2-3-publish-discovery-and-jwks-per-tenant: done
+  2-4-rotate-signing-keys-automatically: done
   2-5-issue-a-token-by-client-credentials: backlog
   2-6-add-session-and-transaction-tables: done
   2-7-build-the-one-revocation-path: done
@@ -190,7 +190,7 @@ development_status:
   12-4-replay-revocations-after-restore: backlog
   12-5-sign-release-images: done
   12-6-upgrade-between-releases: backlog
-  12-7-rotate-the-master-key: backlog
+  12-7-rotate-the-master-key: done
   epic-12-retrospective: optional
 
   epic-13: backlog
