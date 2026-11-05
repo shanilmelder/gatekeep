@@ -8,7 +8,9 @@ This document never holds a key, token, recovery share, role ID or secret ID, an
 
 | Thing | Where | Who can read it |
 | --- | --- | --- |
-| Master Key (static seal key), 32 random bytes | `master/master-key` in the secrets directory (`GATEKEEP_SECRETS_DIR`, default `deploy/secrets`), on the Docker host. Never a Docker volume | On the host, root and anyone with Docker access. In containers, OpenBao as the read-only Compose secret `/run/secrets/master_key`, and `keygen`, which writes it. No other service mounts `master/` |
+| Master Key (static seal key), 32 random bytes | `master/master-key` in the secrets directory (`GATEKEEP_SECRETS_DIR`, default `deploy/secrets`), on the Docker host. Never a Docker volume | On the host, root and anyone with Docker access. In containers, OpenBao as the read-only Compose secret `/run/secrets/master_key`, and `keygen` and `master-key-rotate`, which write it. No other service mounts `master/` |
+| Master Key ID, `gatekeep-master-<N>` for generation N | `master/master-key-id`, beside the key, mode `0444`. Not a secret: it names the generation, and holds no key byte | OpenBao, as the Compose secret `/run/secrets/master_key_id`. OpenBao refuses to start without it, or with anything but `gatekeep-master-<N>` in it |
+| The previous generation, during a rotation only | `master/previous/master-key` and `master-key-id`, mode `0400`, from `prepare` until `finish` shreds them (`docs/runbooks/master-key-rotation.md`) | OpenBao in rotation mode alone, as `master_key_previous` and `master_key_previous_id` from `deploy/compose.rotate.yaml` |
 | Master Key escrow copies, every generation | Offline, in two places, apart from backups | Esm |
 | Recovery keys and the first root token | `recovery/openbao-init.json` in the secrets directory for minutes, then offline with the Master Key | root, then Esm |
 | OpenBao data (Raft) | The `openbao-data` volume | OpenBao's user |
@@ -26,7 +28,7 @@ The root token is revoked at the end of setup, so none exists afterwards.
 
 ## Steps
 
-1. **Make the Master Key.** `keygen` runs `deploy/openbao/generate-master-key.sh` with no network, mounting only `master/`. It writes `master-key` mode `0400` for OpenBao's user and prints only the path. It refuses to run unless the directory is mounted, and refuses to overwrite a key that exists. The owner and mode hold only on a Linux host file system: on a Docker Desktop bind mount from Windows or macOS they're ignored, and it prints a warning saying so.
+1. **Make the Master Key.** `keygen` runs `deploy/openbao/generate-master-key.sh` with no network, mounting only `master/`. It writes `master-key` mode `0400` for OpenBao's user, and its ID, `gatekeep-master-1`, to `master-key-id`, and prints only the paths. It refuses to run unless the directory is mounted, and refuses to overwrite a key or ID that exists. The owner and mode hold only on a Linux host file system: on a Docker Desktop bind mount from Windows or macOS they're ignored, and it prints a warning saying so.
 
    ```sh
    docker compose -f deploy/compose.yaml run --rm keygen
@@ -84,12 +86,12 @@ The recovery keys of the failed init open nothing you'll keep. The Master Key ca
 
 ## Rules that outlast setup
 
-- **Keep every generation.** A new Master Key (seal rotation) never replaces the old escrow copy. Each generation stays escrowed until the last backup that needs it has expired, because an OpenBao snapshot can only be opened with the generation it was taken under.
+- **Keep every generation.** A new Master Key (seal rotation, `docs/runbooks/master-key-rotation.md`) never replaces the old escrow copy. Each generation stays escrowed until the last backup that needs it has expired, because an OpenBao snapshot can only be opened with the generation it was taken under. The rotation also rotates OpenBao's root key and barrier keyring, so an old generation opens only snapshots taken before it.
 - **Apart from backups.** The secrets directory and the escrow drives are never in a backup set. No backup set exists yet: the backup story must exclude them and check it.
 - **Nothing else.** No Master Key, recovery key, root token, role ID or secret ID in a container image, an environment variable, a Docker volume, `docs/`, a log or the repository.
 - **Not hardware-bound.** The Master Key is a file on the Docker host. Anyone with root or Docker access there, or who copies it and an OpenBao snapshot, has every key, and old copies stay valid until the key rotates. The TPM design is retired: see `docs/spikes/1-2-key-custody.md`.
 
 ## Still open
 
-- Seal rotation, restore and `gatekeep rekey` against the key file (G-3).
-- Rewrapping ciphertexts after a Transit key rotation (G-16).
+- Restore and `gatekeep rekey` against the key file (G-3). Seal rotation is Story 12.7's runbook, `docs/runbooks/master-key-rotation.md`.
+- Rewrapping ciphertexts after a Transit key rotation (G-16). A Master Key rotation adds Transit versions but rewraps nothing.

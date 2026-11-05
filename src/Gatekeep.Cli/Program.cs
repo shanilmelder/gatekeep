@@ -30,6 +30,7 @@ const string Usage = """
                                                   GATEKEEP_CUSTODY_SOCKET, GATEKEEP_CUSTODY_ROLE_ID_FILE and
                                                   GATEKEEP_CUSTODY_SECRET_ID_FILE set;
                                                   the token directory defaults to /gatekeep/bootstrap)
+           gatekeep rotate-transit-keys    (with the same settings as init: the last step of a Master Key rotation)
     """;
 
 var defaultConnectionFile = Environment.GetEnvironmentVariable(ConnectionFileVariable);
@@ -50,6 +51,7 @@ return args switch
     ["init"] when cliReady => await InitAsync(cliConnectionFile!, cliPasswordFile!, DefaultTokenDirectory, defaultDirectory: true),
     ["init", "--token-dir", var tokenDirectory] when cliReady && tokenDirectory.Length > 0 =>
         await InitAsync(cliConnectionFile!, cliPasswordFile!, tokenDirectory, defaultDirectory: false),
+    ["rotate-transit-keys"] when cliReady => await RotateTransitKeysAsync(cliConnectionFile!, cliPasswordFile!),
     _ => ShowUsage(),
 };
 
@@ -276,4 +278,13 @@ static async Task<int> InitAsync(string path, string passwordPath, string tokenD
     return connectionString is null
         ? Failure
         : await InitCommand.RunAsync(connectionString, tokenDirectory, defaultDirectory);
+}
+
+/// <summary><c>gatekeep rotate-transit-keys</c> (Story 12.7), as <see cref="RotateTransitKeysCommand"/> runs it.</summary>
+static async Task<int> RotateTransitKeysAsync(string path, string passwordPath)
+{
+    var connectionString = await ConnectionAsync(path, passwordPath);
+    return connectionString is null
+        ? Failure
+        : await RotateTransitKeysCommand.RunAsync(connectionString);
 }

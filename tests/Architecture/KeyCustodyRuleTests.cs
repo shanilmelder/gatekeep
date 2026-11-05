@@ -175,9 +175,35 @@ public class KeyCustodyRuleTests
         Assert.NotEmpty(service);
         Assert.Contains("current_key    = \"file:///run/secrets/master_key\"", config);
         Assert.Matches(@"(?m)^      - master_key$", service);
+        Assert.Matches(@"(?m)^      - master_key_id$", service);
+        Assert.DoesNotContain("master_key_previous", service);
         Assert.DoesNotContain("environment:", service);
         Assert.DoesNotContain("env_file", service);
         Assert.DoesNotContain("SECRETS_DIR", service);
+    }
+
+    /// <summary>
+    /// Story 12.7: the previous generation reaches OpenBao only from the rotation overlay, as two
+    /// more secret files, and the rendered key IDs never come from anything but the ID file.
+    /// </summary>
+    [Fact]
+    public void Previous_generation_reaches_OpenBao_only_through_the_rotation_overlay()
+    {
+        var overlay = File.ReadAllText(Path.Combine(Root, "deploy", "compose.rotate.yaml")).ReplaceLineEndings("\n");
+        var service = Regex.Match(overlay, @"(?m)^  openbao:\n(?<body>(?:(?:    .*)?\n)*)").Groups["body"].Value;
+
+        Assert.Equal(["master_key_previous", "master_key_previous_id"], Regex.Matches(service, @"(?m)^      - (\S+)$").Select(m => m.Groups[1].Value));
+        Assert.DoesNotContain("environment:", service);
+        Assert.DoesNotContain("volumes:", service);
+
+        var config = HclComment.Replace(File.ReadAllText(Path.Combine(Root, DeployDirectory, "openbao.hcl")), string.Empty);
+        Assert.Contains("current_key_id = \"@MASTER_KEY_ID@\"", config);
+        Assert.DoesNotContain("previous_key", config);
+
+        var start = File.ReadAllText(Path.Combine(Root, DeployDirectory, "start-openbao.sh"));
+        Assert.Contains("KEY_ID_FILE=/run/secrets/master_key_id", start);
+        Assert.Contains("PREVIOUS_KEY_FILE=/run/secrets/master_key_previous", start);
+        Assert.Contains("PREVIOUS_ID_FILE=/run/secrets/master_key_previous_id", start);
     }
 
     [Fact]
