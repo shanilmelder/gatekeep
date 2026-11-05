@@ -129,4 +129,4 @@ The stack check (`deploy/ci/stack-check.sh`) rehearses the whole rotation on a f
 | Date | Environment | Commit | Result |
 | --- | --- | --- | --- |
 | 2026-11-05 | Docker Desktop Linux VM | before the review fixes (uncommitted, on `c68541d`) | Passed after one fix: the first run failed at `finish`, because `shred` refused the `0400` file on the Docker Desktop bind mount; `finish` now makes the file writable first |
-| 2026-11-05 | Docker Desktop Linux VM | `bb097926f5fccb2233703204b8b2ffe24df66c57` | Passed: `deploy/ci/stack-check.sh` ended `rotation rehearsal passed` and `passed`, with the root-step marker, the key-term check and the root-token sweep in place |
+| 2026-11-05 | Docker Desktop Linux VM | `c7a673eb3b13ec7a29db1a899df644a92d82e1de` | Passed: `deploy/ci/stack-check.sh` ended `rotation rehearsal passed` and `passed`, with the root-step marker, the key-term check and the root-token sweep in place |
