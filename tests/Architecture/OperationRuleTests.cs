@@ -6,8 +6,10 @@ namespace Gatekeep.Tests.Architecture;
 
 /// <summary>
 /// AD-30: Tenant deletion reaches every module holding <c>tenant</c> tables, so Operations
-/// needs an edge to each. Tests reference no adapter, so the AD-3 table registry is read by
-/// reflection from the Postgres adapter's own output folder.
+/// needs an edge to each, and, from Story 1.29, its purge list names every such owner but Audit,
+/// each of which exposes its own Tenant purge. Tests reference no adapter, so the AD-3 table
+/// registry is read by reflection from the Postgres adapter's own output folder, and the modules'
+/// contracts from theirs.
 /// </summary>
 public class OperationRuleTests
 {
@@ -46,12 +48,63 @@ public class OperationRuleTests
     }
 
     [Fact]
-    public void Production_Operation_types_are_found_and_one_has_a_completion_handler()
+    public void Production_Operation_types_are_found_and_two_have_a_completion_handler()
     {
         var types = ProductionOperationTypes();
 
         Assert.Contains(types, t => t.Type == "tenancy.tenant.create" && t.HasCompletion);
+        Assert.Contains(types, t => t.Type == "tenancy.tenant.delete" && t.HasCompletion);
         Assert.Contains(types, t => t.Type == "audit.chain.purge" && !t.HasCompletion);
+        Assert.Equal(2, types.Count(t => t.HasCompletion));
+    }
+
+    /// <summary>
+    /// Story 1.29: the owners of the registry's <c>tenant</c> tables, but Audit, are exactly the
+    /// deletion's purge list, each once. A table a later story adds under a new owner fails here
+    /// until its owner's purge is on the list.
+    /// </summary>
+    [Fact]
+    public void Tenant_deletion_purges_every_owner_of_a_tenant_table_but_Audit()
+    {
+        var modules = PurgeModules();
+
+        Assert.Contains(Operations, modules);
+        Assert.Empty(PurgeListViolations(TenantTableOwners(), modules));
+    }
+
+    [Fact]
+    public void Purge_list_missing_an_owner_or_naming_another_is_reported()
+    {
+        (string, string)[] tables = [("widget", "Widgets"), ("tenant_settings", "Tenancy"), ("audit_event", Audit), ("job_payload", Operations)];
+
+        Assert.Equal(
+            [
+                "Directory: is on the purge list, but owns no tenant table.",
+                "Tenancy: is on the purge list twice.",
+                "Widgets: owns tenant table widget, but Tenant deletion doesn't purge it (Story 1.29).",
+            ],
+            PurgeListViolations(tables, ["Tenancy", "Tenancy", "Directory", Operations]));
+
+        // Audit's chain is never purged with its Tenant's data, so listing it is a violation too.
+        Assert.Equal(
+            ["Audit: is on the purge list, but its chain is kept until its retention ends (Story 1.29)."],
+            PurgeListViolations(tables.Where(t => t.Item2 != "Widgets"), ["Tenancy", Audit, Operations]));
+    }
+
+    /// <summary>Story 1.29: each owner on the purge list but Operations, whose purge is internal, exposes <c>{Module}Contract.TenantPurge</c>.</summary>
+    [Fact]
+    public void Every_purged_module_but_Operations_exposes_its_Tenant_purge()
+    {
+        var missing = PurgeModules().Where(m => m != Operations).Where(m => !ExposesPurge(m)).ToList();
+
+        Assert.Empty(missing);
+    }
+
+    [Fact]
+    public void Module_without_a_Tenant_purge_is_reported()
+    {
+        // Notifications owns no tenant table today, and exposes no purge.
+        Assert.False(ExposesPurge("Notifications"));
     }
 
     /// <summary>
@@ -78,6 +131,64 @@ public class OperationRuleTests
         Assert.Equal(
             ["widgets.widget.create: has a completion handler, so its stages are all Tenant stages (Story 1.27)."],
             CompletionViolations(types));
+    }
+
+    private const string Audit = "Audit";
+
+    private static List<string> PurgeListViolations(IEnumerable<(string Table, string Owner)> tenantTables, IReadOnlyList<string> modules)
+    {
+        var owners = tenantTables.Select(t => t.Owner).Where(o => o != Audit).ToHashSet(StringComparer.Ordinal);
+        var problems = new List<string>();
+
+        foreach (var (table, owner) in tenantTables.Where(t => t.Owner != Audit && !modules.Contains(t.Owner)).DistinctBy(t => t.Owner))
+        {
+            problems.Add($"{owner}: owns tenant table {table}, but Tenant deletion doesn't purge it (Story 1.29).");
+        }
+
+        foreach (var module in modules.Distinct(StringComparer.Ordinal))
+        {
+            if (module == Audit)
+            {
+                problems.Add($"{Audit}: is on the purge list, but its chain is kept until its retention ends (Story 1.29).");
+            }
+            else if (!owners.Contains(module))
+            {
+                problems.Add($"{module}: is on the purge list, but owns no tenant table.");
+            }
+
+            if (modules.Count(m => m == module) > 1)
+            {
+                problems.Add($"{module}: is on the purge list twice.");
+            }
+        }
+
+        return [.. problems.Order(StringComparer.Ordinal)];
+    }
+
+    private static string Output() =>
+        Path.GetRelativePath(
+            Path.Combine(Root, "tests/Architecture"),
+            AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+
+    private static List<string> PurgeModules()
+    {
+        var assembly = Assembly.LoadFrom(Path.Combine(Root, "src/Modules/Operations", Output(), "Gatekeep.Modules.Operations.dll"));
+        var contract = assembly.GetType("Gatekeep.Modules.Operations.Contracts.OperationsContract", throwOnError: true)!;
+        return [.. ((IEnumerable)contract.GetProperty("TenantPurgeModules")!.GetValue(null)!).Cast<string>()];
+    }
+
+    /// <summary>Whether the module's contract has a static <c>TenantPurge</c> of the Kernel's <c>ITenantPurge</c>, set.</summary>
+    private static bool ExposesPurge(string module)
+    {
+        var path = Path.Combine(Root, "src/Modules", module, Output(), $"Gatekeep.Modules.{module}.dll");
+        if (!File.Exists(path))
+        {
+            return false;
+        }
+
+        var contract = Assembly.LoadFrom(path).GetType($"Gatekeep.Modules.{module}.Contracts.{module}Contract");
+        var property = contract?.GetProperty("TenantPurge", BindingFlags.Public | BindingFlags.Static);
+        return property?.PropertyType.FullName == "Gatekeep.Kernel.Persistence.ITenantPurge" && property.GetValue(null) is not null;
     }
 
     private sealed record OperationTypeShape(string Type, bool HasCompletion, IReadOnlyList<string> StageKinds);

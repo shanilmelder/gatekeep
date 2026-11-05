@@ -60,9 +60,10 @@ interface TenantRow {
   name: string;
   host: string;
   label: 'dev' | 'staging' | 'prod';
-  status: 'creating' | 'active';
+  status: 'creating' | 'active' | 'deleting';
   createdAt: string;
   creation: { operationId: string; status: 'running' | 'failed' } | null;
+  deletion: { operationId: string; status: 'running' | 'failed' } | null;
 }
 
 const tenant = (n: number, extra: Partial<TenantRow> = {}): TenantRow => ({
@@ -73,6 +74,7 @@ const tenant = (n: number, extra: Partial<TenantRow> = {}): TenantRow => ({
   status: 'active',
   createdAt: `2026-11-0${n + 1}T10:00:00Z`,
   creation: null,
+  deletion: null,
   ...extra,
 });
 
@@ -717,7 +719,7 @@ test.describe('tenants page', () => {
     await expect(heading(page)).toHaveText('Tenants');
     await expect(page.getByText('Deployment', { exact: true }).first()).toBeVisible();
     const table = page.getByRole('table');
-    await expect(table.getByRole('columnheader')).toHaveText(['Name', 'Tenant Subdomain', 'Environment', 'Created', 'Retry']);
+    await expect(table.getByRole('columnheader')).toHaveText(['Name', 'Tenant Subdomain', 'Environment', 'Created', 'Retry', 'Delete']);
     await expect(table.getByRole('rowheader')).toHaveText([/^Acme$/, /^Beta\s*Creating$/, /^Gamma\s*Creation failed$/]);
     const tags = table.locator('[data-badge="environment"]');
     await expect(tags).toHaveText(['DEV', 'STG', 'PROD']);
@@ -725,8 +727,12 @@ test.describe('tenants page', () => {
     await expect(table.locator('code')).toHaveText([`tenant-0.${ZONE}`, `tenant-1.${ZONE}`, `tenant-2.${ZONE}`]);
     await expect(table.getByTestId('tenant-creating')).toHaveCount(1);
     await expect(table.getByTestId('tenant-creation-failed')).toHaveAttribute('data-status', 'blocked');
-    await expect(table.getByRole('button')).toHaveCount(1);
+    // Story 1.29: Delete on the active row and on the failed creation, never on one still being created.
+    await expect(table.getByRole('button')).toHaveCount(3);
     await expect(table.getByRole('button', { name: 'Retry creating Gamma' })).toBeVisible();
+    await expect(table.getByRole('button', { name: 'Delete Acme' })).toBeVisible();
+    await expect(table.getByRole('button', { name: 'Delete Gamma' })).toBeVisible();
+    await expect(table.getByRole('button', { name: 'Delete Beta' })).toHaveCount(0);
     await expect(table.getByRole('link')).toHaveCount(0);
     await expect(page.getByTestId('tenants-create')).toHaveText('Create Tenant');
 
@@ -735,6 +741,102 @@ test.describe('tenants page', () => {
     await table.getByRole('button', { name: 'Retry creating Gamma' }).click();
     await expect.poll(() => api.count(`POST /api/v1/deployment/operations/${opr(2)}/retry`)).toBe(1);
     await expect.poll(() => api.count(`GET ${TENANTS}`)).toBeGreaterThan(before);
+  });
+
+  test('Story 1.29: a deleting row says Deleting, a failed deletion says so with its own Retry, and neither has Delete', async ({ page, baseURL }) => {
+    await answerApi(page, baseURL!, {
+      tenants: [
+        tenant(0, { name: 'Acme' }),
+        tenant(1, { name: 'Beta', status: 'deleting', deletion: { operationId: opr(1), status: 'running' } }),
+        tenant(2, { name: 'Gamma', status: 'deleting', deletion: { operationId: opr(2), status: 'failed' } }),
+      ],
+    });
+
+    await page.goto('/deployment/tenants');
+
+    const table = page.getByRole('table');
+    await expect(table.getByRole('columnheader')).toHaveText(['Name', 'Tenant Subdomain', 'Environment', 'Created', 'Retry', 'Delete']);
+    await expect(table.getByRole('rowheader')).toHaveText([/^Acme$/, /^Beta\s*Deleting$/, /^Gamma\s*Deletion failed$/]);
+    await expect(table.getByTestId('tenant-deleting')).toHaveCount(1);
+    await expect(table.getByTestId('tenant-deletion-failed')).toHaveAttribute('data-status', 'blocked');
+    await expect(table.getByRole('button')).toHaveCount(2);
+    await expect(table.getByRole('button', { name: 'Retry deleting Gamma' })).toBeVisible();
+    await expect(table.getByRole('button', { name: 'Delete Acme' })).toBeVisible();
+  });
+
+  test('Story 1.29: without deployment.tenants.delete there is no Delete column, and no deletion Retry', async ({ page, baseURL }) => {
+    await answerApi(page, baseURL!, {
+      deployment: ['deployment.tenants.read', 'deployment.tenants.create'],
+      tenants: [tenant(0, { name: 'Acme' }), tenant(2, { name: 'Gamma', status: 'deleting', deletion: { operationId: opr(2), status: 'failed' } })],
+    });
+
+    await page.goto('/deployment/tenants');
+
+    const table = page.getByRole('table');
+    await expect(table.getByRole('columnheader')).toHaveText(['Name', 'Tenant Subdomain', 'Environment', 'Created']);
+    await expect(table.getByRole('button')).toHaveCount(0);
+  });
+
+  test('Story 1.29: a deleting row is read again until it leaves the list, then the reads stop', async ({ page, baseURL }) => {
+    const api = await answerApi(page, baseURL!, {
+      tenants: [tenant(0, { name: 'Acme' }), tenant(1, { name: 'Beta', status: 'deleting', deletion: { operationId: opr(1), status: 'running' } })],
+    });
+
+    await page.goto('/deployment/tenants');
+    await expect(page.getByTestId('tenant-deleting')).toHaveCount(1);
+
+    api.state.tenants = [tenant(0, { name: 'Acme' })];
+    await expect(page.getByRole('rowheader')).toHaveText(['Acme'], { timeout: 10_000 });
+    const reads = api.count(`GET ${TENANTS}`);
+    await page.waitForTimeout(3000);
+    expect(api.count(`GET ${TENANTS}`)).toBe(reads);
+  });
+
+  test('Story 1.29: a refresh refused for good stops the refreshes', async ({ page, baseURL }) => {
+    const api = await answerApi(page, baseURL!, {
+      tenants: [tenant(1, { name: 'Beta', status: 'deleting', deletion: { operationId: opr(1), status: 'running' } })],
+    });
+
+    await page.goto('/deployment/tenants');
+    await expect(page.getByTestId('tenant-deleting')).toHaveCount(1);
+    const first = api.count(`GET ${TENANTS}`);
+
+    api.state.listAnswer = (route) => problem(route, 403, 'access_denied');
+    await expect.poll(() => api.count(`GET ${TENANTS}`), { timeout: 10_000 }).toBe(first + 1);
+    await page.waitForTimeout(4500);
+    expect(api.count(`GET ${TENANTS}`)).toBe(first + 1);
+    // The rows already shown stay.
+    await expect(page.getByTestId('tenant-deleting')).toHaveCount(1);
+  });
+
+  test('Story 1.29: a deleting row past the first page is refreshed through its page, keeps its badge, and updates once it fails', async ({ page, baseURL }) => {
+    const acme = tenant(0, { name: 'Acme' });
+    let beta = tenant(1, { name: 'Beta', status: 'deleting', deletion: { operationId: opr(1), status: 'running' } });
+    const api = await answerApi(page, baseURL!, {
+      listAnswer: (route, cursor) =>
+        cursor === null
+          ? json(route, 200, { tenantZone: ZONE, tenants: [acme], nextCursor: acme.id })
+          : json(route, 200, { tenantZone: ZONE, tenants: [beta], nextCursor: null }),
+    });
+
+    await page.goto('/deployment/tenants');
+    await expect(page.getByRole('rowheader')).toHaveText(['Acme']);
+    await page.getByTestId('tenants-load-more').click();
+    await expect(page.getByTestId('tenant-deleting')).toHaveCount(1);
+
+    // A refresh reads both pages, and the row past the first keeps its badge.
+    const reads = api.count(`GET ${TENANTS}`);
+    await expect.poll(() => api.count(`GET ${TENANTS}`), { timeout: 10_000 }).toBeGreaterThanOrEqual(reads + 2);
+    await expect(page.getByRole('rowheader')).toHaveText(['Acme', /^Beta/]);
+    await expect(page.getByTestId('tenant-deleting')).toHaveCount(1);
+
+    // Its deletion fails: the refresh reaches it, it shows its own Retry, and the reads stop.
+    beta = { ...beta, deletion: { operationId: opr(1), status: 'failed' } };
+    await expect(page.getByTestId('tenant-deletion-failed')).toHaveCount(1, { timeout: 10_000 });
+    await expect(page.getByRole('button', { name: 'Retry deleting Beta' })).toBeVisible();
+    const settled = api.count(`GET ${TENANTS}`);
+    await page.waitForTimeout(3000);
+    expect(api.count(`GET ${TENANTS}`)).toBe(settled);
   });
 
   test('a creating row is read again until it is active, then the reads stop', async ({ page, baseURL }) => {
@@ -849,9 +951,12 @@ for (const scheme of ['light', 'dark'] as const) {
         tenant(0, { name: 'Acme', label: 'dev' }),
         tenant(1, { name: 'Beta', label: 'staging', status: 'creating', creation: { operationId: opr(1), status: 'running' } }),
         tenant(2, { name: 'Gamma', label: 'prod', status: 'creating', creation: { operationId: opr(2), status: 'failed' } }),
+        // Story 1.29: the deletion badges, the deletion Retry and the Delete column.
+        tenant(3, { name: 'Delta', status: 'deleting', deletion: { operationId: opr(3), status: 'running' } }),
+        tenant(4, { name: 'Epsilon', status: 'deleting', deletion: { operationId: opr(4), status: 'failed' } }),
       ];
       await page.goto('/deployment/tenants');
-      await expect(page.getByRole('rowheader')).toHaveCount(3);
+      await expect(page.getByRole('rowheader')).toHaveCount(5);
       expect(await axe(page), 'tenants').toEqual([]);
 
       api.state.tenants = [];

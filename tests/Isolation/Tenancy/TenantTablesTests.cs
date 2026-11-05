@@ -15,7 +15,11 @@ namespace Gatekeep.Tests.Isolation.Tenancy;
 /// guard against every update, delete and truncate for every role and the migrator, and the grants:
 /// gk_worker may only set a Tenant's status and insert its settings, gk_admin may insert the
 /// creator's role, and gk_hosted only reads. Story 1.28: gk_admin may update a Tenant's label and
-/// nothing else of it, and only while it is active (<c>GK006</c>), whoever runs the update.
+/// nothing else of it, and only while it is active (<c>GK006</c>), whoever runs the update. Story
+/// 1.29: a status goes only creating to active, creating or active to deleting, and deleting to
+/// deleted, each by its one role (<c>GK007</c>); settings go only while deleting (<c>GK008</c>);
+/// gk_admin deletes only a deleting Tenant's roles (<c>GK009</c>); and gk_worker reads only the
+/// <c>tenant_id</c> of the tables its purges delete from.
 /// </summary>
 public sealed class TenantTablesTests(PostgresFixture postgres)
 {
@@ -28,6 +32,9 @@ public sealed class TenantTablesTests(PostgresFixture postgres)
     private const string TenantInsertRefused = "GK003";
     private const string ActivationRefused = "GK005";
     private const string LabelRefused = "GK006";
+    private const string StatusRefused = "GK007";
+    private const string SettingsDeleteRefused = "GK008";
+    private const string RoleDeleteRefused = "GK009";
 
     private const string PreviousMigration = "20261104010000_ConfirmSensitiveActions";
 
@@ -169,7 +176,6 @@ public sealed class TenantTablesTests(PostgresFixture postgres)
     [InlineData(TableRegistry.Worker, "UPDATE tenant SET rp_id = 'evil.test'")]
     [InlineData(TableRegistry.Worker, "UPDATE tenant SET name = 'Renamed'")]
     [InlineData(TableRegistry.Worker, "DELETE FROM tenant")]
-    [InlineData(TableRegistry.Admin, "UPDATE tenant SET status = 'active'")]
     [InlineData(TableRegistry.Admin, "UPDATE tenant SET issuer = 'https://evil.test/'")]
     [InlineData(TableRegistry.Admin, "UPDATE tenant SET name = 'Renamed'")]
     [InlineData(TableRegistry.Admin, "DELETE FROM tenant")]
@@ -195,7 +201,6 @@ public sealed class TenantTablesTests(PostgresFixture postgres)
     [InlineData("UPDATE tenant SET email_link_base = 'https://evil.test/'")]
     [InlineData("UPDATE tenant SET created_at = created_at - interval '1 day'")]
     [InlineData("UPDATE tenant SET id = gen_random_uuid()")]
-    [InlineData("UPDATE tenant SET status = 'creating'")]
     public async Task Trigger_keeps_the_derived_values_and_status_for_any_role(string sql)
     {
         var database = await SeededAsync();
@@ -212,14 +217,15 @@ public sealed class TenantTablesTests(PostgresFixture postgres)
         var worker = postgres.RoleConnection(TableRegistry.Worker, database);
         string Scoped(string sql) => $"BEGIN; SELECT set_config('gatekeep.tenant_id', '{TenantA}', true); {sql}; COMMIT;";
 
-        // Without its settings it can't become active, whoever asks.
-        foreach (var connection in new[] { worker, postgres.RoleConnection(TableRegistry.Migrator, database) })
-        {
-            var early = await Assert.ThrowsAsync<PostgresException>(() => PostgresFixture.ExecuteAsync(
-                connection,
-                Scoped($"UPDATE tenant SET status = 'active' WHERE id = '{TenantA}'")));
-            Assert.Equal(ActivationRefused, early.SqlState);
-        }
+        // Without its settings it can't become active; and no role but gk_worker activates (Story 1.29).
+        var early = await Assert.ThrowsAsync<PostgresException>(() => PostgresFixture.ExecuteAsync(
+            worker,
+            Scoped($"UPDATE tenant SET status = 'active' WHERE id = '{TenantA}'")));
+        Assert.Equal(ActivationRefused, early.SqlState);
+        var migrator = await Assert.ThrowsAsync<PostgresException>(() => PostgresFixture.ExecuteAsync(
+            postgres.RoleConnection(TableRegistry.Migrator, database),
+            Scoped($"UPDATE tenant SET status = 'active' WHERE id = '{TenantA}'")));
+        Assert.Equal(StatusRefused, migrator.SqlState);
 
         // In the Tenant's own scope (RLS), as the creation Operation's completion does: settings, then active.
         await PostgresFixture.ExecuteAsync(
@@ -230,12 +236,12 @@ public sealed class TenantTablesTests(PostgresFixture postgres)
 
         // Back to creating is refused for the Worker too, by the trigger.
         var back = await Assert.ThrowsAsync<PostgresException>(() => PostgresFixture.ExecuteAsync(worker, $"UPDATE tenant SET status = 'creating' WHERE id = '{TenantA}'"));
-        Assert.Equal(RaisedException, back.SqlState);
+        Assert.Equal(StatusRefused, back.SqlState);
     }
 
-    /// <summary>Story 1.28: gk_admin may update a Tenant's label, and no other column of it.</summary>
+    /// <summary>Story 1.28: gk_admin may update a Tenant's label, and from Story 1.29 its status, and no other column of it.</summary>
     [Fact]
-    public async Task Admin_may_update_only_the_label()
+    public async Task Admin_may_update_only_the_label_and_status()
     {
         var database = await postgres.NewMigratedDatabaseAsync();
 
@@ -248,7 +254,7 @@ public sealed class TenantTablesTests(PostgresFixture postgres)
             ORDER BY attname
             """);
 
-        Assert.Equal(["label"], columns);
+        Assert.Equal(["label", "status"], columns);
         Assert.False(await ScalarAsync<bool>(database, "SELECT has_table_privilege('gk_admin', 'public.tenant', 'UPDATE')"));
         Assert.False(await ScalarAsync<bool>(database, "SELECT has_table_privilege('gk_admin', 'public.tenant', 'DELETE')"));
     }
@@ -343,7 +349,7 @@ public sealed class TenantTablesTests(PostgresFixture postgres)
             """
             SELECT c.relname || '.' || t.tgname || ' ' || t.tgenabled::text
             FROM pg_trigger t JOIN pg_class c ON c.oid = t.tgrelid
-            WHERE NOT t.tgisinternal AND c.relname IN ('tenant', 'tenant_host', 'tenant_role')
+            WHERE NOT t.tgisinternal AND c.relname IN ('tenant', 'tenant_host', 'tenant_role', 'tenant_settings')
             ORDER BY 1
             """);
 
@@ -354,7 +360,11 @@ public sealed class TenantTablesTests(PostgresFixture postgres)
                 "tenant_host.tenant_host_guard O",
                 "tenant_host.tenant_host_guard_insert O",
                 "tenant_host.tenant_host_refuse_truncate O",
+                "tenant_role.tenant_role_guard_delete O",
                 "tenant_role.tenant_role_guard_insert O",
+                "tenant_settings.tenant_row_guard O",
+                "tenant_settings.tenant_settings_guard_delete O",
+                "tenant_settings.tenant_settings_guard_update O",
             ],
             triggers);
     }
@@ -385,7 +395,7 @@ public sealed class TenantTablesTests(PostgresFixture postgres)
     {
         var database = await postgres.NewMigratedDatabaseAsync();
 
-        foreach (var function in new[] { "tenant_guard_update", "tenant_host_guard" })
+        foreach (var function in new[] { "tenant_guard_update", "tenant_host_guard", "tenant_settings_guard_delete", "tenant_role_guard_delete", "tenant_row_guard" })
         {
             foreach (var role in TableRegistry.RuntimeRoles)
             {
@@ -394,6 +404,293 @@ public sealed class TenantTablesTests(PostgresFixture postgres)
                     $"{role} may execute {function}.");
             }
         }
+    }
+
+    // Story 1.29: the lifecycle guard, the settings and role delete guards, and the purge grants.
+
+    [Theory]
+    [InlineData(TableRegistry.Admin, "creating", "active")]
+    [InlineData(TableRegistry.Worker, "active", "deleting")]
+    [InlineData(TableRegistry.Worker, "creating", "deleting")]
+    [InlineData(TableRegistry.Admin, "deleting", "deleted")]
+    [InlineData(TableRegistry.Migrator, "deleted", "active")]
+    [InlineData(TableRegistry.Migrator, "deleted", "deleting")]
+    [InlineData(TableRegistry.Migrator, "deleting", "active")]
+    [InlineData(TableRegistry.Migrator, "deleting", "creating")]
+    [InlineData(TableRegistry.Migrator, "active", "creating")]
+    [InlineData(TableRegistry.Migrator, "active", "deleted")]
+    [InlineData(TableRegistry.Migrator, "creating", "deleted")]
+    // An allow-list: a step of the lifecycle, by any role but the one that takes it, the migrator included.
+    [InlineData(TableRegistry.Migrator, "active", "deleting")]
+    [InlineData(TableRegistry.Migrator, "deleting", "deleted")]
+    [InlineData(TableRegistry.Migrator, "creating", "deleting")]
+    public async Task Status_follows_only_the_lifecycle_by_its_own_role_GK007(string role, string from, string to)
+    {
+        var database = await SeededAsync(status: from);
+
+        var failure = await Assert.ThrowsAsync<PostgresException>(() => PostgresFixture.ExecuteAsync(
+            postgres.RoleConnection(role, database),
+            $"UPDATE tenant SET status = '{to}' WHERE id = '{TenantA}'"));
+
+        Assert.Equal(StatusRefused, failure.SqlState);
+        Assert.Equal(from, await ScalarAsync<string>(database, $"SELECT status FROM tenant WHERE id = '{TenantA}'"));
+    }
+
+    [Fact]
+    public async Task Deleting_to_deleted_with_settings_left_is_GK007()
+    {
+        var database = await SeededAsync(status: "deleting");
+        await PostgresFixture.ExecuteAsync(postgres.SuperuserConnection(database), $"SET session_replication_role = replica; INSERT INTO tenant_settings (tenant_id) VALUES ('{TenantA}'); SET session_replication_role = DEFAULT");
+
+        foreach (var role in new[] { TableRegistry.Worker, TableRegistry.Migrator })
+        {
+            var failure = await Assert.ThrowsAsync<PostgresException>(() => PostgresFixture.ExecuteAsync(
+                postgres.RoleConnection(role, database),
+                $"BEGIN; SELECT set_config('gatekeep.tenant_id', '{TenantA}', true); UPDATE tenant SET status = 'deleted' WHERE id = '{TenantA}'; COMMIT;"));
+            Assert.Equal(StatusRefused, failure.SqlState);
+        }
+
+        Assert.Equal("deleting", await ScalarAsync<string>(database, $"SELECT status FROM tenant WHERE id = '{TenantA}'"));
+    }
+
+    [Theory]
+    [InlineData("creating")]
+    [InlineData("active")]
+    public async Task Admin_starts_a_deletion_and_removes_its_roles_and_the_Worker_ends_it(string from)
+    {
+        var database = await SeededAsync(status: from);
+        var admin = postgres.RoleConnection(TableRegistry.Admin, database);
+        var worker = postgres.RoleConnection(TableRegistry.Worker, database);
+        await PostgresFixture.ExecuteAsync(
+            postgres.SuperuserConnection(database),
+            $"INSERT INTO admin (id, deployment_owner) VALUES ('{Guid.CreateVersion7()}', false); " +
+            $"INSERT INTO tenant_role (tenant_id, admin_id, role) SELECT '{TenantA}', id, 'editor' FROM admin; " +
+            (from == "active" ? $"INSERT INTO tenant_settings (tenant_id) VALUES ('{TenantA}')" : "SELECT 1"));
+
+        await PostgresFixture.ExecuteAsync(admin, $"UPDATE tenant SET status = 'deleting' WHERE id = '{TenantA}'; DELETE FROM tenant_role WHERE tenant_id = '{TenantA}'");
+        Assert.Equal(0L, await ScalarAsync<long>(database, "SELECT count(*) FROM tenant_role"));
+
+        await PostgresFixture.ExecuteAsync(
+            worker,
+            $"BEGIN; SELECT set_config('gatekeep.tenant_id', '{TenantA}', true); DELETE FROM tenant_settings WHERE tenant_id = '{TenantA}'; " +
+            $"UPDATE tenant SET status = 'deleted' WHERE id = '{TenantA}'; COMMIT;");
+
+        Assert.Equal("deleted", await ScalarAsync<string>(database, $"SELECT status FROM tenant WHERE id = '{TenantA}'"));
+        Assert.Equal(1L, await ScalarAsync<long>(database, "SELECT count(*) FROM tenant_host"));
+    }
+
+    [Theory]
+    [InlineData(TableRegistry.Worker, "active")]
+    [InlineData(TableRegistry.Worker, "creating")]
+    [InlineData(TableRegistry.Migrator, "active")]
+    public async Task Settings_go_only_while_the_Tenant_is_deleting_GK008(string role, string status)
+    {
+        var database = await SeededAsync(status: status);
+        await PostgresFixture.ExecuteAsync(postgres.SuperuserConnection(database), $"INSERT INTO tenant_settings (tenant_id) VALUES ('{TenantA}')");
+
+        var failure = await Assert.ThrowsAsync<PostgresException>(() => PostgresFixture.ExecuteAsync(
+            postgres.RoleConnection(role, database),
+            $"BEGIN; SELECT set_config('gatekeep.tenant_id', '{TenantA}', true); DELETE FROM tenant_settings WHERE tenant_id = '{TenantA}'; COMMIT;"));
+
+        Assert.Equal(SettingsDeleteRefused, failure.SqlState);
+        Assert.Equal(1L, await ScalarAsync<long>(database, "SELECT count(*) FROM tenant_settings"));
+    }
+
+    /// <summary>Story 1.29, after Story 2.3: a Tenant's key rows go only with its deletion, so rotation can never delete one (GK008).</summary>
+    [Theory]
+    [InlineData("signing_key", "active")]
+    [InlineData("signing_key", "creating")]
+    [InlineData("protection_key_wrap", "active")]
+    [InlineData("protection_key_wrap", "creating")]
+    public async Task Key_rows_go_only_while_the_Tenant_is_deleting_GK008(string table, string status)
+    {
+        var database = await SeededAsync(status: status);
+        var seed = TenantSeeds.Seeds.Single(s => s.Table == table).Sql(TenantA, Guid.CreateVersion7());
+        await PostgresFixture.ExecuteAsync(
+            postgres.SuperuserConnection(database), $"SET session_replication_role = replica; {seed}; SET session_replication_role = DEFAULT");
+
+        var failure = await Assert.ThrowsAsync<PostgresException>(() => PostgresFixture.ExecuteAsync(
+            postgres.RoleConnection(TableRegistry.Worker, database),
+            $"BEGIN; SELECT set_config('gatekeep.tenant_id', '{TenantA}', true); DELETE FROM {table} WHERE tenant_id = '{TenantA}'; COMMIT;"));
+
+        Assert.Equal(SettingsDeleteRefused, failure.SqlState);
+        Assert.Equal(1L, await ScalarAsync<long>(database, $"SELECT count(*) FROM {table}"));
+    }
+
+    [Theory]
+    [InlineData("active")]
+    [InlineData("creating")]
+    [InlineData("deleted")]
+    public async Task Admin_deletes_only_a_deleting_Tenants_roles_GK009(string status)
+    {
+        var database = await SeededAsync(status: status);
+        await PostgresFixture.ExecuteAsync(
+            postgres.SuperuserConnection(database),
+            $"INSERT INTO admin (id, deployment_owner) VALUES ('{Guid.CreateVersion7()}', false); INSERT INTO tenant_role (tenant_id, admin_id, role) SELECT '{TenantA}', id, 'owner' FROM admin");
+
+        var failure = await Assert.ThrowsAsync<PostgresException>(() => PostgresFixture.ExecuteAsync(
+            postgres.RoleConnection(TableRegistry.Admin, database),
+            $"DELETE FROM tenant_role WHERE tenant_id = '{TenantA}'"));
+
+        Assert.Equal(RoleDeleteRefused, failure.SqlState);
+        Assert.Equal(1L, await ScalarAsync<long>(database, "SELECT count(*) FROM tenant_role"));
+    }
+
+    [Theory]
+    [MemberData(nameof(AllRuntimeRoles))]
+    public async Task No_runtime_role_deletes_a_Tenant(string role)
+    {
+        var database = await SeededAsync(status: "deleted");
+
+        foreach (var sql in new[] { "DELETE FROM tenant", "TRUNCATE tenant", "DELETE FROM tenant_host" })
+        {
+            var failure = await Assert.ThrowsAsync<PostgresException>(() => PostgresFixture.ExecuteAsync(postgres.RoleConnection(role, database), sql));
+            Assert.Equal(PermissionDenied, failure.SqlState);
+        }
+
+        Assert.Equal(1L, await ScalarAsync<long>(database, "SELECT count(*) FROM tenant"));
+        Assert.Equal(1L, await ScalarAsync<long>(database, "SELECT count(*) FROM tenant_host"));
+    }
+
+    public static TheoryData<string> AllRuntimeRoles() => [.. TableRegistry.RuntimeRoles];
+
+    /// <summary>Story 1.29: every purged tenant table refuses a row for a Tenant being deleted, or deleted (GK010).</summary>
+    [Theory]
+    [InlineData("deleting")]
+    [InlineData("deleted")]
+    public async Task No_purged_table_takes_a_row_of_a_deleting_or_deleted_Tenant_GK010(string status)
+    {
+        var database = await SeededAsync(status: status);
+        var value = Guid.CreateVersion7();
+        var seeds = TenantSeeds.Seeds.Select(s => (s.Table, Sql: s.Sql(TenantA, value))).ToList();
+
+        // A job payload needs its job, which the job guard writes only in a scope: checked on its own below.
+        foreach (var (table, sql) in seeds.Where(s => s.Table != "job_payload"))
+        {
+            // The parent rows a child needs, written with triggers off; then the child itself, with them on.
+            var parents = string.Join("; ", seeds.TakeWhile(s => s.Table != table).Select(s => s.Sql));
+            var setup = parents.Length == 0 ? "SELECT 1" : $"SET session_replication_role = replica; {parents}; SET session_replication_role = DEFAULT";
+            var failure = await Assert.ThrowsAsync<PostgresException>(() => PostgresFixture.ExecuteAsync(
+                postgres.SuperuserConnection(database),
+                $"BEGIN; {setup}; {sql}; COMMIT;"));
+
+            Assert.True(failure.SqlState == "GK010", $"{table}: {failure.SqlState}");
+        }
+
+        // A job payload is still written while the Tenant is deleting, for its own deletion's step
+        // jobs; once it is deleted, never.
+        if (status == "deleted")
+        {
+            var job = Guid.CreateVersion7();
+            var payload = await Assert.ThrowsAsync<PostgresException>(() => PostgresFixture.ExecuteAsync(
+                postgres.SuperuserConnection(database),
+                $"SET session_replication_role = replica; INSERT INTO job (id, type, tenant_id, deployment_wide) VALUES ('{job}', 'operations.operation.step', '{TenantA}', false); " +
+                $"SET session_replication_role = DEFAULT; INSERT INTO job_payload (tenant_id, job_id, ids) VALUES ('{TenantA}', '{job}', '{{}}')"));
+            Assert.Equal("GK010", payload.SqlState);
+        }
+
+        Assert.Empty(await TenantSeeds.RowsLeftAsync(postgres.SuperuserConnection(database), TenantA));
+    }
+
+    [Fact]
+    public async Task A_deleting_Tenants_own_step_jobs_still_get_their_payload()
+    {
+        var database = await SeededAsync(status: "deleting");
+        var job = Guid.CreateVersion7();
+
+        await PostgresFixture.ExecuteAsync(
+            postgres.SuperuserConnection(database),
+            $"SET session_replication_role = replica; INSERT INTO job (id, type, tenant_id, deployment_wide) VALUES ('{job}', 'operations.operation.step', '{TenantA}', false); " +
+            $"SET session_replication_role = DEFAULT; INSERT INTO job_payload (tenant_id, job_id, ids) VALUES ('{TenantA}', '{job}', '{{}}')");
+
+        Assert.Equal(1L, await ScalarAsync<long>(database, $"SELECT count(*) FROM job_payload WHERE tenant_id = '{TenantA}'"));
+    }
+
+    [Theory]
+    [InlineData("deleting", "INSERT INTO tenant_settings (tenant_id) VALUES ('{0}')")]
+    [InlineData("deleted", "INSERT INTO tenant_settings (tenant_id) VALUES ('{0}')")]
+    [InlineData("creating", "UPDATE tenant_settings SET updated_at = now() WHERE tenant_id = '{0}'")]
+    [InlineData("deleting", "UPDATE tenant_settings SET updated_at = now() WHERE tenant_id = '{0}'")]
+    public async Task Settings_are_inserted_only_while_creating_or_active_and_updated_only_while_active_GK010(string status, string sql)
+    {
+        var database = await SeededAsync(status: status);
+        if (sql.StartsWith("UPDATE", StringComparison.Ordinal))
+        {
+            await PostgresFixture.ExecuteAsync(
+                postgres.SuperuserConnection(database),
+                $"SET session_replication_role = replica; INSERT INTO tenant_settings (tenant_id) VALUES ('{TenantA}'); SET session_replication_role = DEFAULT");
+        }
+
+        var failure = await Assert.ThrowsAsync<PostgresException>(() => PostgresFixture.ExecuteAsync(
+            postgres.SuperuserConnection(database),
+            string.Format(System.Globalization.CultureInfo.InvariantCulture, sql, TenantA)));
+
+        Assert.Equal("GK010", failure.SqlState);
+    }
+
+    [Fact]
+    public async Task An_active_Tenants_settings_update()
+    {
+        var database = await SeededAsync();
+        await PostgresFixture.ExecuteAsync(postgres.SuperuserConnection(database), $"INSERT INTO tenant_settings (tenant_id) VALUES ('{TenantA}')");
+
+        await PostgresFixture.ExecuteAsync(postgres.SuperuserConnection(database), $"UPDATE tenant_settings SET updated_at = now() WHERE tenant_id = '{TenantA}'");
+    }
+
+    [Theory]
+    [InlineData("deleting")]
+    [InlineData("deleted")]
+    public async Task No_role_is_granted_in_a_deleting_or_deleted_Tenant_GK004(string status)
+    {
+        var database = await SeededAsync(status: status);
+        var admin = Guid.CreateVersion7();
+        await PostgresFixture.ExecuteAsync(postgres.SuperuserConnection(database), $"INSERT INTO admin (id, deployment_owner) VALUES ('{admin}', true)");
+
+        var failure = await Assert.ThrowsAsync<PostgresException>(() => PostgresFixture.ExecuteAsync(
+            postgres.RoleConnection(TableRegistry.Admin, database),
+            $"INSERT INTO tenant_role (tenant_id, admin_id, role) VALUES ('{TenantA}', '{admin}', 'owner')"));
+
+        Assert.Equal("GK004", failure.SqlState);
+    }
+
+    [Theory]
+    [InlineData("user")]
+    [InlineData("user_session")]
+    [InlineData("authorization")]
+    [InlineData("token")]
+    [InlineData("signin_transaction")]
+    public async Task Worker_may_delete_and_read_only_the_Tenant_ID_of_a_purged_table(string table)
+    {
+        var database = await postgres.NewMigratedDatabaseAsync();
+
+        Assert.True(await ScalarAsync<bool>(database, $"SELECT has_table_privilege('gk_worker', 'public.\"{table}\"', 'DELETE')"));
+        foreach (var privilege in new[] { "SELECT", "INSERT", "UPDATE", "TRUNCATE" })
+        {
+            Assert.False(await ScalarAsync<bool>(database, $"SELECT has_table_privilege('gk_worker', 'public.\"{table}\"', '{privilege}')"), $"{table} {privilege}");
+        }
+
+        var readable = await ReadAsync(
+            database,
+            $"""
+            SELECT attname FROM pg_attribute
+            WHERE attrelid = 'public."{table}"'::regclass AND attnum > 0 AND NOT attisdropped
+              AND has_column_privilege('gk_worker', 'public."{table}"', attname, 'SELECT')
+            ORDER BY attname
+            """);
+        Assert.Equal(["tenant_id"], readable);
+    }
+
+    [Fact]
+    public async Task Worker_reads_no_purged_tables_content()
+    {
+        var database = await postgres.NewMigratedDatabaseAsync();
+        await TestTenants.InsertAsync(postgres.SuperuserConnection(database), TenantA);
+
+        var failure = await Assert.ThrowsAsync<PostgresException>(() => PostgresFixture.ExecuteAsync(
+            postgres.RoleConnection(TableRegistry.Worker, database),
+            $"BEGIN; SELECT set_config('gatekeep.tenant_id', '{TenantA}', true); SELECT id FROM \"user\"; COMMIT;"));
+
+        Assert.Equal(PermissionDenied, failure.SqlState);
     }
 
     private async Task<string> SeededAsync(string status = "active")

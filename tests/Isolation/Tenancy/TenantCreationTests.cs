@@ -377,7 +377,7 @@ public sealed class TenantCreationTests(PostgresFixture postgres)
         var (third, _) = await CreatedAsync(host, cookie, csrf, "third");
 
         // The first is activated as its Operation would; the others are still creating.
-        await PostgresFixture.ExecuteAsync(host.Superuser, $"UPDATE operation SET status = 'succeeded', finished_at = now() WHERE id = '{firstOperation}'; INSERT INTO tenant_settings (tenant_id) VALUES ('{first}'); UPDATE tenant SET status = 'active' WHERE id = '{first}'");
+        await PostgresFixture.ExecuteAsync(host.Superuser, $"UPDATE operation SET status = 'succeeded', finished_at = now() WHERE id = '{firstOperation}'; INSERT INTO tenant_settings (tenant_id) VALUES ('{first}'); SET session_replication_role = replica; UPDATE tenant SET status = 'active' WHERE id = '{first}'; SET session_replication_role = DEFAULT");
 
         using var response = await host.SendAsync(HttpMethod.Get, TenantsPath, cookie);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);

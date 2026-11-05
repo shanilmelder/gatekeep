@@ -63,14 +63,29 @@ public static class TableRegistry
 
     private static readonly IReadOnlyList<string> BootstrapTokenColumns = ["token_sha256", "issued_at", "expires_at"];
 
+    /// <summary>
+    /// Story 1.29: every purged tenant table's <c>BEFORE INSERT</c> guard, so no row reaches a Tenant
+    /// whose status doesn't allow it, and a deleted Tenant's purge leaves nothing behind.
+    /// </summary>
+    public static readonly IReadOnlyList<string> RowGuard = ["tenant_row_guard"];
+
+    /// <summary>A Tenant purge's read (Story 1.29): the one column its <c>WHERE</c> names, never the content.</summary>
+    private static readonly IReadOnlyDictionary<string, IReadOnlyList<ColumnGrant>> PurgeColumns =
+        new Dictionary<string, IReadOnlyList<ColumnGrant>>
+        {
+            [Worker] = [new ColumnGrant(Select, ["tenant_id"])],
+        };
+
     public static readonly IReadOnlyList<TableEntry> Tables =
     [
         // Story 1.27: Host.Admin creates a Tenant, always creating, which its creation Operation's
         // completion, as gk_worker, makes active once its settings exist. Nobody else changes one, and
         // the triggers keep its ID, issuer, RP ID, link base and creation time, and let its status go
         // only from creating to active. From Story 1.28 a Tenant Owner, through Host.Admin, changes its
-        // label, only while it is active. They hold every DML by any role; an owner or superuser can
-        // still disable triggers.
+        // label, only while it is active. From Story 1.29 a Deployment Owner, through Host.Admin, sets a
+        // Tenant deleting, and its deletion Operation's completion, as gk_worker, sets it deleted: the
+        // row is a tombstone, never deleted, so its host is never reused. They hold every DML by any
+        // role; an owner or superuser can still disable triggers.
         new(
             "tenant",
             TableClass.Control,
@@ -86,10 +101,11 @@ public static class TableRegistry
             {
                 // The seal loop lists the Tenant chains, so it reads the IDs only.
                 [Sealer] = [new ColumnGrant(Select, ["id"])],
-                // Activation, once the creation Operation succeeds.
+                // Activation, once the creation Operation succeeds, and deleted, once the deletion
+                // Operation does (Story 1.29).
                 [Worker] = [new ColumnGrant(Update, ["status"])],
-                // A Tenant Owner's label change (Story 1.28), and no other column.
-                [Admin] = [new ColumnGrant(Update, ["label"])],
+                // A Tenant Owner's label change (Story 1.28), and a deletion's start (Story 1.29).
+                [Admin] = [new ColumnGrant(Update, ["label", "status"])],
             },
             ["tenant_guard_insert", "tenant_guard_update"]),
 
@@ -108,13 +124,20 @@ public static class TableRegistry
                 [Worker] = [Select],
             },
             Triggers: ["tenant_host_guard", "tenant_host_guard_insert", "tenant_host_refuse_truncate"]),
-        new("tenant_settings", TableClass.Tenant, "Tenancy", new Dictionary<string, IReadOnlyList<string>>
-        {
-            [Hosted] = [Select],
-            [Admin] = [Select, Insert, Update],
-            // Story 1.27: the creation Operation's completion writes the new Tenant's row.
-            [Worker] = [Select, Insert],
-        }),
+        new(
+            "tenant_settings",
+            TableClass.Tenant,
+            "Tenancy",
+            new Dictionary<string, IReadOnlyList<string>>
+            {
+                [Hosted] = [Select],
+                [Admin] = [Select, Insert, Update],
+                // Story 1.27: the creation Operation's completion writes the new Tenant's row. Story
+                // 1.29: the deletion Operation's purge deletes it, which the trigger allows only while
+                // the Tenant is deleting, for every role.
+                [Worker] = [Select, Insert, Delete],
+            },
+            Triggers: ["tenant_row_guard", "tenant_settings_guard_delete", "tenant_settings_guard_update"]),
         new("migration_history", TableClass.Control, "Operations", new Dictionary<string, IReadOnlyList<string>>()),
         new(
             "audit_event",
@@ -209,7 +232,8 @@ public static class TableRegistry
             {
                 // Erasing a dead job's credential.
                 [Worker] = [new ColumnGrant(Update, ["ciphertext"])],
-            }),
+            },
+            RowGuard),
         new(
             "operation",
             TableClass.Control,
@@ -247,27 +271,34 @@ public static class TableRegistry
             ["operation_step_guard_insert"]),
 
         // AD-12 and AD-13. Only the Hosted request path reaches these yet: sign-in reads Users,
-        // and writes Sessions, transactions and OpenIddict's entities. No role deletes.
+        // and writes Sessions, transactions and OpenIddict's entities. Only a Tenant's deletion
+        // deletes (Story 1.29): its Operation's purges, as gk_worker in the Tenant's own scope, which
+        // read nothing but the tenant_id their WHERE names.
         new("user", TableClass.Tenant, "Identity", new Dictionary<string, IReadOnlyList<string>>
         {
             [Hosted] = [Select],
-        }),
+            [Worker] = [Delete],
+        }, PurgeColumns, RowGuard),
         new("user_session", TableClass.Tenant, "Sessions", new Dictionary<string, IReadOnlyList<string>>
         {
             [Hosted] = [Select, Insert, Update],
-        }),
+            [Worker] = [Delete],
+        }, PurgeColumns, RowGuard),
         new("authorization", TableClass.Tenant, "Sessions", new Dictionary<string, IReadOnlyList<string>>
         {
             [Hosted] = [Select, Insert, Update],
-        }),
+            [Worker] = [Delete],
+        }, PurgeColumns, RowGuard),
         new("token", TableClass.Tenant, "Sessions", new Dictionary<string, IReadOnlyList<string>>
         {
             [Hosted] = [Select, Insert, Update],
-        }),
+            [Worker] = [Delete],
+        }, PurgeColumns, RowGuard),
         new("signin_transaction", TableClass.Tenant, "Authentication", new Dictionary<string, IReadOnlyList<string>>
         {
             [Hosted] = [Select, Insert, Update],
-        }),
+            [Worker] = [Delete],
+        }, PurgeColumns, RowGuard),
         new(
             "admin_attempt",
             TableClass.Control,
@@ -390,17 +421,18 @@ public static class TableRegistry
         // Story 1.24: the one Tenant Role each Admin holds in a Tenant (AD-27). control, not tenant:
         // one Admin's roles are listed across Tenants, so the request checks filter by the path
         // Tenant in code. Host.Admin reads it on every Tenant request, caching nothing, and from
-        // Story 1.27 inserts the creator's Owner role. Story 8.4 adds UPDATE (role) and DELETE.
-        // gk_hosted never reads it (AD-2).
+        // Story 1.27 inserts the creator's Owner role. From Story 1.29 it deletes every role of a
+        // Tenant whose deletion starts, which the trigger holds it to; Story 8.4 adds UPDATE (role)
+        // and single-role removal. gk_hosted never reads it (AD-2).
         new(
             "tenant_role",
             TableClass.Control,
             "Admins",
             new Dictionary<string, IReadOnlyList<string>>
             {
-                [Admin] = [Select, Insert],
+                [Admin] = [Select, Insert, Delete],
             },
-            Triggers: ["tenant_role_guard_insert"]),
+            Triggers: ["tenant_role_guard_insert", "tenant_role_guard_delete"]),
 
         // Story 1.26: each Admin Session's pending fresh-assertion challenge and its verified grants,
         // bound to the Session and to the SHA-256 of their action, Tenant and target, for 5 minutes
@@ -441,7 +473,8 @@ public static class TableRegistry
         // protection key, only as the Transit wrap. Host.Worker creates them at Tenant creation and in
         // the hourly backfill; Host.Hosted only reads them, for discovery and JWKS. Story 2.4: Host.Worker
         // rotates, retires and destroys keys through their state and lifecycle times only, the trigger
-        // holds every change to AD-11's transitions, and no role deletes a row.
+        // holds every change to AD-11's transitions. Only a Tenant's deletion deletes a row (Story 1.29), which
+        // the triggers allow only while the Tenant is deleting, and no row reaches a Tenant past creating or active.
         new(
             "signing_key",
             TableClass.Tenant,
@@ -449,18 +482,19 @@ public static class TableRegistry
             new Dictionary<string, IReadOnlyList<string>>
             {
                 [Hosted] = [Select],
-                [Worker] = [Select, Insert],
+                // Story 1.29: the deletion Operation's Keys purge deletes a deleting Tenant's rows.
+                [Worker] = [Select, Insert, Delete],
             },
             new Dictionary<string, IReadOnlyList<ColumnGrant>>
             {
                 [Worker] = [new ColumnGrant(Update, ["state", "promoted_at", "rotated_at", "retired_at", "destroyed_at"])],
             },
-            ["signing_key_guard_update"]),
+            ["signing_key_guard_delete", "signing_key_guard_update", "tenant_row_guard"]),
         new("protection_key_wrap", TableClass.Tenant, "Keys", new Dictionary<string, IReadOnlyList<string>>
         {
             [Hosted] = [Select],
-            [Worker] = [Select, Insert],
-        }),
+            [Worker] = [Select, Insert, Delete],
+        }, Triggers: ["protection_key_wrap_guard_delete", "tenant_row_guard"]),
     ];
 
     private static IReadOnlyList<string> EventTriggers(string table) =>

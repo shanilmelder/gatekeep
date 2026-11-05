@@ -138,7 +138,12 @@ internal static class AdminOpenApi
                 else if (type == typeof(TenantLabelResponse))
                 {
                     Enumerate(schema, "label", TenantsApi.Labels);
-                    Enumerate(schema, "status", TenantsApi.TenantStatuses);
+                    Enumerate(schema, "status", TenantsApi.LabelStatuses);
+                }
+                else if (type == typeof(TenantDeletion))
+                {
+                    Enumerate(schema, "status", TenantsApi.CreationStatuses);
+                    Bound(schema, "operationId", OperationIdPattern, maxLength: null);
                 }
                 else if (type == typeof(OperationResponse))
                 {
@@ -219,6 +224,16 @@ internal static class AdminOpenApi
                         Description = query.Description,
                         Schema = new OpenApiSchema { Type = JsonSchemaType.String },
                     });
+                }
+
+                if (operation.Parameters?.FirstOrDefault(p => p.Name == TenantsApi.TargetTenantRouteValue) is OpenApiParameter target)
+                {
+                    // The Tenant a Deployment route acts on (Story 1.29): never a path Tenant.
+                    target.Description =
+                        "The public ID of the Tenant this Deployment route acts on: ten_ and 26 base32 characters, in its canonical " +
+                        "spelling. It isn't a path Tenant: no Tenant scope opens on it, and the page Tenant header doesn't apply. Anything " +
+                        "else, and an unknown Tenant, is the unknown-path 404.";
+                    target.Schema = new OpenApiSchema { Type = JsonSchemaType.String, Pattern = TenantIdPattern };
                 }
 
                 if (declaration.Tenant)

@@ -22,9 +22,11 @@ internal static class ProductionOperations
     /// <summary>
     /// <c>audit.chain.purge</c> deletes a deleted Tenant's audit chain once its retention ends
     /// (AD-16). Its one Tenant stage enqueues the <c>audit.chain.purge</c> job, which runs as
-    /// <c>gk_retention</c>. Tenant deletion, its future caller, starts it.
+    /// <c>gk_retention</c>. It has no production caller: a deletion's completion enqueues the same
+    /// job itself, from the Tenant's scope.
     /// <c>tenancy.tenant.create</c> (Story 1.27) creates a new Tenant's secret class keys, then, on
-    /// success, its settings, and makes it active.
+    /// success, its settings, and makes it active. <c>tenancy.tenant.delete</c> (Story 1.29) purges
+    /// a deleting Tenant's data and destroys its keys, then, on success, marks it deleted.
     /// </summary>
     public static readonly OperationRegistry Registry = new(
     [
@@ -32,6 +34,7 @@ internal static class ProductionOperations
             AuditRetentionJobs.PurgeOperation,
             [new OperationStage(AuditRetentionJobs.PurgeStage, OperationStageKind.Tenant, AuditRetentionJobs.PurgeStageAsync)]),
         TenantCreation.Definition,
+        TenantDeletion.Definition,
     ]);
 }
 

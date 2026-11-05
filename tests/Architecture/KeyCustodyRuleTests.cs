@@ -85,6 +85,49 @@ public class KeyCustodyRuleTests
         Assert.Equal(expected, ReachesOpenBao.IsMatch(source));
     }
 
+    /// <summary>
+    /// Story 1.29 (AD-10): a key is destroyed only inside the Keys module, through <c>KeysContract</c>,
+    /// which destroys a deleted Tenant's six secret class keys and, from Story 2.3, its Signing and
+    /// Management keys (and Story 2.4's retired and orphaned ones), and nowhere else under <c>src/</c>
+    /// but the adapter itself.
+    /// </summary>
+    [Fact]
+    public void Only_KeysContract_destroys_a_key()
+    {
+        var sources = SourceFiles(Path.Combine(Root, "src")).Select(f => (Relative(f), File.ReadAllText(f))).ToList();
+
+        Assert.Contains(sources, s => s.Item1 == KeysContractFile && DestroysKey.IsMatch(Comment.Replace(s.Item2, string.Empty)));
+        Assert.Empty(DestroyViolations(sources));
+    }
+
+    [Theory]
+    [InlineData("src/Modules/Operations/Core/TenantDeletion.cs", "await custody.DeleteAsync(key, ct);", 1)]
+    [InlineData("src/Gatekeep.Host.Admin/TenantsApi.cs", "await services.Custody\n  .DeleteAsync(KeyName.ForTenant(c, id), ct);", 1)]
+    [InlineData("src/Modules/Operations/Core/TenantDeletion.cs", "// custody.DeleteAsync(key, ct) is KeysContract's alone.", 0)]
+    [InlineData("src/Modules/Operations/Core/TenantDeletion.cs", "await KeysContract.DestroySecretClassKeysAsync(custody, id, ct);", 0)]
+    [InlineData(KeysContractFile, "await custody.DeleteAsync(key, cancellationToken);", 0)]
+    [InlineData("src/Modules/Keys/Core/KeysPurge.cs", "await custody.DeleteAsync(key, cancellationToken);", 0)]
+    [InlineData("src/Modules/Operations/Core/SigningKeyJobs.cs", "await custody.DeleteAsync(key, ct);", 1)]
+    [InlineData("src/Adapters/OpenBao/OpenBaoKeyCustody.cs", "await other.DeleteAsync(key, ct);", 0)]
+    [InlineData("src/Gatekeep.Host.Admin/TenantsApi.cs", "await services.Tenants.DeleteAsync(context, principal, id, typed, ct);", 0)]
+    public void Key_destroy_detection(string path, string source, int expected)
+    {
+        Assert.Equal(expected, DestroyViolations([(path, source)]).Count);
+    }
+
+    private const string KeysContractFile = "src/Modules/Keys/Contracts/KeysContract.cs";
+
+    private const string KeysModule = "src/Modules/Keys/";
+
+    /// <summary>A <c>DeleteAsync</c> call on a receiver named for custody: a Tenant's or anything else's <c>DeleteAsync</c> isn't a key.</summary>
+    private static readonly Regex DestroysKey = new(@"\b\w*[Cc]ustody\w*\s*\.\s*DeleteAsync\s*\(", RegexOptions.Compiled);
+
+    private static List<string> DestroyViolations(IEnumerable<(string Path, string Source)> sources) =>
+        [.. sources
+            .Where(s => !s.Path.StartsWith(KeysModule, StringComparison.Ordinal) && !s.Path.StartsWith(AdapterDirectory, StringComparison.Ordinal))
+            .Where(s => DestroysKey.IsMatch(Comment.Replace(s.Source, string.Empty)))
+            .Select(s => $"{s.Path} destroys a key: only the Keys module, through {KeysContractFile}, may (AD-10).")];
+
     [Fact]
     public void No_source_makes_asymmetric_or_AEAD_keys()
     {

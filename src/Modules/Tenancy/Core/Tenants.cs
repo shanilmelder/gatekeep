@@ -33,8 +33,9 @@ internal sealed class Tenants(IAuditAppender appender) : ITenants
         SELECT t.id, t.name, t.label, t.status, h.host, t.created_at
         FROM tenant t
         JOIN tenant_host h ON h.tenant_id = t.id AND h.kind = 'subdomain'
-        WHERE @after::uuid IS NULL
-           OR (t.created_at, t.id) > (SELECT a.created_at, a.id FROM tenant a WHERE a.id = @after)
+        WHERE t.status <> 'deleted'
+          AND (@after::uuid IS NULL
+               OR (t.created_at, t.id) > (SELECT a.created_at, a.id FROM tenant a WHERE a.id = @after))
         ORDER BY t.created_at, t.id
         LIMIT @limit
         """;
@@ -66,6 +67,34 @@ internal sealed class Tenants(IAuditAppender appender) : ITenants
     private const string ReadLabel = "SELECT label, status FROM tenant WHERE id = @id";
 
     private const string SetLabel = "UPDATE tenant SET label = @label WHERE id = @id AND status = 'active'";
+
+    /// <summary>
+    /// A creation's completion locks the Tenant first (Story 1.29), so a deletion's start, which takes
+    /// the same lock, either finds it active or makes it deleting before this reads it.
+    /// </summary>
+    private const string LockStatus = "SELECT status FROM tenant WHERE id = @id FOR NO KEY UPDATE";
+
+    // NO KEY UPDATE, not UPDATE: other tables reference tenant, and their inserts' FOR KEY SHARE goes on.
+    private const string LockForDeletion =
+        """
+        SELECT t.status, h.host
+        FROM tenant t
+        LEFT JOIN tenant_host h ON h.tenant_id = t.id AND h.kind = 'subdomain'
+        WHERE t.id = @id
+        FOR NO KEY UPDATE OF t
+        """;
+
+    private const string BeginDeletion = "UPDATE tenant SET status = 'deleting' WHERE id = @id AND status IN ('creating', 'active')";
+
+    /// <summary>
+    /// <c>FOR SHARE</c>: two stages of one deletion read it together, while it conflicts with a
+    /// deletion's start and a creation's completion, which take <c>FOR NO KEY UPDATE</c>.
+    /// </summary>
+    private const string ShareStatus = "SELECT status FROM tenant WHERE id = @id FOR SHARE";
+
+    private const string PurgeLock = "SELECT status FROM tenant WHERE id = @id FOR UPDATE";
+
+    private const string MarkDeleted = "UPDATE tenant SET status = 'deleted' WHERE id = @id AND status = 'deleting'";
 
     private readonly IAuditAppender _appender = appender ?? throw new ArgumentNullException(nameof(appender));
 
@@ -156,6 +185,18 @@ internal sealed class Tenants(IAuditAppender appender) : ITenants
         if (tenantId == Guid.Empty || context.TenantId != tenantId)
         {
             throw new InvalidOperationException("A Tenant is activated in its own context.");
+        }
+
+        // Only a creating Tenant: a deleting or deleted one never gets settings back (Story 1.29).
+        await using (var command = context.CreateCommand())
+        {
+            command.CommandText = LockStatus;
+            Add(command, "id", tenantId);
+            if (await command.ExecuteScalarAsync(cancellationToken) is not string status
+                || TenantValues.ParseStatus(status) != TenantStatus.Creating)
+            {
+                return false;
+            }
         }
 
         await using (var command = context.CreateCommand())
@@ -250,6 +291,114 @@ internal sealed class Tenants(IAuditAppender appender) : ITenants
 
         var code = removedProd ? TenancyEvents.ProdLabelRemoved.Code : TenancyEvents.LabelChanged.Code;
         await _appender.AppendAsync(context, new AuditEvent(code, actor, AuditTargetKind.Tenant, tenantId), null, cancellationToken);
+    }
+
+    public async Task<TenantDeletionState?> LockForDeletionAsync(CommandContext context, Guid tenantId, CancellationToken cancellationToken)
+    {
+        RequireDeployment(context);
+
+        await using var command = context.CreateCommand();
+        command.CommandText = LockForDeletion;
+        Add(command, "id", tenantId);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        if (!await reader.ReadAsync(cancellationToken))
+        {
+            return null;
+        }
+
+        return new TenantDeletionState(TenantValues.ParseStatus(reader.GetString(0)), reader.IsDBNull(1) ? null : reader.GetString(1));
+    }
+
+    public async Task BeginDeletionAsync(CommandContext context, Guid tenantId, CancellationToken cancellationToken)
+    {
+        RequireDeployment(context);
+
+        await using var command = context.CreateCommand();
+        command.CommandText = BeginDeletion;
+        Add(command, "id", tenantId);
+        if (await command.ExecuteNonQueryAsync(cancellationToken) != 1)
+        {
+            // The caller holds the row lock and saw it creating or active: nothing else can have changed it.
+            throw new InvalidOperationException("No creating or active Tenant was set deleting.");
+        }
+    }
+
+    public async Task<TenantStatus?> LockStatusAsync(CommandContext context, Guid tenantId, CancellationToken cancellationToken)
+    {
+        RequireOwnScope(context, tenantId);
+
+        await using var command = context.CreateCommand();
+        command.CommandText = ShareStatus;
+        Add(command, "id", tenantId);
+        return await command.ExecuteScalarAsync(cancellationToken) is string status ? TenantValues.ParseStatus(status) : null;
+    }
+
+    public async Task<TenantStatus?> LockForPurgeAsync(CommandContext context, Guid tenantId, CancellationToken cancellationToken)
+    {
+        RequireOwnScope(context, tenantId);
+
+        await using var command = context.CreateCommand();
+        command.CommandText = PurgeLock;
+        Add(command, "id", tenantId);
+        return await command.ExecuteScalarAsync(cancellationToken) is string status ? TenantValues.ParseStatus(status) : null;
+    }
+
+    public async Task<bool> MarkDeletedAsync(CommandContext context, Guid tenantId, CancellationToken cancellationToken)
+    {
+        RequireOwnScope(context, tenantId);
+
+        TenantStatus? status;
+        await using (var command = context.CreateCommand())
+        {
+            command.CommandText = LockStatus;
+            Add(command, "id", tenantId);
+            status = await command.ExecuteScalarAsync(cancellationToken) is string stored ? TenantValues.ParseStatus(stored) : null;
+        }
+
+        switch (status)
+        {
+            case TenantStatus.Deleted:
+                // Repeated: already done, and nothing is written twice.
+                return false;
+
+            case TenantStatus.Deleting:
+                break;
+
+            default:
+                throw new InvalidOperationException("Only a deleting Tenant is marked deleted.");
+        }
+
+        await using (var command = context.CreateCommand())
+        {
+            command.CommandText = MarkDeleted;
+            Add(command, "id", tenantId);
+            if (await command.ExecuteNonQueryAsync(cancellationToken) != 1)
+            {
+                throw new InvalidOperationException("No deleting Tenant was marked deleted.");
+            }
+        }
+
+        await _appender.AppendAsync(context, new AuditEvent(TenancyEvents.TenantDeleted.Code, Actor.System, AuditTargetKind.Tenant, tenantId), null, cancellationToken);
+        return true;
+    }
+
+    private static void RequireDeployment(CommandContext context)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        if (context.TenantId is not null)
+        {
+            throw new InvalidOperationException("A Tenant's deletion starts in a Deployment context.");
+        }
+    }
+
+    /// <summary>A deletion's stages and completion read and change the Tenant in its own scope only.</summary>
+    private static void RequireOwnScope(CommandContext context, Guid tenantId)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        if (tenantId == Guid.Empty || context.TenantId != tenantId)
+        {
+            throw new InvalidOperationException("A Tenant's status is read under lock and marked deleted in its own context.");
+        }
     }
 
     /// <summary>A Tenant's label is read under lock and written in that Tenant's own context only.</summary>

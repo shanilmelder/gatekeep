@@ -139,6 +139,48 @@ public sealed class TenantCreationOperationTests(PostgresFixture postgres)
         Assert.Equal(0L, await database.ScalarAsync<long>($"SELECT count(*) FROM audit_event WHERE type_code = '{Activated}'"));
     }
 
+    /// <summary>Story 1.29: a creation stage for a Tenant whose deletion started creates no key, and nothing activates it.</summary>
+    [Fact]
+    public async Task Creation_stage_for_a_deleting_Tenant_creates_no_key()
+    {
+        var (database, tenant, operation, _) = await CreatedAsync();
+        await database.SuperuserAsync($"SET session_replication_role = replica; UPDATE tenant SET status = 'deleting' WHERE id = '{tenant}'; SET session_replication_role = DEFAULT");
+        var custody = new RecordingCustody();
+
+        await DrainAsync(database, custody);
+
+        Assert.Empty(custody.Created);
+        // Both stages, the Signing Keys too (after Story 2.3): no row and no key.
+        Assert.Equal(Both("failed/tenant_not_creating"), await StepAsync(database, operation));
+        Assert.Equal(0L, await database.ScalarAsync<long>($"SELECT count(*) FROM signing_key WHERE tenant_id = '{tenant}'"));
+        Assert.Equal(0L, await database.ScalarAsync<long>($"SELECT count(*) FROM protection_key_wrap WHERE tenant_id = '{tenant}'"));
+        Assert.Equal("failed", await database.ScalarAsync<string>($"SELECT status FROM operation WHERE id = '{operation}'"));
+        Assert.Equal("deleting", await StatusAsync(database, tenant));
+        Assert.Equal(0L, await database.ScalarAsync<long>($"SELECT count(*) FROM tenant_settings WHERE tenant_id = '{tenant}'"));
+    }
+
+    /// <summary>Story 1.29: activation locks the Tenant and does nothing, settings included, to one that isn't creating.</summary>
+    [Theory]
+    [InlineData("deleting")]
+    [InlineData("deleted")]
+    public async Task Activation_of_a_Tenant_that_isnt_creating_writes_nothing(string status)
+    {
+        var (database, tenant, _, _) = await CreatedAsync();
+        await database.SuperuserAsync($"SET session_replication_role = replica; UPDATE tenant SET status = 'deleting' WHERE id = '{tenant}'; SET session_replication_role = DEFAULT");
+        if (status == "deleted")
+        {
+            await database.SuperuserAsync($"SET session_replication_role = replica; UPDATE tenant SET status = 'deleted' WHERE id = '{tenant}'; SET session_replication_role = DEFAULT");
+        }
+
+        var activated = await database.InScopeAsync(TableRegistry.Worker, tenant, context =>
+            Gatekeep.Modules.Tenancy.Contracts.TenancyContract.CreateTenants(AuditContract.CreateAppender()).ActivateAsync(context, tenant, Cancellation));
+
+        Assert.False(activated);
+        Assert.Equal(status, await StatusAsync(database, tenant));
+        Assert.Equal(0L, await database.ScalarAsync<long>($"SELECT count(*) FROM tenant_settings WHERE tenant_id = '{tenant}'"));
+        Assert.Equal(0L, await database.ScalarAsync<long>($"SELECT count(*) FROM audit_event WHERE type_code = '{Activated}'"));
+    }
+
     [Fact]
     public async Task Retry_reruns_only_the_failed_step_and_then_activates()
     {
@@ -591,11 +633,38 @@ internal sealed class RecordingCustody : IKeyCustody
     public Task<KeyCiphertext> RewrapAsync(KeyName key, Guid? tenantId, KeyCiphertext ciphertext, CancellationToken cancellationToken) =>
         throw new NotSupportedException();
 
-    public Task DeleteAsync(KeyName key, CancellationToken cancellationToken) => throw new NotSupportedException();
+    /// <summary>Every destroy, in order: a key that doesn't exist counts as destroyed, as the adapter does (Story 1.29).</summary>
+    public IReadOnlyList<string> Deleted => [.. _deleted];
+
+    private readonly ConcurrentQueue<string> _deleted = new();
+
+    public Task DeleteAsync(KeyName key, CancellationToken cancellationToken)
+    {
+        if (Fail)
+        {
+            throw new KeyCustodyException(key.Value, KeyOperation.Delete, KeyCustodyFailure.Unavailable);
+        }
+
+        _deleted.Enqueue(key.Value);
+        Versions.TryRemove(key.Value, out _);
+        return Task.CompletedTask;
+    }
 
     public Task<IReadOnlyList<KeyPublicVersion>> GetPublicKeysAsync(KeyName key, CancellationToken cancellationToken) =>
         throw new NotSupportedException();
 
-    public Task<IReadOnlyList<ListedKey>> ListRowKeysAsync(CancellationToken cancellationToken) =>
-        throw new NotSupportedException();
+    /// <summary>The row keys created and not yet destroyed, as the adapter lists them (Story 2.4).</summary>
+    public Task<IReadOnlyList<ListedKey>> ListRowKeysAsync(CancellationToken cancellationToken)
+    {
+        if (Fail)
+        {
+            throw new KeyCustodyException("list", KeyOperation.List, KeyCustodyFailure.Unavailable);
+        }
+
+        IReadOnlyList<ListedKey> listed = [.. Versions.Keys
+            .Select(name => KeyName.TryParseRowKey(name, out var key) ? key : null)
+            .OfType<KeyName>()
+            .Select(key => new ListedKey(key, DateTimeOffset.UnixEpoch))];
+        return Task.FromResult(listed);
+    }
 }

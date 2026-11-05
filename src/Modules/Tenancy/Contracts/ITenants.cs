@@ -13,11 +13,17 @@ public enum TenantLabel
     Prod,
 }
 
-/// <summary>A Tenant's lifecycle: <c>creating</c> until its creation Operation succeeds, then <c>active</c>. Story 1.29 adds <c>deleted</c>.</summary>
+/// <summary>
+/// A Tenant's lifecycle: <c>creating</c> until its creation Operation succeeds, then <c>active</c>;
+/// from Story 1.29, <c>deleting</c> from its deletion's start, and <c>deleted</c> once its deletion
+/// Operation succeeds. Nothing leaves <c>deleting</c> but to <c>deleted</c>, and nothing leaves <c>deleted</c>.
+/// </summary>
 public enum TenantStatus
 {
     Creating,
     Active,
+    Deleting,
+    Deleted,
 }
 
 /// <summary>The stored spellings of <see cref="TenantLabel"/> and <see cref="TenantStatus"/>, and the label's one parser.</summary>
@@ -35,6 +41,8 @@ public static class TenantValues
     {
         TenantStatus.Creating => "creating",
         TenantStatus.Active => "active",
+        TenantStatus.Deleting => "deleting",
+        TenantStatus.Deleted => "deleted",
         _ => throw new ArgumentOutOfRangeException(nameof(status)),
     };
 
@@ -59,6 +67,8 @@ public static class TenantValues
     {
         "creating" => TenantStatus.Creating,
         "active" => TenantStatus.Active,
+        "deleting" => TenantStatus.Deleting,
+        "deleted" => TenantStatus.Deleted,
         _ => throw new InvalidOperationException("Unknown Tenant status."),
     };
 }
@@ -125,6 +135,12 @@ public static class TenantLabelChange
 /// <summary>A Tenant's label and status, as read under its row lock.</summary>
 public sealed record TenantLabelState(TenantLabel Label, TenantStatus Status);
 
+/// <summary>
+/// A Tenant's status and stored <c>subdomain</c> host, as read under its row lock by a deletion's
+/// start (Story 1.29). The host is null for a Tenant with none, which no typed value then matches.
+/// </summary>
+public sealed record TenantDeletionState(TenantStatus Status, string? Host);
+
 /// <summary>A new Tenant, validated, with its ID and its address already derived.</summary>
 public sealed record TenantDraft(Guid Id, string Name, TenantLabel Label, TenantAddress Address);
 
@@ -160,14 +176,16 @@ public interface ITenants
 
     /// <summary>
     /// Up to <paramref name="limit"/> Tenants with their hosts, ordered by creation time then ID, after
-    /// the one <paramref name="after"/> names: the page cursor stands for both. An unknown one is an empty page.
+    /// the one <paramref name="after"/> names: the page cursor stands for both. An unknown one is an
+    /// empty page. A <c>deleted</c> Tenant is never listed, though a cursor naming one still works.
     /// </summary>
     Task<IReadOnlyList<TenantRecord>> ListAsync(CommandContext context, Guid? after, int limit, CancellationToken cancellationToken);
 
     /// <summary>
-    /// Completes a creation, in that Tenant's own context: inserts its <c>tenant_settings</c> row if
-    /// it has none, makes it <c>active</c> if it is <c>creating</c>, and only then appends
-    /// <see cref="TenancyEvents.TenantActivated"/> on its chain. Repeating it changes nothing.
+    /// Completes a creation, in that Tenant's own context: locks its row and, only while it is
+    /// <c>creating</c>, inserts its <c>tenant_settings</c> row if it has none, makes it <c>active</c>,
+    /// and appends <see cref="TenancyEvents.TenantActivated"/> on its chain. Repeating it, or calling it
+    /// for a Tenant that is being deleted (Story 1.29), changes nothing.
     /// </summary>
     /// <returns>Whether this call activated the Tenant.</returns>
     /// <exception cref="InvalidOperationException">The context isn't <paramref name="tenantId"/>'s.</exception>
@@ -202,6 +220,51 @@ public interface ITenants
     /// <exception cref="InvalidOperationException">The context isn't <paramref name="tenantId"/>'s, or no active Tenant was changed.</exception>
     [StateChanging]
     Task SetLabelAsync(CommandContext context, Guid tenantId, TenantLabel label, Actor actor, bool removedProd, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Locks the Tenant's row (<c>FOR NO KEY UPDATE</c>) in a Deployment context, and reads its
+    /// status and <c>subdomain</c> host, or null when there is no such Tenant (Story 1.29). The lock
+    /// is held until the caller's transaction ends, so a deletion's decision holds for its writes.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The context has a Tenant.</exception>
+    Task<TenantDeletionState?> LockForDeletionAsync(CommandContext context, Guid tenantId, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Sets a <c>creating</c> or <c>active</c> Tenant <c>deleting</c>, in a Deployment context: its
+    /// host stops resolving at once. The caller holds the lock from <see cref="LockForDeletionAsync"/>.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The context has a Tenant, or no Tenant was changed.</exception>
+    [StateChanging]
+    Task BeginDeletionAsync(CommandContext context, Guid tenantId, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// The Tenant's status under a <c>FOR SHARE</c> lock, in its own context, or null when there is no
+    /// such Tenant (Story 1.29). It conflicts with a deletion's start, so an Operation stage's
+    /// decision on it holds for the stage's transaction.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The context isn't <paramref name="tenantId"/>'s.</exception>
+    Task<TenantStatus?> LockStatusAsync(CommandContext context, Guid tenantId, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// The Tenant's status under a <c>FOR UPDATE</c> lock, in its own context, or null when there is no
+    /// such Tenant: the purge stage's lock (Story 1.29). It conflicts with the <c>FOR KEY SHARE</c> every
+    /// foreign-key insert referencing the Tenant holds until it commits, so a writer that passed the
+    /// row guard before the deletion started commits first, and its row is purged with the rest.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The context isn't <paramref name="tenantId"/>'s.</exception>
+    Task<TenantStatus?> LockForPurgeAsync(CommandContext context, Guid tenantId, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Completes a deletion, in the Tenant's own context: locks its row and, while it is
+    /// <c>deleting</c>, makes it <c>deleted</c> and appends <see cref="TenancyEvents.TenantDeleted"/>
+    /// on its chain. A <c>deleted</c> Tenant is left alone, with nothing written.
+    /// </summary>
+    /// <returns>Whether this call marked the Tenant deleted.</returns>
+    /// <exception cref="InvalidOperationException">
+    /// The context isn't <paramref name="tenantId"/>'s, or the Tenant is neither deleting nor deleted.
+    /// </exception>
+    [StateChanging]
+    Task<bool> MarkDeletedAsync(CommandContext context, Guid tenantId, CancellationToken cancellationToken);
 }
 
 /// <summary>

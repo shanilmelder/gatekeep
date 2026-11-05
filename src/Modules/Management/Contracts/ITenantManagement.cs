@@ -81,9 +81,13 @@ public sealed record ManagedOperation(
 /// <summary>A creating Tenant's creation Operation: <c>running</c> or <c>failed</c>.</summary>
 public sealed record ManagedTenantCreation(Guid OperationId, ManagedOperationStatus Status);
 
+/// <summary>A deleting Tenant's deletion Operation (Story 1.29): <c>running</c> or <c>failed</c>.</summary>
+public sealed record ManagedTenantDeletion(Guid OperationId, ManagedOperationStatus Status);
+
 /// <summary>
 /// A Tenant as the Tenants list shows it: its stored host, never a subdomain split from it (AD-6),
-/// its label and status in their stored spellings, and its creation while it is <c>creating</c>.
+/// its label and status in their stored spellings, its creation while it is <c>creating</c>, and its
+/// deletion while it is <c>deleting</c> (Story 1.29). A <c>deleted</c> Tenant is never listed.
 /// </summary>
 public sealed record ManagedTenant(
     Guid Id,
@@ -92,7 +96,35 @@ public sealed record ManagedTenant(
     string Label,
     string Status,
     DateTimeOffset CreatedAt,
-    ManagedTenantCreation? Creation);
+    ManagedTenantCreation? Creation,
+    ManagedTenantDeletion? Deletion = null);
+
+public enum TenantDeletionStatus
+{
+    /// <summary>The Tenant is deleting, its roles are gone, its Operation started and its event written. The caller commits.</summary>
+    Started,
+
+    /// <summary>The handler's own re-check refused it (AD-5): the request checks should have first.</summary>
+    Forbidden,
+
+    /// <summary>No Tenant has this ID.</summary>
+    NotFound,
+
+    /// <summary>The Tenant is already being deleted, or deleted.</summary>
+    AlreadyDeleted,
+
+    /// <summary>The typed value isn't the Tenant's stored host, exactly. Nothing was written.</summary>
+    ConfirmationMismatch,
+
+    /// <summary>The Tenant's creation Operation is still running. Nothing was written.</summary>
+    Busy,
+}
+
+/// <summary>A deletion start's outcome, and its Operation once started.</summary>
+public sealed record TenantDeletionResult(TenantDeletionStatus Status, ManagedOperation? Operation = null);
+
+/// <summary>A deletion read: whether the module's own capability check allowed it (AD-5), and the newest deletion Operation, if any.</summary>
+public sealed record TenantDeletionRead(bool Allowed, ManagedOperation? Operation);
 
 public enum TenantCreationStatus
 {
@@ -129,8 +161,11 @@ public enum OperationRetryStatus
     /// <summary>No Operation has this ID, or it isn't a Tenant creation.</summary>
     NotFound,
 
-    /// <summary>The creation isn't <c>failed</c>, so there is nothing to retry.</summary>
+    /// <summary>The Operation isn't <c>failed</c>, so there is nothing to retry.</summary>
     NotFailed,
+
+    /// <summary>A creation whose Tenant is being deleted, or deleted (Story 1.29): it never runs again.</summary>
+    TenantDeleted,
 }
 
 public sealed record OperationRetryResult(OperationRetryStatus Status, ManagedOperation? Operation = null);
@@ -218,6 +253,8 @@ public interface ITenantManagement
     /// <summary>
     /// Retries a <c>failed</c> <c>tenancy.tenant.create</c> Operation's failed steps, and appends
     /// <c>operations.operation.retried</c>. Any other Operation is <see cref="OperationRetryStatus.NotFound"/>.
+    /// The Tenant is locked first: one being deleted, or deleted, is
+    /// <see cref="OperationRetryStatus.TenantDeleted"/>, and nothing runs (Story 1.29).
     /// </summary>
     [StateChanging]
     Task<OperationRetryResult> RetryCreationAsync(
@@ -262,4 +299,36 @@ public interface ITenantManagement
         string? requested,
         Func<CancellationToken, Task<bool>> requireFreshAssertion,
         CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Starts deleting <paramref name="tenantId"/> (Story 1.29, FR-7), in a Deployment context: decides
+    /// <c>deployment.tenants.delete</c> again (AD-5), locks the Tenant, refuses one already deleting
+    /// or deleted, a <paramref name="confirmation"/> that isn't ordinally its stored host, and one whose
+    /// creation is still running; then sets it <c>deleting</c>, removes every Tenant Role in it,
+    /// starts <c>tenancy.tenant.delete</c> and appends <see cref="TenancyEvents.DeletionStarted"/> on
+    /// the Deployment chain. A refusal writes nothing. The caller commits only on
+    /// <see cref="TenantDeletionStatus.Started"/>.
+    /// </summary>
+    [StateChanging]
+    Task<TenantDeletionResult> DeleteAsync(
+        CommandContext context,
+        AdminPrincipal principal,
+        Guid tenantId,
+        string? confirmation,
+        CancellationToken cancellationToken);
+
+    /// <summary>
+    /// The Tenant's newest <c>tenancy.tenant.delete</c> Operation, any status, with every step, once
+    /// <c>deployment.tenants.read</c> is decided again here (Story 1.29).
+    /// </summary>
+    Task<TenantDeletionRead> GetDeletionAsync(CommandContext context, AdminPrincipal principal, Guid tenantId, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Retries a deleting Tenant's <c>failed</c> deletion's failed steps, and appends
+    /// <c>operations.operation.retried</c> with the Tenant as target (Story 1.29). No such Tenant is
+    /// <see cref="OperationRetryStatus.NotFound"/>; one that isn't deleting, or whose deletion isn't
+    /// failed, is <see cref="OperationRetryStatus.NotFailed"/>.
+    /// </summary>
+    [StateChanging]
+    Task<OperationRetryResult> RetryDeletionAsync(CommandContext context, AdminPrincipal principal, Guid tenantId, CancellationToken cancellationToken);
 }

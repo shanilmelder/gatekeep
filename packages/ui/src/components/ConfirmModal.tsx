@@ -12,8 +12,11 @@ export interface ConfirmModalProps {
   open: boolean;
   /** Esc or Cancel: close without confirming. */
   onCancel: () => void;
-  /** Confirm, once allowed. The caller acts, then closes the modal. */
-  onConfirm: () => void;
+  /**
+   * Confirm, once allowed. The caller acts, then closes the modal. With `confirmText`, it is handed
+   * what the Admin typed, so the caller sends that and never its own copy of the expected value.
+   */
+  onConfirm: (typed: string) => void;
   title: ReactNode;
   /** The impact, in the caller's words: what the action changes and for whom. */
   children: ReactNode;
@@ -91,7 +94,7 @@ export function ConfirmModal({
   }, [open, confirmText]);
 
   const confirm = () => {
-    if (allowed) onConfirm();
+    if (allowed) onConfirm(typed);
   };
   // While the action runs, neither Cancel nor Esc can close the modal.
   const cancel = () => {

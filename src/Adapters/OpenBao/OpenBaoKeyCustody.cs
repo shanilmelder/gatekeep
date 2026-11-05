@@ -254,6 +254,13 @@ public sealed class OpenBaoKeyCustody : IKeyCustody, IDisposable
     {
         ArgumentNullException.ThrowIfNull(key);
 
+        // A key already gone is destroyed: a repeat, or a rerun part way, succeeds (Story 1.29). The
+        // read is under the same policy paths, so a role that may not delete is still refused here.
+        if (!await ExistsAsync(key, KeyOperation.Delete, cancellationToken))
+        {
+            return;
+        }
+
         // Transit refuses to delete a key until its config allows it.
         await SendAsync(
             key,
@@ -417,6 +424,14 @@ public sealed class OpenBaoKeyCustody : IKeyCustody, IDisposable
         using var second = await SendOnceAsync(key, operation, method, $"v1/{Mount}/{path}", body, token, cancellationToken);
         return await ReadAsync(key, operation, second, notFoundIsEmpty, cancellationToken);
     }
+
+    /// <summary>
+    /// Whether <c>transit/keys/{key}</c> exists: a 404 is false, a 200 true, and anything else fails as
+    /// <see cref="SendAsync"/> does, a 403 as <see cref="KeyCustodyFailure.Refused"/>, with one login
+    /// and one retry for a reused token.
+    /// </summary>
+    private async Task<bool> ExistsAsync(KeyName key, KeyOperation operation, CancellationToken cancellationToken) =>
+        await SendCoreAsync(key.Value, operation, HttpMethod.Get, $"keys/{key.Value}", null, notFoundIsEmpty: true, cancellationToken) is not null;
 
     private async Task<HttpResponseMessage> SendOnceAsync(
         string key,

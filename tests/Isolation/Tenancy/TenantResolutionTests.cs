@@ -29,6 +29,8 @@ public sealed class TenantResolutionTests(PostgresFixture postgres) : IDisposabl
 {
     private const string Active = "acme-dev.gatekeep.test";
     private const string Creating = "beta.gatekeep.test";
+    private const string Deleting = "gamma.gatekeep.test";
+    private const string Deleted = "delta.gatekeep.test";
 
     private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(60);
 
@@ -40,6 +42,10 @@ public sealed class TenantResolutionTests(PostgresFixture postgres) : IDisposabl
 
     private static readonly Guid ActiveTenant = Guid.Parse("01900000-0000-7000-8000-0000000127a1");
     private static readonly Guid CreatingTenant = Guid.Parse("01900000-0000-7000-8000-0000000127b2");
+
+    // Story 1.29: a Tenant being deleted, and one deleted, keep their rows and hosts for good.
+    private static readonly Guid DeletingTenant = Guid.Parse("01900000-0000-7000-8000-0000000129c3");
+    private static readonly Guid DeletedTenant = Guid.Parse("01900000-0000-7000-8000-0000000129d4");
 
     private readonly string _directory = Directory.CreateTempSubdirectory("gatekeep-tenant-resolution-").FullName;
 
@@ -71,6 +77,9 @@ public sealed class TenantResolutionTests(PostgresFixture postgres) : IDisposabl
             ("nobody.gatekeep.test", HttpMethod.Post, "/connect/token"),
             (Creating, HttpMethod.Get, "/.well-known/openid-configuration"),
             (Creating, HttpMethod.Delete, "/x"),
+            (Deleting, HttpMethod.Get, "/.well-known/openid-configuration"),
+            (Deleted, HttpMethod.Get, "/.well-known/jwks.json"),
+            (Deleted, HttpMethod.Post, "/connect/token"),
             (Active, HttpMethod.Get, "/"),
             (Active, HttpMethod.Put, "/random/path?with=query"),
             ("ACME-DEV.gatekeep.test:8443", HttpMethod.Get, "/"),
@@ -143,6 +152,8 @@ public sealed class TenantResolutionTests(PostgresFixture postgres) : IDisposabl
             ("nobody.gatekeep.test", HttpMethod.Get),
             ("nobody.gatekeep.test", HttpMethod.Post),
             (Creating, HttpMethod.Get),
+            (Deleting, HttpMethod.Get),
+            (Deleted, HttpMethod.Get),
             (Active + ".", HttpMethod.Get),
             ("dev.gatekeep.test", HttpMethod.Get),
             ("x." + Active, HttpMethod.Get),
@@ -227,11 +238,47 @@ public sealed class TenantResolutionTests(PostgresFixture postgres) : IDisposabl
 
         await PostgresFixture.ExecuteAsync(
             postgres.SuperuserConnection(database),
-            $"INSERT INTO tenant_settings (tenant_id) VALUES ('{CreatingTenant}'); UPDATE tenant SET status = 'active' WHERE id = '{CreatingTenant}'");
+            $"INSERT INTO tenant_settings (tenant_id) VALUES ('{CreatingTenant}'); SET session_replication_role = replica; UPDATE tenant SET status = 'active' WHERE id = '{CreatingTenant}'; SET session_replication_role = DEFAULT");
 
         // No cache: the next request sees it.
         using var after = await SendAsync(probe.Http, probe.Port, Creating, HttpMethod.Get, "/probe");
         Assert.Equal(HttpStatusCode.OK, after.StatusCode);
+        Assert.Equal(1, probe.Calls);
+    }
+
+    /// <summary>Story 1.29: an active Tenant whose deletion starts stops resolving at once, and stays gone once deleted.</summary>
+    [Fact]
+    public async Task Tenant_stops_resolving_once_its_deletion_starts_and_stays_gone()
+    {
+        var database = await SeededAsync();
+        await using var probe = await ProbeServer.StartAsync(postgres.RoleConnection(TableRegistry.Hosted, database));
+
+        using (var before = await SendAsync(probe.Http, probe.Port, Active, HttpMethod.Get, "/probe"))
+        {
+            Assert.Equal(HttpStatusCode.OK, before.StatusCode);
+        }
+
+        var snapshots = new List<string>();
+        await PostgresFixture.ExecuteAsync(postgres.SuperuserConnection(database), $"SET session_replication_role = replica; UPDATE tenant SET status = 'deleting' WHERE id = '{ActiveTenant}'; SET session_replication_role = DEFAULT");
+        using (var deleting = await SendAsync(probe.Http, probe.Port, Active, HttpMethod.Get, "/probe"))
+        {
+            snapshots.Add(await AdminHost.SnapshotAsync(deleting));
+        }
+
+        await PostgresFixture.ExecuteAsync(
+            postgres.SuperuserConnection(database),
+            $"SET session_replication_role = replica; DELETE FROM tenant_settings WHERE tenant_id = '{ActiveTenant}'; UPDATE tenant SET status = 'deleted' WHERE id = '{ActiveTenant}'; SET session_replication_role = DEFAULT");
+        using (var deleted = await SendAsync(probe.Http, probe.Port, Active, HttpMethod.Get, "/probe"))
+        {
+            snapshots.Add(await AdminHost.SnapshotAsync(deleted));
+        }
+
+        using (var unknown = await SendAsync(probe.Http, probe.Port, "nobody.gatekeep.test", HttpMethod.Get, "/probe"))
+        {
+            snapshots.Add(await AdminHost.SnapshotAsync(unknown));
+        }
+
+        Assert.Equal(FixedNotFound, Assert.Single(snapshots.Distinct()));
         Assert.Equal(1, probe.Calls);
     }
 
@@ -247,8 +294,12 @@ public sealed class TenantResolutionTests(PostgresFixture postgres) : IDisposabl
             SET session_replication_role = replica;
             INSERT INTO tenant (id, name, label, status, issuer, rp_id, email_link_base) VALUES
               ('{ActiveTenant}', 'Acme Dev', 'dev', 'active', 'https://{Active}/', '{Active}', 'https://{Active}/'),
-              ('{CreatingTenant}', 'Beta', 'prod', 'creating', 'https://{Creating}/', '{Creating}', 'https://{Creating}/');
-            INSERT INTO tenant_host (host, tenant_id, kind) VALUES ('{Active}', '{ActiveTenant}', 'subdomain'), ('{Creating}', '{CreatingTenant}', 'subdomain');
+              ('{CreatingTenant}', 'Beta', 'prod', 'creating', 'https://{Creating}/', '{Creating}', 'https://{Creating}/'),
+              ('{DeletingTenant}', 'Gamma', 'dev', 'deleting', 'https://{Deleting}/', '{Deleting}', 'https://{Deleting}/'),
+              ('{DeletedTenant}', 'Delta', 'prod', 'deleted', 'https://{Deleted}/', '{Deleted}', 'https://{Deleted}/');
+            INSERT INTO tenant_host (host, tenant_id, kind) VALUES
+              ('{Active}', '{ActiveTenant}', 'subdomain'), ('{Creating}', '{CreatingTenant}', 'subdomain'),
+              ('{Deleting}', '{DeletingTenant}', 'subdomain'), ('{Deleted}', '{DeletedTenant}', 'subdomain');
             SET session_replication_role = DEFAULT;
             """);
         return database;
@@ -256,7 +307,7 @@ public sealed class TenantResolutionTests(PostgresFixture postgres) : IDisposabl
 
     private static HttpClient Client() => new(new SocketsHttpHandler { UseCookies = false, AllowAutoRedirect = false, UseProxy = false });
 
-    private static async Task<HttpResponseMessage> SendAsync(
+    internal static async Task<HttpResponseMessage> SendAsync(
         HttpClient http,
         int port,
         string host,
@@ -306,7 +357,7 @@ public sealed class TenantResolutionTests(PostgresFixture postgres) : IDisposabl
     /// The real resolution middleware, first, then routing, a test-only probe endpoint that counts
     /// its calls and echoes the <see cref="ResolvedTenant"/> it was given, and Host.Hosted's fallback.
     /// </summary>
-    private sealed class ProbeServer : IAsyncDisposable
+    internal sealed class ProbeServer : IAsyncDisposable
     {
         private readonly WebApplication _app;
         private int _calls;

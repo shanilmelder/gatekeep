@@ -22,7 +22,7 @@ internal static class AuditRetentionJobs
     /// <summary>The purge stage's code once its job is queued. The chain goes when the job runs.</summary>
     public static readonly OperationCode PurgeQueued = new("purge_queued");
 
-    private const string ListTenants = "SELECT id FROM tenant ORDER BY id";
+    private const string ListTenants = "SELECT id, status = 'deleted' FROM tenant ORDER BY id";
 
     private const string ActiveJob =
         """
@@ -40,21 +40,26 @@ internal static class AuditRetentionJobs
     // Built on use: the production registry names these handlers, so it can't be read while it's being built.
     private static JobEnqueuer Enqueuer => new(ProductionJobs.Registry, custody: null);
 
-    /// <summary>Lists the Tenants and enqueues one apply job for each that has none waiting.</summary>
+    /// <summary>
+    /// Lists the Tenants and enqueues one apply job for each that has none waiting. For a deleted
+    /// Tenant whose chain still holds an event it also schedules the chain's purge again when no
+    /// purge job is pending or running (Story 1.29): a purge job that went dead, or was never
+    /// enqueued, is replaced within a day, so a deleted Tenant's chain is never kept for good.
+    /// </summary>
     public static async Task SweepAsync(JobRun run, CancellationToken cancellationToken)
     {
-        var tenants = new List<Guid>();
+        var tenants = new List<(Guid Id, bool Deleted)>();
         await using (var command = run.Context.CreateCommand())
         {
             command.CommandText = ListTenants;
             await using var reader = await command.ExecuteReaderAsync(cancellationToken);
             while (await reader.ReadAsync(cancellationToken))
             {
-                tenants.Add(reader.GetGuid(0));
+                tenants.Add((reader.GetGuid(0), reader.GetBoolean(1)));
             }
         }
 
-        foreach (var tenantId in tenants)
+        foreach (var (tenantId, deleted) in tenants)
         {
             await using var scope = await TenantScope.BeginAsync(run.Services.Source, tenantId, cancellationToken);
             var context = scope.CreateCommandContext();
@@ -62,6 +67,11 @@ internal static class AuditRetentionJobs
             if (!await HasActiveJobAsync(context, ProductionJobs.ApplyRetention, tenantId, cancellationToken))
             {
                 await Enqueuer.EnqueueAsync(context, ProductionJobs.ApplyRetention, payload: null, runAfter: null, cancellationToken);
+            }
+
+            if (deleted)
+            {
+                await SchedulePurgeAsync(context, tenantId, cancellationToken, skipWhenEmpty: true);
             }
 
             await scope.CommitAsync(cancellationToken);
@@ -91,13 +101,33 @@ internal static class AuditRetentionJobs
         var tenantId = run.TenantId
             ?? throw new InvalidOperationException("The purge stage runs for one Tenant.");
 
-        if (await HasActiveJobAsync(run.Context, ProductionJobs.PurgeChain, tenantId, cancellationToken))
+        await SchedulePurgeAsync(run.Context, tenantId, cancellationToken);
+        return OperationStepResult.Success(PurgeQueued);
+    }
+
+    /// <summary>
+    /// Enqueues the Tenant's <c>audit.chain.purge</c> job, in its own scope as <c>gk_worker</c>,
+    /// unless one is pending or running: due once its newest non-checkpoint event is past
+    /// <see cref="RetentionPeriods.LogDays"/>, whatever the Tenant's label. The purge stage, and from
+    /// Story 1.29 a Tenant deletion's completion, once <c>tenancy.tenant.deleted</c> is written.
+    /// </summary>
+    /// <param name="skipWhenEmpty">The sweep's case: a chain with no event left, already purged, gets no job.</param>
+    /// <returns>Whether this call enqueued the job.</returns>
+    public static async Task<bool> SchedulePurgeAsync(CommandContext context, Guid tenantId, CancellationToken cancellationToken, bool skipWhenEmpty = false)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        if (context.TenantId != tenantId)
         {
-            return OperationStepResult.Success(PurgeQueued);
+            throw new InvalidOperationException("A Tenant's chain purge is scheduled in its own scope.");
+        }
+
+        if (await HasActiveJobAsync(context, ProductionJobs.PurgeChain, tenantId, cancellationToken))
+        {
+            return false;
         }
 
         DateTimeOffset? newest;
-        await using (var command = run.Context.CreateCommand())
+        await using (var command = context.CreateCommand())
         {
             command.CommandText = NewestEvent;
             Sql.Add(command, "tenant_id", tenantId);
@@ -106,11 +136,16 @@ internal static class AuditRetentionJobs
             newest = value is DateTime time ? new DateTimeOffset(DateTime.SpecifyKind(time, DateTimeKind.Utc)) : null;
         }
 
+        if (newest is null && skipWhenEmpty)
+        {
+            return false;
+        }
+
         var due = newest + TimeSpan.FromDays(RetentionPeriods.LogDays);
         var runAfter = due > DateTimeOffset.UtcNow ? due : null;
 
-        await Enqueuer.EnqueueAsync(run.Context, ProductionJobs.PurgeChain, payload: null, runAfter, cancellationToken);
-        return OperationStepResult.Success(PurgeQueued);
+        await Enqueuer.EnqueueAsync(context, ProductionJobs.PurgeChain, payload: null, runAfter, cancellationToken);
+        return true;
     }
 
     private static async Task<bool> HasActiveJobAsync(

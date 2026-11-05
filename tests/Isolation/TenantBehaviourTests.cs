@@ -52,7 +52,8 @@ public sealed class TenantBehaviourTests(PostgresFixture postgres)
         {
             // So the insert fails on the policy, not on the primary key.
             await PostgresFixture.ExecuteAsync(
-                postgres.SuperuserConnection(database), $"DELETE FROM tenant_settings WHERE tenant_id = '{TenantB}'");
+                postgres.SuperuserConnection(database),
+                $"SET session_replication_role = replica; DELETE FROM tenant_settings WHERE tenant_id = '{TenantB}'; SET session_replication_role = DEFAULT");
         }
 
         await using var dataSource = NpgsqlDataSource.Create(postgres.RoleConnection(TableRegistry.Admin, database));

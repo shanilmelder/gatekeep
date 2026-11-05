@@ -17,6 +17,8 @@ internal sealed class TenantManagement(IAuditAppender appender, TenantAddressing
 {
     private static readonly OperationType CreationType = OperationsContract.TenantCreationOperation;
 
+    private static readonly OperationType DeletionType = OperationsContract.TenantDeletionOperation;
+
     private readonly IAuditAppender _appender = appender;
     private readonly TenantAddressing _addressing = addressing;
     private readonly ITenants _tenants = TenancyContract.CreateTenants(appender);
@@ -110,15 +112,22 @@ internal sealed class TenantManagement(IAuditAppender appender, TenantAddressing
         var rows = await _tenants.ListAsync(context, after, limit + 1, cancellationToken);
         var page = rows.Take(limit).ToList();
 
-        // The page's creation Operations, in one query.
+        // The page's creation Operations, and its deletion Operations, in one query each.
         var creating = page.Where(t => t.Status == TenantStatus.Creating).Select(t => t.Id).ToList();
         var active = await _operations.FindActiveForTenantsAsync(context, CreationType, creating, cancellationToken);
+        var deleting = page.Where(t => t.Status == TenantStatus.Deleting).Select(t => t.Id).ToList();
+        var deletions = await _operations.FindActiveForTenantsAsync(context, DeletionType, deleting, cancellationToken);
 
         var tenants = new List<ManagedTenant>(page.Count);
         foreach (var row in page)
         {
             ManagedTenantCreation? creation = row.Status == TenantStatus.Creating && active.TryGetValue(row.Id, out var found)
                 ? new ManagedTenantCreation(found.OperationId, Status(found.Status))
+                : null;
+
+            // A succeeded deletion made its Tenant deleted in the same transaction, so it isn't listed.
+            ManagedTenantDeletion? deletion = row.Status == TenantStatus.Deleting && deletions.TryGetValue(row.Id, out var running)
+                ? new ManagedTenantDeletion(running.OperationId, Status(running.Status))
                 : null;
 
             tenants.Add(new ManagedTenant(
@@ -128,7 +137,8 @@ internal sealed class TenantManagement(IAuditAppender appender, TenantAddressing
                 TenantValues.Stored(row.Label),
                 TenantValues.Stored(row.Status),
                 row.CreatedAt,
-                creation));
+                creation,
+                deletion));
         }
 
         return new TenantPage(tenants, rows.Count > limit ? page[^1].Id : null);
@@ -174,6 +184,14 @@ internal sealed class TenantManagement(IAuditAppender appender, TenantAddressing
         if (existing is null || existing.Type != CreationType)
         {
             return new OperationRetryResult(OperationRetryStatus.NotFound);
+        }
+
+        // The Tenant first (Story 1.29), under the lock a deletion's start takes: one being deleted
+        // never gets its creation run again, and a start waits for this retry, then sees it running.
+        if (existing.TenantId is { } tenantId
+            && await _tenants.LockForDeletionAsync(context, tenantId, cancellationToken) is { Status: TenantStatus.Deleting or TenantStatus.Deleted })
+        {
+            return new OperationRetryResult(OperationRetryStatus.TenantDeleted);
         }
 
         if (existing.Status != OperationStatus.Failed)
@@ -306,6 +324,135 @@ internal sealed class TenantManagement(IAuditAppender appender, TenantAddressing
         }
 
         return new LabelChangeResult(LabelChangeStatus.Changed, TenantValues.Stored(label));
+    }
+
+    /// <summary>
+    /// Lock order (Story 1.29): the <c>tenant</c> row first, <c>FOR NO KEY UPDATE</c>, then its
+    /// <c>tenant_role</c> rows, then the new Operation's rows. A creation retry takes the Tenant first
+    /// too; the Worker's stages take it <c>FOR SHARE</c> after their own step, under an Operation
+    /// this start never touches.
+    /// </summary>
+    public async Task<TenantDeletionResult> DeleteAsync(
+        CommandContext context,
+        AdminPrincipal principal,
+        Guid tenantId,
+        string? confirmation,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        ArgumentNullException.ThrowIfNull(principal);
+
+        // 1. Authorization runs in the handler too (AD-5), whatever the request checks decided.
+        if (!AdminCapabilities.Allows(AdminCapabilities.DeploymentTenantsDelete, principal, null, null))
+        {
+            return new TenantDeletionResult(TenantDeletionStatus.Forbidden);
+        }
+
+        // 2. The row lock, held to the end of the transaction: two starts take turns, and the second
+        // finds the Tenant deleting.
+        var state = await _tenants.LockForDeletionAsync(context, tenantId, cancellationToken);
+        if (state is null)
+        {
+            return new TenantDeletionResult(TenantDeletionStatus.NotFound);
+        }
+
+        if (state.Status is TenantStatus.Deleting or TenantStatus.Deleted)
+        {
+            return new TenantDeletionResult(TenantDeletionStatus.AlreadyDeleted);
+        }
+
+        // 3. Exactly what the Tenants list shows: no trimming and no case folding, as the modal enforces.
+        if (state.Host is null || !string.Equals(confirmation, state.Host, StringComparison.Ordinal))
+        {
+            return new TenantDeletionResult(TenantDeletionStatus.ConfirmationMismatch);
+        }
+
+        // 4. A creation still running would create keys or settings after the purge looked.
+        if (state.Status == TenantStatus.Creating
+            && await _operations.FindActiveAsync(context, CreationType, tenantId, cancellationToken) is { Status: OperationStatus.Running })
+        {
+            return new TenantDeletionResult(TenantDeletionStatus.Busy);
+        }
+
+        // 5. Access ends here: the host stops resolving and every role in it goes, in this transaction.
+        await _tenants.BeginDeletionAsync(context, tenantId, cancellationToken);
+        await _roles.RemoveAllForTenantAsync(context, tenantId, cancellationToken);
+
+        // Nothing deleted it before, or it would be deleting: an active deletion here is a bug, and throws.
+        var operation = await _operations.StartAsync(
+            context,
+            DeletionType,
+            tenantId,
+            [
+                new OperationStepPlan(OperationsContract.TenantPurgeStage, tenantId),
+                new OperationStepPlan(OperationsContract.SecretClassKeysDestroyStage, tenantId),
+            ],
+            cancellationToken);
+
+        await _appender.AppendAsync(
+            context,
+            new AuditEvent(TenancyEvents.DeletionStarted.Code, Actor.Admin(principal.AdminId), AuditTargetKind.Tenant, tenantId),
+            detail: null,
+            cancellationToken);
+
+        return new TenantDeletionResult(TenantDeletionStatus.Started, Managed(operation));
+    }
+
+    public async Task<TenantDeletionRead> GetDeletionAsync(CommandContext context, AdminPrincipal principal, Guid tenantId, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        ArgumentNullException.ThrowIfNull(principal);
+
+        if (!AdminCapabilities.Allows(AdminCapabilities.DeploymentTenantsRead, principal, null, null))
+        {
+            return new TenantDeletionRead(Allowed: false, Operation: null);
+        }
+
+        var operation = await _operations.FindLatestAsync(context, DeletionType, tenantId, cancellationToken);
+        return new TenantDeletionRead(Allowed: true, operation is null ? null : Managed(operation));
+    }
+
+    public async Task<OperationRetryResult> RetryDeletionAsync(CommandContext context, AdminPrincipal principal, Guid tenantId, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        ArgumentNullException.ThrowIfNull(principal);
+
+        if (!AdminCapabilities.Allows(AdminCapabilities.DeploymentTenantsDelete, principal, null, null))
+        {
+            return new OperationRetryResult(OperationRetryStatus.Forbidden);
+        }
+
+        // The Tenant first, then the Operation's steps and row: the order the start takes them in.
+        var state = await _tenants.LockForDeletionAsync(context, tenantId, cancellationToken);
+        if (state is null)
+        {
+            return new OperationRetryResult(OperationRetryStatus.NotFound);
+        }
+
+        if (state.Status != TenantStatus.Deleting
+            || await _operations.FindActiveAsync(context, DeletionType, tenantId, cancellationToken) is not { Status: OperationStatus.Failed } failed)
+        {
+            return new OperationRetryResult(OperationRetryStatus.NotFailed);
+        }
+
+        OperationResource retried;
+        try
+        {
+            retried = await _operations.RetryAsync(context, failed.Id, cancellationToken);
+        }
+        catch (OperationNotFailedException)
+        {
+            // Retried by another request since the read: it is no longer failed.
+            return new OperationRetryResult(OperationRetryStatus.NotFailed);
+        }
+
+        await _appender.AppendAsync(
+            context,
+            new AuditEvent(OperationsEvents.OperationRetried.Code, Actor.Admin(principal.AdminId), AuditTargetKind.Tenant, tenantId),
+            detail: null,
+            cancellationToken);
+
+        return new OperationRetryResult(OperationRetryStatus.Retried, Managed(retried));
     }
 
     private static ManagedOperation Managed(OperationResource operation) => new(

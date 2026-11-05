@@ -317,7 +317,7 @@ export interface paths {
         };
         /**
          * The Deployment's Tenants, oldest first, 50 a page, and the Tenant zone their hosts sit under.
-         * @description Deployment Owner only. Each Tenant's ten_ public ID, name, host as stored at creation, label, status and creation time; while it is creating, its creation Operation's opr_ ID and whether it is running or failed. No subdomain is split out of a host. nextCursor is the last Tenant's ID when another page follows, else null; pass it back as cursor. A malformed cursor is 400 tenant_invalid.
+         * @description Deployment Owner only. Each Tenant's ten_ public ID, name, host as stored at creation, label, status and creation time; while it is creating, its creation Operation's opr_ ID and whether it is running or failed; while it is deleting, its deletion Operation's, alike. A deleted Tenant is never listed. No subdomain is split out of a host. nextCursor is the last Tenant's ID when another page follows, else null; pass it back as cursor, which works even when it names a Tenant deleted since. A malformed cursor is 400 tenant_invalid.
          */
         get: operations["ListTenants"];
         put?: never;
@@ -343,9 +343,53 @@ export interface paths {
         put?: never;
         /**
          * Retry a failed Tenant creation's failed steps.
-         * @description Deployment Owner only. Reopens only the failed steps of a failed tenancy.tenant.create Operation, which runs again, and writes operations.operation.retried. One that is running or succeeded is 409 operation_not_failed. An Operation of any other type, and an unknown or malformed operationId, is the unknown-path 404.
+         * @description Deployment Owner only. Reopens only the failed steps of a failed tenancy.tenant.create Operation, which runs again, and writes operations.operation.retried. One that is running or succeeded is 409 operation_not_failed, and one whose Tenant is being deleted, or deleted, is 409 tenant_deleted, and never runs again. An Operation of any other type, a deletion included, and an unknown or malformed operationId, is the unknown-path 404.
          */
         post: operations["RetryOperation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/deployment/tenants/{targetTenantId}/deletion": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * A Tenant's newest deletion Operation, with every step.
+         * @description Deployment Owner only. The newest tenancy.tenant.delete Operation of the Tenant, whatever its status, with every step's codes and IDs, never a step's row ID. A Tenant never deleted, and an unknown or malformed targetTenantId, is the unknown-path 404.
+         */
+        get: operations["GetTenantDeletion"];
+        put?: never;
+        /**
+         * Delete a Tenant: its host stops resolving, every Tenant Role in it ends, and its deletion Operation starts.
+         * @description Deployment Owner only, after a fresh assertion for deployment.tenants.delete with this targetTenantId as its target, begun on POST /api/v1/deployment/assertions, which the request checks use up before anything else, whatever follows, or 403 fresh_assertion_required: a refusal after it needs a new confirmation. The body's confirmation must be the Tenant's host exactly as the Tenants list shows it, with no trimming or case folding, or 400 confirmation_mismatch. In one transaction it sets the Tenant deleting, so its host gets the same 404 as an unknown host at once; removes every Tenant Role in it, so every Tenant route refuses its former members; starts its tenancy.tenant.delete Operation; and writes tenancy.tenant.deletion_started. The Operation purges every module's data of the Tenant but its Logs, destroys its keys and marks it deleted; its Logs are kept for at least 90 days after, whatever its label. The Tenant and its host are never reused. A body that isn't JSON, is over 4096 bytes, or misses confirmation or has the wrong type is 400 tenant_invalid. A Tenant already being deleted, or deleted, is 409 tenant_deleted, and one whose creation is still running 409 tenant_busy. An unknown or malformed targetTenantId is the unknown-path 404. Location names the deletion.
+         */
+        post: operations["DeleteTenant"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/deployment/tenants/{targetTenantId}/deletion/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Retry a Tenant's failed deletion's failed steps.
+         * @description Deployment Owner only, after a new fresh assertion for deployment.tenants.delete with this targetTenantId as its target, which the request checks use up, or 403 fresh_assertion_required. No body and no typed confirmation. Reopens only the failed steps of the Tenant's failed tenancy.tenant.delete Operation, which runs again, and writes operations.operation.retried. A deletion that is running or succeeded, and a Tenant that isn't being deleted, is 409 operation_not_failed. An unknown or malformed targetTenantId is the unknown-path 404.
+         */
+        post: operations["RetryTenantDeletion"];
         delete?: never;
         options?: never;
         head?: never;
@@ -514,7 +558,7 @@ export interface components {
         };
         ApiProblem: {
             /** @enum {string} */
-            code: "bootstrap_refused" | "credential_refused" | "signin_refused" | "rate_limited" | "access_denied" | "fresh_assertion_required" | "assertion_refused" | "credentials_minimum" | "credentials_maximum" | "recovery_code_refused" | "recovery_code_superseded" | "tenant_invalid" | "subdomain_refused" | "operation_not_failed" | "tenant_mismatch" | "tenant_not_active";
+            code: "bootstrap_refused" | "credential_refused" | "signin_refused" | "rate_limited" | "access_denied" | "fresh_assertion_required" | "assertion_refused" | "credentials_minimum" | "credentials_maximum" | "recovery_code_refused" | "recovery_code_superseded" | "tenant_invalid" | "subdomain_refused" | "operation_not_failed" | "tenant_mismatch" | "tenant_not_active" | "tenant_deleted" | "tenant_busy" | "confirmation_mismatch";
             traceId: string;
         };
         BootstrapClaimRequest: {
@@ -561,6 +605,9 @@ export interface components {
             /** Format: int32 */
             credentials: number;
             setupComplete: boolean;
+        };
+        DeleteTenantRequest: {
+            confirmation: string;
         };
         FreshAssertionBeginRequest: {
             action: string;
@@ -640,6 +687,11 @@ export interface components {
             /** @enum {string} */
             status: "running" | "failed";
         };
+        TenantDeletion: {
+            operationId: string;
+            /** @enum {string} */
+            status: "running" | "failed";
+        };
         TenantLabelResponse: {
             /** @enum {string} */
             label: "dev" | "staging" | "prod";
@@ -658,10 +710,11 @@ export interface components {
             /** @enum {string} */
             label: "dev" | "staging" | "prod";
             /** @enum {string} */
-            status: "creating" | "active";
+            status: "creating" | "active" | "deleting";
             /** Format: date-time */
             createdAt: string;
             creation: null | components["schemas"]["TenantCreation"];
+            deletion: null | components["schemas"]["TenantDeletion"];
         };
     };
     responses: never;
@@ -1691,6 +1744,187 @@ export interface operations {
                 content?: never;
             };
             /** @description access_denied, with the problem body, when the capability is refused. No body when an earlier check refuses first: a Session restricted to setup, or on a state-changing call a wrong Origin or CSRF token. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    GetTenantDeletion: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperationResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description access_denied, with the problem body, when the capability is refused. No body when an earlier check refuses first: a Session restricted to setup, or on a state-changing call a wrong Origin or CSRF token. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    DeleteTenant: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeleteTenantRequest"];
+            };
+        };
+        responses: {
+            /** @description Accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperationResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description fresh_assertion_required, with the problem body, when no fresh assertion for this action and target is bound to the Session; access_denied when the capability is refused. No body when an earlier check refuses first: a restricted Session, or a wrong Origin or CSRF token. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    RetryTenantDeletion: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperationResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description fresh_assertion_required, with the problem body, when no fresh assertion for this action and target is bound to the Session; access_denied when the capability is refused. No body when an earlier check refuses first: a restricted Session, or a wrong Origin or CSRF token. */
             403: {
                 headers: {
                     [name: string]: unknown;

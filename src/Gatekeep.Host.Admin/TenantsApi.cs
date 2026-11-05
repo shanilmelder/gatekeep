@@ -30,6 +30,26 @@ public sealed class TenantCreation
     public required string Status { get; init; }
 }
 
+/// <summary>A deleting Tenant's deletion Operation (Story 1.29).</summary>
+public sealed class TenantDeletion
+{
+    /// <summary>The Operation's public ID: <c>opr_</c> and 26 base32 characters.</summary>
+    public required string OperationId { get; init; }
+
+    /// <summary><c>running</c>, or <c>failed</c> when it can be retried.</summary>
+    public required string Status { get; init; }
+}
+
+/// <summary>
+/// The delete body (Story 1.29): the Tenant's host typed exactly as the Tenants list shows it. The
+/// only request in the API with a confirmation.
+/// </summary>
+public sealed class DeleteTenantRequest
+{
+    /// <summary>The Tenant's stored host, such as <c>acme.id.example.com</c>, compared exactly: no trimming or case folding.</summary>
+    public required string Confirmation { get; init; }
+}
+
 /// <summary>A Tenant as the Tenants list shows it: its stored host, never a subdomain split from it (AD-6).</summary>
 public sealed class TenantResponse
 {
@@ -44,13 +64,19 @@ public sealed class TenantResponse
     /// <summary><c>dev</c>, <c>staging</c> or <c>prod</c>.</summary>
     public required string Label { get; init; }
 
-    /// <summary><c>creating</c> until its creation Operation succeeds, then <c>active</c>.</summary>
+    /// <summary>
+    /// <c>creating</c> until its creation Operation succeeds, then <c>active</c>; <c>deleting</c> from its
+    /// deletion's start until its deletion Operation succeeds, when it leaves the list.
+    /// </summary>
     public required string Status { get; init; }
 
     public required DateTimeOffset CreatedAt { get; init; }
 
     /// <summary>Its creation Operation while the Tenant is <c>creating</c>; otherwise null.</summary>
     public required TenantCreation? Creation { get; init; }
+
+    /// <summary>Its deletion Operation while the Tenant is <c>deleting</c>; otherwise null.</summary>
+    public required TenantDeletion? Deletion { get; init; }
 }
 
 /// <summary>One page of the Deployment's Tenants, oldest first, and the Tenant zone their hosts sit under.</summary>
@@ -155,7 +181,17 @@ internal static class TenantsApi
 
     public static readonly IReadOnlyList<string> Labels = ["dev", "staging", "prod"];
 
-    public static readonly IReadOnlyList<string> TenantStatuses = ["creating", "active"];
+    /// <summary>The route value naming the Tenant a Deployment route acts on (Story 1.29): never <c>tenantId</c>, which only the Tenant surface has.</summary>
+    public const string TargetTenantRouteValue = "targetTenantId";
+
+    /// <summary>The largest delete body read: anything bigger is 400 <c>tenant_invalid</c>, unread past it.</summary>
+    public const int MaxDeleteBody = 4096;
+
+    /// <summary>The statuses the Tenants list shows: a deleted Tenant never appears.</summary>
+    public static readonly IReadOnlyList<string> TenantStatuses = ["creating", "active", "deleting"];
+
+    /// <summary>The statuses a label read returns: only a Tenant someone holds a role in is read, so never a deleting one.</summary>
+    public static readonly IReadOnlyList<string> LabelStatuses = ["creating", "active"];
 
     public static readonly IReadOnlyList<string> CreationStatuses = ["running", "failed"];
 
@@ -360,11 +396,200 @@ internal static class TenantsApi
                 await RefuseAsync(context, StatusCodes.Status409Conflict, AdminResponses.OperationNotFailed, "An Operation retry");
                 return;
 
+            case OperationRetryStatus.TenantDeleted:
+                await RefuseAsync(context, StatusCodes.Status409Conflict, AdminResponses.TenantDeleted, "An Operation retry");
+                return;
+
             default:
                 await AdminResponses.NotFoundAsync(context);
                 return;
         }
     }
+
+    /// <summary>
+    /// Starts a Tenant's deletion (Story 1.29). The request checks have used up the fresh assertion
+    /// for <c>deployment.tenants.delete</c> on this Tenant before this runs, so from here nothing may
+    /// stop the write a client going away: the transaction and the answer take no request token.
+    /// </summary>
+    public static async Task StartDeletionAsync(HttpContext context, AdminApiServices services)
+    {
+        var principal = AdminRequestChecks.Principal(context);
+
+        // A malformed ID names no Tenant: the same 404 as an unknown one.
+        if (!PublicId.TryParse(PublicIdType.Tenant, context.GetRouteValue(TargetTenantRouteValue) as string, out var tenantId))
+        {
+            await AdminResponses.NotFoundAsync(context);
+            return;
+        }
+
+        // Under a deadline and a size cap, as application/json only: anything else is malformed.
+        // A client gone before its body arrives has nothing started to finish.
+        var body = await AdminApi.ReadJsonAsync<DeleteTenantRequest>(context.Request, MaxDeleteBody, context.RequestAborted);
+        if (body?.Confirmation is not { } confirmation)
+        {
+            await RefuseAsync(context, StatusCodes.Status400BadRequest, AdminResponses.TenantInvalid, "A Tenant deletion");
+            return;
+        }
+
+        TenantDeletionResult result;
+        try
+        {
+            await using var scope = await services.BeginAsync(CancellationToken.None);
+            result = await services.Tenants.DeleteAsync(scope.CreateCommandContext(), principal, tenantId, confirmation, CancellationToken.None);
+
+            if (result.Status == TenantDeletionStatus.Started)
+            {
+                await scope.CommitAsync(CancellationToken.None);
+            }
+        }
+        catch (DbException e) when (AdminResponses.DeletionGuardStates.Contains(e.SqlState) && !context.Response.HasStarted)
+        {
+            // A concurrent start that won the race, or the role guard: the same refusal, rolled back.
+            AdminRequestChecks.Log(context, e);
+            await RefuseAsync(context, StatusCodes.Status409Conflict, AdminResponses.TenantDeleted, "A Tenant deletion");
+            return;
+        }
+        catch (DbException e) when (!context.Response.HasStarted)
+        {
+            AdminRequestChecks.Log(context, e);
+            await AdminResponses.UnavailableAsync(context);
+            return;
+        }
+
+        switch (result.Status)
+        {
+            case TenantDeletionStatus.Started:
+                context.Response.StatusCode = StatusCodes.Status202Accepted;
+                context.Response.Headers.Location = DeletionLocation(tenantId);
+                await AdminResponses.JsonAsync(context, Operation(result.Operation!), cancellationToken: CancellationToken.None);
+                return;
+
+            case TenantDeletionStatus.Forbidden:
+                await RefuseAsync(context, StatusCodes.Status403Forbidden, AdminResponses.AccessDenied, "A Tenant deletion");
+                return;
+
+            case TenantDeletionStatus.NotFound:
+                await AdminResponses.NotFoundAsync(context);
+                return;
+
+            case TenantDeletionStatus.AlreadyDeleted:
+                await RefuseAsync(context, StatusCodes.Status409Conflict, AdminResponses.TenantDeleted, "A Tenant deletion");
+                return;
+
+            case TenantDeletionStatus.Busy:
+                await RefuseAsync(context, StatusCodes.Status409Conflict, AdminResponses.TenantBusy, "A Tenant deletion");
+                return;
+
+            default:
+                await RefuseAsync(context, StatusCodes.Status400BadRequest, AdminResponses.ConfirmationMismatch, "A Tenant deletion");
+                return;
+        }
+    }
+
+    /// <summary>The Tenant's newest deletion Operation, with every step (Story 1.29): a plain read, taking no lock.</summary>
+    public static async Task GetDeletionAsync(HttpContext context, AdminApiServices services)
+    {
+        var principal = AdminRequestChecks.Principal(context);
+        var cancellationToken = context.RequestAborted;
+
+        if (!PublicId.TryParse(PublicIdType.Tenant, context.GetRouteValue(TargetTenantRouteValue) as string, out var tenantId))
+        {
+            await AdminResponses.NotFoundAsync(context);
+            return;
+        }
+
+        TenantDeletionRead read;
+        try
+        {
+            await using var scope = await services.BeginAsync(cancellationToken);
+            read = await services.Tenants.GetDeletionAsync(scope.CreateCommandContext(), principal, tenantId, cancellationToken);
+            await scope.CommitAsync(cancellationToken);
+        }
+        catch (DbException e) when (!context.Response.HasStarted)
+        {
+            AdminRequestChecks.Log(context, e);
+            await AdminResponses.UnavailableAsync(context);
+            return;
+        }
+
+        if (!read.Allowed)
+        {
+            await RefuseAsync(context, StatusCodes.Status403Forbidden, AdminResponses.AccessDenied, "A Tenant deletion read");
+            return;
+        }
+
+        if (read.Operation is not { } operation)
+        {
+            await AdminResponses.NotFoundAsync(context);
+            return;
+        }
+
+        await AdminResponses.JsonAsync(context, Operation(operation));
+    }
+
+    /// <summary>
+    /// Retries a failed deletion's failed steps (Story 1.29), after a new fresh assertion the request
+    /// checks used up, so, as the start, it finishes whatever the client does.
+    /// </summary>
+    public static async Task RetryDeletionAsync(HttpContext context, AdminApiServices services)
+    {
+        var principal = AdminRequestChecks.Principal(context);
+
+        if (!PublicId.TryParse(PublicIdType.Tenant, context.GetRouteValue(TargetTenantRouteValue) as string, out var tenantId))
+        {
+            await AdminResponses.NotFoundAsync(context);
+            return;
+        }
+
+        OperationRetryResult result;
+        try
+        {
+            await using var scope = await services.BeginAsync(CancellationToken.None);
+            result = await services.Tenants.RetryDeletionAsync(scope.CreateCommandContext(), principal, tenantId, CancellationToken.None);
+
+            if (result.Status == OperationRetryStatus.Retried)
+            {
+                await scope.CommitAsync(CancellationToken.None);
+            }
+        }
+        catch (DbException e) when (AdminResponses.DeletionGuardStates.Contains(e.SqlState) && !context.Response.HasStarted)
+        {
+            // A Tenancy guard a concurrent change met first: nothing to retry, rolled back.
+            AdminRequestChecks.Log(context, e);
+            await RefuseAsync(context, StatusCodes.Status409Conflict, AdminResponses.OperationNotFailed, "A Tenant deletion retry");
+            return;
+        }
+        catch (DbException e) when (!context.Response.HasStarted)
+        {
+            AdminRequestChecks.Log(context, e);
+            await AdminResponses.UnavailableAsync(context);
+            return;
+        }
+
+        switch (result.Status)
+        {
+            case OperationRetryStatus.Retried:
+                context.Response.StatusCode = StatusCodes.Status202Accepted;
+                context.Response.Headers.Location = DeletionLocation(tenantId);
+                await AdminResponses.JsonAsync(context, Operation(result.Operation!), cancellationToken: CancellationToken.None);
+                return;
+
+            case OperationRetryStatus.Forbidden:
+                await RefuseAsync(context, StatusCodes.Status403Forbidden, AdminResponses.AccessDenied, "A Tenant deletion retry");
+                return;
+
+            case OperationRetryStatus.NotFound:
+                await AdminResponses.NotFoundAsync(context);
+                return;
+
+            default:
+                await RefuseAsync(context, StatusCodes.Status409Conflict, AdminResponses.OperationNotFailed, "A Tenant deletion retry");
+                return;
+        }
+    }
+
+    private static string DeletionLocation(Guid tenantId) =>
+        $"/api/v1/deployment/tenants/{PublicId.Format(PublicIdType.Tenant, tenantId)}/deletion";
 
     /// <summary>
     /// The path Tenant's view of one Operation: only its own steps. Another Tenant's Operation, an
@@ -417,6 +642,13 @@ internal static class TenantsApi
             {
                 OperationId = PublicId.Format(PublicIdType.Operation, creation.OperationId),
                 Status = creation.Status == ManagedOperationStatus.Failed ? "failed" : "running",
+            }
+            : null,
+        Deletion = tenant.Deletion is { } deletion
+            ? new TenantDeletion
+            {
+                OperationId = PublicId.Format(PublicIdType.Operation, deletion.OperationId),
+                Status = deletion.Status == ManagedOperationStatus.Failed ? "failed" : "running",
             }
             : null,
     };

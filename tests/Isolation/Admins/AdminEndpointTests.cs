@@ -52,6 +52,9 @@ public sealed class AdminEndpointTests : IDisposable
                 "/api/v1/deployment/signin/recovery-code",
                 "/api/v1/deployment/tenants",
                 "/api/v1/deployment/tenants",
+                "/api/v1/deployment/tenants/{targetTenantId}/deletion",
+                "/api/v1/deployment/tenants/{targetTenantId}/deletion",
+                "/api/v1/deployment/tenants/{targetTenantId}/deletion/retry",
             ],
             deployment.Select(e => e.RoutePattern.RawText!).Order(StringComparer.Ordinal));
         foreach (var endpoint in deployment)

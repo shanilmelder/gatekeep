@@ -312,6 +312,32 @@ export interface Messages {
   tenantsEmpty: string;
   /** The action that reads the next page of Tenants. */
   tenantsLoadMore: string;
+  /** The Tenants table's Delete column and button (Story 1.29), and the button's name. Placeholder: {name}. */
+  tenantsDelete: string;
+  tenantsDeleteNamed: string;
+  /** The badges on a Tenant being deleted, and on one whose deletion failed. */
+  tenantsDeleting: string;
+  tenantsDeletionFailed: string;
+  /** A failed deletion's Retry, named for its Tenant. Placeholder: {name}. */
+  tenantsRetryDeletingNamed: string;
+  /** The Delete Tenant modal. Placeholders: {name} in the title, {host} in the body. */
+  deleteTenantTitle: string;
+  deleteTenantBody: string;
+  /** The typed field's label: the value to type is the Tenant's host. */
+  deleteTenantConfirmLabel: string;
+  deleteTenantConfirm: string;
+  /** The toast once a deletion has started. */
+  deleteTenantStarted: string;
+  /** In the modal when the Tenant's creation is still running. */
+  deleteTenantBusy: string;
+  /** In the modal when the request failed: nothing was deleted. */
+  deleteTenantFailed: string;
+  /** The Retry deletion modal. Placeholder in the title: {name}. */
+  retryDeletionTitle: string;
+  retryDeletionBody: string;
+  retryDeletionConfirm: string;
+  /** The shell's banner when the Tenant the Admin was in is gone for them. Placeholder: {tenant}. */
+  tenantLost: string;
   /** A confirming modal's text when the Session was renewed during the action, which wasn't sent again. */
   actionRetryAfterSignIn: string;
   /** A confirming modal's text when the server refused the action outright. */
@@ -535,6 +561,23 @@ export const defaultMessages: Readonly<Messages> = Object.freeze({
   tenantsRetryNamed: 'Retry creating {name}',
   tenantsEmpty: 'No Tenants yet.',
   tenantsLoadMore: 'Load more',
+  tenantsDelete: 'Delete',
+  tenantsDeleteNamed: 'Delete {name}',
+  tenantsDeleting: 'Deleting',
+  tenantsDeletionFailed: 'Deletion failed',
+  tenantsRetryDeletingNamed: 'Retry deleting {name}',
+  deleteTenantTitle: 'Delete {name}?',
+  deleteTenantBody:
+    "This permanently removes its Users, Sessions and settings, and destroys its keys. {host} stops answering and can never be used again. Its Logs are kept for 90 days. This can't be undone.",
+  deleteTenantConfirmLabel: 'Tenant subdomain',
+  deleteTenantConfirm: 'Delete Tenant',
+  deleteTenantStarted: 'Tenant deletion started.',
+  deleteTenantBusy: 'This Tenant is still being created. Try again once it finishes.',
+  deleteTenantFailed: "Couldn't delete the Tenant. Try again.",
+  retryDeletionTitle: 'Retry deleting {name}?',
+  retryDeletionBody: "Only the steps that didn't finish run again.",
+  retryDeletionConfirm: 'Retry deletion',
+  tenantLost: 'You no longer have access to {tenant}. It was deleted, or your role in it was removed.',
   actionRetryAfterSignIn: "You're signed in again, but nothing was changed. Confirm to try again.",
   actionForbidden: "You can't do this in this session.",
   navTenant: 'Tenant',

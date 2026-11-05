@@ -243,11 +243,17 @@ public sealed class AdminTablesTests(PostgresFixture postgres)
             Assert.Equal("GK004", refused.SqlState);
         }
 
-        foreach (var sql in TenantRoleWrites.Skip(1).Append("TRUNCATE tenant_role"))
+        foreach (var sql in TenantRoleWrites.Skip(1).Where(s => !s.StartsWith("DELETE", StringComparison.Ordinal)).Append("TRUNCATE tenant_role"))
         {
             var denied = await Assert.ThrowsAsync<PostgresException>(() => PostgresFixture.ExecuteAsync(admin, sql));
             Assert.Equal(PermissionDenied, denied.SqlState);
         }
+
+        // Story 1.29: gk_admin may delete roles, but only a deleting Tenant's, which none is.
+        var roles = await PostgresFixture.ScalarAsync<long>(postgres.SuperuserConnection(database), "SELECT count(*) FROM tenant_role");
+        var removed = await Assert.ThrowsAsync<PostgresException>(() => PostgresFixture.ExecuteAsync(admin, "DELETE FROM tenant_role"));
+        Assert.Equal("GK009", removed.SqlState);
+        Assert.Equal(roles, await PostgresFixture.ScalarAsync<long>(postgres.SuperuserConnection(database), "SELECT count(*) FROM tenant_role"));
     }
 
     // The floor and maximum triggers' own SQLSTATE, so the host maps exactly them to a refusal.

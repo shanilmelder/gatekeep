@@ -106,6 +106,14 @@ public interface IOperations
     Task<OperationResource?> FindActiveAsync(CommandContext context, OperationType type, Guid? tenantId, CancellationToken cancellationToken);
 
     /// <summary>
+    /// The newest Operation of <paramref name="type"/> scoped to <paramref name="tenantId"/>, whatever
+    /// its status, with every step; or null when there is none (Story 1.29). Newest is by creation
+    /// time, then ID.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The context has a Tenant.</exception>
+    Task<OperationResource?> FindLatestAsync(CommandContext context, OperationType type, Guid tenantId, CancellationToken cancellationToken);
+
+    /// <summary>
     /// The <c>running</c> or <c>failed</c> Operation of <paramref name="type"/> for each of
     /// <paramref name="tenantIds"/> that has one, by Tenant, in one query, without their steps.
     /// </summary>

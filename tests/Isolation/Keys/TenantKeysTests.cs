@@ -298,15 +298,25 @@ public sealed class TenantKeysTests(PostgresFixture postgres, OpenBaoFixture bao
     [InlineData("UPDATE signing_key SET published_at = now()")]
     [InlineData("UPDATE signing_key SET created_at = now()")]
     [InlineData("UPDATE signing_key SET purpose = purpose")]
-    [InlineData("DELETE FROM signing_key")]
     [InlineData("UPDATE protection_key_wrap SET ciphertext = ciphertext")]
-    [InlineData("DELETE FROM protection_key_wrap")]
-    public async Task Worker_never_changes_a_key_rows_identity_or_a_wrap_and_never_deletes(string sql)
+    public async Task Worker_never_changes_a_key_rows_identity_or_a_wrap(string sql)
     {
         var (database, tenant) = await ProvisionedAsync();
 
         var refused = await Assert.ThrowsAsync<PostgresException>(() => RunAsync(database, TableRegistry.Worker, tenant, sql));
         Assert.Equal(PostgresErrorCodes.InsufficientPrivilege, refused.SqlState);
+    }
+
+    // Story 1.29: the Worker deletes key rows only in a Tenant's deletion; for a live Tenant the trigger refuses (GK008).
+    [Theory]
+    [InlineData("DELETE FROM signing_key")]
+    [InlineData("DELETE FROM protection_key_wrap")]
+    public async Task Worker_never_deletes_a_live_Tenants_key_rows(string sql)
+    {
+        var (database, tenant) = await ProvisionedAsync();
+
+        var refused = await Assert.ThrowsAsync<PostgresException>(() => RunAsync(database, TableRegistry.Worker, tenant, sql));
+        Assert.Equal("GK008", refused.SqlState);
     }
 
     [Fact]

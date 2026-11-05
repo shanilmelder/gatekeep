@@ -34,6 +34,42 @@ public static class KeysContract
         }
     }
 
+    /// <summary>
+    /// Destroys <see cref="SecretClassKeys"/> through <paramref name="custody"/>, in order, with every
+    /// version of each (Story 1.29). Only <c>Host.Worker</c>'s and the Cli's custody policies may
+    /// (AD-10). A key already gone counts as destroyed, so a repeat, or a rerun after a failure part
+    /// way, is harmless. No other key is ever destroyed here.
+    /// </summary>
+    /// <exception cref="KeyCustodyException">Custody refused or couldn't be reached. Keys destroyed before it stay destroyed.</exception>
+    public static async Task DestroySecretClassKeysAsync(IKeyCustody custody, Guid tenantId, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(custody);
+
+        foreach (var key in SecretClassKeys(tenantId))
+        {
+            await custody.DeleteAsync(key, cancellationToken);
+        }
+    }
+
+    /// <summary>
+    /// Destroys every Signing and Management Transit key of <paramref name="tenantId"/>, in any state,
+    /// with every version of each (Story 1.29, after Story 2.3), in the Tenant's own
+    /// <paramref name="context"/>: those its <c>signing_key</c> rows name, and those custody lists under
+    /// its ID. Only <c>Host.Worker</c>'s custody policy may list keys (AD-10). A key already gone counts
+    /// as destroyed, so a repeat is harmless. No row is changed, and no other Tenant's key is touched.
+    /// </summary>
+    /// <exception cref="KeyCustodyException">Custody refused or couldn't be reached. Keys destroyed before it stay destroyed.</exception>
+    /// <exception cref="InvalidOperationException">The context isn't <paramref name="tenantId"/>'s.</exception>
+    [StateChanging]
+    public static Task DestroyTenantRowKeysAsync(CommandContext context, IKeyCustody custody, Guid tenantId, CancellationToken cancellationToken) =>
+        KeysPurge.DestroyRowKeysAsync(context, custody, tenantId, cancellationToken);
+
+    /// <summary>
+    /// Keys' Tenant purge (Story 1.29, AD-30): deletes the context Tenant's <c>signing_key</c> and
+    /// <c>protection_key_wrap</c> rows. The Transit keys are <see cref="DestroyTenantRowKeysAsync"/>'s.
+    /// </summary>
+    public static ITenantPurge TenantPurge { get; } = new KeysPurge();
+
     /// <summary>The Tenant's token protection key's wrap key, <c>tpk-{tenantId}</c> (AD-10).</summary>
     public static KeyName TokenProtectionKey(Guid tenantId) => KeyName.ForTenant(TenantKeyClass.TokenProtection, tenantId);
 

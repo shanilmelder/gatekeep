@@ -238,6 +238,13 @@ internal static class CanaryFlows
                 new(SurfaceKind.Route, "/api/v1/tenants/{tenantId}/assertions"),
             ],
             TenantLabelAsync),
+        new(
+            "admin.tenant-deletion",
+            [
+                new(SurfaceKind.Route, "/api/v1/deployment/tenants/{targetTenantId}/deletion"),
+                new(SurfaceKind.Route, "/api/v1/deployment/tenants/{targetTenantId}/deletion/retry"),
+            ],
+            TenantDeletionAsync),
 
         // No production type carries a credential yet, so this flow takes the runner's credential
         // path with a test type: enqueue, decrypt, run, retry and dead, as every one will.
@@ -322,6 +329,13 @@ internal static class CanaryFlows
             + "protection key, by name only, storing key names, versions, Transit's ciphertext and fixed result codes; its "
             + "completion inserts an empty settings row, sets the status and writes an ID-only event. No key material leaves custody.",
             "Story 2.3 build review",
+            new DateOnly(2026, 11, 5)),
+        new(
+            new(SurfaceKind.OperationType, "tenancy.tenant.delete"),
+            "Its two Tenant stages delete the Tenant's rows by its ID and destroy its six secret class keys and its Signing and "
+            + "Management keys by name only, and store fixed result codes; its completion sets the status, writes an ID-only event "
+            + "and enqueues the ID-only purge job.",
+            "Story 1.29 build review",
             new DateOnly(2026, 11, 5)),
     ];
 
@@ -1132,6 +1146,80 @@ internal static class CanaryFlows
             using var removed = await Tenancy.TenantRequests.SetLabelAsync(host, cookie, csrf, tenant, "staging");
             run.Capture("removal response", await ResponseTextAsync(removed));
             Assert.Equal(HttpStatusCode.OK, removed.StatusCode);
+        }
+
+        foreach (var authenticator in authenticators)
+        {
+            authenticator.Dispose();
+        }
+
+        await host.StopAsync();
+        run.Capture("Admin output", host.Output);
+        Assert.Matches(@"""LogLevel"":""(?:Trace|Debug)""", host.Output);
+    }
+
+    /// <summary>
+    /// Story 1.29: a Tenant's deletion, logging at Trace. Failing, an unconfirmed start, a
+    /// confirmed one with a wrong typed host, an unconfirmed retry and a read of no deletion;
+    /// succeeding, a confirmed start, its read and a confirmed retry of a deletion still running.
+    /// </summary>
+    private static async Task TenantDeletionAsync(CanaryFlowContext context, FlowRun run, bool failing)
+    {
+        await using var host = await Admins.AdminHost.StartAsync(context.Postgres, null, DebugArguments);
+        run.Database = host.Database;
+        run.Plant("role-password", PostgresFixture.Password);
+        var tenant = await Tenancy.TenantRequests.InsertAsync(host);
+        var (cookie, csrf, _, authenticators) = await host.OwnerWithCredentialsAsync();
+        run.Plant("admin-session-id", cookie);
+        run.Plant("admin-csrf-token", csrf);
+        var id = Tenancy.TenantRequests.Id(tenant);
+        var path = $"/api/v1/deployment/tenants/{id}/deletion";
+        var body = System.Text.Json.JsonSerializer.Serialize(new { confirmation = TestTenants.Host(tenant) });
+
+        if (failing)
+        {
+            using (var unconfirmed = await host.SendAsync(HttpMethod.Post, path, cookie, csrf, Admins.AdminHost.Origin, body))
+            {
+                run.Capture("unconfirmed deletion response", await ResponseTextAsync(unconfirmed));
+                Assert.Equal(HttpStatusCode.Forbidden, unconfirmed.StatusCode);
+            }
+
+            await host.ConfirmAsync(cookie, csrf, authenticators[0], "deployment.tenants.delete", id);
+            using (var mismatch = await host.SendAsync(HttpMethod.Post, path, cookie, csrf, Admins.AdminHost.Origin, """{"confirmation":"wrong"}"""))
+            {
+                run.Capture("mismatched deletion response", await ResponseTextAsync(mismatch));
+                Assert.Equal(HttpStatusCode.BadRequest, mismatch.StatusCode);
+            }
+
+            using (var retry = await host.SendAsync(HttpMethod.Post, path + "/retry", cookie, csrf, Admins.AdminHost.Origin))
+            {
+                run.Capture("unconfirmed retry response", await ResponseTextAsync(retry));
+                Assert.Equal(HttpStatusCode.Forbidden, retry.StatusCode);
+            }
+
+            using var read = await host.SendAsync(HttpMethod.Get, path, cookie);
+            run.Capture("no deletion response", await ResponseTextAsync(read));
+            Assert.Equal(HttpStatusCode.NotFound, read.StatusCode);
+        }
+        else
+        {
+            await host.ConfirmAsync(cookie, csrf, authenticators[0], "deployment.tenants.delete", id);
+            using (var started = await host.SendAsync(HttpMethod.Post, path, cookie, csrf, Admins.AdminHost.Origin, body))
+            {
+                run.Capture("deletion response", await ResponseTextAsync(started));
+                Assert.Equal(HttpStatusCode.Accepted, started.StatusCode);
+            }
+
+            using (var read = await host.SendAsync(HttpMethod.Get, path, cookie))
+            {
+                run.Capture("deletion read response", await ResponseTextAsync(read));
+                Assert.Equal(HttpStatusCode.OK, read.StatusCode);
+            }
+
+            await host.ConfirmAsync(cookie, csrf, authenticators[0], "deployment.tenants.delete", id);
+            using var retry = await host.SendAsync(HttpMethod.Post, path + "/retry", cookie, csrf, Admins.AdminHost.Origin);
+            run.Capture("retry response", await ResponseTextAsync(retry));
+            Assert.Equal(HttpStatusCode.Conflict, retry.StatusCode);
         }
 
         foreach (var authenticator in authenticators)

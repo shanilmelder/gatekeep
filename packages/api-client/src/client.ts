@@ -31,6 +31,8 @@ export type AdminTenantListResponse = components['schemas']['AdminTenantListResp
 export type AdminTenant = components['schemas']['AdminTenantResponse'];
 export type TenantLabelResponse = components['schemas']['TenantLabelResponse'];
 export type SetTenantLabelRequest = components['schemas']['SetTenantLabelRequest'];
+export type DeleteTenantRequest = components['schemas']['DeleteTenantRequest'];
+export type TenantDeletion = components['schemas']['TenantDeletion'];
 
 /** A path the committed OpenAPI document has, so a removed endpoint fails to compile. */
 export type ApiPath = keyof paths;
@@ -245,6 +247,29 @@ export function createApiClient(options: ApiClientOptions = {}) {
     retryOperation: (operationId: string) =>
       request(
         `/api/v1/deployment/operations/${encodeURIComponent(operationId)}/retry` as '/api/v1/deployment/operations/{operationId}/retry',
+        'post',
+      ),
+    /**
+     * Deletes the Tenant `tenantId` names (Story 1.29): `confirmation` is its stored host, typed. It
+     * needs a fresh assertion for deployment.tenants.delete with this ID as its target. The ID goes
+     * into the path encoded. A 202 with its deletion Operation.
+     */
+    deleteTenant: (tenantId: string, body: DeleteTenantRequest) =>
+      request(
+        `/api/v1/deployment/tenants/${encodeURIComponent(tenantId)}/deletion` as '/api/v1/deployment/tenants/{targetTenantId}/deletion',
+        'post',
+        body,
+      ),
+    /** The Tenant's newest deletion Operation, with every step, or a 404. Its ID goes into the path encoded. */
+    getTenantDeletion: (tenantId: string) =>
+      request(
+        `/api/v1/deployment/tenants/${encodeURIComponent(tenantId)}/deletion` as '/api/v1/deployment/tenants/{targetTenantId}/deletion',
+        'get',
+      ),
+    /** Retries a failed Tenant deletion's failed steps. It needs a new fresh assertion for this Tenant. Its ID goes into the path encoded. */
+    retryTenantDeletion: (tenantId: string) =>
+      request(
+        `/api/v1/deployment/tenants/${encodeURIComponent(tenantId)}/deletion/retry` as '/api/v1/deployment/tenants/{targetTenantId}/deletion/retry',
         'post',
       ),
   };

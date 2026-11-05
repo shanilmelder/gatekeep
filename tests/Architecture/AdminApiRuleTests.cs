@@ -35,8 +35,9 @@ public class AdminApiRuleTests
         new[] { "gk_admin UPDATE backed_up,backup_eligible,last_used_at,sign_count" })]
     // Story 1.23: DELETE and no UPDATE: taking a challenge deletes it. Story 1.26's grants work the same way.
     [InlineData("admin_signin_challenge", new[] { "gk_admin DELETE", "gk_admin INSERT", "gk_admin SELECT" }, new string[0], true)]
-    // Story 1.24: read-only to gk_admin. Story 1.27 adds INSERT, the creator's Owner role; Story 8.4 UPDATE and DELETE.
-    [InlineData("tenant_role", new[] { "gk_admin INSERT", "gk_admin SELECT" }, new string[0])]
+    // Story 1.24: read-only to gk_admin. Story 1.27 adds INSERT, the creator's Owner role; Story 1.29 DELETE, every role
+    // of a Tenant whose deletion starts; Story 8.4 UPDATE.
+    [InlineData("tenant_role", new[] { "gk_admin DELETE", "gk_admin INSERT", "gk_admin SELECT" }, new string[0])]
     [InlineData("admin_fresh_assertion", new[] { "gk_admin DELETE", "gk_admin INSERT", "gk_admin SELECT" }, new string[0], true)]
     [InlineData(
         "admin_recovery_code",
@@ -74,7 +75,7 @@ public class AdminApiRuleTests
         "tenant",
         "Control",
         new[] { "gk_admin INSERT", "gk_admin SELECT", "gk_cli SELECT", "gk_hosted SELECT", "gk_worker SELECT" },
-        new[] { "gk_admin UPDATE label", "gk_sealer SELECT id", "gk_worker UPDATE status" },
+        new[] { "gk_admin UPDATE label,status", "gk_sealer SELECT id", "gk_worker UPDATE status" },
         new[] { "tenant_guard_insert", "tenant_guard_update" })]
     [InlineData(
         "tenant_host",
@@ -85,9 +86,9 @@ public class AdminApiRuleTests
     [InlineData(
         "tenant_settings",
         "Tenant",
-        new[] { "gk_admin INSERT", "gk_admin SELECT", "gk_admin UPDATE", "gk_hosted SELECT", "gk_worker INSERT", "gk_worker SELECT" },
+        new[] { "gk_admin INSERT", "gk_admin SELECT", "gk_admin UPDATE", "gk_hosted SELECT", "gk_worker DELETE", "gk_worker INSERT", "gk_worker SELECT" },
         new string[0],
-        new string[0])]
+        new[] { "tenant_row_guard", "tenant_settings_guard_delete", "tenant_settings_guard_update" })]
     public void Registry_lists_the_Tenancy_tables_with_exactly_their_grants(
         string table,
         string tableClass,

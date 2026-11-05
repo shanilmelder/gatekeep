@@ -11,6 +11,8 @@ internal sealed class AdminTenantRoles : IAdminTenantRoles
 
     private const string SelectTenantIds = "SELECT tenant_id FROM tenant_role WHERE admin_id = @admin_id";
 
+    private const string DeleteForTenant = "DELETE FROM tenant_role WHERE tenant_id = @tenant_id";
+
     public async Task GrantCreatorOwnerAsync(CommandContext context, Guid adminId, Guid tenantId, CancellationToken cancellationToken)
     {
         AdminSessions.RequireDeployment(context);
@@ -45,5 +47,19 @@ internal sealed class AdminTenantRoles : IAdminTenantRoles
         }
 
         return ids;
+    }
+
+    public async Task<int> RemoveAllForTenantAsync(CommandContext context, Guid tenantId, CancellationToken cancellationToken)
+    {
+        AdminSessions.RequireDeployment(context);
+        if (tenantId == Guid.Empty)
+        {
+            throw new ArgumentException("A Tenant has an ID.", nameof(tenantId));
+        }
+
+        await using var command = context.CreateCommand();
+        command.CommandText = DeleteForTenant;
+        AdminSessions.Add(command, "tenant_id", tenantId);
+        return await command.ExecuteNonQueryAsync(cancellationToken);
     }
 }
