@@ -173,6 +173,62 @@ public sealed class RequestChecksTests(PostgresFixture postgres)
         Assert.Equal(0L, await app.ScalarAsync<long>("SELECT count(*) FROM deployment_audit_event"));
     }
 
+    /// <summary>
+    /// Story 1.28: on a Tenant route that changes state, the page Tenant header is compared after the
+    /// capability decision and before the checks use up a grant. A mismatch is 409 with the grant
+    /// unused and nothing audited; a role-less path Tenant is still the audited 403 whatever the header.
+    /// </summary>
+    [Fact]
+    public async Task A_page_Tenant_mismatch_is_409_after_the_capability_and_before_the_grant()
+    {
+        await using var app = await StartAsync(await postgres.NewMigratedDatabaseAsync());
+        var admin = await app.SessionAsync(owner: false);
+        var tenant = Guid.CreateVersion7();
+        var other = Guid.CreateVersion7();
+        await PostgresFixture.ExecuteAsync(app.Superuser, TestTenants.InsertSql(tenant, other));
+        await TestTenants.GrantRoleAsync(app.Superuser, tenant, app.AdminOf(admin), "owner");
+        var path = $"/api/v1/tenants/{Id(tenant)}/test/always";
+        await PostgresFixture.ExecuteAsync(
+            app.Superuser,
+            $"""
+            INSERT INTO admin_fresh_assertion (id, session_id, stage, binding_hash, credential_id, created_at, expires_at)
+            SELECT gen_random_uuid(), '{app.SessionOf(admin)}', 'verified', sha256(convert_to(E'tenant.client_secrets.manage\n{Id(tenant)}\n', 'UTF8')),
+                   min(id::text)::uuid, now(), now() + interval '5 minutes'
+            FROM admin_credential WHERE admin_id = '{app.AdminOf(admin)}'
+            """);
+
+        foreach (var header in new[] { Id(other), null })
+        {
+            using var mismatch = await app.PostAsync(path, admin, header);
+            Assert.Equal(HttpStatusCode.Conflict, mismatch.StatusCode);
+            using var json = JsonDocument.Parse(await mismatch.Content.ReadAsStringAsync(Cancellation));
+            Assert.Equal("tenant_mismatch", json.RootElement.GetProperty("code").GetString());
+        }
+
+        Assert.Equal(1L, await app.ScalarAsync<long>("SELECT count(*) FROM admin_fresh_assertion"));
+        Assert.Equal(0L, await app.ScalarAsync<long>("SELECT count(*) FROM deployment_audit_event"));
+
+        // The role-less path Tenant, naming the owned one as the page's: the audited 403 first.
+        using (var denied = await app.PostAsync($"/api/v1/tenants/{Id(other)}/test/always", admin, Id(tenant)))
+        {
+            Assert.Equal(HttpStatusCode.Forbidden, denied.StatusCode);
+        }
+
+        Assert.Equal(1L, await app.ScalarAsync<long>($"SELECT count(*) FROM deployment_audit_event WHERE type_code = 'admin.access.denied' AND target_id = '{other}'"));
+        Assert.Equal(1L, await app.ScalarAsync<long>("SELECT count(*) FROM admin_fresh_assertion"));
+
+        // Matched: the checks use the grant up and the handler runs.
+        using (var matched = await app.PostAsync(path, admin, Id(tenant)))
+        {
+            Assert.Equal(HttpStatusCode.OK, matched.StatusCode);
+        }
+
+        Assert.Equal(0L, await app.ScalarAsync<long>("SELECT count(*) FROM admin_fresh_assertion"));
+    }
+
+    private static string Id(Guid tenant) =>
+        Gatekeep.Kernel.Identifiers.PublicId.Format(Gatekeep.Kernel.Identifiers.PublicIdType.Tenant, tenant);
+
     private static string PublicIdFor() =>
         Gatekeep.Kernel.Identifiers.PublicId.Format(Gatekeep.Kernel.Identifiers.PublicIdType.Tenant, Guid.CreateVersion7());
 
@@ -271,6 +327,8 @@ public sealed class RequestChecksTests(PostgresFixture postgres)
         Map(app, "/api/v1/deployment/test/capability-and-setup", deployment, Requires(AdminCapabilities.DeploymentTenantsRead), Instance("SetupAllowed"));
         Map(app, "/api/v1/deployment/{tenantId}/test", deployment, self);
         Map(app, "/api/v1/tenants/{tenantId}/test/self", tenant, self);
+        app.MapPost("/api/v1/tenants/{tenantId}/test/always", () => Results.Text("always"))
+            .WithMetadata(tenant, Requires(AdminCapabilities.TenantClientSecretsManage));
         app.MapFallback("/api/{**path}", static context =>
         {
             context.Response.StatusCode = StatusCodes.Status404NotFound;
@@ -335,6 +393,23 @@ public sealed class RequestChecksTests(PostgresFixture postgres)
         {
             using var request = new HttpRequestMessage(HttpMethod.Get, path);
             request.Headers.TryAddWithoutValidation("Cookie", $"{AdminHost.Cookie}={cookie}");
+            var response = await _client.SendAsync(request, Cancellation);
+            await response.Content.LoadIntoBufferAsync(Cancellation);
+            return response;
+        }
+
+        /// <summary>A state-changing call with the Admin Origin and the Session's CSRF token, and the page Tenant header when given.</summary>
+        public async Task<HttpResponseMessage> PostAsync(string path, string cookie, string? pageTenant)
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Post, path);
+            request.Headers.TryAddWithoutValidation("Cookie", $"{AdminHost.Cookie}={cookie}");
+            request.Headers.TryAddWithoutValidation(AdminHost.CsrfHeader, AdminHost.Csrf(cookie));
+            request.Headers.TryAddWithoutValidation("Origin", AdminHost.Origin);
+            if (pageTenant is not null)
+            {
+                request.Headers.TryAddWithoutValidation("X-Gatekeep-Tenant", pageTenant);
+            }
+
             var response = await _client.SendAsync(request, Cancellation);
             await response.Content.LoadIntoBufferAsync(Cancellation);
             return response;

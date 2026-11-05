@@ -47,6 +47,26 @@ internal sealed class Tenants(IAuditAppender appender) : ITenants
 
     private const string Activate = "UPDATE tenant SET status = 'active' WHERE id = @id AND status = 'creating'";
 
+    private const string SelectActive =
+        """
+        SELECT t.id, t.name, t.label, t.status, h.host, t.created_at
+        FROM tenant t
+        JOIN tenant_host h ON h.tenant_id = t.id AND h.kind = 'subdomain'
+        WHERE t.id = ANY(@ids) AND t.status = 'active'
+        ORDER BY t.created_at, t.id
+        """;
+
+    /// <summary>
+    /// <c>FOR NO KEY UPDATE</c>, not <c>FOR UPDATE</c>: it still serialises label changes, but it
+    /// doesn't conflict with the <c>FOR KEY SHARE</c> every foreign-key insert referencing the Tenant
+    /// takes, so its audit appends, sessions, roles, jobs and sign-ins go on while a change holds it.
+    /// </summary>
+    private const string LockLabel = "SELECT label, status FROM tenant WHERE id = @id FOR NO KEY UPDATE";
+
+    private const string ReadLabel = "SELECT label, status FROM tenant WHERE id = @id";
+
+    private const string SetLabel = "UPDATE tenant SET label = @label WHERE id = @id AND status = 'active'";
+
     private readonly IAuditAppender _appender = appender ?? throw new ArgumentNullException(nameof(appender));
 
     public async Task<TenantInsertResult> InsertAsync(CommandContext context, TenantDraft draft, CancellationToken cancellationToken)
@@ -157,6 +177,89 @@ internal sealed class Tenants(IAuditAppender appender) : ITenants
 
         await _appender.AppendAsync(context, new AuditEvent(TenancyEvents.TenantActivated.Code, Actor.System), null, cancellationToken);
         return true;
+    }
+
+    public async Task<IReadOnlyList<TenantRecord>> ListActiveAsync(CommandContext context, IReadOnlyCollection<Guid> ids, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        ArgumentNullException.ThrowIfNull(ids);
+
+        var tenants = new List<TenantRecord>();
+        if (ids.Count == 0)
+        {
+            return tenants;
+        }
+
+        await using var command = context.CreateCommand();
+        command.CommandText = SelectActive;
+        Add(command, "ids", ids.ToArray());
+
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            tenants.Add(new TenantRecord(
+                reader.GetGuid(0),
+                reader.GetString(1),
+                TenantValues.ParseLabel(reader.GetString(2)),
+                TenantValues.ParseStatus(reader.GetString(3)),
+                reader.GetString(4),
+                reader.GetFieldValue<DateTimeOffset>(5)));
+        }
+
+        return tenants;
+    }
+
+    public Task<TenantLabelState?> LockLabelAsync(CommandContext context, Guid tenantId, CancellationToken cancellationToken) =>
+        LabelAsync(context, tenantId, LockLabel, cancellationToken);
+
+    public Task<TenantLabelState?> GetLabelAsync(CommandContext context, Guid tenantId, CancellationToken cancellationToken) =>
+        LabelAsync(context, tenantId, ReadLabel, cancellationToken);
+
+    private static async Task<TenantLabelState?> LabelAsync(CommandContext context, Guid tenantId, string sql, CancellationToken cancellationToken)
+    {
+        RequireOwnContext(context, tenantId);
+
+        await using var command = context.CreateCommand();
+        command.CommandText = sql;
+        Add(command, "id", tenantId);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        if (!await reader.ReadAsync(cancellationToken))
+        {
+            return null;
+        }
+
+        return new TenantLabelState(TenantValues.ParseLabel(reader.GetString(0)), TenantValues.ParseStatus(reader.GetString(1)));
+    }
+
+    public async Task SetLabelAsync(CommandContext context, Guid tenantId, TenantLabel label, Actor actor, bool removedProd, CancellationToken cancellationToken)
+    {
+        RequireOwnContext(context, tenantId);
+        ArgumentNullException.ThrowIfNull(actor);
+
+        await using (var command = context.CreateCommand())
+        {
+            command.CommandText = SetLabel;
+            Add(command, "label", TenantValues.Stored(label));
+            Add(command, "id", tenantId);
+            if (await command.ExecuteNonQueryAsync(cancellationToken) != 1)
+            {
+                // The caller holds the row lock and saw it active: nothing else can have changed it.
+                throw new InvalidOperationException("No active Tenant's label was changed.");
+            }
+        }
+
+        var code = removedProd ? TenancyEvents.ProdLabelRemoved.Code : TenancyEvents.LabelChanged.Code;
+        await _appender.AppendAsync(context, new AuditEvent(code, actor, AuditTargetKind.Tenant, tenantId), null, cancellationToken);
+    }
+
+    /// <summary>A Tenant's label is read under lock and written in that Tenant's own context only.</summary>
+    private static void RequireOwnContext(CommandContext context, Guid tenantId)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        if (tenantId == Guid.Empty || context.TenantId != tenantId)
+        {
+            throw new InvalidOperationException("A Tenant's label is read and changed in its own context.");
+        }
     }
 
     private static async Task ExecuteAsync(CommandContext context, string sql, CancellationToken cancellationToken)

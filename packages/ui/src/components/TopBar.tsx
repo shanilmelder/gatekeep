@@ -1,4 +1,4 @@
-import type { MouseEvent } from 'react';
+import type { MouseEvent, ReactNode } from 'react';
 import { useMessages } from '../messages';
 import { cx } from '../util';
 import { Menu, type MenuItem } from './Menu';
@@ -17,6 +17,8 @@ export interface TopBarProps {
   onToggleTheme: () => void;
   /** The avatar menu's items, such as Sign out. */
   accountItems: readonly MenuItem[];
+  /** The Tenant switcher (Story 1.28), after the brand and a `/` separator. */
+  tenantSwitcher?: ReactNode;
   className?: string;
   'data-testid'?: string;
 }
@@ -33,9 +35,10 @@ function PersonGlyph() {
 /**
  * The Admin top bar (EXPERIENCE.md, Admin shell; DESIGN.md, components.top-bar): a 48px
  * `header` on sf with a bd bottom border. The brand links to the root: the mark and the
- * "gatekeep" wordmark, which is visually hidden below 1100px but stays the link's name. On the
- * right, the theme toggle and then the avatar menu. Nothing else: no global search, alerts,
- * Help or Tenant switcher until the stories that build them.
+ * "gatekeep" wordmark, which is visually hidden below 1100px but stays the link's name. After the
+ * brand, a `/` separator and the Tenant switcher, when the page gives one (Story 1.28). On the
+ * right, the theme toggle and then the avatar menu. No global search, alerts or Help until the
+ * stories that build them.
  */
 export function TopBar({
   brandHref = '/',
@@ -43,6 +46,7 @@ export function TopBar({
   dark,
   onToggleTheme,
   accountItems,
+  tenantSwitcher,
   className,
   'data-testid': testId,
 }: TopBarProps) {
@@ -63,6 +67,14 @@ export function TopBar({
           {messages.brandWordmark}
         </span>
       </a>
+      {tenantSwitcher !== undefined && tenantSwitcher !== null && (
+        <>
+          <span className={styles.separator} aria-hidden="true">
+            /
+          </span>
+          <div className={styles.tenant}>{tenantSwitcher}</div>
+        </>
+      )}
       <div className={styles.end}>
         <ThemeToggle dark={dark} onToggle={onToggleTheme} />
         <Menu

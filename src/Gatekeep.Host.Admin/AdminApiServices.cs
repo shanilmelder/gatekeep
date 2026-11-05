@@ -105,6 +105,12 @@ internal sealed class AdminApiServices : IAsyncDisposable
     public Task<DeploymentScope> BeginAsync(CancellationToken cancellationToken) =>
         DeploymentScope.BeginAsync(_dataSource.Value, cancellationToken);
 
+    /// <summary>
+    /// The <c>gk_admin</c> data source, for a Tenant scope on the path Tenant only (Story 1.28):
+    /// <c>TenantScope.BeginAsync(services.Source, AdminRequestChecks.PathTenant(context), …)</c>.
+    /// </summary>
+    public NpgsqlDataSource Source => _dataSource.Value;
+
     /// <summary>Whether there is a bootstrap to claim: a token issued and bootstrap not complete.</summary>
     public async Task<bool> IsBootstrapOpenAsync(CancellationToken cancellationToken) =>
         !_bootstrapComplete && await ReadBootstrapAsync(cancellationToken) == BootstrapOpenness.Open;

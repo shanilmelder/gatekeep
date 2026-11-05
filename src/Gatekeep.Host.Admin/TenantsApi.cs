@@ -114,6 +114,27 @@ public sealed class TenantCreatedResponse
     public required OperationResponse Operation { get; init; }
 }
 
+/// <summary>A Tenant the current Admin holds a Tenant Role in, as the Tenant switcher shows it (Story 1.28). Never the role.</summary>
+public sealed class AdminTenantResponse
+{
+    /// <summary>The Tenant's public ID: <c>ten_</c> and 26 base32 characters.</summary>
+    public required string Id { get; init; }
+
+    public required string Name { get; init; }
+
+    /// <summary>The Tenant's host, <c>{subdomain}.{zone}</c>, as stored at creation.</summary>
+    public required string Host { get; init; }
+
+    /// <summary><c>dev</c>, <c>staging</c> or <c>prod</c>.</summary>
+    public required string Label { get; init; }
+}
+
+/// <summary>The active Tenants the current Admin holds a Tenant Role in, oldest first, with no paging.</summary>
+public sealed class AdminTenantListResponse
+{
+    public required IReadOnlyList<AdminTenantResponse> Tenants { get; init; }
+}
+
 /// <summary>
 /// Creating and listing Tenants, and reading and retrying their creation (Story 1.27). The request
 /// checks have decided each request's capability before these run; Management decides it again.
@@ -141,6 +162,44 @@ internal static class TenantsApi
     public static readonly IReadOnlyList<string> OperationStatuses = ["running", "failed", "succeeded"];
 
     public static readonly IReadOnlyList<string> StepStatuses = ["pending", "running", "succeeded", "failed"];
+
+    /// <summary>
+    /// The Tenant switcher's list (Story 1.28): the active Tenants the current Admin holds a Tenant
+    /// Role in, oldest first. Self-service, so no capability is checked, and no role is returned.
+    /// </summary>
+    public static async Task ListMineAsync(HttpContext context, AdminApiServices services)
+    {
+        var principal = AdminRequestChecks.Principal(context);
+        var cancellationToken = context.RequestAborted;
+
+        IReadOnlyList<AdminTenant> tenants;
+        try
+        {
+            await using var read = await services.BeginAsync(cancellationToken);
+            tenants = await services.Tenants.ListForAdminAsync(read.CreateCommandContext(), principal, cancellationToken);
+            await read.CommitAsync(cancellationToken);
+        }
+        catch (DbException e) when (!context.Response.HasStarted)
+        {
+            AdminRequestChecks.Log(context, e);
+            await AdminResponses.UnavailableAsync(context);
+            return;
+        }
+
+        await AdminResponses.JsonAsync(context, new AdminTenantListResponse
+        {
+            Tenants =
+            [
+                .. tenants.Select(t => new AdminTenantResponse
+                {
+                    Id = PublicId.Format(PublicIdType.Tenant, t.Id),
+                    Name = t.Name,
+                    Host = t.Host,
+                    Label = t.Label,
+                }),
+            ],
+        });
+    }
 
     public static async Task ListAsync(HttpContext context, AdminApiServices services)
     {

@@ -1,4 +1,5 @@
-import { EmptyState, SectionPage, useMessages } from '@gatekeep/ui/admin';
+import type { AdminTenant } from '@gatekeep/api-client';
+import { Banner, EmptyState, ErrorReference, SectionPage, useMessages } from '@gatekeep/ui/admin';
 import { useEffect, useState } from 'react';
 import { navigate } from '../navigation';
 import { useCapabilities } from './capabilities';
@@ -7,17 +8,37 @@ import { CreateTenantForm, TenantsReadState } from './CreateTenantPage';
 import { TENANTS_PATH, readTenants, type TenantsRead } from './tenants';
 
 /**
- * The landing page, interim until Stories 1.28 and 3.1 own the final rules. An Admin who can list
- * Tenants has the first page read: with none, it is the Create Tenant form, in place (FR-44); with
- * any, the URL becomes the Tenants page. Anyone else has no Tenant to reach. It is one Section
- * page throughout, so its h1 stays the same node as the read answers, and focus on it stays.
+ * The landing page (FR-44; Story 1.28). An Admin holding a Tenant Role lands on the current
+ * Tenant's page: the remembered one, else the first listed, whose settings page is its landing
+ * until Story 3.1's Applications list. Otherwise an Admin who can list Tenants has the first page
+ * read: with none, it is the Create Tenant form, in place; with any, the URL becomes the Tenants
+ * page. Anyone else has no Tenant to reach. It is one Section page throughout, so its h1 stays
+ * the same node as the read answers, and focus on it stays.
  */
-export function LandingPage({ request }: { request: ShellRequest }) {
+export function LandingPage({
+  request,
+  tenants,
+  tenantsFailure,
+  onRetry,
+  current,
+}: {
+  request: ShellRequest;
+  tenants: readonly AdminTenant[];
+  /** The switcher's list failed to read: the landing can't tell where to go, so it says so. */
+  tenantsFailure: { code: string; traceId: string } | null;
+  onRetry: () => void;
+  current: AdminTenant | null;
+}) {
   const messages = useMessages();
   const { has } = useCapabilities();
-  const canRead = has('deployment.tenants.read');
+  const target = tenantsFailure === null && tenants.length > 0 ? (current ?? tenants[0]!) : null;
+  const canRead = tenantsFailure === null && target === null && has('deployment.tenants.read');
   const [read, setRead] = useState<TenantsRead | null>(null);
   const [attempt, setAttempt] = useState(0);
+
+  useEffect(() => {
+    if (target !== null) navigate(`/tenants/${encodeURIComponent(target.id)}/settings`, { replace: true });
+  }, [target]);
 
   useEffect(() => {
     if (!canRead) return;
@@ -33,6 +54,19 @@ export function LandingPage({ request }: { request: ShellRequest }) {
     });
     return () => controller.abort();
   }, [canRead, request, attempt]);
+
+  if (target !== null) return <SectionPage title={messages.landingTitle} data-testid="landing" />;
+
+  if (tenantsFailure !== null) {
+    return (
+      <SectionPage title={messages.landingTitle} data-testid="landing">
+        <Banner tone="bad" action={{ label: messages.retry, onClick: onRetry }} data-testid="landing-tenants-failed">
+          <p>{messages.loadFailed}</p>
+          <ErrorReference code={tenantsFailure.code} traceId={tenantsFailure.traceId} />
+        </Banner>
+      </SectionPage>
+    );
+  }
 
   if (!canRead) {
     return (

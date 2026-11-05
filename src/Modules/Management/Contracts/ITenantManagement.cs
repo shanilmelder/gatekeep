@@ -136,9 +136,43 @@ public enum OperationRetryStatus
 public sealed record OperationRetryResult(OperationRetryStatus Status, ManagedOperation? Operation = null);
 
 /// <summary>
+/// A Tenant the current Admin holds a Tenant Role in, as the Tenant switcher shows it (Story 1.28):
+/// its stored host and label, never the role, and never its status, which is always <c>active</c>.
+/// </summary>
+public sealed record AdminTenant(Guid Id, string Name, string Host, string Label);
+
+/// <summary>A label read: whether the module's own capability check allowed it (AD-5), and the stored label and status.</summary>
+public sealed record TenantLabelRead(bool Allowed, string? Label, string? Status = null);
+
+public enum LabelChangeStatus
+{
+    /// <summary>The label was written, and its event appended. The caller commits.</summary>
+    Changed,
+
+    /// <summary>The requested label is the current one: nothing was written, no event, no grant used.</summary>
+    Unchanged,
+
+    /// <summary>The handler's own re-check refused it (AD-5), or the Tenant isn't there.</summary>
+    Forbidden,
+
+    /// <summary>The requested label isn't <c>dev</c>, <c>staging</c> or <c>prod</c>.</summary>
+    Invalid,
+
+    /// <summary>The Tenant is still being created, or stopped being active: its label can't change.</summary>
+    NotActive,
+
+    /// <summary>Removing Prod, and the fresh-assertion gate found no grant: it has already answered.</summary>
+    FreshAssertionRequired,
+}
+
+/// <summary>A label change's outcome, and the label the Tenant has after it when it was changed or unchanged.</summary>
+public sealed record LabelChangeResult(LabelChangeStatus Status, string? Label = null);
+
+/// <summary>
 /// Creating and listing Tenants for Host.Admin (Story 1.27): the one place that orchestrates
 /// Tenancy, Admins and Operations for it (AD-1). Each call runs in the caller's Deployment
-/// context, and decides access again itself (AD-5).
+/// context, but the label calls (Story 1.28), which run in the path Tenant's, and decides access
+/// again itself (AD-5).
 /// </summary>
 public interface ITenantManagement
 {
@@ -190,5 +224,42 @@ public interface ITenantManagement
         CommandContext context,
         AdminPrincipal principal,
         Guid operationId,
+        CancellationToken cancellationToken);
+
+    /// <summary>
+    /// The <c>active</c> Tenants <paramref name="principal"/> holds a Tenant Role in, ordered by
+    /// creation, in a Deployment context (Story 1.28). Self-service: the caller's own roles, so no
+    /// capability is checked, and no role is returned.
+    /// </summary>
+    Task<IReadOnlyList<AdminTenant>> ListForAdminAsync(CommandContext context, AdminPrincipal principal, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// The path Tenant's label, in that Tenant's own context, once <c>tenant.configuration.read</c>
+    /// is decided again here (AD-5) from <paramref name="grant"/>, the role the request checks read.
+    /// </summary>
+    Task<TenantLabelRead> GetLabelAsync(
+        CommandContext tenantContext,
+        AdminPrincipal principal,
+        TenantRoleGrant? grant,
+        Guid tenantId,
+        CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Changes the path Tenant's label, in that Tenant's own context (Story 1.28, FR-7): decides
+    /// <c>tenant.label.manage</c> again from <paramref name="grant"/> with no second role read,
+    /// parses <paramref name="requested"/>, locks the Tenant's row, and only when the change removes
+    /// Prod on that locked label awaits <paramref name="requireFreshAssertion"/>, which uses up the
+    /// grant in its own committed transaction. Then it writes the label, and only the label, and
+    /// appends its event on the Tenant's chain. The caller commits only on
+    /// <see cref="LabelChangeStatus.Changed"/>.
+    /// </summary>
+    [StateChanging]
+    Task<LabelChangeResult> ChangeLabelAsync(
+        CommandContext tenantContext,
+        AdminPrincipal principal,
+        TenantRoleGrant? grant,
+        Guid tenantId,
+        string? requested,
+        Func<CancellationToken, Task<bool>> requireFreshAssertion,
         CancellationToken cancellationToken);
 }

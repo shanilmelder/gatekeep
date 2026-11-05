@@ -41,6 +41,7 @@ public class CapabilityRuleTests
         "delete /api/v1/deployment/session",
         "get /api/v1/deployment/capabilities",
         "get /api/v1/deployment/credentials",
+        "get /api/v1/deployment/my-tenants",
         "get /api/v1/deployment/session",
         "post /api/v1/deployment/assertions",
         "post /api/v1/deployment/assertions/complete",
@@ -53,11 +54,13 @@ public class CapabilityRuleTests
     /// <summary>
     /// The reviewed routes whose handler, not the request checks, uses up their fresh assertion
     /// (Story 1.26): registration begin, whose need depends on the Session being full. A route
-    /// declaring a <c>When…</c> capability joins this list with the story that maps it.
+    /// declaring a <c>When…</c> capability joins this list with the story that maps it: Story 1.28's
+    /// label change, whose handler decides <c>WhenProdTenant</c> on the locked label.
     /// </summary>
     private static readonly string[] HandlerEnforced =
     [
         "post /api/v1/deployment/credentials/registration",
+        "put /api/v1/tenants/{tenantId}/label",
     ];
 
     /// <summary>The reviewed sessionless routes: the bootstrap claim and sign-in's begin and complete.</summary>
@@ -134,7 +137,7 @@ public class CapabilityRuleTests
         { DeploymentPrefix + "tenants/{x}", "delete", Capability("deployment.tenants.delete", "deployment", false, "always", enforcedBy: "checks", action: "deployment.admins.manage"), "names action deployment.admins.manage" },
         { DeploymentPrefix + "tenants/{x}", "delete", Capability("deployment.tenants.delete", "deployment", false, "always", enforcedBy: "checks", problem403: false), "lists no 403 problem" },
         { TenantPrefix + "label", "put", Capability("tenant.label.manage", "tenant", false, "whenProdTenant", enforcedBy: "checks"), "must be enforced by the handler" },
-        { TenantPrefix + "label", "put", Capability("tenant.label.manage", "tenant", false, "whenProdTenant", enforcedBy: "handler"), "isn't on the reviewed handler-enforced list" },
+        { TenantPrefix + "environment", "put", Capability("tenant.label.manage", "tenant", false, "whenProdTenant", enforcedBy: "handler"), "isn't on the reviewed handler-enforced list" },
         { TenantPrefix + "x", "get", Capability("tenant.configuration.read", "tenant", true, "never", enforcedBy: "checks"), "needs no fresh assertion" },
         { DeploymentPrefix + "credentials/{credentialId}", "delete", Declared("self", "self.credentials.rename"), "isn't a self-service fresh-assertion action" },
         { DeploymentPrefix + "credentials/{credentialId}", "delete", Declared("self", "deployment.tenants.delete"), "isn't a self-service fresh-assertion action" },
@@ -170,6 +173,11 @@ public class CapabilityRuleTests
         Assert.Equal("checks", Fresh(operations["delete /api/v1/deployment/credentials/{credentialId}"])!.EnforcedBy);
         Assert.Equal("credentialId", Fresh(operations["delete /api/v1/deployment/credentials/{credentialId}"])!.Target);
         Assert.Equal("handler", Fresh(operations["post /api/v1/deployment/credentials/registration"])!.EnforcedBy);
+
+        // Story 1.28: the label change's handler decides WhenProdTenant, bound to the path Tenant alone.
+        Assert.Equal("handler", Fresh(operations["put /api/v1/tenants/{tenantId}/label"])!.EnforcedBy);
+        Assert.Null(Fresh(operations["put /api/v1/tenants/{tenantId}/label"])!.Target);
+        Assert.Equal("tenant.label.manage", Fresh(operations["put /api/v1/tenants/{tenantId}/label"])!.Action);
         Assert.Equal(HandlerEnforced.Order(), operations.Where(o => Fresh(o.Value)?.EnforcedBy == "handler").Select(o => o.Key).Order());
     }
 

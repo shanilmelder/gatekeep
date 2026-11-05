@@ -25,4 +25,21 @@ public static class TenancyEvents
     public static readonly AuditEventDefinition TenantActivated = new(
         new AuditTypeCode("tenancy.tenant.activated"),
         "A Tenant's creation Operation succeeded: its settings exist and its Tenant Subdomain now resolves.");
+
+    /// <summary>
+    /// Written on the Tenant's own chain by a label change other than removing Prod (Story 1.28),
+    /// in the transaction that writes the label. The Actor is the Admin; the target the Tenant.
+    /// </summary>
+    public static readonly AuditEventDefinition LabelChanged = new(
+        new AuditTypeCode("tenancy.tenant.label_changed"),
+        "A Tenant Owner changed a Tenant's environment label, other than removing Prod. Names the Tenant only.");
+
+    /// <summary>
+    /// Written on the Tenant's own chain when a Tenant Owner removes its Prod label (Story 1.28),
+    /// after a fresh WebAuthn assertion, in the transaction that writes the label. The Actor is the
+    /// Admin; the target the Tenant.
+    /// </summary>
+    public static readonly AuditEventDefinition ProdLabelRemoved = new(
+        new AuditTypeCode("tenancy.tenant.prod_label_removed"),
+        "A Tenant Owner removed a Tenant's Prod label after a fresh WebAuthn assertion. No setting changed with it.");
 }

@@ -113,6 +113,14 @@ export function SignInPage() {
           backHref="/signin"
           data-testid="signin-error"
         />
+        {failure.code === SIGNIN_UNAVAILABLE && (
+          // No Admin to sign in yet: the way on is the public Bootstrap page, which says nothing new.
+          <p>
+            <a href="/bootstrap" data-testid="signin-set-up">
+              {messages.signInSetUpDeployment}
+            </a>
+          </p>
+        )}
       </HostedPage>
     );
   }

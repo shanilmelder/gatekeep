@@ -19,6 +19,7 @@ const CSRF = 'T'.repeat(43);
 const RENEWED_CSRF = 'U'.repeat(43);
 const ADMIN_ID = '01900000-0000-7000-8000-000000000127';
 const ZONE = 'gatekeep.test';
+const MY_TENANTS = '/api/v1/deployment/my-tenants';
 
 const OWNER = [
   'deployment.tenants.read',
@@ -50,6 +51,9 @@ type Answer = (route: Route) => Promise<void>;
 
 const ten = (n: number) => `ten_${String.fromCharCode(97 + n).repeat(25)}a`;
 const opr = (n: number) => `opr_${String.fromCharCode(97 + n).repeat(25)}a`;
+
+/** Story 1.28: a created Tenant's success opens it, whose landing is its settings page until Story 3.1. */
+const CREATED_LANDING = new RegExp(`/tenants/${ten(9)}/settings$`);
 
 interface TenantRow {
   id: string;
@@ -115,6 +119,8 @@ interface State {
   retryAnswer: Answer | null;
   /** Runs as a sign-in begin arrives, before it is answered. */
   onBegin: (() => Promise<void>) | null;
+  /** The switcher's list (Story 1.28): the active Tenants this Admin holds a role in. */
+  mine: { id: string; name: string; host: string; label: TenantRow['label'] }[];
 }
 
 interface Api {
@@ -139,6 +145,7 @@ async function answerApi(page: Page, baseURL: string, initial: Partial<State> = 
     operationAnswer: null,
     retryAnswer: null,
     onBegin: null,
+    mine: [],
     ...initial,
   };
 
@@ -148,6 +155,12 @@ async function answerApi(page: Page, baseURL: string, initial: Partial<State> = 
       const request = route.request();
       const url = new URL(request.url());
       const pathname = url.pathname;
+      // The shell's Tenants list (Story 1.28), outside the log this spec's rules read: the Tenants
+      // this Admin holds a role in, none until a test says so. Its own rules are admin-tenant-switcher.spec.ts's.
+      if (pathname === MY_TENANTS) {
+        if (state.expired) return route.fulfill({ status: 401 });
+        return json(route, 200, { tenants: state.mine });
+      }
       log.push(`${request.method()} ${pathname}${url.search}`);
       requests.push(request);
 
@@ -194,6 +207,11 @@ async function answerApi(page: Page, baseURL: string, initial: Partial<State> = 
         const next = state.operations.length > 1 ? state.operations.shift()! : state.operations[0]!;
         return json(route, 200, next);
       }
+      // The created Tenant's own page (Story 1.28): its Owner's capabilities and its label.
+      if (/^\/api\/v1\/tenants\/[^/]+\/capabilities$/.test(pathname)) {
+        return json(route, 200, { capabilities: ['tenant.configuration.read', 'tenant.settings.manage', 'tenant.label.manage'] });
+      }
+      if (/^\/api\/v1\/tenants\/[^/]+\/label$/.test(pathname) && request.method() === 'GET') return json(route, 200, { label: 'dev', status: 'active' });
       if (/^\/api\/v1\/deployment\/operations\/[^/]+\/retry$/.test(pathname)) {
         if (state.retryAnswer) return state.retryAnswer(route);
         return json(route, 202, operation('running'));
@@ -451,7 +469,7 @@ test.describe('create', () => {
     api.state.operations = [operation('succeeded')];
     await banner.getByRole('button', { name: 'Retry' }).click();
     await expect(page.getByTestId('toast')).toHaveText('Tenant created.');
-    await expect(page).toHaveURL(/\/deployment\/tenants$/);
+    await expect(page).toHaveURL(CREATED_LANDING);
   });
 
   test('Operation reads answered 503 back off, say so after three, and go on until it succeeds', async ({ page, baseURL }) => {
@@ -474,7 +492,7 @@ test.describe('create', () => {
     api.state.operationAnswer = null;
     api.state.operations = [operation('succeeded')];
     await expect(page.getByTestId('toast')).toHaveText('Tenant created.', { timeout: 15_000 });
-    await expect(page).toHaveURL(/\/deployment\/tenants$/);
+    await expect(page).toHaveURL(CREATED_LANDING);
   });
 
   for (const [status, testId] of [
@@ -528,7 +546,7 @@ test.describe('create', () => {
     expect(await api.requests.find((request) => request.method() === 'POST')!.headerValue('x-gatekeep-csrf')).toBe(CSRF);
   });
 
-  test('a 202 shows the status line while the Operation runs, then the toast and the Tenants page', async ({ page, baseURL }) => {
+  test('a 202 shows the status line while the Operation runs, then the toast and the new Tenant', async ({ page, baseURL }) => {
     const api = await answerApi(page, baseURL!, { operations: [operation('running'), operation('succeeded')] });
     await page.goto('/');
     await expect(heading(page)).toHaveText('Create your Tenant');
@@ -542,9 +560,12 @@ test.describe('create', () => {
     await expect(submit(page)).toHaveAttribute('aria-busy', 'true');
 
     api.state.tenants = [tenant(9, { name: 'Acme Dev', host: `acme-dev.${ZONE}` })];
+    api.state.mine = [{ id: ten(9), name: 'Acme Dev', host: `acme-dev.${ZONE}`, label: 'dev' }];
     await expect(page.getByTestId('toast')).toHaveText('Tenant created.');
-    await expect(page).toHaveURL(/\/deployment\/tenants$/);
-    await expect(heading(page)).toHaveText('Tenants');
+    await expect(page).toHaveURL(CREATED_LANDING);
+    await expect(heading(page)).toHaveText('Tenant settings');
+    // The new Tenant is the current one in the top bar, as the next reads list it.
+    await expect(page.getByTestId('tenant-switcher').locator('[data-menu-trigger]')).toHaveAccessibleName('Acme Dev DEV, switch Tenant');
     expect(api.count(`GET /api/v1/tenants/${ten(9)}/operations/${opr(0)}`)).toBe(2);
     expect(posts(api)).toBe(1);
   });
@@ -565,7 +586,7 @@ test.describe('create', () => {
     api.state.operations = [operation('succeeded')];
     await banner.getByRole('button', { name: 'Retry' }).click();
     await expect(page.getByTestId('toast')).toHaveText('Tenant created.');
-    await expect(page).toHaveURL(/\/deployment\/tenants$/);
+    await expect(page).toHaveURL(CREATED_LANDING);
     expect(api.count(`POST /api/v1/deployment/operations/${opr(0)}/retry`)).toBe(1);
     expect(posts(api)).toBe(1);
   });
@@ -582,7 +603,7 @@ test.describe('create', () => {
 
     api.state.operations = [operation('succeeded')];
     await page.getByTestId('create-tenant-failed').getByRole('button', { name: 'Retry' }).click();
-    await expect(page).toHaveURL(/\/deployment\/tenants$/);
+    await expect(page).toHaveURL(CREATED_LANDING);
   });
 
   for (const failure of [

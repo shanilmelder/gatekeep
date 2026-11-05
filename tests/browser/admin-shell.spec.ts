@@ -17,6 +17,7 @@ const CAPABILITIES = '/api/v1/deployment/capabilities';
 const TENANTS = '/api/v1/deployment/tenants';
 const BEGIN = '/api/v1/deployment/signin';
 const COMPLETE = '/api/v1/deployment/signin/complete';
+const MY_TENANTS = '/api/v1/deployment/my-tenants';
 const CSRF = 'S'.repeat(43);
 const RENEWED_CSRF = 'R'.repeat(43);
 const ADMIN_ID = '01900000-0000-7000-8000-000000000123';
@@ -65,7 +66,11 @@ interface Api {
     completeAnswer: Answer | null;
     signOutAnswer: Answer | null;
     sessionAnswer: Answer | null;
+    /** Replaces the Tenants list's answer (Story 1.28), while not expired. */
+    tenantsAnswer: Answer | null;
   };
+  /** The Tenants list reads, kept apart from `log`. */
+  tenantLog: string[];
   count: (entry: string) => number;
   /** The begin's own answer, for a replacement that only watches or waits. */
   begin: Answer;
@@ -78,6 +83,7 @@ interface Api {
  */
 async function answerApi(page: Page, baseURL: string, initial: Partial<Api['state']> = {}): Promise<Api> {
   const log: string[] = [];
+  const tenantLog: string[] = [];
   const requests: Request[] = [];
   const state: Api['state'] = {
     expired: false,
@@ -89,6 +95,7 @@ async function answerApi(page: Page, baseURL: string, initial: Partial<Api['stat
     completeAnswer: null,
     signOutAnswer: null,
     sessionAnswer: null,
+    tenantsAnswer: null,
     ...initial,
   };
   const begin: Answer = (route) =>
@@ -105,6 +112,15 @@ async function answerApi(page: Page, baseURL: string, initial: Partial<Api['stat
     async (route) => {
       const request = route.request();
       const pathname = new URL(request.url()).pathname;
+      // The shell's Tenants list (Story 1.28), read with the capabilities on every navigation:
+      // none, refused like them while the Session is gone, and outside the log this spec's rules
+      // read. Its own rules are admin-tenant-switcher.spec.ts's.
+      if (pathname === MY_TENANTS) {
+        tenantLog.push(`${request.method()} ${pathname}`);
+        if (state.expired) return route.fulfill({ status: 401 });
+        if (state.tenantsAnswer) return state.tenantsAnswer(route);
+        return json(route, 200, { tenants: [] });
+      }
       log.push(`${request.method()} ${pathname}`);
       requests.push(request);
 
@@ -152,7 +168,7 @@ async function answerApi(page: Page, baseURL: string, initial: Partial<Api['stat
     },
   );
 
-  return { log, requests, state, count: (entry) => log.filter((line) => line === entry).length, begin };
+  return { log, tenantLog, requests, state, count: (entry) => log.filter((line) => line === entry).length, begin };
 }
 
 /** A virtual CTAP2 authenticator holding the Admin's resident credential, verifying and presenting by itself. */
@@ -232,7 +248,7 @@ test.use({ viewport: { width: 1280, height: 720 } });
 watchCsp(test);
 
 test.describe('shell', () => {
-  test("a Deployment Owner's shell: the top bar's brand, theme toggle and account menu, the Main nav's Deployment group, and the landing page", async ({
+  test("a Deployment Owner's shell: the top bar's brand, Tenant switcher, theme toggle and account menu, the Main nav's Deployment group, and the landing page", async ({
     page,
     baseURL,
   }) => {
@@ -248,14 +264,17 @@ test.describe('shell', () => {
 
     const header = page.getByRole('banner');
     await expect(brand(page)).toHaveAttribute('href', '/');
-    await expect(header.getByRole('button')).toHaveCount(2);
+    // Story 1.28: the Tenant switcher after the brand. The Owner holds no Tenant Role yet, so it
+    // names no Tenant; its own rules are admin-tenant-switcher.spec.ts's.
+    await expect(header.getByRole('button')).toHaveCount(3);
+    await expect(header.getByRole('button', { name: 'Choose a Tenant' })).toBeVisible();
     await expect(header.getByRole('button', { name: 'Dark theme' })).toBeVisible();
     await expect(header.getByRole('button', { name: 'Account' })).toBeVisible();
     await expect(page.getByRole('searchbox')).toHaveCount(0);
     // The only text boxes are the landing's Create Tenant form's: no search in the top bar.
     await expect(header.getByRole('textbox')).toHaveCount(0);
     await expect(page.getByRole('textbox')).toHaveCount(2);
-    await expect(header.getByRole('button', { name: /alerts|help|tenant/i })).toHaveCount(0);
+    await expect(header.getByRole('button', { name: /alerts|help/i })).toHaveCount(0);
     await expect(page.getByRole('link', { name: /help|api reference/i })).toHaveCount(0);
 
     // The registry's one item (Story 1.27): the Deployment group, closed off its page, with Tenants.
@@ -546,7 +565,9 @@ test.describe('pages', () => {
     await expect(page.getByText("You don't have access to this page.")).toHaveCount(0);
     api.state.tenantAnswer = (route) => json(route, 200, { capabilities: ['tenant.configuration.read'] });
     await failedBanner(page).getByRole('button', { name: 'Retry' }).click();
-    await expect(heading(page)).toHaveText('This no longer exists.');
+    // Story 1.28: an allowed Tenant's landing is its settings page, until Story 3.1.
+    await expect(page).toHaveURL(/\/tenants\/ten_a\/settings$/);
+    await expect(heading(page)).toHaveText('Tenant settings');
   });
 
   test('a bodiless 403 on the Tenant read is a failure, never the forbidden page: that needs the server’s access_denied', async ({ page, baseURL }) => {
@@ -661,7 +682,7 @@ test.describe('navigation', () => {
   test("the browser's back and forward are in-shell navigations too, each reading again", async ({ page, baseURL }) => {
     const api = await answerApi(page, baseURL!);
 
-    await page.goto('/tenants/ten_a');
+    await page.goto('/tenants/ten_a/applications');
     await expect(heading(page)).toHaveText('This no longer exists.');
     await page.getByRole('link', { name: 'Back to Admin Dashboard' }).click();
     await expect(heading(page)).toHaveText(LANDING);
@@ -1127,7 +1148,7 @@ test.describe('session renewal', () => {
     await authenticator(page, new URL(baseURL!).hostname);
     const api = await answerApi(page, baseURL!);
 
-    await page.goto('/tenants/ten_a');
+    await page.goto('/tenants/ten_a/applications');
     await expect(heading(page)).toHaveText('This no longer exists.');
     await page.getByRole('link', { name: 'Back to Admin Dashboard' }).click();
     await expect(heading(page)).toHaveText(LANDING);

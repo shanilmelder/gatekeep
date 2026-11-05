@@ -110,7 +110,108 @@ internal static class FreshAssertionApi
             return;
         }
 
-        await AdminResponses.JsonAsync(context, new AdminSignInOptionsResponse
+        await OptionsAsync(context, options);
+    }
+
+    /// <summary>
+    /// The Tenant-surface begin (Story 1.28): a Tenant capability action whose fresh assertion isn't
+    /// never, bound to the path Tenant, which is the only Tenant source. The route needs any Tenant
+    /// Role; the action's own capability is then decided from the grant the request checks read,
+    /// with no second read, and a refusal is counted and audited against the path Tenant. The
+    /// Deployment complete finishes it: the challenge already carries the binding.
+    /// </summary>
+    public static async Task BeginForTenantAsync(HttpContext context, AdminApiServices services)
+    {
+        var session = AdminRequestChecks.Session(context);
+        var path = AdminRequestChecks.PathTenantGrant(context);
+        var cancellationToken = context.RequestAborted;
+        if (!await CountAsync(context, services, session))
+        {
+            return;
+        }
+
+        var body = await AdminApi.ReadJsonAsync<FreshAssertionBeginRequest>(context.Request, MaxBeginBody, cancellationToken);
+        if (body?.Action is not { Length: > 0 and <= MaxActionLength } action
+            || body.Target is { Length: > MaxTargetLength }
+            || !AdminFreshAssertions.IsAction(action))
+        {
+            await RefusedAsync(context, "unknown action");
+            return;
+        }
+
+        // A self-service action, a Deployment capability and a never capability begin elsewhere, or not at all.
+        if (AdminFreshAssertions.CapabilityOf(action) is not { Scope: CapabilityScope.Tenant } capability)
+        {
+            await RefusedAsync(context, "not a tenant action");
+            return;
+        }
+
+        // A target only an action whose route names one can carry: any other could never be used.
+        if (body!.Target is not null && !TargetedActions(context).Contains(action))
+        {
+            await RefusedAsync(context, "stray target");
+            return;
+        }
+
+        var principal = AdminRequestChecks.Principal(context);
+        var allowed = AdminCapabilities.Allows(capability, principal, path.Grant, path.TenantId);
+
+        WebAuthnRequestOptions? options = null;
+        var audited = false;
+        try
+        {
+            await using var scope = await services.BeginAsync(cancellationToken);
+            var command = scope.CreateCommandContext();
+            if (!allowed)
+            {
+                audited = await AdminRequestChecks.DenyAsync(command, services, principal, path.TenantId, cancellationToken);
+            }
+            else
+            {
+                options = await services.FreshAssertions.BeginAsync(
+                    command,
+                    session,
+                    SignInApi.RelyingParty(context),
+                    new FreshAssertionBinding(action, path.TenantId, body!.Target),
+                    cancellationToken);
+            }
+
+            await scope.CommitAsync(cancellationToken);
+        }
+        catch (DbException e) when (e.SqlState == UniqueViolation)
+        {
+            AdminRequestChecks.Log(context, e);
+            await RefusedAsync(context, "constraint");
+            return;
+        }
+
+        if (!allowed || options is null)
+        {
+            Logger(context).LogInformation(
+                "An Admin request was refused with {Problem} for {Capability}, audited {Audited}, trace {TraceId}.",
+                AdminResponses.AccessDenied,
+                capability.Name,
+                audited,
+                AdminResponses.TraceId(context));
+            await AdminResponses.AccessDeniedAsync(context);
+            return;
+        }
+
+        await OptionsAsync(context, options);
+    }
+
+    /// <summary>The actions some mapped route's fresh-assertion requirement binds to a target route value.</summary>
+    private static HashSet<string> TargetedActions(HttpContext context) =>
+        [
+            .. context.RequestServices.GetRequiredService<EndpointDataSource>().Endpoints
+                .Select(e => AccessDeclaration.Of(e.Metadata, (e as RouteEndpoint)?.RoutePattern.RawText)?.FreshAssertion)
+                .Where(f => f?.TargetRouteValue is not null)
+                .Select(f => f!.Action),
+        ];
+
+    /// <summary>The request options for navigator.credentials.get, as sign-in sends them.</summary>
+    private static Task OptionsAsync(HttpContext context, WebAuthnRequestOptions options) =>
+        AdminResponses.JsonAsync(context, new AdminSignInOptionsResponse
         {
             Challenge = Base64Url.EncodeToString(options.Challenge),
             RpId = options.RpId,
@@ -126,7 +227,6 @@ internal static class FreshAssertionApi
                 }),
             ],
         });
-    }
 
     public static async Task CompleteAsync(HttpContext context, AdminApiServices services)
     {

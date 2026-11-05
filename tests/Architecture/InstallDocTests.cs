@@ -83,9 +83,9 @@ public class InstallDocTests
             @"^## Using the Admin Dashboard$",
             @"\*\*Below 768px: unsupported\.\*\*",
         ],
-        ["no Tenant pages yet (from Stories 1.28 and 3.1)"] =
+        ["the Tenant switcher and environment, with Applications from Story 3.1 and other settings from Story 8.5"] =
         [
-            @"\*\*A working Admin Dashboard\.\*\*[^\n]*creates and lists Tenants[^\n]*from Stories 1\.28 and 3\.1 on",
+            @"\*\*A working Admin Dashboard\.\*\*[^\n]*creates and lists Tenants[^\n]*Tenant switcher[^\n]*environment[^\n]*from Story 3\.1 on[^\n]*Story 8\.5",
         ],
         ["no Certificate Transparency alerts yet (Epic 11)"] =
         [

@@ -44,6 +44,19 @@ describe('confirmItsYou', () => {
     ]);
   });
 
+  it('passes a Tenant action its Tenant, and a Deployment or self-service one none (Story 1.28)', async () => {
+    const { log, fresh } = harness();
+    await fresh.confirmItsYou({ action: 'tenant.label.manage', target: null, tenantId: 'ten_a' });
+    await fresh.confirmItsYou({ action: 'self.credentials.add', tenantId: null });
+    await fresh.confirmItsYou({ action: 'self.credentials.add', tenantId: '' });
+    const begins = log.filter(([step]) => step === 'begin').map(([, binding]) => binding);
+    assert.deepEqual(begins, [
+      { action: 'tenant.label.manage', target: null, tenantId: 'ten_a' },
+      { action: 'self.credentials.add', target: null },
+      { action: 'self.credentials.add', target: null },
+    ]);
+  });
+
   it('sends a missing target as null', async () => {
     const { log, fresh } = harness();
     await fresh.confirmItsYou({ action: 'self.credentials.add' });

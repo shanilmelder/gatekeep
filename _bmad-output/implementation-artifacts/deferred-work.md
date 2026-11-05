@@ -179,9 +179,6 @@
   summary: Build `MachinePrincipal` from validated Management API tokens, add the Management API bearer scheme on `/api/v1/tenants/*`, and map each capability to the Management API Permission that grants it, as ADV-22 asks (Epic 17, Story 17.3).
   evidence: Story 1.24 has no `src/` construction of `MachinePrincipal` (an architecture rule holds it to that); machine denial is proven only at handler level with `TestOnlyMachinePrincipal`.
 - source_spec: `_bmad-output/implementation-artifacts/spec-1-24-enforce-capabilities-and-tenant-scoped-routes.md`
-  summary: Tenant switching from an Admin's roles, and the "no Tenant Role" landing (Story 1.28).
-  evidence: Story 1.24 adds the `tenant_role_admin` index for the switcher but no route lists an Admin's Tenants.
-- source_spec: `_bmad-output/implementation-artifacts/spec-1-24-enforce-capabilities-and-tenant-scoped-routes.md`
   summary: Make a deleted Tenant's roles grant nothing (Story 1.29).
   evidence: Story 1.24's authorizer doesn't read `tenant` (AD-1), and `tenant_role` keeps `RESTRICT` keys, so deletion isn't designed yet.
 - source_spec: `_bmad-output/implementation-artifacts/spec-1-24-enforce-capabilities-and-tenant-scoped-routes.md`
@@ -197,9 +194,6 @@
   summary: Catch `ARCHITECTURE-SPINE.md` up with Story 1.24: the AD-19 self-service exemption under `/api/v1/deployment`, the public ID alphabet (lowercase RFC 4648 base32, no padding, canonical only, never the empty UUID) in Conventions, the capability names in AD-20, and `tenant_role` in AD-27's Admins tables.
   evidence: Story 1.24 exempts the reviewed self-service and sessionless routes from the Deployment Owner gate and fixes the public ID encoding, which the spine doesn't yet state.
 - source_spec: `_bmad-output/implementation-artifacts/spec-1-25-open-the-admin-shell.md`
-  summary: The Tenant switcher, the current Tenant's name and environment badge in the top bar, Tenant mismatch, and the final landing rules (Story 1.28).
-  evidence: Story 1.25 out of scope. The top bar has the brand, the theme toggle and the avatar menu only, and the landing page is a holding page.
-- source_spec: `_bmad-output/implementation-artifacts/spec-1-25-open-the-admin-shell.md`
   summary: Help in the top bar, opening the API reference (Story 17.5).
   evidence: Story 1.25 out of scope. FR-44: a deferred feature doesn't appear in any form, so the top bar has no Help until the reference exists.
 - source_spec: `_bmad-output/implementation-artifacts/spec-1-25-open-the-admin-shell.md`
@@ -209,14 +203,11 @@
   summary: Tenant page titles in `<title>`.
   evidence: Story 1.25 out of scope. Every shell page keeps the document title "Gatekeep Admin Dashboard".
 - source_spec: `_bmad-output/implementation-artifacts/spec-1-26-confirm-sensitive-actions-and-manage-admin-credentials.md`
-  summary: The Tenant-surface fresh-assertion begin, `POST /api/v1/tenants/{tenantId}/assertions`, for Tenant capability actions (Story 1.28, whose Prod label removal, `tenant.label.manage` with `WhenProdTenant`, is the first Tenant route that needs it).
-  evidence: Story 1.26 refuses a Tenant capability action on the Deployment begin with 400 `assertion_refused`; the binding already takes the path Tenant.
-- source_spec: `_bmad-output/implementation-artifacts/spec-1-26-confirm-sensitive-actions-and-manage-admin-credentials.md`
   summary: The first HTTP test of an `Always` capability route on a production route (Tenant deletion, Story 1.29; Admin invites and removal, Epic 8).
   evidence: Story 1.26 proves the checks' consume on a test-only route in `RequestChecksTests`; no production route declares an `Always` capability yet.
 - source_spec: `_bmad-output/implementation-artifacts/spec-1-26-confirm-sensitive-actions-and-manage-admin-credentials.md`
-  summary: The `WhenProdTenant` and `WhenLoweringPolicy` predicates, each evaluated in its route's handler before `FreshAssertionGate.RequireAsync` (their routes' stories).
-  evidence: Story 1.26 builds the gate, the `EvaluatesFreshAssertion` marker and the reviewed handler-enforced list; registration begin is its only caller.
+  summary: The `WhenProdTenant` predicate for callback URLs (`tenant.application_callbacks.manage`, Epic 3) and the `WhenLoweringPolicy` predicate (Epic 6), each evaluated in its route's handler before `FreshAssertionGate.RequireAsync`.
+  evidence: Story 1.26 builds the gate, the `EvaluatesFreshAssertion` marker and the reviewed handler-enforced list; registration begin is its only caller. Story 1.28 evaluates `WhenProdTenant` for `tenant.label.manage` only, on the locked label.
 - source_spec: `_bmad-output/implementation-artifacts/spec-1-26-confirm-sensitive-actions-and-manage-admin-credentials.md`
   summary: Rename an Admin credential in Your credentials.
   evidence: Story 1.26 out of scope: credentials are named by their kind only.
@@ -269,9 +260,6 @@
   summary: Key rotation must re-key or keep the old hmac version for Admin Recovery Code lookups.
   evidence: Story 1.26 review; Epic 9.
 - source_spec: `_bmad-output/implementation-artifacts/spec-1-26-confirm-sensitive-actions-and-manage-admin-credentials.md`
-  summary: Tenant-scoped fresh-assertion begin route.
-  evidence: Story 1.26 review; Story 1.28. Story 1.27 maps no Tenant route with a fresh-assertion capability: creation is `deployment.tenants.create`, `FreshAssertion.Never`.
-- source_spec: `_bmad-output/implementation-artifacts/spec-1-26-confirm-sensitive-actions-and-manage-admin-credentials.md`
   summary: Admin removal must account for the credential floor trigger.
   evidence: Story 1.26 review; Epic 8.
 - source_spec: `_bmad-output/implementation-artifacts/spec-1-26-confirm-sensitive-actions-and-manage-admin-credentials.md`
@@ -284,14 +272,11 @@
   summary: The built-in API record and the default Connection as Tenant creation stages (their stories).
   evidence: Story 1.27 out of scope: every stage a later story adds runs before the completion handler activates the Tenant.
 - source_spec: `_bmad-output/implementation-artifacts/spec-1-27-create-tenants-with-permanent-subdomains.md`
-  summary: The Tenant switcher, the Tenant name and environment badge in the top bar, label changes, and the final landing rules (Story 1.28).
-  evidence: Story 1.27 out of scope. After creation, and on `/` with any Tenant, the dashboard opens Tenants, not the Applications list (Story 3.1).
-- source_spec: `_bmad-output/implementation-artifacts/spec-1-27-create-tenants-with-permanent-subdomains.md`
   summary: Tenant deletion, its purge contracts, and a `deleted` status that resolves to the same fixed 404 (Story 1.29).
   evidence: Story 1.27: `tenant` and `tenant_host` rows are never deleted, and `tenant_host_guard` refuses it for every role, so deletion must soft-delete; `tenant.status` allows only `creating` and `active`.
 - source_spec: `_bmad-output/implementation-artifacts/spec-1-27-create-tenants-with-permanent-subdomains.md`
-  summary: A Tenant page that a Tenants row opens (Story 3.1 or 1.28).
-  evidence: Story 1.27: Tenants rows aren't links, as no Tenant page exists (FR-44).
+  summary: A Tenant page that a Tenants row opens (Story 3.1).
+  evidence: Story 1.27: Tenants rows aren't links, as no Tenant page exists (FR-44). Story 1.28 keeps rows plain text: a Deployment Owner may hold no role in a listed Tenant, so a row link would often lead to the forbidden page.
 - source_spec: `_bmad-output/implementation-artifacts/spec-1-27-create-tenants-with-permanent-subdomains.md`
   summary: Ordered Operation stages (carried on to Story 1.29).
   evidence: Story 1.27 adds a completion handler instead, which runs after every stage; Tenant deletion still needs purge before removal.
@@ -334,3 +319,33 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-1-27-create-tenants-with-permanent-subdomains.md`
   summary: Record Tenancy's ASP.NET Core and Npgsql dependency in the architecture spine.
   evidence: Story 1.27 review.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-28-switch-tenants-and-set-the-environment-label.md`
+  summary: Refuse to label a Tenant Prod while `GATEKEEP_CONFORMANCE_TENANT` is set (Story 4.14, AD-21).
+  evidence: Story 1.28 out of scope: any Tenant Owner can label any active Tenant Prod; threat model T-36.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-28-switch-tenants-and-set-the-environment-label.md`
+  summary: The Applications list as the Tenant landing (Story 3.1).
+  evidence: Story 1.28 `[ASSUMPTION]`: `/tenants/{tenantId}` and the landing with a Tenant Role open the Tenant settings page, which holds only the environment.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-28-switch-tenants-and-set-the-environment-label.md`
+  summary: FR-10's other Tenant settings on the Tenant settings page (Story 8.5).
+  evidence: Story 1.28 builds the page with the environment only, which the label route needs.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-28-switch-tenants-and-set-the-environment-label.md`
+  summary: Paging or search in the Tenant switcher.
+  evidence: Story 1.28 `[ASSUMPTION]`: `GET /api/v1/deployment/my-tenants` lists every active Tenant the Admin holds a role in, with no paging, and the switcher shows them flat.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-28-switch-tenants-and-set-the-environment-label.md`
+  summary: The label in the audit envelope, so `tenancy.tenant.label_changed` can say which label (carried on from Story 1.27).
+  evidence: Story 1.28 writes two codes, `label_changed` and `prod_label_removed`, because the envelope can't carry the new label (AD-16).
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-28-switch-tenants-and-set-the-environment-label.md`
+  summary: The `X-Gatekeep-Tenant` mismatch rule for the Management API's bearer scheme (Story 17.3).
+  evidence: Story 1.28 applies it to Admin Sessions, the only principals today.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-28-switch-tenants-and-set-the-environment-label.md`
+  summary: The "role removed mid-session" and "Tenant deleted" banners (Story 8.4, Story 1.29, carried on).
+  evidence: Story 1.28 reads the switcher's list on every navigation, so a removed role drops out of it at once, but no banner says so.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-28-switch-tenants-and-set-the-environment-label.md`
+  summary: Tenant page titles in `<title>` (carried on from Story 1.25).
+  evidence: Story 1.28's Tenant settings page keeps the document title "Gatekeep Admin Dashboard".
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-28-switch-tenants-and-set-the-environment-label.md`
+  summary: Bidi isolation beyond the Tenant switcher and the mismatch banner (Story 18.3, carried on).
+  evidence: Story 1.28 isolates the Tenant name in `<bdi>` in the switcher, the mismatch banner and the Prod modal only.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-28-switch-tenants-and-set-the-environment-label.md`
+  summary: Every later rule that reads the label (the 90-day Prod retention floor, Prod callback confirmation, Dev-only email verification off, the conformance Tenant) reads it when its own setting changes, and never rewrites a setting because the label changed.
+  evidence: Story 1.28: no setting reads the label yet, so removing Prod writes only `tenant.label`; threat model T-56.

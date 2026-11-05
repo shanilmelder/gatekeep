@@ -2,10 +2,10 @@
 title: 'Story 1.28: Switch Tenants and set the environment label'
 type: 'feature'
 created: '2026-11-04'
-status: 'ready-for-dev'
+status: 'done'
 baseline_revision: 'deb7f458d7cdb36200ae2bc29c83f314d4e01a0e'
 review_loop_iteration: 0
-followup_review_recommended: false
+followup_review_recommended: true
 context:
   - '{project-root}/_bmad-output/planning-artifacts/architecture/architecture-gatekeep-2026-11-02/ARCHITECTURE-SPINE.md'
   - '{project-root}/_bmad-output/planning-artifacts/prds/prd-gatekeep-2026-11-01/prd.md'
@@ -378,29 +378,29 @@ Not taken in: "A Tenant page that a Tenants row opens (Story 3.1 or 1.28)". Tena
 ## Tasks & Acceptance
 
 **Execution:**
-- [ ] Schema:
+- [x] Schema:
   - the migration and registry entry;
   - `TenantTablesTests` covers the `gk_admin` column grant (label only), `GK006` for every role and the migrator, and that every Story 1.27 trigger rule still holds.
-- [ ] Tenancy, Admins, Management:
+- [x] Tenancy, Admins, Management:
   - `TenantLabelChange`, the three `ITenants` calls and the events;
   - `ListTenantIdsAsync`;
   - `ListForAdminAsync`, `GetLabelAsync` and `ChangeLabelAsync`, with the AD-5 re-checks from the request's grant.
-- [ ] Host.Admin:
+- [x] Host.Admin:
   - the request checks' mismatch rule and its position;
   - the Tenant begin;
   - the label routes and the self-service list;
   - the problem codes and the `GK006` mapping;
   - the OpenAPI header and 409.
   - Then regenerate the contract with `sh deploy/docker/api-contract.sh --write <abs dir>`.
-- [ ] Architecture tests:
+- [x] Architecture tests:
   - `CapabilityRuleTests` lists;
   - `TenantRuleTests` rules with self-checks;
   - the Admins registry row;
   - the catalogue, with `docs/audit-events.md` regenerated;
   - the unchanged edge list.
-- [ ] Isolation tests: every server row of the I/O matrix, with Testcontainers PostgreSQL and the software authenticator, and the canary row.
-- [ ] api-client: `pageTenant`, the calls, and `client.test.mjs`.
-- [ ] Dashboard:
+- [x] Isolation tests: every server row of the I/O matrix, with Testcontainers PostgreSQL and the software authenticator, and the canary row.
+- [x] api-client: `pageTenant`, the calls, and `client.test.mjs`.
+- [x] Dashboard:
   - `Menu.current` and `TopBar`'s slot;
   - `currentTenant.ts` with its Node test;
   - the switcher;
@@ -411,8 +411,8 @@ Not taken in: "A Tenant page that a Tenants row opens (Story 3.1 or 1.28)". Tena
   - Create Tenant's success;
   - `freshAssertion.ts` and its test;
   - the catalogue keys.
-- [ ] Browser tests: `admin-tenant-switcher.spec.ts` (every browser row, `watchCsp`, axe in light and dark at 1100 and 768), the updated `admin-shell.spec.ts` and `admin-tenants.spec.ts`, and the config.
-- [ ] Docs:
+- [x] Browser tests: `admin-tenant-switcher.spec.ts` (every browser row, `watchCsp`, axe in light and dark at 1100 and 768), the updated `admin-shell.spec.ts` and `admin-tenants.spec.ts`, and the config.
+- [x] Docs:
   - threat model (header, T-1, T-22, T-36, T-53, new T-56);
   - `install.md`;
   - `deferred-work.md`:
@@ -437,6 +437,33 @@ Not taken in: "A Tenant page that a Tenants row opens (Story 3.1 or 1.28)". Tena
 ## Spec Change Log
 
 ## Review Triage Log
+
+### 2026-11-02 — Review pass
+- verdicts: 23 findings — high 1, medium 9, low 13, false 0, maybe-false 0
+- findings:
+  - `[high]` `[patch]` Blind: the label lock is FOR UPDATE, which blocks every FK insert on the Tenant while a Prod removal runs, and GET takes it too — FOR NO KEY UPDATE for the change, a plain read for GET.
+  - `[medium]` `[patch]` Blind: a label raised to Prod elsewhere sends a plain PUT and shows "forbidden" — the PUT always goes through the fresh-assertion helper.
+  - `[medium]` `[patch]` Blind: unsaved changes are guarded only for picking another Tenant — every shell navigation, plus beforeunload.
+  - `[medium]` `[patch]` Blind: a client abort after the gate rolls back the label with the grant used — the write finishes uncancellable.
+  - `[medium]` `[patch]` Blind: a confirmed grant can outlive the change it was earned for — any label change clears it.
+  - `[medium]` `[patch]` Blind: a failed switcher list makes every page unavailable — only the switcher and the landing degrade.
+  - `[low]` `[patch]` Blind: the docs say localStorage never reaches a request, but it picks the landing Tenant — reworded.
+  - `[low]` `[patch]` Blind: one global records the last Tenant write, so concurrent writes swap the banner's names — returned per request.
+  - `[low]` `[patch]` Blind: a Tenant still being created shows an editable form — disabled, with the status from the label read.
+  - `[low]` `[patch]` Blind: threat-model T-22 and T-53 cells put prose after their Tests lists — fixed.
+  - `[medium]` `[patch]` Edge: stale loaded label — same fix as the Blind row.
+  - `[medium]` `[patch]` Edge: GET takes a write lock — same fix as the Blind row.
+  - `[low]` `[patch]` Edge: global last-write record — same fix as the Blind row.
+  - `[low]` `[patch]` Edge: a path segment decoding to non-Latin-1 characters makes fetch throw on the header — only a well-formed ID is sent.
+  - `[low]` `[patch]` Edge: a Tenant begin with a target for an action that has none makes an unusable grant — refused.
+  - `[medium]` `[patch]` Gap: a failed switcher list is untested — tested, with the revised degrade behaviour.
+  - `[low]` `[patch]` Gap: the Prod-removal modal's rate-limited and unavailable text is untested — added.
+  - `[low]` `[patch]` Gap: a 401 on the label PUT is untested — renewal test added.
+  - `[low]` `[patch]` Gap: the oldest-first order can't be told from insertion order — the test inserts out of order.
+  - `[low]` `[reject]` Intent: the GK006 to 409 mapping is never reached over HTTP — the status check runs first; the trigger is tested directly.
+  - `[low]` `[patch]` Intent: the switcher's ellipsis at 768 to 1099px is unproved — tested.
+  - `[low]` `[patch]` Intent: a literal "-" in the mismatch banner is outside the message catalogue — moved.
+  - `[medium]` `[patch]` Stack: before bootstrap the root sends the operator to sign-in, a dead end showing `signin_unavailable` — it now links to the bootstrap page.
 
 ## Design Notes
 
@@ -465,3 +492,19 @@ Not taken in: "A Tenant page that a Tenants row opens (Story 3.1 or 1.28)". Tena
 - After changing the endpoints, regenerate the contract in Docker with `sh deploy/docker/api-contract.sh --write <abs dir>` (as `docker compose -f deploy/compose.test.yaml run --rm --build -v "<repository>:/out" tests sh deploy/docker/api-contract.sh --write /out`). Regenerate the audit catalogue with the Generator. Commit both.
 
 Nothing runs on the host.
+
+## Auto Run Result
+
+Status: done
+
+**Summary:** an Admin switches Tenants from the top bar, which lists only the active Tenants they hold a role in, with each Tenant's environment badge. The path is the only source of the Tenant. Dashboard writes name the Tenant the page shows, and the server refuses a mismatch with `tenant_mismatch`, so an action never lands on a Tenant the Admin isn't looking at. Settings → Tenant changes the environment label. Removing Prod needs a fresh assertion bound to that Tenant, begun on a new Tenant-scoped route, and changes nothing but the label. Each change writes the Tenant's Log.
+
+**Files:** the label migration and `TableRegistry`; `src/Modules/Tenancy/`, `Admins/`, `Management/`; `src/Gatekeep.Host.Admin/` (label API, my-tenants, Tenant fresh-assertion begin, request checks, OpenAPI); `docs/api/openapi-v1.json`, `packages/api-client/`; `packages/ui/` (Menu, TopBar); `apps/admin-dashboard/src/shell/` (switcher, Tenant settings, landing, current Tenant); `tests/Isolation/Tenancy/`, `Admins/`, `tests/Architecture/`, `tests/browser/admin-tenant-switcher.spec.ts`; `docs/audit-events.md`, the threat model and `install.md`.
+
+**Review:** 23 findings across four layers: 22 patched, 0 deferred, 1 rejected, each with its reason in the triage log.
+
+**Follow-up review:** recommended. Lock strength, grant clearing and the switcher's failure handling changed in review, with new tests as the only proof.
+
+**Verification:** see the PR screenshot; the full suite passes in the `tests` container.
+
+**Residual risks:** the switcher lists active Tenants only, without paging. The Tenant settings page stands in as the landing until Story 3.1.

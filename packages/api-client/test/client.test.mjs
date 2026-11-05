@@ -3,7 +3,7 @@
 
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { CSRF_HEADER, createApiClient, parseProblem } from '../src/client.ts';
+import { CSRF_HEADER, TENANT_HEADER, createApiClient, parseProblem } from '../src/client.ts';
 
 /** A fetch that records each call and answers with `status` and `body`. */
 function fakeFetch(status, body = '', contentType = 'application/json') {
@@ -52,7 +52,7 @@ describe('api-client', () => {
     assert.equal(calls[0].init.cache, 'no-store');
     const { headers, ...rest } = result;
     assert.ok(headers instanceof Headers);
-    assert.deepEqual(rest, { ok: true, status: 200, data: { capabilities: [] } });
+    assert.deepEqual(rest, { ok: true, status: 200, data: { capabilities: [] }, path: '/api/v1/deployment/capabilities', pageTenant: null });
   });
 
   it("puts the Tenant's public ID into the templated path, encoded", async () => {
@@ -77,7 +77,13 @@ describe('api-client', () => {
 
     const { headers, ...rest } = result;
     assert.ok(headers instanceof Headers);
-    assert.deepEqual(rest, { ok: false, status: 403, problem: { code: 'access_denied', traceId: 't-3' } });
+    assert.deepEqual(rest, {
+      ok: false,
+      status: 403,
+      problem: { code: 'access_denied', traceId: 't-3' },
+      path: '/api/v1/tenants/ten_aaaaaaaaaaaaaaaaaaaaaaaaab/capabilities',
+      pageTenant: null,
+    });
   });
 
   it('reads a problem body into its code and trace ID only', async () => {
@@ -87,7 +93,13 @@ describe('api-client', () => {
 
     const { headers, ...rest } = result;
     assert.ok(headers instanceof Headers);
-    assert.deepEqual(rest, { ok: false, status: 400, problem: { code: 'bootstrap_refused', traceId: 't-1' } });
+    assert.deepEqual(rest, {
+      ok: false,
+      status: 400,
+      problem: { code: 'bootstrap_refused', traceId: 't-1' },
+      path: '/api/v1/deployment/bootstrap',
+      pageTenant: null,
+    });
   });
 
   it("exposes the response's headers, such as a 429's Retry-After", async () => {
@@ -114,7 +126,7 @@ describe('api-client', () => {
       const result = await createApiClient({ fetch }).getSession();
       const { headers, ...rest } = result;
       assert.ok(headers instanceof Headers);
-      assert.deepEqual(rest, { ok: false, status, problem: null }, `${status} ${body}`);
+      assert.deepEqual(rest, { ok: false, status, problem: null, path: '/api/v1/deployment/session', pageTenant: null }, `${status} ${body}`);
     }
   });
 
@@ -192,6 +204,66 @@ describe('api-client', () => {
     assert.equal(calls[4].init.body, undefined);
     assert.equal(calls[4].init.headers[CSRF_HEADER], 'csrf-1');
     assert.equal(result.status, 202);
+  });
+
+  it('sends the page Tenant only on state-changing Tenant-surface calls, when there is one', async () => {
+    const { calls, fetch } = fakeFetch(200, JSON.stringify({ label: 'dev' }));
+    let page = 'ten_a';
+    const client = createApiClient({ fetch, csrfToken: () => 'csrf-1', pageTenant: () => page });
+
+    await client.setTenantLabel('ten_a', { label: 'dev' });
+    await client.beginTenantFreshAssertion('ten_a', { action: 'tenant.label.manage', target: null });
+    await client.getTenantLabel('ten_a');
+    await client.listMyTenants();
+    await client.createTenant({ name: 'A', subdomain: 'acme', label: 'dev' });
+    page = null;
+    await client.setTenantLabel('ten_a', { label: 'prod' });
+    page = 'ten_b';
+    await client.setTenantLabel('ten_a/x', { label: 'prod' });
+
+    // The page's Tenant, read at send time, never the path's: the server compares the two.
+    assert.equal(calls[0].input, '/api/v1/tenants/ten_a/label');
+    assert.equal(calls[0].init.method, 'PUT');
+    assert.equal(calls[0].init.body, JSON.stringify({ label: 'dev' }));
+    assert.equal(calls[0].init.headers[TENANT_HEADER], 'ten_a');
+    assert.equal(calls[0].init.headers[CSRF_HEADER], 'csrf-1');
+    assert.equal(calls[1].input, '/api/v1/tenants/ten_a/assertions');
+    assert.equal(calls[1].init.method, 'POST');
+    assert.equal(calls[1].init.headers[TENANT_HEADER], 'ten_a');
+    // Reads, Deployment paths and a page with no Tenant send none.
+    assert.equal(calls[2].input, '/api/v1/tenants/ten_a/label');
+    assert.equal(calls[2].init.method, 'GET');
+    assert.equal(TENANT_HEADER in calls[2].init.headers, false);
+    assert.equal(calls[3].input, '/api/v1/deployment/my-tenants');
+    assert.equal(TENANT_HEADER in calls[3].init.headers, false);
+    assert.equal(TENANT_HEADER in calls[4].init.headers, false);
+    assert.equal(TENANT_HEADER in calls[5].init.headers, false);
+    assert.equal(calls[6].input, '/api/v1/tenants/ten_a%2Fx/label');
+    assert.equal(calls[6].init.headers[TENANT_HEADER], 'ten_b');
+  });
+
+  it('returns with each answer the path it sent and the page Tenant it carried, if any', async () => {
+    const { fetch } = fakeFetch(409, JSON.stringify({ code: 'tenant_mismatch', traceId: 't' }), 'application/problem+json');
+    let page = 'ten_b';
+    const client = createApiClient({ fetch, csrfToken: () => 'csrf-1', pageTenant: () => page });
+
+    const mismatch = await client.setTenantLabel('ten_a', { label: 'dev' });
+    page = null;
+    const none = await client.setTenantLabel('ten_a', { label: 'dev' });
+    const read = await client.getTenantLabel('ten_c');
+
+    assert.deepEqual([mismatch.path, mismatch.pageTenant, mismatch.problem?.code], ['/api/v1/tenants/ten_a/label', 'ten_b', 'tenant_mismatch']);
+    assert.deepEqual([none.path, none.pageTenant], ['/api/v1/tenants/ten_a/label', null]);
+    assert.deepEqual([read.path, read.pageTenant], ['/api/v1/tenants/ten_c/label', null]);
+  });
+
+  it('sends no page Tenant without the option', async () => {
+    const { calls, fetch } = fakeFetch(200, '{}');
+    const client = createApiClient({ fetch, csrfToken: () => 'csrf-1' });
+
+    await client.setTenantLabel('ten_a', { label: 'dev' });
+
+    assert.equal(TENANT_HEADER in calls[0].init.headers, false);
   });
 
   it('parses only a string code, and a missing trace ID as empty', () => {

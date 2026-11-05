@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text;
+using Gatekeep.Kernel.Audit;
 using Gatekeep.Kernel.Persistence;
 
 namespace Gatekeep.Modules.Tenancy.Contracts;
@@ -109,6 +110,21 @@ public static class TenantName
     }
 }
 
+/// <summary>
+/// The one encoding of <c>WhenProdTenant</c> for a Tenant's label (FR-7, FR-46; Story 1.28): only
+/// removing Prod needs a fresh assertion. Raising to Prod, Dev to Staging, Staging to Dev and an
+/// unchanged label never do.
+/// </summary>
+public static class TenantLabelChange
+{
+    /// <summary>Whether going from <paramref name="current"/> to <paramref name="requested"/> removes the Prod label.</summary>
+    public static bool RemovesProd(TenantLabel current, TenantLabel requested) =>
+        current == TenantLabel.Prod && requested != TenantLabel.Prod;
+}
+
+/// <summary>A Tenant's label and status, as read under its row lock.</summary>
+public sealed record TenantLabelState(TenantLabel Label, TenantStatus Status);
+
 /// <summary>A new Tenant, validated, with its ID and its address already derived.</summary>
 public sealed record TenantDraft(Guid Id, string Name, TenantLabel Label, TenantAddress Address);
 
@@ -157,6 +173,35 @@ public interface ITenants
     /// <exception cref="InvalidOperationException">The context isn't <paramref name="tenantId"/>'s.</exception>
     [StateChanging]
     Task<bool> ActivateAsync(CommandContext context, Guid tenantId, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// The <c>active</c> Tenants among <paramref name="ids"/>, with their <c>subdomain</c> host,
+    /// ordered by creation time then ID, in one query. No IDs is no query and an empty list.
+    /// </summary>
+    Task<IReadOnlyList<TenantRecord>> ListActiveAsync(CommandContext context, IReadOnlyCollection<Guid> ids, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Locks the Tenant's row (<c>FOR NO KEY UPDATE</c>) in its own context and reads its label and
+    /// status, or null when there is no such Tenant. The lock is held until the caller's
+    /// transaction ends, so a decision on the label holds for the write that follows. It doesn't
+    /// block the <c>FOR KEY SHARE</c> of a foreign-key insert referencing the Tenant.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The context isn't <paramref name="tenantId"/>'s.</exception>
+    Task<TenantLabelState?> LockLabelAsync(CommandContext context, Guid tenantId, CancellationToken cancellationToken);
+
+    /// <summary>The Tenant's label and status, read with no lock, in its own context; null when there is no such Tenant.</summary>
+    /// <exception cref="InvalidOperationException">The context isn't <paramref name="tenantId"/>'s.</exception>
+    Task<TenantLabelState?> GetLabelAsync(CommandContext context, Guid tenantId, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Sets an <c>active</c> Tenant's label, and nothing else, in its own context, and appends
+    /// <see cref="TenancyEvents.ProdLabelRemoved"/> when <paramref name="removedProd"/>, else
+    /// <see cref="TenancyEvents.LabelChanged"/>, on its chain, the Actor <paramref name="actor"/>
+    /// and the target the Tenant. The caller holds the row lock from <see cref="LockLabelAsync"/>.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The context isn't <paramref name="tenantId"/>'s, or no active Tenant was changed.</exception>
+    [StateChanging]
+    Task SetLabelAsync(CommandContext context, Guid tenantId, TenantLabel label, Actor actor, bool removedProd, CancellationToken cancellationToken);
 }
 
 /// <summary>

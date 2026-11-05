@@ -4,8 +4,11 @@
 
 export {
   CSRF_HEADER,
+  TENANT_HEADER,
   createApiClient,
   parseProblem,
+  type AdminTenant,
+  type AdminTenantListResponse,
   type AdminCredentialResponse,
   type AdminCredentialsResponse,
   type AdminRecoveryCodeResponse,
@@ -21,6 +24,7 @@ export {
   type ApiRequest,
   type ApiResponse,
   type ApiResult,
+  type ApiSent,
   type BootstrapClaimResponse,
   type CapabilitiesResponse,
   type CredentialCreationOptionsResponse,
@@ -29,8 +33,10 @@ export {
   type CredentialRegistrationResponse,
   type FreshAssertionBeginRequest,
   type OperationResponse,
+  type SetTenantLabelRequest,
   type TenantCapabilities,
   type TenantCreatedResponse,
+  type TenantLabelResponse,
   type TenantListResponse,
   type TenantResponse,
 } from './client';

@@ -28,6 +28,8 @@ export type MenuItem =
       disabled?: boolean;
       /** Drawn in bad, such as Delete. Its action still leads to a confirming modal. */
       tone?: 'destructive';
+      /** The one the page is on, such as the current Tenant: aria-current="true", on sf2. */
+      current?: boolean;
       /** A stable React key. The item's index otherwise. */
       key?: string;
     }
@@ -394,8 +396,9 @@ export function Menu({
             },
             role: 'menuitem',
             tabIndex: -1,
-            className: cx(styles.item, item.tone === 'destructive' && styles.destructive),
+            className: cx(styles.item, item.tone === 'destructive' && styles.destructive, item.current && styles.current),
             'aria-disabled': item.disabled || undefined,
+            'aria-current': item.current ? ('true' as const) : undefined,
             onClick: (event: MouseEvent<HTMLElement>) => onItemClick(item, event),
             onFocus: () => {
               lastFocused.current = index;

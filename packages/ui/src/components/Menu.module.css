@@ -67,6 +67,11 @@
   color: var(--gk-color-bad);
 }
 
+/* The item the page is on, such as the current Tenant: on sf2, as the design draws it. */
+.current {
+  background: var(--gk-menu-item-hover);
+}
+
 .item[aria-disabled='true'] {
   color: var(--gk-color-tx3);
   cursor: not-allowed;

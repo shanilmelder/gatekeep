@@ -27,6 +27,10 @@ export type TenantResponse = components['schemas']['TenantResponse'];
 export type TenantListResponse = components['schemas']['TenantListResponse'];
 export type TenantCreatedResponse = components['schemas']['TenantCreatedResponse'];
 export type OperationResponse = components['schemas']['OperationResponse'];
+export type AdminTenantListResponse = components['schemas']['AdminTenantListResponse'];
+export type AdminTenant = components['schemas']['AdminTenantResponse'];
+export type TenantLabelResponse = components['schemas']['TenantLabelResponse'];
+export type SetTenantLabelRequest = components['schemas']['SetTenantLabelRequest'];
 
 /** A path the committed OpenAPI document has, so a removed endpoint fails to compile. */
 export type ApiPath = keyof paths;
@@ -56,18 +60,35 @@ export type ApiRequest<P extends ApiPath, M extends ApiMethod<P>> =
 export const CSRF_HEADER = 'X-Gatekeep-CSRF';
 
 /**
+ * The Tenant the page shows (Story 1.28), which every state-changing call on the Tenant surface
+ * carries. The server only compares it with the path's Tenant: it never selects one.
+ */
+export const TENANT_HEADER = 'X-Gatekeep-Tenant';
+
+/** The Tenant surface's paths: only these carry TENANT_HEADER. */
+const TENANT_SURFACE = '/api/v1/tenants/';
+
+/** What a call sent that its answer is read against (Story 1.28): its path, and the page Tenant it carried. */
+export interface ApiSent {
+  /** The request's path and query, as sent, its IDs encoded. */
+  path: string;
+  /** The TENANT_HEADER value it carried, or null when it carried none. */
+  pageTenant: string | null;
+}
+
+/**
  * The outcome of one call: the body on success, or the problem the server refused it with, and
- * the response's headers either way, such as a 429's Retry-After.
+ * the response's headers either way, such as a 429's Retry-After, and what it sent.
  */
 export type ApiResult<T> =
-  | { ok: true; status: number; headers: Headers; data: T }
-  | {
+  | ({ ok: true; status: number; headers: Headers; data: T } & ApiSent)
+  | ({
       ok: false;
       status: number;
       headers: Headers;
       /** The problem body's code and trace ID. Null when the response had none, such as a 401 or 404. */
       problem: ApiProblem | null;
-    };
+    } & ApiSent);
 
 export interface ApiClientOptions {
   /** Where the API is. The page's own origin when empty, as on Host.Admin. */
@@ -76,6 +97,11 @@ export interface ApiClientOptions {
   csrfToken?: () => string | null | undefined;
   /** The fetch to use. The browser's by default. */
   fetch?: (input: string, init: RequestInit) => Promise<Response>;
+  /**
+   * The Tenant the page shows at send time, its `ten_` ID, or null on a page that shows none.
+   * Read at each state-changing call on the Tenant surface and sent as TENANT_HEADER.
+   */
+  pageTenant?: () => string | null | undefined;
 }
 
 const STATE_CHANGING: ReadonlySet<string> = new Set(['post', 'put', 'patch', 'delete']);
@@ -100,9 +126,14 @@ export function createApiClient(options: ApiClientOptions = {}) {
   ): Promise<ApiResult<ApiResponse<P, M>>> {
     const headers: Record<string, string> = { Accept: 'application/json' };
     if (body !== undefined) headers['Content-Type'] = 'application/json';
+    let pageTenant: string | null = null;
     if (STATE_CHANGING.has(method)) {
       const token = options.csrfToken?.();
       if (token) headers[CSRF_HEADER] = token;
+      if (path.startsWith(TENANT_SURFACE)) {
+        const page = options.pageTenant?.();
+        if (typeof page === 'string' && page !== '') headers[TENANT_HEADER] = pageTenant = page;
+      }
     }
 
     const response = await send(`${baseUrl}${path}`, {
@@ -124,9 +155,10 @@ export function createApiClient(options: ApiClientOptions = {}) {
     }
 
     const { status, headers: responseHeaders } = response;
+    const sent: ApiSent = { path, pageTenant };
     return response.ok
-      ? { ok: true, status, headers: responseHeaders, data: json as ApiResponse<P, M> }
-      : { ok: false, status, headers: responseHeaders, problem: parseProblem(json) };
+      ? { ok: true, status, headers: responseHeaders, data: json as ApiResponse<P, M>, ...sent }
+      : { ok: false, status, headers: responseHeaders, problem: parseProblem(json), ...sent };
   }
 
   return {
@@ -198,6 +230,17 @@ export function createApiClient(options: ApiClientOptions = {}) {
         `/api/v1/tenants/${encodeURIComponent(tenantId)}/operations/${encodeURIComponent(operationId)}` as '/api/v1/tenants/{tenantId}/operations/{operationId}',
         'get',
       ),
+    /** The active Tenants the current Admin holds a Tenant Role in, oldest first, for the Tenant switcher (Story 1.28). Never a role. */
+    listMyTenants: () => request('/api/v1/deployment/my-tenants', 'get'),
+    /** The Tenant's environment label. Its ID goes into the path encoded. */
+    getTenantLabel: (tenantId: string) =>
+      request(`/api/v1/tenants/${encodeURIComponent(tenantId)}/label` as '/api/v1/tenants/{tenantId}/label', 'get'),
+    /** Changes the Tenant's environment label. Removing Prod needs a fresh assertion bound to this Tenant. */
+    setTenantLabel: (tenantId: string, body: SetTenantLabelRequest) =>
+      request(`/api/v1/tenants/${encodeURIComponent(tenantId)}/label` as '/api/v1/tenants/{tenantId}/label', 'put', body),
+    /** Begins a fresh assertion for a Tenant action, bound to the Tenant `tenantId` names. The Deployment complete finishes it. */
+    beginTenantFreshAssertion: (tenantId: string, binding: FreshAssertionBeginRequest) =>
+      request(`/api/v1/tenants/${encodeURIComponent(tenantId)}/assertions` as '/api/v1/tenants/{tenantId}/assertions', 'post', binding),
     /** Retries a failed Tenant creation's failed steps: a 202 with the Operation running again, or 409 when it isn't failed. */
     retryOperation: (operationId: string) =>
       request(

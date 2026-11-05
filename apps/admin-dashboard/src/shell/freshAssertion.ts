@@ -9,11 +9,19 @@
 // (test/freshAssertion.test.mjs). The calls are injected: the shell wraps each one in its
 // Session renewal, so a 401 still renews and a state-changing request is never sent twice by it.
 
-/** What a fresh assertion confirms: an action, and its target exactly as the action's request names it. */
+/**
+ * What a fresh assertion confirms: an action, its target exactly as the action's request names
+ * it, and for a Tenant action the Tenant its path names (Story 1.28), whose begin is then on the
+ * Tenant surface. A grant for one Tenant never serves another.
+ */
 export interface Binding {
   action: string;
   target?: string | null;
+  tenantId?: string | null;
 }
+
+/** What the begin call is given: the binding, with the Tenant only when it has one. */
+export type BeginBinding = { action: string; target: string | null; tenantId?: string };
 
 /** The parts of an API answer this module reads. */
 export interface Answer {
@@ -40,8 +48,11 @@ export type Confirmation =
 export type Guarded<R> = { kind: 'answered'; answer: R } | { kind: 'unconfirmed'; confirmation: Exclude<Confirmation, { kind: 'confirmed' }> };
 
 export interface FreshAssertionCalls {
-  /** POST /assertions with the binding, through the shell's renewal. */
-  begin(binding: { action: string; target: string | null }): Promise<Answer>;
+  /**
+   * POST /assertions with the binding, through the shell's renewal: the Tenant surface's
+   * /tenants/{tenantId}/assertions when the binding has a Tenant, else the Deployment's.
+   */
+  begin(binding: BeginBinding): Promise<Answer>;
   /** POST /assertions/complete with the assertion, through the shell's renewal. */
   complete(assertion: unknown): Promise<Answer>;
   /**
@@ -76,7 +87,10 @@ export function createFreshAssertion(calls: FreshAssertionCalls) {
   async function confirmItsYou(binding: Binding, signal?: AbortSignal): Promise<Confirmation> {
     try {
       if (signal?.aborted) return { kind: 'cancelled' };
-      const begin = await calls.begin({ action: binding.action, target: binding.target ?? null });
+      const target = binding.target ?? null;
+      const begin = await calls.begin(
+        binding.tenantId ? { action: binding.action, target, tenantId: binding.tenantId } : { action: binding.action, target },
+      );
       if (!begin.ok || begin.data === undefined || begin.data === null) return refusal(begin.ok ? null : begin);
       if (signal?.aborted) return { kind: 'cancelled' };
 

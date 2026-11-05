@@ -68,7 +68,8 @@ public static class TableRegistry
         // Story 1.27: Host.Admin creates a Tenant, always creating, which its creation Operation's
         // completion, as gk_worker, makes active once its settings exist. Nobody else changes one, and
         // the triggers keep its ID, issuer, RP ID, link base and creation time, and let its status go
-        // only from creating to active. They hold every DML by any role; an owner or superuser can
+        // only from creating to active. From Story 1.28 a Tenant Owner, through Host.Admin, changes its
+        // label, only while it is active. They hold every DML by any role; an owner or superuser can
         // still disable triggers.
         new(
             "tenant",
@@ -87,6 +88,8 @@ public static class TableRegistry
                 [Sealer] = [new ColumnGrant(Select, ["id"])],
                 // Activation, once the creation Operation succeeds.
                 [Worker] = [new ColumnGrant(Update, ["status"])],
+                // A Tenant Owner's label change (Story 1.28), and no other column.
+                [Admin] = [new ColumnGrant(Update, ["label"])],
             },
             ["tenant_guard_insert", "tenant_guard_update"]),
 

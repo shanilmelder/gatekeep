@@ -1,11 +1,11 @@
 // What the current Admin holds, as the server says (UX-DR23). The shell reads the Deployment
-// capabilities on every in-shell navigation, and on a /tenants/{tenantId}/… path the path
-// Tenant's too. Nothing is cached across navigations or stored, so a Tenant Role removed
+// capabilities and the Tenants the Admin holds a role in (Story 1.28) on every in-shell
+// navigation, and on a /tenants/{tenantId}/… path the path Tenant's capabilities too. Nothing is cached across navigations or stored, so a Tenant Role removed
 // mid-session counts on the next navigation (Story 8.4). Pages ask `has(capability)`; the UI
 // never names, compares or infers a role (AD-20), and hiding is never the control: the server
 // refuses everything on its own (Story 1.24).
 
-import type { ApiProblem, ApiResult, CapabilitiesResponse } from '@gatekeep/api-client';
+import type { AdminTenant, AdminTenantListResponse, ApiProblem, ApiResult, CapabilitiesResponse } from '@gatekeep/api-client';
 import { createContext, createElement, useContext, useEffect, useState, type ReactNode } from 'react';
 import { api } from '../session';
 
@@ -21,11 +21,18 @@ export interface ReadFailure {
   traceId: string;
 }
 
-/** The two lists the current route read: Deployment, and the path Tenant's or none. */
+/** The lists the current route read: Deployment, the path Tenant's or none, and the Admin's Tenants. */
 export interface Held {
   deployment: ReadonlySet<Capability>;
   tenantId: string | null;
   tenant: ReadonlySet<Capability> | null;
+  /** The active Tenants the Admin holds a role in, oldest first, for the switcher. Never a role. */
+  tenants: readonly AdminTenant[];
+  /**
+   * Why that list failed to read, or null. Only the switcher and the landing, which need it,
+   * show the failure: every other page reads as its capability lists say.
+   */
+  tenantsFailure: ReadFailure | null;
 }
 
 export type Reads =
@@ -36,7 +43,7 @@ export type Reads =
   /** A 5xx, a lost connection, another refusal or a 2xx with no list. */
   | { kind: 'failed'; failure: ReadFailure };
 
-const NONE: Held = { deployment: new Set(), tenantId: null, tenant: null };
+const NONE: Held = { deployment: new Set(), tenantId: null, tenant: null, tenants: [], tenantsFailure: null };
 
 /**
  * The path Tenant: the segment after /tenants/, decoded once, so the client's own encoding puts
@@ -79,6 +86,31 @@ async function readOne(read: ShellRead, call: () => Promise<ApiResult<Capabiliti
   }
 }
 
+type TenantsOutcome = { tenants: readonly AdminTenant[] } | { failed: ReadFailure };
+
+const LABELS: ReadonlySet<string> = new Set(['dev', 'staging', 'prod']);
+
+function isTenant(value: unknown): value is AdminTenant {
+  if (typeof value !== 'object' || value === null) return false;
+  const { id, name, host, label } = value as Record<string, unknown>;
+  return typeof id === 'string' && typeof name === 'string' && typeof host === 'string' && typeof label === 'string' && LABELS.has(label);
+}
+
+/** The switcher's list: a 2xx without it, or with an entry that isn't a Tenant, is a failed read. */
+async function readTenants(read: ShellRead, signal: AbortSignal): Promise<TenantsOutcome> {
+  let result: ApiResult<AdminTenantListResponse> | null;
+  try {
+    result = await read(() => api.listMyTenants(), signal);
+  } catch {
+    result = null;
+  }
+  if (result === null) return { failed: { code: '', traceId: '' } };
+  if (!result.ok) return { failed: failureOf(result.problem) };
+  const list = result.data?.tenants;
+  if (!Array.isArray(list) || !list.every(isTenant)) return { failed: { code: '', traceId: '' } };
+  return { tenants: list };
+}
+
 /** The reads that last answered: the path and navigation they were for, and what they said. */
 export interface Answered {
   /** The navigation they were read for. A Retry reads again for the same one. */
@@ -111,13 +143,17 @@ export function useCapabilityReads(
     void Promise.all([
       readOne(read, () => api.getCapabilities(), controller.signal),
       tenantId === null ? Promise.resolve(null) : readOne(read, () => api.getTenantCapabilities(tenantId), controller.signal),
-    ]).then(([deployment, tenantOutcome]) => {
+      readTenants(read, controller.signal),
+    ]).then(([deployment, tenantOutcome, mine]) => {
       if (controller.signal.aborted) return;
       const deploymentFailure = 'list' in deployment ? null : 'denied' in deployment ? deployment.denied : deployment.failed;
+      // The switcher's list degrades the switcher (and the landing, which needs it), never the page.
       setHeld({
         deployment: 'list' in deployment ? deployment.list : NONE.deployment,
         tenantId,
         tenant: tenantOutcome && 'list' in tenantOutcome ? tenantOutcome.list : null,
+        tenants: 'tenants' in mine ? mine.tenants : NONE.tenants,
+        tenantsFailure: 'failed' in mine ? mine.failed : null,
       });
       let reads: Answered['reads'];
       if (tenantOutcome && 'denied' in tenantOutcome) reads = { kind: 'forbidden', failure: tenantOutcome.denied, also: deploymentFailure };
@@ -138,15 +174,18 @@ export interface CapabilitiesValue {
   has: (capability: Capability) => boolean;
   /** The path Tenant those reads were for, or null. */
   tenantId: string | null;
+  /** The path Tenant's capabilities, as the server listed them: empty without a path Tenant. */
+  tenantCapabilities: ReadonlySet<Capability>;
 }
 
-const CapabilitiesContext = createContext<CapabilitiesValue>({ has: () => false, tenantId: null });
+const CapabilitiesContext = createContext<CapabilitiesValue>({ has: () => false, tenantId: null, tenantCapabilities: new Set() });
 
 /** `has` over the held lists: a `deployment.*` name in the Deployment list, a `tenant.*` one in the path Tenant's. */
 export function capabilitiesOf(held: Held): CapabilitiesValue {
   return {
     has: (capability) => (capability.startsWith('deployment.') ? held.deployment.has(capability) : (held.tenant?.has(capability) ?? false)),
     tenantId: held.tenantId,
+    tenantCapabilities: held.tenant ?? new Set(),
   };
 }
 
