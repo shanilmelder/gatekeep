@@ -42,14 +42,28 @@ public static class OperationsContract
     public static OperationCode PurgeChainStage => AuditRetentionJobs.PurgeStage;
 
     /// <summary>
-    /// Creates a new Tenant's secret class keys, then, once every stage has succeeded, its
-    /// settings, and makes it active (Story 1.27). Tenant creation starts it scoped to the new
-    /// Tenant, with one <see cref="TenantCreationStage"/> step for it.
+    /// Creates a new Tenant's secret class keys (Story 1.27) and its Signing Keys (Story 2.3), then,
+    /// once every stage has succeeded, its settings, and makes it active. Tenant creation starts it
+    /// scoped to the new Tenant, with one step for it per <see cref="TenantCreationStages"/>.
     /// </summary>
     public static OperationType TenantCreationOperation => TenantCreation.Type;
 
-    /// <summary>The creation Operation's one stage so far: the six secret class keys (AD-10).</summary>
+    /// <summary>The creation Operation's first stage: the six secret class keys (AD-10).</summary>
     public static OperationCode TenantCreationStage => TenantCreation.SecretClassKeysStage;
+
+    /// <summary>
+    /// The creation Operation's second stage (Story 2.3): the Tenant's current and next Signing and
+    /// Management keys and its wrapped token protection key, through <c>KeysContract.EnsureTenantKeysAsync</c>.
+    /// </summary>
+    public static OperationCode TenantSigningKeysStage => TenantCreation.SigningKeysStage;
+
+    /// <summary>Every stage Tenant creation plans, one step each for the new Tenant.</summary>
+    public static IReadOnlyList<OperationCode> TenantCreationStages => TenantCreation.Stages;
+
+    /// <summary>
+    /// Gives every active Tenant the keys it lacks, as Tenant creation does (Story 2.3). Scheduled hourly.
+    /// </summary>
+    public static JobType BackfillTenantKeys => ProductionJobs.BackfillTenantKeys;
 
     /// <summary>
     /// The code-owned production Operation types: <see cref="PurgeChainOperation"/> and

@@ -54,9 +54,9 @@ public sealed class TenantCreationTests(PostgresFixture postgres)
 
         Assert.Equal("tenancy.tenant.create", operation.GetProperty("type").GetString());
         Assert.Equal("running", operation.GetProperty("status").GetString());
-        var step = Assert.Single(operation.GetProperty("steps").EnumerateArray());
-        Assert.Equal("keys.secret_classes", step.GetProperty("stage").GetString());
-        Assert.False(step.TryGetProperty("id", out _));
+        var steps = operation.GetProperty("steps").EnumerateArray().ToList();
+        Assert.Equal(["keys.secret_classes", "keys.signing"], steps.Select(s => s.GetProperty("stage").GetString()));
+        Assert.All(steps, s => Assert.False(s.TryGetProperty("id", out _)));
 
         Assert.Equal(
             "creating|https://acme-dev.gatekeep.test/|acme-dev.gatekeep.test|https://acme-dev.gatekeep.test/|Acme Dev|dev",
@@ -65,7 +65,7 @@ public sealed class TenantCreationTests(PostgresFixture postgres)
         Assert.Equal("owner", await host.ScalarAsync<string>($"SELECT role FROM tenant_role WHERE tenant_id = '{tenantId}' AND admin_id = '{owner}'"));
         Assert.Equal(1L, await host.ScalarAsync<long>("SELECT count(*) FROM tenant_role"));
         Assert.Equal($"running|{tenantId}", await host.ScalarAsync<string>($"SELECT status || '|' || tenant_id FROM operation WHERE id = '{operationId}'"));
-        Assert.Equal(1L, await host.ScalarAsync<long>($"SELECT count(*) FROM operation_step WHERE operation_id = '{operationId}' AND tenant_id = '{tenantId}' AND status = 'pending'"));
+        Assert.Equal(2L, await host.ScalarAsync<long>($"SELECT count(*) FROM operation_step WHERE operation_id = '{operationId}' AND tenant_id = '{tenantId}' AND status = 'pending'"));
         Assert.Equal(1L, await host.ScalarAsync<long>($"SELECT count(*) FROM job WHERE type = 'operations.operation.run' AND operation_id = '{operationId}'"));
         Assert.Equal(
             1L,
@@ -335,9 +335,13 @@ public sealed class TenantCreationTests(PostgresFixture postgres)
             using var json = JsonDocument.Parse(await mine.Content.ReadAsStringAsync(Cancellation));
             Assert.Equal(opA, json.RootElement.GetProperty("id").GetString());
             Assert.Equal(tenantA, json.RootElement.GetProperty("tenantId").GetString());
-            var step = Assert.Single(json.RootElement.GetProperty("steps").EnumerateArray());
-            Assert.Equal(tenantA, step.GetProperty("tenantId").GetString());
-            Assert.Equal(["attempts", "resultCode", "stage", "status", "tenantId", "updatedAt"], step.EnumerateObject().Select(p => p.Name).Order(StringComparer.Ordinal));
+            var steps = json.RootElement.GetProperty("steps").EnumerateArray().ToList();
+            Assert.Equal(["keys.secret_classes", "keys.signing"], steps.Select(s => s.GetProperty("stage").GetString()));
+            Assert.All(steps, step =>
+            {
+                Assert.Equal(tenantA, step.GetProperty("tenantId").GetString());
+                Assert.Equal(["attempts", "resultCode", "stage", "status", "tenantId", "updatedAt"], step.EnumerateObject().Select(p => p.Name).Order(StringComparer.Ordinal));
+            });
         }
 
         // Owner of both: another Tenant's Operation, an unknown one and a malformed ID look alike.

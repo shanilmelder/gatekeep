@@ -436,6 +436,21 @@ public static class TableRegistry
                 [Admin] = [new ColumnGrant(Update, ["confirmed_at", "used_at"])],
             },
             ["admin_recovery_code_guard"]),
+
+        // Story 2.3 (AD-10, AD-11): each Tenant's Signing and Management key rows, and its token
+        // protection key, only as the Transit wrap. Host.Worker creates them at Tenant creation and in
+        // the hourly backfill; Host.Hosted only reads them, for discovery and JWKS. No role updates or
+        // deletes one yet: rotation and destruction are Story 2.4's.
+        new("signing_key", TableClass.Tenant, "Keys", new Dictionary<string, IReadOnlyList<string>>
+        {
+            [Hosted] = [Select],
+            [Worker] = [Select, Insert],
+        }),
+        new("protection_key_wrap", TableClass.Tenant, "Keys", new Dictionary<string, IReadOnlyList<string>>
+        {
+            [Hosted] = [Select],
+            [Worker] = [Select, Insert],
+        }),
     ];
 
     private static IReadOnlyList<string> EventTriggers(string table) =>

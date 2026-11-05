@@ -70,6 +70,28 @@ public sealed class WorkerStartupTests(PostgresFixture postgres) : IDisposable
     }
 
     [Fact]
+    public async Task Configured_worker_enqueues_the_key_backfill_and_runs_it_to_done()
+    {
+        // No Tenant yet, so the hourly backfill (Story 2.3) runs with custody and finds nothing to do.
+        var database = await postgres.NewMigratedDatabaseAsync();
+
+        using var process = HostProcess.Start("Worker", Configured(database));
+
+        var deadline = DateTimeOffset.UtcNow + Timeout;
+        var done = 0L;
+        while (done == 0 && !process.HasExited && DateTimeOffset.UtcNow < deadline)
+        {
+            await Task.Delay(TimeSpan.FromMilliseconds(250), Cancellation);
+            done = await PostgresFixture.ScalarAsync<long>(
+                postgres.SuperuserConnection(database),
+                "SELECT count(*) FROM job WHERE type = 'keys.tenant_keys.backfill' AND deployment_wide AND status = 'done'");
+        }
+
+        Assert.False(process.HasExited, "Host.Worker stopped instead of running.");
+        Assert.Equal(1L, done);
+    }
+
+    [Fact]
     public async Task Configured_worker_hands_its_key_custody_to_the_job_runner()
     {
         // No production job type carries a credential yet, so the runner says at start

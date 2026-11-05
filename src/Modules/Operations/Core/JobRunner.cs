@@ -339,7 +339,7 @@ internal sealed class JobRunner : IJobRunner
                 : await DeploymentScope.BeginAsync(source, lease.Token);
 
             var context = scope.CreateCommandContext();
-            var services = new JobRunServices(source, _operations, _custody);
+            var services = new JobRunServices(source, _operations, _custody, _logger);
             var run = claim.TenantId is { } tenant
                 ? await TenantRunAsync(claim, definition, tenant, context, services, lease.Token)
                 : new JobRun(claim.Id, definition.Type, null, claim.OperationId, claim.Attempt, NoIds, context, null, services);

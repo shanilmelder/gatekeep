@@ -100,6 +100,7 @@ flowchart TD
   TestsIsolation --> Keys
   TestsIsolation --> Management
   TestsIsolation --> Operations
+  TestsIsolation --> Protocol
   TestsIsolation --> Sessions
   TestsIsolation --> Tenancy
 ```
