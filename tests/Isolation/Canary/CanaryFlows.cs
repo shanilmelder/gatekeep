@@ -292,11 +292,18 @@ internal static class CanaryFlows
             Reviewer,
             Reviewed),
         new(
+            new(SurfaceKind.JobType, "keys.tenant_keys.backfill"),
+            "Deployment-wide, so it carries no payload. Reads active Tenant IDs; per Tenant it creates keys by name in custody "
+            + "and stores only key names, versions and Transit's wrapped ciphertext, with an ID-only event. No key material leaves custody.",
+            "Story 2.3 build review",
+            new DateOnly(2026, 11, 5)),
+        new(
             new(SurfaceKind.OperationType, "tenancy.tenant.create"),
-            "Its one Tenant stage creates the six secret class keys by name only and stores a fixed result code; its completion "
-            + "inserts an empty settings row, sets the status and writes an ID-only event. No key material leaves custody.",
-            "Story 1.27 build review",
-            new DateOnly(2026, 11, 4)),
+            "Its Tenant stages create the six secret class keys, then the Signing and Management keys and the wrapped token "
+            + "protection key, by name only, storing key names, versions, Transit's ciphertext and fixed result codes; its "
+            + "completion inserts an empty settings row, sets the status and writes an ID-only event. No key material leaves custody.",
+            "Story 2.3 build review",
+            new DateOnly(2026, 11, 5)),
     ];
 
     /// <summary>Every production surface: the job and Operation registries, the Cli's commands and the hosts.</summary>

@@ -1,5 +1,20 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
+  <PropertyGroup>
+    <!-- The architecture tests load this assembly from its own output, so OpenIddict must sit beside it. -->
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Story 2.3: OpenIddict's server, wrapped per Tenant, runs on Host.Hosted. -->
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Npgsql" />
+    <PackageReference Include="OpenIddict.Server.AspNetCore" />
+  </ItemGroup>
+
   <ItemGroup>
     <ProjectReference Include="../../Gatekeep.Kernel/Gatekeep.Kernel.csproj" />
     <ProjectReference Include="../Authentication/Gatekeep.Modules.Authentication.csproj" />

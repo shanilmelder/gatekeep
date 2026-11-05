@@ -22,6 +22,8 @@ internal static class ProductionJobs
 
     public static readonly JobType PurgeChain = new("audit.chain.purge");
 
+    public static readonly JobType BackfillTenantKeys = TenantKeyBackfill.Type;
+
     public static readonly JobRegistry Registry = new(
     [
         new JobDefinition(
@@ -96,6 +98,20 @@ internal static class ProductionJobs
             runAs: JobRole.Retention,
             maxAttempts: 20,
             handler: AuditRetentionJobs.PurgeAsync),
+        new JobDefinition(
+            BackfillTenantKeys,
+            JobScope.DeploymentWide,
+            enqueuingRoles: [JobRole.Worker],
+            runAs: JobRole.Worker,
+            maxAttempts: 5,
+            handler: TenantKeyBackfill.RunAsync,
+            review: new JobReview(
+                "Story 2.3 build review",
+                new DateOnly(2026, 11, 5),
+                "Takes no parameter. In its own scope it reads only the IDs of active Tenants. For each it opens "
+                + "that Tenant's own scope and, only where the Tenant lacks them, creates its Signing and Management "
+                + "keys and its wrapped token protection key in key custody and inserts their signing_key and "
+                + "protection_key_wrap rows with one audit event. It updates and deletes nothing.")),
     ]);
 
     private const string DeleteDone =

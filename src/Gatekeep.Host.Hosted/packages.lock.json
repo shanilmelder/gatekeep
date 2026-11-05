@@ -2,6 +2,67 @@
   "version": 2,
   "dependencies": {
     "net10.0": {
+      "OpenIddict.Server.AspNetCore": {
+        "type": "Direct",
+        "requested": "[7.7.2, )",
+        "resolved": "7.7.2",
+        "contentHash": "Nde/hqZbxCbhP8KE5laXbLzsgMFEClaAPL3hiGUezob6ixsq5ga84yQ4aPVrI35sD8Cd6BOh74DkqwvWwZRrfg==",
+        "dependencies": {
+          "OpenIddict.Server": "7.7.2"
+        }
+      },
+      "Microsoft.Bcl.Cryptography": {
+        "type": "Transitive",
+        "resolved": "10.0.2",
+        "contentHash": "LG9Yll3B5aNpxv0+D47g6LiOiKBIlodhcHdQwcYzo8VeexFLGqx5ymetmA2aBRyo9cCcWsQWrFsdbsr8LvmWDw=="
+      },
+      "Microsoft.IdentityModel.Abstractions": {
+        "type": "Transitive",
+        "resolved": "8.19.2",
+        "contentHash": "HJbo/lnSfNHUfphPRT910poQc4T2/9+8svFLvzuaYHGAOJ2Tu+oEDqpX0BVP3BJ4OuUM1kylEKyaiX2fCAK3Cw=="
+      },
+      "Microsoft.IdentityModel.JsonWebTokens": {
+        "type": "Transitive",
+        "resolved": "8.19.2",
+        "contentHash": "ui3fuBT4fs8kdKfBthI4NzLYIBIneEVS8UrL1JVBzAn80UiKmngBBi0BEByE7n/9c+EElcfFlCMFFTqpkBSLNA==",
+        "dependencies": {
+          "Microsoft.IdentityModel.Tokens": "8.19.2"
+        }
+      },
+      "Microsoft.IdentityModel.Logging": {
+        "type": "Transitive",
+        "resolved": "8.19.2",
+        "contentHash": "r5YLDIxGOnkVJHrqXv/iD1FM1CgGrQOdriXuvuWvTPmKbnGANhEysq9XKmN6IHjf2a+9bAGEpnoRBsAQlvJU5w==",
+        "dependencies": {
+          "Microsoft.IdentityModel.Abstractions": "8.19.2"
+        }
+      },
+      "Microsoft.IdentityModel.Tokens": {
+        "type": "Transitive",
+        "resolved": "8.19.2",
+        "contentHash": "GtPC1S02uH1gOO4fQ+zRysIicKmEXaYFP8PIkdJYXqMyruYhopre4ozVHp0XiDSA0+GJvOZH9prxCPvgBMg4Ww==",
+        "dependencies": {
+          "Microsoft.Bcl.Cryptography": "10.0.2",
+          "Microsoft.IdentityModel.Logging": "8.19.2"
+        }
+      },
+      "OpenIddict.Abstractions": {
+        "type": "Transitive",
+        "resolved": "7.7.2",
+        "contentHash": "rt5feUxOneeZ15jz2koGFVbLWA9gbDu4yPgr9nArFx6YpwP+iaNZHENTi44pTxCXo6wMBaeaApjn1ZMvCu3EEw==",
+        "dependencies": {
+          "Microsoft.IdentityModel.Tokens": "8.19.2"
+        }
+      },
+      "OpenIddict.Server": {
+        "type": "Transitive",
+        "resolved": "7.7.2",
+        "contentHash": "azPkMKSMTSlvIKwdesbSaHvTdaNWndqrw/e6P9lyP5/6QG5IhrTK3y2rHWQlv14EU9xG/YegLimP61zapq+ocg==",
+        "dependencies": {
+          "Microsoft.IdentityModel.JsonWebTokens": "8.19.2",
+          "OpenIddict.Abstractions": "7.7.2"
+        }
+      },
       "gatekeep.adapters.hosting": {
         "type": "Project",
         "dependencies": {
@@ -76,7 +137,9 @@
           "Gatekeep.Modules.Identity": "[0.1.0, )",
           "Gatekeep.Modules.Keys": "[0.1.0, )",
           "Gatekeep.Modules.Sessions": "[0.1.0, )",
-          "Gatekeep.Modules.Tenancy": "[0.1.0, )"
+          "Gatekeep.Modules.Tenancy": "[0.1.0, )",
+          "Npgsql": "[10.0.3, )",
+          "OpenIddict.Server.AspNetCore": "[7.7.2, )"
         }
       },
       "gatekeep.modules.sessions": {

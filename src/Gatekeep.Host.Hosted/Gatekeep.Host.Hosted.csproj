@@ -5,6 +5,11 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- Story 2.3: the Protocol module's OpenIddict server runs here. -->
+    <PackageReference Include="OpenIddict.Server.AspNetCore" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="../Gatekeep.Kernel/Gatekeep.Kernel.csproj" />
     <ProjectReference Include="../Adapters/Logging/Gatekeep.Adapters.Logging.csproj" />
     <ProjectReference Include="../Adapters/Hosting/Gatekeep.Adapters.Hosting.csproj" />

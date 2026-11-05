@@ -106,4 +106,16 @@ public static class SecurityLimits
     /// and Your credentials, and the database refuses an 11th.
     /// </summary>
     public const int MaxAdminCredentials = 10;
+
+    /// <summary>
+    /// How long Host.Hosted keeps a Tenant's built OpenIddict runtime: 5 seconds at most (AD-11's JWKS
+    /// exception, Story 2.3). Its unwrapped token protection key lives no longer than that either.
+    /// </summary>
+    public static readonly TimeSpan TenantRuntimeLifetime = TimeSpan.FromSeconds(5);
+
+    /// <summary>How long a relying party may cache a Tenant's JWKS: 15 minutes, as <c>max-age=900</c> (AD-11).</summary>
+    public static readonly TimeSpan JwksMaxAge = TimeSpan.FromMinutes(15);
+
+    /// <summary>How long one key custody call on the Hosted request path may take: 5 seconds (Story 2.3).</summary>
+    public static readonly TimeSpan KeyCustodyCallTimeout = TimeSpan.FromSeconds(5);
 }

@@ -25,6 +25,7 @@ Every audit type code Gatekeep writes, declared in its module's contract. Codes 
 | `bootstrap.admin.created` | Admins | The bootstrap token was claimed: the first Admin was created as Deployment Owner and bootstrap completed. Holds no token or hash. | None |
 | `bootstrap.token.issued` | Admins | gatekeep init issued the first one-time bootstrap token. It expires 15 minutes after issue. Holds no token or hash. | None |
 | `bootstrap.token.reissued` | Admins | gatekeep init reissued the bootstrap token, voiding the previous one. It expires 15 minutes after issue. Holds no token or hash. | None |
+| `keys.tenant_keys.provisioned` | Keys | A Tenant's missing Signing Keys, Management keys or token protection key were created in key custody. Names no key. | None |
 | `operations.job.dead` | Operations | A job used its last attempt and went dead. Only its fixed failure code is kept. | None |
 | `operations.operation.retried` | Operations | An Admin retried a failed Operation's failed steps. Names the Operation's Tenant only, when it has one. | None |
 | `sessions.access.revoked` | Sessions | Sessions in scope ended and their Token Families and tokens were revoked. User scope targets the User. | Session and token revocation |

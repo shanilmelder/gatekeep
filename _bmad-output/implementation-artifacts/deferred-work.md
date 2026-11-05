@@ -349,3 +349,18 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-1-28-switch-tenants-and-set-the-environment-label.md`
   summary: Every later rule that reads the label (the 90-day Prod retention floor, Prod callback confirmation, Dev-only email verification off, the conformance Tenant) reads it when its own setting changes, and never rewrites a setting because the label changed.
   evidence: Story 1.28: no setting reads the label yet, so removing Prod writes only `tenant.label`; threat model T-56.
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-3-publish-discovery-and-jwks-per-tenant.md`
+  summary: Bound or fan out the hourly key backfill, so a first run over many pre-2.3 Tenants can't outlive its job lease.
+  evidence: Story 2.3 review: `TenantKeyBackfill.RunAsync` provisions every active Tenant in one job run (up to four RSA-3072 Transit keys plus a wrap each).
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-3-publish-discovery-and-jwks-per-tenant.md`
+  summary: A test that concurrent cold requests share one Tenant runtime build, alongside Story 2.5's token-endpoint load test.
+  evidence: Story 2.3 review: every Protocol test sends requests one at a time.
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-3-publish-discovery-and-jwks-per-tenant.md`
+  summary: Rotation and revocation (Stories 2.4, 9.x) must never commit a Tenant with a `next` and no `current`, or `EnsureTenantKeysAsync` would create a `current` that was never published ahead.
+  evidence: Story 2.3 review: the backfill creates whatever (purpose, state) is missing.
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-3-publish-discovery-and-jwks-per-tenant.md`
+  summary: A stored, unique, dot-free `tenant.public_id` before Story 2.9 issues codes.
+  evidence: Story 2.3 left it out by spec; only `PublicId.Format` exists.
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-3-publish-discovery-and-jwks-per-tenant.md`
+  summary: Story 2.4 adds the `NOTIFY` that clears Host.Hosted's 5-second Tenant runtime cache on a key state change.
+  evidence: Story 2.3 caches each runtime for at most 5 seconds, with no NOTIFY yet.

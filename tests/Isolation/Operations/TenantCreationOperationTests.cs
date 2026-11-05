@@ -12,8 +12,9 @@ using static Gatekeep.Tests.Isolation.Jobs.JobDatabase;
 namespace Gatekeep.Tests.Isolation.Operations;
 
 /// <summary>
-/// Story 1.27 (AD-10, AD-30): <c>tenancy.tenant.create</c> through the real job path. Its one stage
-/// creates the six secret class keys through the Worker's custody; its completion handler, in the
+/// Story 1.27 (AD-10, AD-30): <c>tenancy.tenant.create</c> through the real job path. Its first stage
+/// creates the six secret class keys through the Worker's custody, and from Story 2.3 its second the
+/// Signing and Management keys and the wrapped token protection key; its completion handler, in the
 /// transaction that marks it succeeded and in the Tenant's own scope, inserts the settings row,
 /// makes the Tenant active and writes <c>tenancy.tenant.activated</c>, exactly once. A dead run or
 /// step job fails its steps, so the Operation fails and Retry applies.
@@ -33,9 +34,13 @@ public sealed class TenantCreationOperationTests(PostgresFixture postgres)
         Assert.Equal("creating", await StatusAsync(database, tenant));
         await DrainAsync(database, custody);
 
-        Assert.Equal([.. SecretClassPrefixes.Select(p => $"{p}-{tenant:D}")], custody.Created);
+        Assert.Superset(SecretClassPrefixes.Select(p => $"{p}-{tenant:D}").ToHashSet(), custody.Created.ToHashSet());
+        Assert.Equal(2, custody.Created.Count(n => n.StartsWith($"sig-{tenant:D}-", StringComparison.Ordinal)));
+        Assert.Equal(2, custody.Created.Count(n => n.StartsWith($"mgmt-{tenant:D}-", StringComparison.Ordinal)));
+        Assert.Equal(KeyRows, await KeyRowsAsync(database, tenant));
+        Assert.Equal(1L, await database.ScalarAsync<long>($"SELECT count(*) FROM protection_key_wrap WHERE tenant_id = '{tenant}'"));
         Assert.Equal("succeeded", await database.ScalarAsync<string>($"SELECT status FROM operation WHERE id = '{operation}'"));
-        Assert.Equal("succeeded/succeeded", await StepAsync(database, operation));
+        Assert.Equal(Both("succeeded/succeeded"), await StepAsync(database, operation));
         Assert.Equal("active", await StatusAsync(database, tenant));
         Assert.Equal(1L, await database.ScalarAsync<long>($"SELECT count(*) FROM tenant_settings WHERE tenant_id = '{tenant}'"));
         Assert.Equal(
@@ -50,29 +55,38 @@ public sealed class TenantCreationOperationTests(PostgresFixture postgres)
     {
         var (database, tenant, operation, _) = await CreatedAsync();
 
-        // The first attempt creates all six keys, then outlives its lease: its transaction rolls back.
-        var custody = new RecordingCustody { HangAfter = 6 };
+        // The keys.signing step creates its first Signing Key in Transit, then outlives its lease:
+        // its transaction rolls back, and the Transit key it made is left unnamed. Jobs run until
+        // that step has hung, whichever order the two step jobs are claimed in.
+        var custody = new RecordingCustody { HangOn = n => n.StartsWith("sig-", StringComparison.Ordinal) };
         await using (var runner = database.Runner(OperationsContract.ProductionRegistry, custody, options: FastOptions with { Lease = TimeSpan.FromSeconds(2) }))
         {
-            Assert.True(await runner.RunOnceAsync(Cancellation));
-            Assert.True(await runner.RunOnceAsync(Cancellation));
+            for (var i = 0; i < 3 && !custody.Hung; i++)
+            {
+                Assert.True(await runner.RunOnceAsync(Cancellation));
+            }
         }
 
-        Assert.Equal(6, custody.Created.Count);
+        Assert.True(custody.Hung);
+        Assert.Single(custody.Created, n => n.StartsWith("sig-", StringComparison.Ordinal));
+        Assert.Equal(0L, await database.ScalarAsync<long>($"SELECT count(*) FROM protection_key_wrap WHERE tenant_id = '{tenant}'"));
+        Assert.Equal(0L, await database.ScalarAsync<long>($"SELECT count(*) FROM signing_key WHERE tenant_id = '{tenant}'"));
         Assert.Equal("creating", await StatusAsync(database, tenant));
         Assert.Equal("running", await database.ScalarAsync<string>($"SELECT status FROM operation WHERE id = '{operation}'"));
         await database.SuperuserAsync("UPDATE job SET run_after = now() WHERE status = 'pending'");
 
-        custody.HangAfter = null;
+        custody.HangOn = null;
         await DrainAsync(database, custody);
 
-        Assert.Equal(12, custody.Created.Count);
-        Assert.Equal(6, custody.Versions.Count);
         Assert.All(custody.Versions.Values, v => Assert.Equal(1, v));
         Assert.Equal("active", await StatusAsync(database, tenant));
-        // The crashed attempt rolled back with its transaction; the job counts both.
-        Assert.Equal(1, await database.ScalarAsync<int>($"SELECT attempts FROM operation_step WHERE operation_id = '{operation}'"));
-        Assert.Equal(2, await database.ScalarAsync<int>("SELECT attempts FROM job WHERE type = 'operations.operation.step'"));
+        // Exactly one current and one next per purpose, whatever the crashed attempt made in Transit.
+        Assert.Equal(KeyRows, await KeyRowsAsync(database, tenant));
+        Assert.Equal(1L, await database.ScalarAsync<long>($"SELECT count(*) FROM protection_key_wrap WHERE tenant_id = '{tenant}'"));
+        Assert.Equal(1L, await database.ScalarAsync<long>($"SELECT count(*) FROM audit_event WHERE tenant_id = '{tenant}' AND type_code = 'keys.tenant_keys.provisioned'"));
+        // The crashed attempt rolled back with its transaction; its job counts both.
+        Assert.Equal("1,1", await database.ScalarAsync<string>($"SELECT string_agg(attempts::text, ',' ORDER BY position) FROM operation_step WHERE operation_id = '{operation}'"));
+        Assert.Equal(2, await database.ScalarAsync<int>("SELECT max(attempts) FROM job WHERE type = 'operations.operation.step'"));
         Assert.Equal(1L, await database.ScalarAsync<long>($"SELECT count(*) FROM tenant_settings WHERE tenant_id = '{tenant}'"));
         Assert.Equal(1L, await database.ScalarAsync<long>($"SELECT count(*) FROM audit_event WHERE tenant_id = '{tenant}' AND type_code = '{Activated}'"));
     }
@@ -117,7 +131,9 @@ public sealed class TenantCreationOperationTests(PostgresFixture postgres)
         await DrainAsync(database, configured ? new RecordingCustody { Fail = true } : null);
 
         Assert.Equal("failed", await database.ScalarAsync<string>($"SELECT status FROM operation WHERE id = '{operation}'"));
-        Assert.Equal("failed/custody_unavailable", await StepAsync(database, operation));
+        Assert.Equal(Both("failed/custody_unavailable"), await StepAsync(database, operation));
+        Assert.Equal(0L, await database.ScalarAsync<long>($"SELECT count(*) FROM signing_key WHERE tenant_id = '{tenant}'"));
+        Assert.Equal(0L, await database.ScalarAsync<long>($"SELECT count(*) FROM protection_key_wrap WHERE tenant_id = '{tenant}'"));
         Assert.Equal("creating", await StatusAsync(database, tenant));
         Assert.Equal(0L, await database.ScalarAsync<long>($"SELECT count(*) FROM tenant_settings WHERE tenant_id = '{tenant}'"));
         Assert.Equal(0L, await database.ScalarAsync<long>($"SELECT count(*) FROM audit_event WHERE type_code = '{Activated}'"));
@@ -146,7 +162,7 @@ public sealed class TenantCreationOperationTests(PostgresFixture postgres)
 
         await DrainAsync(database, new RecordingCustody());
 
-        Assert.Equal("succeeded/succeeded", await StepAsync(database, operation));
+        Assert.Equal(Both("succeeded/succeeded"), await StepAsync(database, operation));
         Assert.Equal("active", await StatusAsync(database, tenant));
         Assert.Equal(1L, await database.ScalarAsync<long>($"SELECT count(*) FROM audit_event WHERE tenant_id = '{tenant}' AND type_code = '{Activated}'"));
     }
@@ -164,7 +180,7 @@ public sealed class TenantCreationOperationTests(PostgresFixture postgres)
         }
 
         Assert.Equal("dead", await database.ScalarAsync<string>("SELECT status FROM job WHERE type = 'operations.operation.run'"));
-        Assert.Equal("failed/job_dead", await StepAsync(database, operation));
+        Assert.Equal(Both("failed/job_dead"), await StepAsync(database, operation));
         Assert.Equal("failed", await database.ScalarAsync<string>($"SELECT status FROM operation WHERE id = '{operation}'"));
         Assert.Equal(1L, await database.ScalarAsync<long>("SELECT count(*) FROM deployment_audit_event WHERE type_code = 'operations.job.dead'"));
 
@@ -186,14 +202,16 @@ public sealed class TenantCreationOperationTests(PostgresFixture postgres)
             // The run job dispatches the step job, which then has no attempt left.
             Assert.True(await runner.RunOnceAsync(Cancellation));
             await database.SuperuserAsync("UPDATE job SET attempts = 5 WHERE type = 'operations.operation.step'");
+            // Both step jobs, one per creation stage.
+            Assert.True(await runner.RunOnceAsync(Cancellation));
             Assert.True(await runner.RunOnceAsync(Cancellation));
         }
 
-        Assert.Equal("dead", await database.ScalarAsync<string>("SELECT status FROM job WHERE type = 'operations.operation.step'"));
-        Assert.Equal("failed/job_dead", await StepAsync(database, operation));
+        Assert.Equal("dead", await database.ScalarAsync<string>("SELECT string_agg(DISTINCT status, ',') FROM job WHERE type = 'operations.operation.step'"));
+        Assert.Equal(Both("failed/job_dead"), await StepAsync(database, operation));
         Assert.Equal("failed", await database.ScalarAsync<string>($"SELECT status FROM operation WHERE id = '{operation}'"));
         Assert.Equal("creating", await StatusAsync(database, tenant));
-        Assert.Equal(1L, await database.ScalarAsync<long>($"SELECT count(*) FROM audit_event WHERE tenant_id = '{tenant}' AND type_code = 'operations.job.dead'"));
+        Assert.Equal(2L, await database.ScalarAsync<long>($"SELECT count(*) FROM audit_event WHERE tenant_id = '{tenant}' AND type_code = 'operations.job.dead'"));
     }
 
     [Fact]
@@ -209,7 +227,7 @@ public sealed class TenantCreationOperationTests(PostgresFixture postgres)
         }
 
         Assert.Equal("dead", await database.ScalarAsync<string>("SELECT status FROM job WHERE type = 'operations.job.purge'"));
-        Assert.Equal("pending/", await database.ScalarAsync<string>($"SELECT status || '/' || coalesce(result_code, '') FROM operation_step WHERE operation_id = '{operation}'"));
+        Assert.Equal(Both("pending/"), await StepAsync(database, operation));
         Assert.Equal("running", await database.ScalarAsync<string>($"SELECT status FROM operation WHERE id = '{operation}'"));
     }
 
@@ -246,7 +264,7 @@ public sealed class TenantCreationOperationTests(PostgresFixture postgres)
         Assert.True(await runner.RunOnceAsync(Cancellation));
 
         Assert.Equal(1L, await database.ScalarAsync<long>("SELECT count(*) FROM job WHERE type = 'operations.operation.run' AND status = 'dead'"));
-        Assert.Equal("running/", await StepAsync(database, operation));
+        Assert.Equal(Both("running/"), await StepAsync(database, operation));
         Assert.Equal("running", await database.ScalarAsync<string>($"SELECT status FROM operation WHERE id = '{operation}'"));
 
         // The step job still runs it, and the creation succeeds.
@@ -254,7 +272,7 @@ public sealed class TenantCreationOperationTests(PostgresFixture postgres)
         {
         }
 
-        Assert.Equal("succeeded/succeeded", await StepAsync(database, operation));
+        Assert.Equal(Both("succeeded/succeeded"), await StepAsync(database, operation));
         Assert.Equal("active", await StatusAsync(database, tenant));
     }
 
@@ -269,11 +287,13 @@ public sealed class TenantCreationOperationTests(PostgresFixture postgres)
             Assert.Equal(operation, await database.ScalarAsync<Guid>("SELECT operation_id FROM job WHERE type = 'operations.operation.step'"));
             await database.SuperuserAsync(
                 "DELETE FROM job_payload; UPDATE job SET attempts = 5 WHERE type = 'operations.operation.step'");
+            // Both step jobs, one per creation stage.
+            Assert.True(await runner.RunOnceAsync(Cancellation));
             Assert.True(await runner.RunOnceAsync(Cancellation));
         }
 
-        Assert.Equal("dead", await database.ScalarAsync<string>("SELECT status FROM job WHERE type = 'operations.operation.step'"));
-        Assert.Equal("failed/job_dead", await StepAsync(database, operation));
+        Assert.Equal("dead", await database.ScalarAsync<string>("SELECT string_agg(DISTINCT status, ',') FROM job WHERE type = 'operations.operation.step'"));
+        Assert.Equal(Both("failed/job_dead"), await StepAsync(database, operation));
         Assert.Equal("failed", await database.ScalarAsync<string>($"SELECT status FROM operation WHERE id = '{operation}'"));
         Assert.Equal("creating", await StatusAsync(database, tenant));
     }
@@ -303,7 +323,7 @@ public sealed class TenantCreationOperationTests(PostgresFixture postgres)
 
         Assert.Equal("dead", await database.ScalarAsync<string>("SELECT status FROM job WHERE type = 'operations.operation.run'"));
         Assert.Equal(1L, await database.ScalarAsync<long>("SELECT count(*) FROM deployment_audit_event WHERE type_code = 'operations.job.dead'"));
-        Assert.Equal("pending/", await StepAsync(database, operation));
+        Assert.Equal(Both("pending/"), await StepAsync(database, operation));
         await database.SuperuserAsync("DROP TRIGGER test_refuse_job_dead ON operation_step");
     }
 
@@ -490,18 +510,33 @@ public sealed class TenantCreationOperationTests(PostgresFixture postgres)
     private static Task<string> StatusAsync(JobDatabase database, Guid tenant) =>
         database.ScalarAsync<string>($"SELECT status FROM tenant WHERE id = '{tenant}'");
 
+    /// <summary>Each step's status and result code, in plan order, comma-separated.</summary>
     private static Task<string> StepAsync(JobDatabase database, Guid operation) =>
-        database.ScalarAsync<string>($"SELECT status || '/' || coalesce(result_code, '') FROM operation_step WHERE operation_id = '{operation}'");
+        database.ScalarAsync<string>(
+            $"SELECT string_agg(status || '/' || coalesce(result_code, ''), ',' ORDER BY position) FROM operation_step WHERE operation_id = '{operation}'");
+
+    /// <summary>The same outcome for both creation steps: the secret class keys and the Signing Keys.</summary>
+    private static string Both(string step) => $"{step},{step}";
+
+    /// <summary>A new Tenant's key rows (AD-11): one current and one next per purpose.</summary>
+    private const string KeyRows = "management/current,management/next,signing/current,signing/next";
+
+    private static Task<string> KeyRowsAsync(JobDatabase database, Guid tenant) =>
+        database.ScalarAsync<string>(
+            $"SELECT string_agg(purpose || '/' || state, ',' ORDER BY purpose, state) FROM signing_key WHERE tenant_id = '{tenant}'");
 }
 
 /// <summary>
 /// A stand-in for Transit key creation: creating a name that exists returns it unchanged, as
-/// OpenBao does. It can fail every call, or hang after a number of creations until cancelled,
-/// as a body that outlives its lease does.
+/// OpenBao does, and a signing key comes back with its one version. It wraps a fresh data key as
+/// a Transit-shaped ciphertext. It can fail every call, or hang on a key name until cancelled, as
+/// a body that outlives its lease does.
 /// </summary>
 internal sealed class RecordingCustody : IKeyCustody
 {
     private readonly ConcurrentQueue<string> _created = new();
+
+    private bool _hung;
 
     public ConcurrentDictionary<string, int> Versions { get; } = new();
 
@@ -509,7 +544,10 @@ internal sealed class RecordingCustody : IKeyCustody
 
     public bool Fail { get; init; }
 
-    public int? HangAfter { get; set; }
+    public Func<string, bool>? HangOn { get; set; }
+
+    /// <summary>Whether a create has hung on <see cref="HangOn"/>.</summary>
+    public bool Hung => Volatile.Read(ref _hung);
 
     public async Task<IReadOnlyList<KeyPublicVersion>> CreateKeyAsync(KeyName key, CancellationToken cancellationToken)
     {
@@ -521,12 +559,13 @@ internal sealed class RecordingCustody : IKeyCustody
         _created.Enqueue(key.Value);
         Versions.TryAdd(key.Value, 1);
 
-        if (HangAfter is { } after && _created.Count >= after)
+        if (HangOn is { } hang && hang(key.Value))
         {
+            Volatile.Write(ref _hung, true);
             await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
         }
 
-        return [];
+        return key.Kind == KeyKind.Signing ? [new KeyPublicVersion(1, string.Empty)] : [];
     }
 
     public Task<KeySignature> SignAsync(KeyName key, ReadOnlyMemory<byte> data, CancellationToken cancellationToken) => throw new NotSupportedException();
@@ -543,7 +582,9 @@ internal sealed class RecordingCustody : IKeyCustody
     public Task<KeyHmac> HmacAsync(KeyName key, Secret<byte[]> input, CancellationToken cancellationToken) => throw new NotSupportedException();
 
     public Task<KeyCiphertext> CreateWrappedDataKeyAsync(KeyName key, Guid tenantId, CancellationToken cancellationToken) =>
-        throw new NotSupportedException();
+        Fail
+            ? throw new KeyCustodyException(key.Value, KeyOperation.WrapDataKey, KeyCustodyFailure.Unavailable)
+            : Task.FromResult(new KeyCiphertext("vault:v1:" + Convert.ToBase64String(System.Security.Cryptography.RandomNumberGenerator.GetBytes(60))));
 
     public Task RotateAsync(KeyName key, CancellationToken cancellationToken) => throw new NotSupportedException();
 
