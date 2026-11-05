@@ -25,7 +25,14 @@ Every audit type code Gatekeep writes, declared in its module's contract. Codes 
 | `bootstrap.admin.created` | Admins | The bootstrap token was claimed: the first Admin was created as Deployment Owner and bootstrap completed. Holds no token or hash. | None |
 | `bootstrap.token.issued` | Admins | gatekeep init issued the first one-time bootstrap token. It expires 15 minutes after issue. Holds no token or hash. | None |
 | `bootstrap.token.reissued` | Admins | gatekeep init reissued the bootstrap token, voiding the previous one. It expires 15 minutes after issue. Holds no token or hash. | None |
+| `keys.signing_key.created` | Keys | A Tenant's replacement next Signing or Management key was created in key custody. Names no key. | None |
+| `keys.signing_key.destroyed` | Keys | A Tenant's retired Signing or Management key was destroyed in key custody. Names no key. | None |
+| `keys.signing_key.destruction_failed` | Keys | Key custody failed to destroy a Tenant's retired Signing or Management key; the destruction retries. Names no key. | None |
+| `keys.signing_key.promoted` | Keys | A Tenant's next Signing or Management key became current. Names no key. | None |
+| `keys.signing_key.retired` | Keys | A Tenant's previous Signing or Management key retired and its destruction was queued. Names no key. | None |
+| `keys.signing_key.rotated` | Keys | A Tenant's current Signing or Management key reached its rotation age and became previous. Names no key. | None |
 | `keys.tenant_keys.provisioned` | Keys | A Tenant's missing Signing Keys, Management keys or token protection key were created in key custody. Names no key. | None |
+| `keys.transit_key.swept` | Keys | A Signing or Management key at least 24 hours old, named by no row when checked, was deleted from key custody. Names no key. | None |
 | `operations.job.dead` | Operations | A job used its last attempt and went dead. Only its fixed failure code is kept. | None |
 | `operations.operation.retried` | Operations | An Admin retried a failed Operation's failed steps. Names the Operation's Tenant only, when it has one. | None |
 | `sessions.access.revoked` | Sessions | Sessions in scope ended and their Token Families and tokens were revoked. User scope targets the User. | Session and token revocation |

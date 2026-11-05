@@ -118,4 +118,40 @@ public static class SecurityLimits
 
     /// <summary>How long one key custody call on the Hosted request path may take: 5 seconds (Story 2.3).</summary>
     public static readonly TimeSpan KeyCustodyCallTimeout = TimeSpan.FromSeconds(5);
+
+    /// <summary>
+    /// The longest a Signing or Management key may exist: 180 days (PRD §5.2, AD-11, Story 2.4). Not
+    /// configurable in v1. A key's age counts from its row's <c>created_at</c>, not from its promotion.
+    /// </summary>
+    public static readonly TimeSpan SigningKeyMaxAge = TimeSpan.FromDays(180);
+
+    /// <summary>
+    /// How long before <see cref="SigningKeyMaxAge"/> the daily rotation replaces a <c>current</c> key:
+    /// 30 days (AD-11). A key is due once it is 150 days old.
+    /// </summary>
+    public static readonly TimeSpan SigningKeyRotationMargin = TimeSpan.FromDays(30);
+
+    /// <summary>
+    /// How long a <c>next</c> Signing Key must have been published in JWKS before a routine rotation
+    /// promotes it: 15 minutes (AD-11), so relying parties have it before it signs.
+    /// </summary>
+    public static readonly TimeSpan SigningKeyPublicationBeforePromotion = TimeSpan.FromMinutes(15);
+
+    /// <summary>
+    /// The hard lifetime of the longest-lived token a Signing Key signs, the access and ID tokens:
+    /// 1 hour (PRD §5.2). Their configurable default is shorter.
+    /// </summary>
+    public static readonly TimeSpan HardSignedTokenLifetime = TimeSpan.FromHours(1);
+
+    /// <summary>
+    /// How long a <c>previous</c> key stays published after its rotation before it retires:
+    /// <see cref="HardSignedTokenLifetime"/> plus 15 minutes (AD-11), so every token it signed has expired.
+    /// </summary>
+    public static readonly TimeSpan SigningKeyRetirementDelay = HardSignedTokenLifetime + TimeSpan.FromMinutes(15);
+
+    /// <summary>
+    /// How old a <c>sig-</c> or <c>mgmt-</c> Transit key that no row names must be before the orphan
+    /// sweep deletes it: 24 hours (AD-11), far past any provisioning or rotation still in flight.
+    /// </summary>
+    public static readonly TimeSpan OrphanKeyGrace = TimeSpan.FromHours(24);
 }

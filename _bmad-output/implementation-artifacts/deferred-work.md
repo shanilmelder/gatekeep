@@ -364,6 +364,15 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-2-3-publish-discovery-and-jwks-per-tenant.md`
   summary: Story 2.4 adds the `NOTIFY` that clears Host.Hosted's 5-second Tenant runtime cache on a key state change.
   evidence: Story 2.3 caches each runtime for at most 5 seconds, with no NOTIFY yet.
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-4-rotate-signing-keys-automatically.md`
+  summary: An alert when a `current` Signing Key passes 180 days because rotation keeps failing (Epic 11).
+  evidence: Story 2.4 review: the daily rotation only logs a failed Tenant by type and retries.
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-4-rotate-signing-keys-automatically.md`
+  summary: Destruction for `revoked` Signing Keys (Epic 9).
+  evidence: Story 2.4 destroys only `retired` keys; `destroyed_at` is CHECKed to `retired` rows.
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-4-rotate-signing-keys-automatically.md`
+  summary: Decide whether to rotate on a 75/75-day cadence (time served) instead of counting age from creation, which double-rotates every cycle.
+  evidence: Story 2.4 review: alternate keys sign about 1 day and about 149 days; still within 180 days.
 - source_spec: `_bmad-output/implementation-artifacts/spec-12-7-rotate-the-master-key.md`
   summary: Prove that `sys/rotate/root` changes the root key, so that an old generation plus a snapshot taken before the rotation can't open data written afterwards.
   evidence: Story 12.7 checks that the keyring term rises. Removing the root-key call still passes every test. It needs a snapshot-and-restore harness, which comes with Stories 12.1 and 12.2.

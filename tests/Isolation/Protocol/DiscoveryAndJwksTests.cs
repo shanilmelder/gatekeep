@@ -101,7 +101,7 @@ public sealed class DiscoveryAndJwksTests(PostgresFixture postgres, OpenBaoFixtu
         }
 
         await database.ExecuteAsync(
-            $"INSERT INTO signing_key (id, tenant_id, purpose, state, transit_name, transit_version, published_at) VALUES ('{id}', '{a.TenantId}', 'signing', 'previous', '{name.Value}', 1, now())");
+            $"INSERT INTO signing_key (id, tenant_id, purpose, state, transit_name, transit_version, published_at, rotated_at, promoted_at) VALUES ('{id}', '{a.TenantId}', 'signing', 'previous', '{name.Value}', 1, now(), now(), now())");
 
         await using var host = await ProtocolHost.StartAsync(database.Hosted, bao);
         using var document = await GetJsonAsync(host, HostA, ProtocolContract.JsonWebKeySetPath);
@@ -119,7 +119,7 @@ public sealed class DiscoveryAndJwksTests(PostgresFixture postgres, OpenBaoFixtu
         {
             var id = Guid.CreateVersion7();
             await database.ExecuteAsync(
-                $"INSERT INTO signing_key (id, tenant_id, purpose, state, transit_name, transit_version, published_at) VALUES ('{id}', '{a.TenantId}', 'signing', '{state}', 'sig-{a.TenantId:D}-{id:D}', 1, now())");
+                $"INSERT INTO signing_key (id, tenant_id, purpose, state, transit_name, transit_version, published_at, rotated_at, retired_at, promoted_at) VALUES ('{id}', '{a.TenantId}', 'signing', '{state}', 'sig-{a.TenantId:D}-{id:D}', 1, now(), now(), now(), now())");
         }
 
         await using var host = await ProtocolHost.StartAsync(database.Hosted, bao);
@@ -354,7 +354,7 @@ public sealed class DiscoveryAndJwksTests(PostgresFixture postgres, OpenBaoFixtu
         }
 
         await database.ExecuteAsync(
-            $"INSERT INTO signing_key (id, tenant_id, purpose, state, transit_name, transit_version, published_at) VALUES ('{id}', '{a.TenantId}', 'signing', 'previous', '{name.Value}', 1, now())");
+            $"INSERT INTO signing_key (id, tenant_id, purpose, state, transit_name, transit_version, published_at, rotated_at, promoted_at) VALUES ('{id}', '{a.TenantId}', 'signing', 'previous', '{name.Value}', 1, now(), now(), now())");
 
         clock.Advance(SecurityLimits.TenantRuntimeLifetime - TimeSpan.FromMilliseconds(1));
         Assert.Equal(2, await KeyCountAsync(host));

@@ -14,6 +14,7 @@ public enum KeyOperation
     Rewrap,
     Delete,
     ReadPublicKey,
+    List,
 }
 
 public enum KeyCustodyFailure

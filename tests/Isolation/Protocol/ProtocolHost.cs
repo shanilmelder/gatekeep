@@ -134,6 +134,52 @@ internal sealed class ProtocolDatabase(PostgresFixture postgres, string name)
         return created;
     }
 
+    /// <summary>
+    /// Runs one Tenant's rotation as <c>gk_worker</c>, as the daily job does for each Tenant, with the
+    /// production destroy job type and enqueuer, and commits it when anything changed.
+    /// </summary>
+    public async Task<bool> RotateAsync(OpenBaoFixture bao, Guid tenantId, IKeyCustody? custody = null)
+    {
+        using var worker = bao.Custody(OpenBaoFixture.Worker);
+        await using var source = NpgsqlDataSource.Create(postgres.RoleConnection(TableRegistry.Worker, Name));
+        await using var scope = await TenantScope.BeginAsync(source, tenantId, TestContext.Current.CancellationToken);
+
+        var changed = await KeysContract.RotateTenantKeysAsync(
+            scope.CreateCommandContext(),
+            custody ?? worker,
+            AuditContract.CreateAppender(),
+            Gatekeep.Modules.Operations.Contracts.OperationsContract.CreateEnqueuer(
+                Gatekeep.Modules.Operations.Contracts.OperationsContract.ProductionRegistry, custody: null),
+            Gatekeep.Modules.Operations.Contracts.OperationsContract.DestroySigningKey,
+            tenantId,
+            TestContext.Current.CancellationToken);
+        if (changed)
+        {
+            await scope.CommitAsync(TestContext.Current.CancellationToken);
+        }
+
+        return changed;
+    }
+
+    public string Role(string role) => postgres.RoleConnection(role, Name);
+
+    /// <summary>A production job runner over this database, with short retry timings.</summary>
+    public Gatekeep.Modules.Operations.Contracts.IJobRunner Runner(IKeyCustody? custody, ILogger? logger = null) =>
+        Gatekeep.Modules.Operations.Contracts.OperationsContract.CreateRunner(
+            Gatekeep.Modules.Operations.Contracts.OperationsContract.ProductionRegistry,
+            new Gatekeep.Modules.Operations.Contracts.JobDatabases(
+                Role(TableRegistry.Dispatch), Role(TableRegistry.Worker), Role(TableRegistry.Sealer), Role(TableRegistry.Retention)),
+            Gatekeep.Tests.Isolation.Jobs.JobDatabase.FastOptions,
+            custody,
+            logger);
+
+    /// <summary>
+    /// Runs <paramref name="sql"/> as the superuser with triggers off, so a test can age a row by
+    /// moving its times back instead of waiting.
+    /// </summary>
+    public Task BackdateAsync(string sql) =>
+        PostgresFixture.ExecuteAsync(Superuser, $"SET session_replication_role = replica; {sql}; SET session_replication_role = DEFAULT");
+
     public Task<T> ScalarAsync<T>(string sql) => PostgresFixture.ScalarAsync<T>(Superuser, sql);
 
     public Task ExecuteAsync(string sql) => PostgresFixture.ExecuteAsync(Superuser, sql);
@@ -165,6 +211,7 @@ internal sealed class ProtocolDatabase(PostgresFixture postgres, string name)
 internal sealed class ControlledCustody(OpenBaoKeyCustody inner) : IKeyCustody, IDisposable
 {
     private readonly ConcurrentDictionary<KeyOperation, int> _calls = new();
+    private readonly ConcurrentQueue<string> _deleted = new();
 
     /// <summary>Operations that throw <see cref="KeyCustodyFailure.Unavailable"/> while listed.</summary>
     public HashSet<KeyOperation> Failing { get; } = [];
@@ -246,6 +293,7 @@ internal sealed class ControlledCustody(OpenBaoKeyCustody inner) : IKeyCustody, 
     {
         await EnterAsync(key, KeyOperation.Delete, cancellationToken);
         await inner.DeleteAsync(key, cancellationToken);
+        _deleted.Enqueue(key.Value);
     }
 
     public async Task<IReadOnlyList<KeyPublicVersion>> GetPublicKeysAsync(KeyName key, CancellationToken cancellationToken)
@@ -254,13 +302,46 @@ internal sealed class ControlledCustody(OpenBaoKeyCustody inner) : IKeyCustody, 
         return await inner.GetPublicKeysAsync(key, cancellationToken);
     }
 
+    /// <summary>
+    /// The real list, with each key in <see cref="Backdated"/> reported that much older: Transit's
+    /// creation time can't be moved, and a test never waits a day.
+    /// </summary>
+    public async Task<IReadOnlyList<ListedKey>> ListRowKeysAsync(CancellationToken cancellationToken)
+    {
+        _calls.AddOrUpdate(KeyOperation.List, 1, (_, n) => n + 1);
+        if (Failing.Contains(KeyOperation.List))
+        {
+            throw new KeyCustodyException("transit/keys", KeyOperation.List, KeyCustodyFailure.Unavailable);
+        }
+
+        var listed = await inner.ListRowKeysAsync(cancellationToken);
+        return [.. listed.Select(k => Backdated.TryGetValue(k.Key.Value, out var by) ? k with { CreatedAt = k.CreatedAt - by } : k)];
+    }
+
+    /// <summary>Keys <see cref="ListRowKeysAsync"/> reports as older than they are, by name.</summary>
+    public ConcurrentDictionary<string, TimeSpan> Backdated { get; } = new();
+
+    /// <summary>Key names on which every operation throws <see cref="KeyCustodyFailure.Unavailable"/>.</summary>
+    public ConcurrentDictionary<string, bool> FailingKeys { get; } = new();
+
+    /// <summary>Operations that throw the given failure while listed, before reaching custody.</summary>
+    public ConcurrentDictionary<KeyOperation, KeyCustodyFailure> FailingWith { get; } = new();
+
+    /// <summary>Every key this wrapper deleted, in order.</summary>
+    public IReadOnlyList<string> Deleted => [.. _deleted];
+
     public void Dispose() => inner.Dispose();
 
     private async Task EnterAsync(KeyName key, KeyOperation operation, CancellationToken cancellationToken)
     {
         _calls.AddOrUpdate(operation, 1, (_, n) => n + 1);
 
-        if (Failing.Contains(operation))
+        if (FailingWith.TryGetValue(operation, out var failure))
+        {
+            throw new KeyCustodyException(key.Value, operation, failure);
+        }
+
+        if (Failing.Contains(operation) || FailingKeys.ContainsKey(key.Value))
         {
             throw new KeyCustodyException(key.Value, operation, KeyCustodyFailure.Unavailable);
         }

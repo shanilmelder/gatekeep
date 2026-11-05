@@ -21,6 +21,24 @@ internal interface ITenantKeyReader
     Task<TenantKeyMaterial> ReadAsync(Guid tenantId, CancellationToken cancellationToken);
 }
 
+/// <summary>
+/// Tells Host.Hosted when a Tenant's keys changed (Story 2.4): a committed rotation's <c>NOTIFY</c>,
+/// on one listening connection.
+/// </summary>
+internal interface ITenantKeyChanges
+{
+    /// <summary>Whether the listening connection is up now.</summary>
+    bool Listening { get; }
+
+    /// <summary>
+    /// Starts listening, once: later calls only return the first one's task. <paramref name="changed"/>
+    /// gets each notified Tenant; <paramref name="reconnected"/> runs on every successful connect,
+    /// the first included, because notifications sent while no one listened are lost.
+    /// </summary>
+    /// <returns>A task that ends when the first connection attempt has ended, either way. It never faults.</returns>
+    Task StartAsync(Action<Guid> changed, Action reconnected);
+}
+
 /// <summary>A Tenant's OpenIddict options and the keys behind them.</summary>
 internal sealed record TenantRuntime(Guid TenantId, Uri Issuer, OpenIddictServerOptions Options, IReadOnlyList<TransitSigningKey> SigningKeys);
 
@@ -33,17 +51,29 @@ internal sealed record TenantRuntime(Guid TenantId, Uri Issuer, OpenIddictServer
 /// <see cref="SecurityLimits.TenantRuntimeLifetime"/>, and a timer drops it then even if no request
 /// comes, so a quiet Tenant's unwrapped protection key isn't kept; one whose build failed is dropped
 /// at once, so the next request builds again. Concurrent requests share one build.
+/// <para>
+/// Story 2.4: on first use it starts listening for key changes, and waits for that first connection
+/// attempt before building anything. A committed rotation's notification drops that Tenant's runtime
+/// at once, so its JWKS changes on the next request; a reconnect drops every runtime, since what
+/// changed meanwhile is unknown. While no listener is connected, the 5-second lifetime is the bound.
+/// </para>
 /// </summary>
 internal sealed class TenantRuntimes(
     IOptionsFactory<OpenIddictServerOptions> factory,
     ITenantKeyReader reader,
     IServiceProvider services,
-    TimeProvider time) : ITenantServerOptions
+    TimeProvider time,
+    ITenantKeyChanges? changes = null) : ITenantServerOptions
 {
     /// <summary>An RSA-3072 modulus, in bytes.</summary>
     private const int RsaModulusBytes = 3072 / 8;
 
+    /// <summary>The longest the first request waits for the listener's first connection attempt.</summary>
+    private static readonly TimeSpan ListenerStartWait = TimeSpan.FromSeconds(5);
+
     private readonly ConcurrentDictionary<Guid, Entry> _entries = new();
+
+    private Task? _listening;
 
     public async ValueTask<OpenIddictServerOptions> GetAsync(ResolvedTenant tenant, CancellationToken cancellationToken) =>
         (await GetRuntimeAsync(tenant, cancellationToken)).Options;
@@ -51,6 +81,8 @@ internal sealed class TenantRuntimes(
     public async ValueTask<TenantRuntime> GetRuntimeAsync(ResolvedTenant tenant, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(tenant);
+
+        await StartListeningAsync(cancellationToken);
 
         while (true)
         {
@@ -78,6 +110,48 @@ internal sealed class TenantRuntimes(
 
     /// <summary>The Tenants whose runtime is kept now, built or being built.</summary>
     public int Kept => _entries.Count;
+
+    /// <summary>Drops a Tenant's kept runtime, if any, so its next request builds from the rows as they are now.</summary>
+    public void Drop(Guid tenantId)
+    {
+        if (_entries.TryGetValue(tenantId, out var entry))
+        {
+            Evict(tenantId, entry);
+        }
+    }
+
+    /// <summary>Drops every kept runtime.</summary>
+    public void DropAll()
+    {
+        foreach (var (tenantId, entry) in _entries)
+        {
+            Evict(tenantId, entry);
+        }
+    }
+
+    private async Task StartListeningAsync(CancellationToken cancellationToken)
+    {
+        if (changes is null)
+        {
+            return;
+        }
+
+        // Started once (a racing second call gets the same task). Building only after LISTEN is in
+        // place means no runtime can miss a change.
+        var started = _listening ??= changes.StartAsync(Drop, DropAll);
+
+        if (!started.IsCompleted)
+        {
+            try
+            {
+                await started.WaitAsync(ListenerStartWait, cancellationToken);
+            }
+            catch (TimeoutException)
+            {
+                // Still connecting: the lifetime bounds staleness until it does, and its connect drops all.
+            }
+        }
+    }
 
     /// <summary>Builds, then schedules the entry's removal for when its lifetime ends.</summary>
     private async Task<TenantRuntime> BuildKeptAsync(ResolvedTenant tenant, Entry entry)

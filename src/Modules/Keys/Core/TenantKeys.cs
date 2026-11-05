@@ -16,7 +16,7 @@ internal static class TenantKeys
 
     // Two provisioners for one Tenant (a creation stage and a backfill, or two attempts) wait for
     // each other rather than both creating Transit keys only one can keep.
-    private const string Lock = "SELECT pg_advisory_xact_lock(@namespace, hashtext(@tenant_id::text))";
+    internal const string Lock = "SELECT pg_advisory_xact_lock(@namespace, hashtext(@tenant_id::text))";
 
     private const string SelectOpen =
         """
@@ -26,12 +26,14 @@ internal static class TenantKeys
 
     private const string SelectWrapExists = "SELECT EXISTS (SELECT 1 FROM protection_key_wrap WHERE tenant_id = @tenant_id)";
 
-    // A signing row is published the moment it commits: JWKS serves next and current alike.
-    private const string InsertKey =
+    // A signing row is published the moment it commits: JWKS serves next and current alike. A new
+    // Tenant's current key is promoted at once (AD-11), so it is promoted when it is created.
+    internal const string InsertKey =
         """
-        INSERT INTO signing_key (id, tenant_id, purpose, state, transit_name, transit_version, created_at, published_at)
+        INSERT INTO signing_key (id, tenant_id, purpose, state, transit_name, transit_version, created_at, published_at, promoted_at)
         VALUES (@id, @tenant_id, @purpose, @state, @transit_name, @transit_version, now(),
-                CASE WHEN @purpose = 'signing' THEN now() END)
+                CASE WHEN @purpose = 'signing' THEN now() END,
+                CASE WHEN @state = 'current' THEN now() END)
         """;
 
     private const string InsertWrap =
@@ -47,7 +49,7 @@ internal static class TenantKeys
     private const string SelectWrap = "SELECT ciphertext FROM protection_key_wrap WHERE tenant_id = @tenant_id";
 
     /// <summary>The first key of every Keys advisory lock, so no other advisory lock can collide with one.</summary>
-    private const int LockNamespace = 0x4B455953;
+    internal const int LockNamespace = 0x4B455953;
 
     private static readonly (SigningKeyPurpose Purpose, string State)[] Required =
     [
@@ -210,7 +212,7 @@ internal static class TenantKeys
         return await command.ExecuteScalarAsync(cancellationToken) is string ciphertext ? new KeyCiphertext(ciphertext) : null;
     }
 
-    private static void RequireTenant(CommandContext context, Guid tenantId)
+    internal static void RequireTenant(CommandContext context, Guid tenantId)
     {
         if (tenantId == Guid.Empty || context.TenantId != tenantId)
         {
@@ -218,28 +220,28 @@ internal static class TenantKeys
         }
     }
 
-    private static string Stored(SigningKeyPurpose purpose) => purpose switch
+    internal static string Stored(SigningKeyPurpose purpose) => purpose switch
     {
         SigningKeyPurpose.Signing => "signing",
         SigningKeyPurpose.Management => "management",
         _ => throw new ArgumentOutOfRangeException(nameof(purpose)),
     };
 
-    private static SigningKeyPurpose ParsePurpose(string stored) => stored switch
+    internal static SigningKeyPurpose ParsePurpose(string stored) => stored switch
     {
         "signing" => SigningKeyPurpose.Signing,
         "management" => SigningKeyPurpose.Management,
         _ => throw new InvalidOperationException("Unknown Signing Key purpose."),
     };
 
-    private static async Task ExecuteAsync(CommandContext context, string sql, CancellationToken cancellationToken)
+    internal static async Task ExecuteAsync(CommandContext context, string sql, CancellationToken cancellationToken)
     {
         await using var command = context.CreateCommand();
         command.CommandText = sql;
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
-    private static void Add(DbCommand command, string name, object value)
+    internal static void Add(DbCommand command, string name, object value)
     {
         var parameter = command.CreateParameter();
         parameter.ParameterName = name;

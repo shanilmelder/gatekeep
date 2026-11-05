@@ -299,6 +299,24 @@ internal static class CanaryFlows
             "Story 2.3 build review",
             new DateOnly(2026, 11, 5)),
         new(
+            new(SurfaceKind.JobType, "keys.signing_keys.rotate"),
+            "Deployment-wide, so it carries no payload. Reads active Tenant IDs; per Tenant it changes key row states and times, "
+            + "creates keys by name in custody, stores only names and versions, enqueues ID-only jobs and writes ID-only events. No key material leaves custody.",
+            "Story 2.4 build review",
+            new DateOnly(2026, 11, 5)),
+        new(
+            new(SurfaceKind.JobType, "keys.signing_key.destroy"),
+            "May not carry a credential: its payload is one signing_key row ID. It deletes a key by the name the row's own IDs make "
+            + "and writes ID-only events. Failures are logged by type only.",
+            "Story 2.4 build review",
+            new DateOnly(2026, 11, 5)),
+        new(
+            new(SurfaceKind.JobType, "keys.transit_keys.sweep"),
+            "Deployment-wide, so it carries no payload. Lists key names and creation times in custody, deletes unnamed old sig-/mgmt- keys "
+            + "and writes ID-only Deployment events. Failures are logged by type only, never a key name.",
+            "Story 2.4 build review",
+            new DateOnly(2026, 11, 5)),
+        new(
             new(SurfaceKind.OperationType, "tenancy.tenant.create"),
             "Its Tenant stages create the six secret class keys, then the Signing and Management keys and the wrapped token "
             + "protection key, by name only, storing key names, versions, Transit's ciphertext and fixed result codes; its "

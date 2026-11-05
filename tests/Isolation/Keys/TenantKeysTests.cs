@@ -57,6 +57,10 @@ public sealed class TenantKeysTests(PostgresFixture postgres, OpenBaoFixture bao
         Assert.Equal(0L, await database.ScalarAsync<long>(
             $"SELECT count(*) FROM signing_key WHERE tenant_id = '{tenant}' AND ((purpose = 'signing') <> (published_at IS NOT NULL) OR published_at <> created_at)"));
 
+        // A new Tenant's current keys are promoted at once (Story 2.4); nothing has rotated yet.
+        Assert.Equal(0L, await database.ScalarAsync<long>(
+            $"SELECT count(*) FROM signing_key WHERE tenant_id = '{tenant}' AND ((state = 'current') <> (promoted_at IS NOT NULL) OR promoted_at <> created_at OR rotated_at IS NOT NULL OR retired_at IS NOT NULL OR destroyed_at IS NOT NULL)"));
+
         var names = await NamesAsync(database, tenant);
         Assert.Equal(4, names.Distinct().Count());
         using var http = new HttpClient { BaseAddress = bao.Address };
@@ -287,12 +291,17 @@ public sealed class TenantKeysTests(PostgresFixture postgres, OpenBaoFixture bao
         Assert.Contains(table, refused.MessageText, StringComparison.Ordinal);
     }
 
+    // Story 2.4 lets the Worker move a row's state and lifecycle times, and nothing else.
     [Theory]
-    [InlineData("UPDATE signing_key SET state = 'revoked'")]
+    [InlineData("UPDATE signing_key SET transit_name = transit_name")]
+    [InlineData("UPDATE signing_key SET transit_version = transit_version")]
+    [InlineData("UPDATE signing_key SET published_at = now()")]
+    [InlineData("UPDATE signing_key SET created_at = now()")]
+    [InlineData("UPDATE signing_key SET purpose = purpose")]
     [InlineData("DELETE FROM signing_key")]
     [InlineData("UPDATE protection_key_wrap SET ciphertext = ciphertext")]
     [InlineData("DELETE FROM protection_key_wrap")]
-    public async Task Worker_inserts_and_reads_but_never_changes_a_key_row(string sql)
+    public async Task Worker_never_changes_a_key_rows_identity_or_a_wrap_and_never_deletes(string sql)
     {
         var (database, tenant) = await ProvisionedAsync();
 
@@ -335,18 +344,18 @@ public sealed class TenantKeysTests(PostgresFixture postgres, OpenBaoFixture bao
         var id = Guid.CreateVersion7();
 
         var refused = await Assert.ThrowsAsync<PostgresException>(() => database.ExecuteAsync(
-            $"INSERT INTO signing_key (id, tenant_id, purpose, state, transit_name, transit_version, published_at) VALUES ('{id}', '{tenant}', 'signing', '{state}', 'sig-{tenant:D}-{id:D}', 1, now())"));
+            $"INSERT INTO signing_key (id, tenant_id, purpose, state, transit_name, transit_version, published_at, promoted_at) VALUES ('{id}', '{tenant}', 'signing', '{state}', 'sig-{tenant:D}-{id:D}', 1, now(), now())"));
         Assert.Equal(PostgresErrorCodes.UniqueViolation, refused.SqlState);
     }
 
     [Theory]
-    [InlineData("'management', 'previous', 'mgmt-{0}-{1}', 1, now()", "signing_key_management_unpublished")]
-    [InlineData("'signing', 'previous', 'mgmt-{0}-{1}', 1, now()", "signing_key_transit_name")]
-    [InlineData("'signing', 'previous', 'sig-{0}-{2}', 1, now()", "signing_key_transit_name")]
+    [InlineData("'management', 'next', 'mgmt-{0}-{1}', 1, now()", "signing_key_management_unpublished")]
+    [InlineData("'signing', 'next', 'mgmt-{0}-{1}', 1, now()", "signing_key_transit_name")]
+    [InlineData("'signing', 'next', 'sig-{0}-{2}', 1, now()", "signing_key_transit_name")]
     [InlineData("'signing', 'active', 'sig-{0}-{1}', 1, now()", "signing_key_state")]
-    [InlineData("'encryption', 'previous', 'sig-{0}-{1}', 1, now()", "signing_key_purpose")]
-    [InlineData("'signing', 'previous', 'sig-{0}-{1}', 1, NULL", "signing_key_signing_published")]
-    [InlineData("'signing', 'previous', 'sig-{0}-{1}', 0, now()", "signing_key_transit_version")]
+    [InlineData("'encryption', 'next', 'sig-{0}-{1}', 1, now()", "signing_key_purpose")]
+    [InlineData("'signing', 'next', 'sig-{0}-{1}', 1, NULL", "signing_key_signing_published")]
+    [InlineData("'signing', 'next', 'sig-{0}-{1}', 0, now()", "signing_key_transit_version")]
     public async Task Constraints_refuse_a_malformed_key_row(string values, string constraint)
     {
         var (database, tenant) = await ProvisionedAsync();

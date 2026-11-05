@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using Gatekeep.Kernel.Audit;
+using Gatekeep.Kernel.Jobs;
 using Gatekeep.Kernel.Persistence;
 using Gatekeep.Kernel.Secrets;
 using Gatekeep.Modules.Keys.Core;
@@ -61,6 +62,101 @@ public static class KeysContract
         Guid tenantId,
         CancellationToken cancellationToken) =>
         TenantKeys.EnsureAsync(context, custody, appender, tenantId, cancellationToken);
+
+    /// <summary>The ID a <c>keys.signing_key.destroy</c> job's payload carries: the retired <c>signing_key</c> row's.</summary>
+    public const string DestroyPayloadId = SigningKeyLifecycle.DestroyPayloadId;
+
+    /// <summary>
+    /// The <c>NOTIFY</c> channel a committed rotation or retirement signals on, with the Tenant ID as
+    /// payload, so Host.Hosted drops that Tenant's runtime at once (Story 2.4).
+    /// </summary>
+    public const string SigningKeysChannel = SigningKeyLifecycle.Channel;
+
+    /// <summary>
+    /// The daily rotation of one Tenant, in its own <paramref name="context"/> (Story 2.4, AD-11), under
+    /// the same per-Tenant lock as <see cref="EnsureTenantKeysAsync"/>. For each purpose whose
+    /// <c>current</c> key is at least 150 days old by database time (from its <c>created_at</c>), and
+    /// whose <c>next</c> qualifies (a <c>signing</c> one published at least 15 minutes ago; a
+    /// <c>management</c> one at once), <c>current</c> becomes <c>previous</c>, <c>next</c> becomes
+    /// <c>current</c>, and a new <c>next</c> is created in Transit first and then inserted. Each
+    /// <c>previous</c> rotated at least 1 hour 15 minutes ago becomes <c>retired</c>, with
+    /// <paramref name="destroyJob"/> enqueued for it through <paramref name="enqueuer"/>, and any retired,
+    /// undestroyed row with no such job pending or running (one that went dead) gets a fresh one. One audit
+    /// event per state change, and one <see cref="SigningKeysChannel"/> notification when anything
+    /// changed. Every row stays one <c>current</c> and one <c>next</c> per purpose.
+    /// </summary>
+    /// <returns>Whether anything changed.</returns>
+    /// <exception cref="KeyCustodyException">
+    /// Custody failed to create a replacement. Nothing may be committed: the caller rolls the command back.
+    /// </exception>
+    /// <exception cref="InvalidOperationException">The context isn't <paramref name="tenantId"/>'s.</exception>
+    [StateChanging]
+    public static Task<bool> RotateTenantKeysAsync(
+        CommandContext context,
+        IKeyCustody custody,
+        IAuditAppender appender,
+        IJobEnqueuer enqueuer,
+        JobType destroyJob,
+        Guid tenantId,
+        CancellationToken cancellationToken) =>
+        SigningKeyLifecycle.RotateAsync(context, custody, appender, enqueuer, destroyJob, tenantId, cancellationToken);
+
+    /// <summary>
+    /// Destroys a retired key's Transit key (Story 2.4), in its Tenant's own <paramref name="context"/>.
+    /// The row is re-read and locked: only a <c>retired</c> row not yet destroyed is acted on, and
+    /// then its Transit key is deleted, <c>destroyed_at</c> set and one event written. Any other row,
+    /// or none, is left alone and false returned. No other row or key is touched.
+    /// </summary>
+    /// <returns>Whether the key was destroyed now.</returns>
+    /// <exception cref="KeyCustodyException">
+    /// Custody failed to delete the key. The caller rolls back, commits
+    /// <see cref="RecordDestructionFailedAsync"/> in a fresh scope, and retries.
+    /// </exception>
+    [StateChanging]
+    public static Task<bool> DestroyRetiredKeyAsync(
+        CommandContext context,
+        IKeyCustody custody,
+        IAuditAppender appender,
+        Guid tenantId,
+        Guid signingKeyId,
+        CancellationToken cancellationToken) =>
+        SigningKeyLifecycle.DestroyAsync(context, custody, appender, tenantId, signingKeyId, cancellationToken);
+
+    /// <summary>Writes <see cref="KeysEvents.SigningKeyDestructionFailed"/> on the context's Tenant's chain.</summary>
+    [StateChanging]
+    public static Task RecordDestructionFailedAsync(CommandContext context, IAuditAppender appender, CancellationToken cancellationToken) =>
+        SigningKeyLifecycle.RecordDestructionFailedAsync(context, appender, cancellationToken);
+
+    /// <summary>
+    /// Whether the orphan sweep may consider a listed key (Story 2.4): its name parses as
+    /// <c>sig-{tenantId}-{rowId}</c> or <c>mgmt-{tenantId}-{rowId}</c>, and custody created it at least
+    /// 24 hours before <paramref name="now"/>. Never a secret class or Deployment key.
+    /// </summary>
+    public static bool IsOrphanCandidate(ListedKey listed, DateTimeOffset now) => SigningKeyLifecycle.IsSweepCandidate(listed, now);
+
+    /// <summary>
+    /// Whether a <c>signing_key</c> row names <paramref name="key"/>, read in the key's own Tenant's
+    /// <paramref name="context"/>. It only reads.
+    /// </summary>
+    /// <exception cref="ArgumentException"><paramref name="key"/> isn't a Signing or Management key.</exception>
+    /// <exception cref="InvalidOperationException">The context isn't the key's Tenant's.</exception>
+    public static Task<bool> IsKeyNamedAsync(CommandContext context, KeyName key, CancellationToken cancellationToken) =>
+        SigningKeyLifecycle.IsNamedAsync(context, key, cancellationToken);
+
+    /// <summary>
+    /// Deletes an orphaned Signing or Management key from custody and writes
+    /// <see cref="KeysEvents.OrphanKeySwept"/> on the Deployment's chain, in its Deployment
+    /// <paramref name="context"/>. The caller has already found it old enough and named by no row.
+    /// </summary>
+    /// <exception cref="ArgumentException"><paramref name="key"/> isn't a Signing or Management key.</exception>
+    [StateChanging]
+    public static Task RemoveOrphanKeyAsync(
+        CommandContext context,
+        IKeyCustody custody,
+        IAuditAppender appender,
+        KeyName key,
+        CancellationToken cancellationToken) =>
+        SigningKeyLifecycle.RemoveOrphanAsync(context, custody, appender, key, cancellationToken);
 
     /// <summary>
     /// The Signing Keys the context's Tenant publishes in its JWKS: its <c>signing</c> rows in

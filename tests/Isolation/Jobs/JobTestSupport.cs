@@ -173,6 +173,9 @@ internal sealed class FakeKeyCustody : IKeyCustody
 
     public Task<IReadOnlyList<KeyPublicVersion>> GetPublicKeysAsync(KeyName key, CancellationToken cancellationToken) =>
         throw new NotSupportedException();
+
+    public Task<IReadOnlyList<ListedKey>> ListRowKeysAsync(CancellationToken cancellationToken) =>
+        throw new NotSupportedException();
 }
 
 /// <summary>Records every formatted line and every exception the runner hands its logger.</summary>
