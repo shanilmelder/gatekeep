@@ -213,7 +213,7 @@ The migration adds the lifecycle times with their backfill and CHECKs, a trigger
 - Tests -- `SigningKeyRotationTests`, `KeyChangeEvictionTests`, a policy matrix case, a Worker startup case, canary reasons, and updated 2.3 fixtures.
 - `docs/audit-events.md` -- regenerated.
 
-**Review findings.** There were 35 findings: 20 patched in 7 groups, 3 deferred (revoked-key destruction, the over-age alert, and the non-active row that shares the revoked deferral), and 12 rejected (all false), plus the low rejections recorded in the triage log.
+**Review findings.** There were 35 findings: 16 patched in 7 groups, 3 deferred (the over-age alert, revoked-key destruction, and the edge row that shares the revoked deferral), and 16 rejected (12 false; 4 low not worth fixing: audit detail, sweep atomicity, the listener being only async-disposable, and the migration-staged backfill test). Reasons are in the triage log.
 
 **Follow-up review: recommended (`true`).** Three medium entries were patched:
 - re-queuing dead destroy jobs
