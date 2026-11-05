@@ -66,6 +66,19 @@ public static class OperationsContract
     public static JobType BackfillTenantKeys => ProductionJobs.BackfillTenantKeys;
 
     /// <summary>
+    /// Rotates and retires every active Tenant's Signing and Management keys (Story 2.4, AD-11). Scheduled daily.
+    /// </summary>
+    public static JobType RotateSigningKeys => ProductionJobs.RotateSigningKeys;
+
+    /// <summary>Destroys one retired key's Transit key, in its Tenant's scope. Enqueued by the rotation, never scheduled.</summary>
+    public static JobType DestroySigningKey => ProductionJobs.DestroySigningKey;
+
+    /// <summary>
+    /// Deletes <c>sig-</c> and <c>mgmt-</c> Transit keys at least 24 hours old that no row names when checked (Story 2.4). Scheduled daily.
+    /// </summary>
+    public static JobType SweepTransitKeys => ProductionJobs.SweepTransitKeys;
+
+    /// <summary>
     /// The code-owned production Operation types: <see cref="PurgeChainOperation"/> and
     /// <see cref="TenantCreationOperation"/>. Tenant deletion arrives in its own story.
     /// </summary>

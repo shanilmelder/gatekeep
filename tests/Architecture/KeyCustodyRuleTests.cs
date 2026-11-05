@@ -45,6 +45,9 @@ public class KeyCustodyRuleTests
         + @"|^transit/(?:keys|sign|verify|encrypt|decrypt|hmac|rewrap)/dep-(?:email|payload|hmac|records|\*)$",
         RegexOptions.Compiled);
 
+    /// <summary>The one Transit path that names no key: the key list.</summary>
+    private const string ListPath = "transit/keys";
+
     private static readonly Regex Listener = new(@"listener\s+""(?<type>\w+)""\s*\{(?<body>[^}]*)\}", RegexOptions.Singleline | RegexOptions.Compiled);
 
     public static TheoryData<string> PolicyFiles =>
@@ -139,6 +142,10 @@ public class KeyCustodyRuleTests
     [InlineData("path \"transit/keys/sig-*\" {\n  capabilities = [\"read\"]\n}", 0)]
     [InlineData("# path \"transit/backup/*\" {}\npath \"transit/hmac/dep-hmac\" {\n  capabilities = [\"update\"]\n}", 0)]
     [InlineData("", 1)]
+    [InlineData("path \"transit/keys\" {\n  capabilities = [\"list\"]\n}", 0)]
+    [InlineData("path \"transit/keys\" {\n  capabilities = [\"list\", \"update\"]\n}", 1)]
+    [InlineData("path \"transit/keys\" {\n  capabilities = [\"read\"]\n}", 1)]
+    [InlineData("path \"transit/keys/*\" {\n  capabilities = [\"list\"]\n}", 1)]
     public void Policy_violation_detection(string policy, int violations)
     {
         Assert.Equal(violations, PolicyViolations(policy).Count);
@@ -208,6 +215,17 @@ public class KeyCustodyRuleTests
         {
             var path = match.Groups["path"].Value;
             var body = match.Groups["body"].Value;
+
+            // The key list (Story 2.4's orphan sweep) shows names only, so it may list and do nothing else.
+            if (path == ListPath)
+            {
+                if (Capabilities.Match(body).Groups["caps"].Value.Trim() != "\"list\"")
+                {
+                    violations.Add($"{path}: may only list");
+                }
+
+                continue;
+            }
 
             if (!AllowedPolicyPath.IsMatch(path))
             {

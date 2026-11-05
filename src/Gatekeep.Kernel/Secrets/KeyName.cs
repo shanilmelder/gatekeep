@@ -75,6 +75,47 @@ public sealed class KeyName : IEquatable<KeyName>
     public static KeyName Management(Guid tenantId, Guid rowId) =>
         new($"mgmt-{Id(tenantId, nameof(tenantId))}-{Id(rowId, nameof(rowId))}", KeyKind.Signing, tenantId);
 
+    /// <summary>
+    /// Reads a Transit name back as a Signing or Management key, only when it is exactly
+    /// <c>sig-{tenantId}-{rowId}</c> or <c>mgmt-{tenantId}-{rowId}</c> with both IDs in their
+    /// canonical lower-case form (Story 2.4). Every other name, including every secret class and
+    /// Deployment key, is refused.
+    /// </summary>
+    public static bool TryParseRowKey(string? value, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out KeyName? key)
+    {
+        key = null;
+        if (value is null)
+        {
+            return false;
+        }
+
+        var management = value.StartsWith("mgmt-", StringComparison.Ordinal);
+        if (!management && !value.StartsWith("sig-", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        var rest = value.AsSpan(management ? 5 : 4);
+        if (rest.Length != 36 + 1 + 36 || rest[36] != '-'
+            || !Guid.TryParseExact(rest[..36], "D", out var tenantId)
+            || !Guid.TryParseExact(rest[37..], "D", out var rowId)
+            || tenantId == Guid.Empty
+            || rowId == Guid.Empty)
+        {
+            return false;
+        }
+
+        var parsed = management ? Management(tenantId, rowId) : Signing(tenantId, rowId);
+        if (parsed.Value != value)
+        {
+            // Upper-case hex parses, but isn't the name Gatekeep would have made.
+            return false;
+        }
+
+        key = parsed;
+        return true;
+    }
+
     public static KeyName ForTenant(TenantKeyClass keyClass, Guid tenantId)
     {
         var (prefix, kind) = keyClass switch

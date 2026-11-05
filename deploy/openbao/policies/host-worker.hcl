@@ -137,3 +137,9 @@ path "transit/verify/dep-records" {
 path "transit/keys/dep-records" {
   capabilities = ["read"]
 }
+
+# The orphan sweep (Story 2.4) lists key names. It reads only sig- and mgmt- keys, through the
+# paths above; listing reveals names, never key material.
+path "transit/keys" {
+  capabilities = ["list"]
+}

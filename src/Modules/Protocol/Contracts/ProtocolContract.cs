@@ -42,6 +42,11 @@ public static class ProtocolContract
         ArgumentNullException.ThrowIfNull(hostedConnectionString);
 
         services.AddSingleton<ITenantKeyReader>(provider => new TenantKeyReader(() => hostedConnectionString(provider)));
+
+        // One listening connection, as gk_hosted, started on the first Tenant request (Story 2.4).
+        services.AddSingleton<ITenantKeyChanges>(provider => new SigningKeyChangeListener(
+            () => hostedConnectionString(provider),
+            provider.GetService<Microsoft.Extensions.Logging.ILogger<SigningKeyChangeListener>>()));
         ProtocolServer.Add(services);
         return services;
     }

@@ -74,7 +74,7 @@ development_status:
   2-1-prove-per-tenant-options-and-transit-signing: done
   2-2-prove-custom-stores-and-revocation-commit: done
   2-3-publish-discovery-and-jwks-per-tenant: done
-  2-4-rotate-signing-keys-automatically: backlog
+  2-4-rotate-signing-keys-automatically: done
   2-5-issue-a-token-by-client-credentials: backlog
   2-6-add-session-and-transaction-tables: done
   2-7-build-the-one-revocation-path: done

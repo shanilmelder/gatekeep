@@ -595,4 +595,7 @@ internal sealed class RecordingCustody : IKeyCustody
 
     public Task<IReadOnlyList<KeyPublicVersion>> GetPublicKeysAsync(KeyName key, CancellationToken cancellationToken) =>
         throw new NotSupportedException();
+
+    public Task<IReadOnlyList<ListedKey>> ListRowKeysAsync(CancellationToken cancellationToken) =>
+        throw new NotSupportedException();
 }

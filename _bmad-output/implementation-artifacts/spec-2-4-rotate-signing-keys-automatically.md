@@ -2,14 +2,29 @@
 title: 'Story 2.4: Rotate Signing Keys automatically'
 type: 'feature'
 created: '2026-11-05'
-status: 'ready-for-dev'
+status: 'done'
+baseline_revision: '27dd30331e7c210c396b165cd8e5cf29620c5633'
 review_loop_iteration: 0
-followup_review_recommended: false
+followup_review_recommended: true
 context:
   - '{project-root}/_bmad-output/implementation-artifacts/epic-2-context.md'
   - '{project-root}/_bmad-output/implementation-artifacts/spec-2-3-publish-discovery-and-jwks-per-tenant.md'
 warnings: ['oversized']
-deferred: []
+deferred:
+  - summary: >-
+      Nothing alerts when a current key passes the 180-day maximum age because rotation keeps failing.
+    evidence: |-
+      The daily rotation logs a failed Tenant by type only and retries. If custody stays down, or the job goes dead, a current key can sign past 180 days with no audit event or alert. Epic 11 (Security Alerts) is where an over-age alert belongs.
+    location: >-
+      src/Modules/Operations/Core/SigningKeyJobs.cs
+    severity: medium
+  - summary: >-
+      Revoked keys have no destruction path yet.
+    evidence: |-
+      Only retirement enqueues a destroy job, and destroyed_at is limited to retired rows. Nothing revokes a key before Epic 9, which must add destruction for revoked rows.
+    location: >-
+      src/Modules/Keys/Core/SigningKeyLifecycle.cs
+    severity: low
 ---
 
 <intent-contract>
@@ -120,6 +135,45 @@ deferred: []
 
 ## Review Triage Log
 
+### 2026-11-05 — Review pass
+- verdicts: 35 findings — high 0, medium 4, low 19, false 12, maybe-false 0
+- findings:
+  - `low` `patch` (blind) The double rotation recurs every 150-day cycle (alternate keys sign about 1 day and about 149 days), and the Design Note said it happened once — the code comment now describes the recurring pattern, and a three-cycle test asserts that no key exists past 180 days and that every promoted signing key had been published. The behaviour stays within AD-11 and the intent contract (age from `created_at`), and the only cost is churn. A different cadence (rotating by time served) would change the intent contract, so it is raised with the user as a residual, not patched.
+  - `medium` `patch` (blind) A destroy job that has gone dead is never queued again, and its row keeps naming the key, so the sweep skips it — the daily rotation now enqueues a destroy for every `retired` row with no `destroyed_at` and no live destroy job.
+  - `low` `defer` (blind) Revoked keys have no destruction path — nothing revokes a key until Epic 9. Deferred.
+  - `medium` `defer` (blind) Nothing enforces or alerts on the 180-day maximum when rotation keeps failing — belongs to Epic 11 alerts. Deferred.
+  - `false` `reject` (blind) Only active Tenants are rotated — `creating` and `active` are the only statuses. A `creating` Tenant never serves a token, and its keys are less than a day old.
+  - `medium` `patch` (blind) One key's failed read fails the whole sweep list — each key is now skipped and the list goes on, with a test.
+  - `low` `patch` (blind) Any `Rejected` LIST is read as an empty mount — only the 404 returns `[]` now, and a LIST failure fails the job, with a test.
+  - `low` `patch` (blind) The migration doesn't backfill `rotated_at`/`retired_at` — both are backfilled before the CHECKs are added.
+  - `low` `patch` (blind) Nothing requires `promoted_at` on promoted states — a CHECK now does, for `current`, `previous` and `retired`.
+  - `low` `reject` (blind) The audit events carry no row ID or purpose — the events name no key by design (as in Story 2.3), and the envelope's Tenant and type are what Epic 11 alerts on. Adding detail is an audit-schema decision for Epic 11.
+  - `low` `reject` (blind) The sweep's check and delete aren't atomic, and clock skew isn't allowed for — the 24-hour grace is much larger than any provisioning window or plausible skew. Locking would add a cross-scope lock for no reachable race.
+  - `false` `reject` (blind) Management keys retire on the access-token lifetime — Management API tokens last 15 minutes (PRD §5.2), less than the 1-hour hard lifetime used.
+  - `low` `patch` (blind) `sprint-status` is marked done before merge, and the sweep wording overstates its check — sprint-status is set at finalize, as in every story (false part). The sweep event wording is now corrected.
+  - `medium` `patch` (blind) Tests are missing — the cadence, dead destroy, revoke transition, Hosted UPDATE refusal and list-failure tests were added. The migration-staged backfill test is rejected (verification-gap row). The persistent-failure-to-`dead` test is rejected as standard job-runner behaviour, already tested in Jobs.
+  - `low` `patch` (edge) A 400 LIST reads as empty — grouped with the 404-only patch.
+  - `false` `reject` (edge) A non-string entry in the `keys` array — OpenBao's LIST returns only strings.
+  - `low` `patch` (edge) One key's read failing aborts the list — grouped with the per-key skip patch.
+  - `low` `patch` (edge) A dead destroy job is never queued again — grouped with the re-enqueue patch.
+  - `false` `reject` (edge) An over-age `next` gets promoted (after the backfill replaced a revoked `current`) — nothing revokes yet, and the 2.3 carry-over requires Epic 9 never to commit a `next` without a `current`.
+  - `low` `defer` (edge) Revoked keys and non-active Tenants — revoked is deferred (blind row). Non-active Tenants are false (blind row).
+  - `low` `patch` (edge) The migration fails on existing `previous`/`retired` rows — grouped with the backfill patch.
+  - `false` `reject` (edge) Setting `rotated_at` on `current` with no state change blocks a later rotation — only Gatekeep's own commands write these columns, and they never do that.
+  - `low` `reject` (edge) The listener isn't `IDisposable` — the generic host disposes its services asynchronously, and no synchronous disposal path is reachable.
+  - `low` `patch` (edge, claim) "One key's failure is logged and the others still run" was false for list reads — grouped with the per-key skip patch.
+  - `false` `reject` (edge, claim) "No key outlives the maximum age" while a `next` of any age is promoted — every `next` is younger than the `current` it replaces, and the cadence test now shows it.
+  - `low` `patch` (verification-gap) No test of retirement-only `NOTIFY` and eviction — added.
+  - `low` `patch` (verification-gap) No test of `Rejected` with the key still present — added.
+  - `low` `patch` (verification-gap) No test of a LIST failure failing the job — added with the 404-only patch.
+  - `low` `reject` (verification-gap, other) No test of the migration's `promoted_at` backfill — nothing reads `promoted_at` yet, and the test would need staged migrations.
+  - `false` `reject` (intent) Retirement can lag to about 25 hours — the intent's "past … plus 15 minutes" is a minimum and the daily job meets it. The retired key is harmless while published.
+  - `false` `reject` (intent) Most tests call the contract directly — the job path is covered by the rotate-only-the-due-Tenant, mid-rotation-failure and Worker startup tests. The contract is the job's only body.
+  - `false` `reject` (intent) One failure event per attempt rather than one when retries run out — the intent says "retries, writes an audit event", and a per-attempt event lets Epic 11 alert before exhaustion.
+  - `false` `reject` (intent) "No key outlives its maximum age" is a schedule, not a hard limit — same root cause as the deferred alert row.
+  - `false` `reject` (intent) No signing test with the promoted key — signing isn't reachable until Story 2.5.
+  - `false` `reject` (intent) Additions beyond the intent (trigger, column grants, listener) — the spec requires them to keep AD-11's transitions and its immediate JWKS change.
+
 ## Design Notes
 
 Measuring age from `created_at` (not from promotion) is the only reading under which no key outlives 180 days, because `next` waits while `current` ages. The double rotation it causes is deliberate. Cycle example: on day 150 `next` N0 is promoted, and on day 151 N0 is itself due and N150 is promoted. After that, each key signs for about 149 days. Write this in the code comment.
@@ -133,3 +187,50 @@ Each Transit key name is a row, and Transit never rotates it in place. A Hosted 
 **Commands:**
 - `docker build -t gatekeep/tests:epic2 -f deploy/docker/tests.Dockerfile .` -- expected: builds with locked restore.
 - `MSYS_NO_PATHCONV=1 docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -e TESTCONTAINERS_HOST_OVERRIDE=host.docker.internal --add-host host.docker.internal:host-gateway gatekeep/tests:epic2` -- expected: all architecture and isolation tests pass. 15–23 s connection timeouts under shared-Docker load are rerun alone.
+
+## Auto Run Result
+
+**Summary.** Signing and Management keys now rotate on their own, through three new Worker jobs:
+- **Daily rotation** (`keys.signing_keys.rotate`): runs one command per Tenant under the provisioning advisory lock. It promotes `next` to `current` and moves `current` to `previous` once `current` is 150 days old. For `signing`, the `next` key must have been published at least 15 minutes earlier. It creates the replacement `next` Transit-first. It retires any `previous` key rotated more than 1 h 15 min ago and queues a destroy job for it. It also queues a destroy job again for any retired key whose earlier one went dead. Then it sends a `NOTIFY` (`gatekeep_signing_keys`).
+- **Destroy** (`keys.signing_key.destroy`): deletes the Transit key and sets `destroyed_at`. If deletion fails, it commits `keys.signing_key.destruction_failed` through `FailureContext` and retries.
+- **Daily orphan sweep** (`keys.transit_keys.sweep`): removes `sig-`/`mgmt-` Transit keys at least 24 hours old that no row names. It never touches any other key.
+
+Host.Hosted keeps a `LISTEN` connection, so a committed change drops that Tenant's cached runtime at once.
+
+The migration adds the lifecycle times with their backfill and CHECKs, a trigger that enforces the AD-11 transitions, and a column-level `UPDATE` for `gk_worker`. The Worker's OpenBao policy gains `list` on `transit/keys`.
+
+**Deviations from the spec**
+- The per-Tenant scopes, the failed-destroy `FailureContext` commit and the sweep's per-key commits live in Operations, because architecture rules forbid scopes and `FailureContext` in contracts. Keys keeps only the steps that take a `CommandContext`.
+- Destroying a key that is already gone from custody marks its row destroyed.
+
+**Files changed**
+- `SecurityLimits.cs` -- six key lifecycle limits.
+- `IKeyCustody.cs`, `KeyName.cs`, `OpenBaoKeyCustody.cs`, `host-worker.hcl` -- `ListRowKeysAsync` (row keys with creation time; 404 only means empty; an unreadable key is skipped) and the `list` grant.
+- `Migration20261105010000RotateSigningKeys.cs`, `TableRegistry.cs` -- the columns, backfill, CHECKs (including `promoted_at`), transition trigger, column grant and re-rendered job guard.
+- `src/Modules/Keys/**` -- `SigningKeyLifecycle.cs` (rotate, retire, re-queue destroy, destroy, row-name check, NOTIFY) and seven `KeysEvents`.
+- `src/Modules/Operations/Core/SigningKeyJobs.cs`, `ProductionJobs.cs`, `OperationsContract.cs`, `JobSchedule.cs` -- the three jobs and the two daily entries.
+- `src/Modules/Protocol/**` -- `SigningKeyChangeListener` and `TenantRuntimes` eviction.
+- Tests -- `SigningKeyRotationTests`, `KeyChangeEvictionTests`, a policy matrix case, a Worker startup case, canary reasons, and updated 2.3 fixtures.
+- `docs/audit-events.md` -- regenerated.
+
+**Review findings.** There were 35 findings: 20 patched in 7 groups, 3 deferred (revoked-key destruction, the over-age alert, and the non-active row that shares the revoked deferral), and 12 rejected (all false), plus the low rejections recorded in the triage log.
+
+**Follow-up review: recommended (`true`).** Three medium entries were patched:
+- re-queuing dead destroy jobs
+- per-key skip in the list
+- the missing tests group
+
+None were high. The unverified risk is the destroy re-queue's match on `job_payload.ids` for live jobs. It runs in every Tenant's daily command, and only one test covers it. A second pass should confirm that it never queues a duplicate while a destroy job is still retrying, and that it scales with job history.
+
+**Verification**
+- Before the patches, the full Docker suite (`gatekeep/tests:epic2`) passed Architecture 599/599 and Isolation 2329/2333, with 4 load timeouts.
+- After the patches, it passed Architecture 599/599 and Isolation 2340/2344. The 4 failures were 15–17 s connection timeouts in unrelated tests (FreshAssertion, TenantLabel, Audit, InitCommand). Rerun alone, those four tests passed (13/13 cases).
+- The matrix audit found a covering test for every I/O matrix row, and each one ran and passed.
+
+**Residual risks**
+- **Rotation cadence:** age is counted from `created_at`, so the double rotation recurs every cycle. Alternate keys sign for about 1 day and about 149 days, which means two extra Transit keys and retirements per Tenant every 150 days. A 75/75 cadence would change the intent contract and is left for the user to decide.
+- **Failing rotation:** nothing alerts when a key passes 180 days because rotation keeps failing (Epic 11).
+- **Revoked keys:** they have no destruction path yet (Epic 9).
+- **Sweep cost:** it reads every row key one by one.
+- **Listener wait:** the first Hosted request waits up to 5 s for the listener.
+- **Migration backfill:** the backfill on pre-existing rows has no migration-staged test.
