@@ -54,7 +54,7 @@ internal static class InitCommand
             ? "bootstrap/" + BootstrapTokenFile.FileName + " in the secrets directory"
             : Path.Combine(Path.GetFullPath(tokenDirectory), BootstrapTokenFile.FileName);
 
-        var custody = CustodyOptions();
+        var custody = CustodyOptions("Nothing was issued.");
         if (custody is null)
         {
             return Failure;
@@ -234,7 +234,7 @@ internal static class InitCommand
     /// The socket and the cli AppRole's files from the environment, each file readable and holding
     /// no known default, as every host checks them. Null after naming each refused setting.
     /// </summary>
-    private static OpenBaoOptions? CustodyOptions()
+    internal static OpenBaoOptions? CustodyOptions(string consequence)
     {
         var socket = Environment.GetEnvironmentVariable(SocketVariable);
         var roleIdFile = Environment.GetEnvironmentVariable(RoleIdFileVariable);
@@ -252,7 +252,7 @@ internal static class InitCommand
         if (refused.Count > 0)
         {
             Console.Error.WriteLine(
-                $"Key custody isn't configured: {string.Join(", ", refused)} must be set, and name a readable file holding no default value. Nothing was issued.");
+                $"Key custody isn't configured: {string.Join(", ", refused)} must be set, and name a readable file holding no default value. {consequence}");
             return null;
         }
 

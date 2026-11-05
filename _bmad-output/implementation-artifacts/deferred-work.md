@@ -364,3 +364,15 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-2-3-publish-discovery-and-jwks-per-tenant.md`
   summary: Story 2.4 adds the `NOTIFY` that clears Host.Hosted's 5-second Tenant runtime cache on a key state change.
   evidence: Story 2.3 caches each runtime for at most 5 seconds, with no NOTIFY yet.
+- source_spec: `_bmad-output/implementation-artifacts/spec-12-7-rotate-the-master-key.md`
+  summary: Prove that `sys/rotate/root` changes the root key, so that an old generation plus a snapshot taken before the rotation can't open data written afterwards.
+  evidence: Story 12.7 checks that the keyring term rises. Removing the root-key call still passes every test. It needs a snapshot-and-restore harness, which comes with Stories 12.1 and 12.2.
+- source_spec: `_bmad-output/implementation-artifacts/spec-12-7-rotate-the-master-key.md`
+  summary: Rewrap or re-encrypt existing ciphertext to the new Transit versions, and then retire the old versions (G-16).
+  evidence: Story 12.7 only rotates the versions. OpenBao 2.7.2 rewrap ignores `associated_data`. The threat model assigns this to Stories 12.2 and 13.4.
+- source_spec: `_bmad-output/implementation-artifacts/spec-12-7-rotate-the-master-key.md`
+  summary: Sign in before and after a Master Key rotation in the stack check, once a sign-in flow exists (Epic 2).
+  evidence: Story 12.7 shows "sign-in keeps working" only on the custody operations sign-in uses, because Hosted still answers 404.
+- source_spec: `_bmad-output/implementation-artifacts/spec-12-7-rotate-the-master-key.md`
+  summary: Check the escrow retention rule and "never in a backup" against the real backup set and manifest (Story 12.1).
+  evidence: Story 12.7 states the rule in the runbook, and `finish` prints it. Its stack check searches volumes, images and environments for both generations, but no backup exists yet.

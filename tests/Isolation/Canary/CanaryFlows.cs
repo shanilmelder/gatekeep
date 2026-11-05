@@ -143,7 +143,7 @@ internal static class CanaryFlows
 {
     private const string HealthEndpoint = "/healthz";
 
-    /// <summary>The <c>migrate</c>, <c>audit verify</c> and <c>init</c> commands, from the Cli's <c>args switch</c>.</summary>
+    /// <summary>The <c>migrate</c>, <c>audit verify</c>, <c>init</c> and <c>rotate-transit-keys</c> commands, from the Cli's <c>args switch</c>.</summary>
     private const string CliProgram = "src/Gatekeep.Cli/Program.cs";
 
     private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(60);
@@ -178,6 +178,7 @@ internal static class CanaryFlows
         new("cli.migrate", [new(SurfaceKind.CliCommand, "migrate")], MigrateAsync),
         new("cli.audit-verify", [new(SurfaceKind.CliCommand, "audit verify")], AuditVerifyAsync),
         new("cli.init", [new(SurfaceKind.CliCommand, "init")], InitAsync),
+        new("cli.rotate-transit-keys", [new(SurfaceKind.CliCommand, "rotate-transit-keys")], RotateTransitKeysAsync),
         new("host.hosted", [new(SurfaceKind.HostStartup, "Hosted"), new(SurfaceKind.Route, HealthEndpoint)], HostAsync("Hosted")),
         new("host.admin", [new(SurfaceKind.HostStartup, "Admin"), new(SurfaceKind.Route, HealthEndpoint)], HostAsync("Admin")),
         new("host.worker", [new(SurfaceKind.HostStartup, "Worker"), new(SurfaceKind.Route, HealthEndpoint)], HostAsync("Worker")),
@@ -498,6 +499,48 @@ internal static class CanaryFlows
         var result = await CliProcess.RunCapturedAsync(
             DebugEnvironment, "audit", "verify", "--connection-file", context.File(connection), "--password-file", context.File(password.Value + "\n"));
         run.Capture("audit verify", result);
+
+        Assert.True(result.ExitCode == (failing ? 1 : 0), result.StandardOutput + result.StandardError);
+    }
+
+    /// <summary>
+    /// <c>gatekeep rotate-transit-keys</c> (Story 12.7) at Trace, with a canary AppRole secret ID and
+    /// OpenBao token on the stand-in socket, as <c>gk_cli</c>, which answers every rotation. Failing,
+    /// the database refuses the connection before any key is touched.
+    /// </summary>
+    private static async Task RotateTransitKeysAsync(CanaryFlowContext context, FlowRun run, bool failing)
+    {
+        var secretId = run.Plant("approle-secret-id");
+        var token = run.Plant("openbao-token");
+        var socket = context.Socket();
+        socket.Body = $$$"""{"auth":{"client_token":"{{{token.Value}}}","lease_duration":900},"data":{}}""";
+
+        string connection;
+        Canary password;
+        if (failing)
+        {
+            password = run.Plant("password-file");
+            connection = RefusedConnection(TableRegistry.Cli);
+        }
+        else
+        {
+            run.Database = await context.Postgres.NewMigratedDatabaseAsync();
+            await TestTenants.InsertAsync(context.Postgres.SuperuserConnection(run.Database), TenantA);
+            password = run.Plant("role-password", PostgresFixture.Password);
+            connection = Passwordless(context.Postgres.RoleConnection(TableRegistry.Cli, run.Database));
+        }
+
+        var environment = new Dictionary<string, string>(DebugEnvironment)
+        {
+            ["GATEKEEP_CLI_CONNECTION_FILE"] = context.File(connection),
+            ["GATEKEEP_CLI_PASSWORD_FILE"] = context.File(password.Value + "\n"),
+            ["GATEKEEP_CUSTODY_SOCKET"] = socket.Path,
+            ["GATEKEEP_CUSTODY_ROLE_ID_FILE"] = context.File(Guid.NewGuid().ToString()),
+            ["GATEKEEP_CUSTODY_SECRET_ID_FILE"] = context.File(secretId.Value + "\n"),
+        };
+
+        var result = await CliProcess.RunCapturedAsync(environment, "rotate-transit-keys");
+        run.Capture("rotate-transit-keys", result);
 
         Assert.True(result.ExitCode == (failing ? 1 : 0), result.StandardOutput + result.StandardError);
     }

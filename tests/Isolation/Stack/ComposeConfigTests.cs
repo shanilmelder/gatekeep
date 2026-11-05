@@ -27,6 +27,12 @@ public sealed class ComposeConfigTests
         },
         "--profile", "tools", "--profile", "setup"));
 
+    /// <summary>Story 12.7: a Master Key rotation, the rotation overlay on top.</summary>
+    private static readonly Lazy<JsonElement> RotateStack = new(() => Config(
+        ["deploy/compose.yaml", "deploy/compose.rotate.yaml"],
+        new Dictionary<string, string>(),
+        "--profile", "tools", "--profile", "setup", "--profile", "rotate"));
+
     private static JsonElement Services => Stack.Value.GetProperty("services");
 
     public static TheoryData<string> HardenedServiceNames => [.. HardenedServices];
@@ -211,9 +217,16 @@ public sealed class ComposeConfigTests
         Assert.Equal(["ALL"], Strings(openbao, "cap_drop"));
         Assert.NotEqual("0", openbao.GetProperty("user").GetString()!.Split(':')[0]);
         Assert.False(openbao.TryGetProperty("environment", out _));
-        Assert.Contains(
-            openbao.GetProperty("secrets").EnumerateArray(),
-            s => s.GetProperty("source").GetString() == "master_key" && s.GetProperty("target").GetString() == "/run/secrets/master_key");
+        // Exactly the key and its ID: the previous generation only ever comes from the rotation overlay.
+        Assert.Equal(
+            ["master_key:/run/secrets/master_key", "master_key_id:/run/secrets/master_key_id"],
+            openbao.GetProperty("secrets").EnumerateArray()
+                .Select(s => $"{s.GetProperty("source").GetString()}:{s.GetProperty("target").GetString()}")
+                .Order(StringComparer.Ordinal));
+        Assert.EndsWith(
+            "/secrets/master/master-key-id",
+            Normalized(Stack.Value.GetProperty("secrets").GetProperty("master_key_id").GetProperty("file").GetString()!),
+            StringComparison.Ordinal);
 
         // Only named volumes: no bind mount, so the secrets directory can't be reached as a volume.
         Assert.All(Volumes(openbao), v => Assert.Equal("volume", v.Type));
@@ -240,7 +253,7 @@ public sealed class ComposeConfigTests
         foreach (var service in Services.EnumerateObject())
         {
             var receives = service.Value.TryGetProperty("secrets", out var secrets)
-                && secrets.EnumerateArray().Any(s => s.GetProperty("source").GetString() == "master_key");
+                && secrets.EnumerateArray().Any(s => s.GetProperty("source").GetString() is "master_key" or "master_key_id");
             Assert.Equal(service.Name == "openbao", receives);
 
             var bound = Volumes(service.Value)
@@ -261,6 +274,93 @@ public sealed class ComposeConfigTests
         {
             Assert.DoesNotContain("secret", volume.Name, StringComparison.OrdinalIgnoreCase);
         }
+    }
+
+    /// <summary>
+    /// Story 12.7: the rotation overlay gives <c>openbao</c> the previous generation and adds its two
+    /// one-shot services, hardened, with no network. Only <c>keygen</c> and <c>master-key-rotate</c>
+    /// bind <c>master/</c>, and <c>master-key-rotate-root</c> has the socket alone.
+    /// </summary>
+    [Fact]
+    public void Rotation_overlay_adds_the_previous_generation_and_two_hardened_tools_with_no_network()
+    {
+        var services = RotateStack.Value.GetProperty("services");
+        var secrets = RotateStack.Value.GetProperty("secrets");
+        var file = Normalized(secrets.GetProperty("master_key").GetProperty("file").GetString()!);
+        var secretsDirectory = file[..^"/master/master-key".Length];
+
+        Assert.Equal(
+            ["master_key", "master_key_id", "master_key_previous", "master_key_previous_id"],
+            services.GetProperty("openbao").GetProperty("secrets").EnumerateArray().Select(s => s.GetProperty("source").GetString()).Order(StringComparer.Ordinal));
+        Assert.Equal(secretsDirectory + "/master/previous/master-key", Normalized(secrets.GetProperty("master_key_previous").GetProperty("file").GetString()!));
+        Assert.Equal(secretsDirectory + "/master/previous/master-key-id", Normalized(secrets.GetProperty("master_key_previous_id").GetProperty("file").GetString()!));
+        Assert.All(Volumes(services.GetProperty("openbao")), v => Assert.Equal("volume", v.Type));
+
+        foreach (var service in services.EnumerateObject())
+        {
+            var bound = Volumes(service.Value)
+                .Where(v => v.Type == "bind" && Normalized(v.Source).StartsWith(secretsDirectory + "/master", StringComparison.Ordinal))
+                .Select(v => $"{Normalized(v.Source)[secretsDirectory.Length..]}:{v.Target}")
+                .ToList();
+            string[] expected = service.Name is "keygen" or "master-key-rotate" ? ["/master:/secrets"] : [];
+            Assert.Equal(expected, bound);
+
+            var previous = service.Value.TryGetProperty("secrets", out var received)
+                && received.EnumerateArray().Any(s => s.GetProperty("source").GetString()!.StartsWith("master_key", StringComparison.Ordinal));
+            Assert.Equal(service.Name == "openbao", previous);
+        }
+
+        foreach (var name in new[] { "master-key-rotate", "master-key-rotate-root" })
+        {
+            var service = services.GetProperty(name);
+            Assert.Equal(["rotate"], Strings(service, "profiles"));
+            Assert.Equal("none", service.GetProperty("network_mode").GetString());
+            Assert.False(service.TryGetProperty("networks", out _), $"{name} joins a network.");
+            Assert.True(service.GetProperty("read_only").GetBoolean(), $"{name} has a writable root filesystem.");
+            Assert.Equal(["ALL"], Strings(service, "cap_drop"));
+            Assert.Contains("no-new-privileges:true", Strings(service, "security_opt"));
+            Assert.False(service.TryGetProperty("privileged", out var privileged) && privileged.GetBoolean());
+            Assert.Equal("no", service.GetProperty("restart").GetString());
+            Assert.Equal(["4500"], Strings(service, "group_add"));
+            Assert.Equal("gatekeep/openbao:local", service.GetProperty("image").GetString());
+            Assert.Equal("never", service.GetProperty("pull_policy").GetString());
+            Assert.True(service.GetProperty("pids_limit").GetInt64() > 0);
+            Assert.False(service.TryGetProperty("secrets", out _), $"{name} gets a Compose secret.");
+            Assert.False(service.TryGetProperty("ports", out var ports) && ports.GetArrayLength() > 0);
+        }
+
+        // prepare and finish chown into master/ as keygen does; the root step runs as OpenBao's user,
+        // with no capability and nothing but the socket.
+        var rotate = services.GetProperty("master-key-rotate");
+        Assert.Equal(Strings(services.GetProperty("keygen"), "cap_add").Order(), Strings(rotate, "cap_add").Order());
+        Assert.Equal(["/opt/gatekeep/openbao/rotate-master-key.sh"], Strings(rotate, "entrypoint").Skip(1));
+        Assert.Equal(
+            ["bind:/secrets", "volume:/run/openbao"],
+            Volumes(rotate).Select(v => $"{v.Type}:{v.Target}").Order());
+
+        var root = services.GetProperty("master-key-rotate-root");
+        Assert.Equal("100:1000", root.GetProperty("user").GetString());
+        Assert.Empty(Strings(root, "cap_add"));
+        Assert.Equal(["/opt/gatekeep/openbao/rotate-root-key.sh"], Strings(root, "entrypoint").Skip(1));
+        Assert.Equal(("volume", "openbao-socket", "/run/openbao"), Assert.Single(Volumes(root)));
+    }
+
+    /// <summary>Story 12.7: the base config and its renderer never allow unauthenticated generate-root outside rotation mode.</summary>
+    [Fact]
+    public void Base_OpenBao_config_disables_unauthenticated_generate_root_and_only_rotation_mode_reopens_it()
+    {
+        var config = File.ReadAllText(Path.Combine(Repository.Root, "deploy", "openbao", "openbao.hcl"));
+        var listeners = Regex.Matches(config, @"(?s)listener ""(?<type>\w+)"" \{(?<body>[^}]*)\}");
+        Assert.Equal(2, listeners.Count);
+        Assert.All(listeners, l => Assert.Matches(@"(?m)^\s*disable_unauthed_generate_root_endpoints = true\s*$", l.Groups["body"].Value));
+        Assert.DoesNotMatch(@"(?m)^[^#]*disable_unauthed_generate_root_endpoints\s*=\s*false", config);
+        Assert.Contains("current_key_id = \"@MASTER_KEY_ID@\"", config);
+
+        var start = File.ReadAllText(Path.Combine(Repository.Root, "deploy", "openbao", "start-openbao.sh"));
+        Assert.Contains("if [ -e \"$PREVIOUS_KEY_FILE\" ] || [ -e \"$PREVIOUS_ID_FILE\" ]; then", start);
+        Assert.Contains("previous != \"\" && unix && /^[ \\t]*disable_unauthed_generate_root_endpoints", start);
+        Assert.Contains("[ \"$opened\" -eq 0 ] || refuse", start);
+        Assert.Contains("ENTRYPOINT [\"sh\", \"/opt/gatekeep/openbao/start-openbao.sh\"]", File.ReadAllText(Path.Combine(Repository.Root, "deploy", "docker", "openbao.Dockerfile")));
     }
 
     /// <summary>
@@ -397,7 +497,7 @@ public sealed class ComposeConfigTests
         {
             ["postgres"] = passwords,
             ["postgres-passwords"] = passwords,
-            ["openbao"] = ["master_key"],
+            ["openbao"] = ["master_key", "master_key_id"],
             ["hosted"] = ["gk_hosted_password", "openbao_hosted_role_id", "openbao_hosted_secret_id"],
             ["admin"] = ["gk_admin_password", "openbao_admin_role_id", "openbao_admin_secret_id"],
             ["worker"] = ["gk_dispatch_password", "gk_worker_password", "gk_sealer_password", "gk_retention_password",
