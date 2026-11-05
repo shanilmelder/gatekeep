@@ -27,6 +27,10 @@ public class OpenBaoFixture : IAsyncLifetime
     public const string Socket = "unix:///run/openbao/openbao.sock";
     public const string KeyDirectory = "/secrets";
     public const string KeyFile = KeyDirectory + "/master-key";
+    public const string KeyIdFile = KeyDirectory + "/master-key-id";
+    public const string PreviousDirectory = KeyDirectory + "/previous";
+    public const string RenderedConfig = "/tmp/openbao.hcl";
+    public const string RotationModeFlag = "/opt/gatekeep/test/rotation-mode";
     public const string EscrowFile = KeyDirectory + "/openbao-init.json";
     public const string AppRoleDirectory = KeyDirectory + "/approle";
     public const string MasterKeySecret = "/run/secrets/master_key";
@@ -44,6 +48,8 @@ public class OpenBaoFixture : IAsyncLifetime
     private readonly string _credentials = Path.Combine(Path.GetTempPath(), "gatekeep-approle-" + Guid.NewGuid().ToString("N"));
 
     private IContainer? _container;
+
+    private IVolume? _keyVolume;
 
     public IContainer Container => _container ?? throw new InvalidOperationException("Not started.");
 
@@ -67,9 +73,21 @@ public class OpenBaoFixture : IAsyncLifetime
     /// <summary>The setup script as the container runs it. A variant may leave steps out.</summary>
     protected virtual string SetupScript(string script) => script;
 
+    /// <summary>
+    /// The key directory as a volume, not a tmpfs, so the Master Key survives <see cref="RestartAsync"/>
+    /// as the bind-mounted secrets directory would.
+    /// </summary>
+    protected virtual bool KeysSurviveRestart => false;
+
     public async ValueTask InitializeAsync()
     {
-        _container = Build(generateKey: true, setup: SetupScript)
+        if (KeysSurviveRestart)
+        {
+            _keyVolume = new VolumeBuilder().WithName("gatekeep-keys-" + Guid.NewGuid().ToString("N")).Build();
+            await _keyVolume.CreateAsync();
+        }
+
+        _container = Build(generateKey: true, _keyVolume, SetupScript)
             .WithPortBinding(TestPort, assignRandomHostPort: true)
             .WithWaitStrategy(Wait.ForUnixContainer().UntilMessageIsLogged("OpenBao server started"))
             .Build();
@@ -110,6 +128,11 @@ public class OpenBaoFixture : IAsyncLifetime
             await _container.DisposeAsync();
         }
 
+        if (_keyVolume is not null)
+        {
+            await _keyVolume.DisposeAsync();
+        }
+
         if (Directory.Exists(_credentials))
         {
             Directory.Delete(_credentials, recursive: true);
@@ -148,6 +171,61 @@ public class OpenBaoFixture : IAsyncLifetime
         response.EnsureSuccessStatusCode();
         using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
         return body.RootElement.GetProperty("auth").GetProperty("client_token").GetString()!;
+    }
+
+    /// <summary>
+    /// The adapter as <paramref name="role"/> would use it, following <see cref="Address"/> across
+    /// <see cref="RestartAsync"/>, which can move the mapped port. Its token is the one it logged in
+    /// for first, as a running host's would be.
+    /// </summary>
+    public OpenBaoKeyCustody FollowingCustody(string role) => Custody(role, wrap: inner => new FollowAddress(this, inner));
+
+    /// <summary>
+    /// Stops and starts OpenBao, as Compose recreating the service would, in rotation mode or not
+    /// (the stand-in start script mounts <see cref="PreviousDirectory"/> only in rotation mode).
+    /// It doesn't wait for an unseal, which may rightly never come.
+    /// </summary>
+    public async Task RestartAsync(bool rotationMode)
+    {
+        var flag = await ExecAsync(rotationMode ? ["touch", RotationModeFlag] : ["rm", "-f", RotationModeFlag]);
+        if (flag.ExitCode != 0)
+        {
+            throw new InvalidOperationException("Couldn't set the rotation mode flag.");
+        }
+
+        await Container.StopAsync();
+        await Container.StartAsync();
+        Address = new UriBuilder(Uri.UriSchemeHttp, Container.Hostname, Container.GetMappedPublicPort(TestPort)).Uri;
+    }
+
+    /// <summary>The <c>bao status</c> JSON over the socket, or null while it doesn't answer.</summary>
+    public async Task<JsonElement?> StatusAsync()
+    {
+        var status = await ExecAsync("bao", "status", "-format=json", $"-address={Socket}");
+        if (status.Stdout.Trim().Length == 0)
+        {
+            return null;
+        }
+
+        using var json = JsonDocument.Parse(status.Stdout);
+        return json.RootElement.Clone();
+    }
+
+    /// <summary>True once OpenBao reports unsealed within <paramref name="deadline"/>.</summary>
+    public async Task<bool> UnsealsWithinAsync(TimeSpan deadline)
+    {
+        var until = DateTime.UtcNow + deadline;
+        while (DateTime.UtcNow < until)
+        {
+            if (await StatusAsync() is { } status && !status.GetProperty("sealed").GetBoolean())
+            {
+                return true;
+            }
+
+            await Task.Delay(500);
+        }
+
+        return false;
     }
 
     public async Task<string> ReadTextAsync(string path) =>
@@ -194,8 +272,12 @@ public class OpenBaoFixture : IAsyncLifetime
             .WithResourceMapping(Lf(Path.Combine(deploy, "openbao.hcl")), "/etc/openbao/openbao.hcl")
             .WithResourceMapping(Lf(Path.Combine(custody, "test-listener.hcl")), "/etc/openbao/test-listener.hcl")
             .WithResourceMapping(Lf(Path.Combine(custody, "start-openbao.sh")), "/opt/gatekeep/test/start-openbao.sh")
-            .WithResourceMapping(Lf(Path.Combine(deploy, "setup.sh"), setup), "/opt/gatekeep/openbao/setup.sh")
-            .WithResourceMapping(Lf(Path.Combine(deploy, "generate-master-key.sh")), "/opt/gatekeep/openbao/generate-master-key.sh");
+            .WithResourceMapping(Lf(Path.Combine(deploy, "setup.sh"), setup), "/opt/gatekeep/openbao/setup.sh");
+
+        foreach (var script in new[] { "start-openbao.sh", "generate-master-key.sh", "rotate-master-key.sh", "rotate-root-key.sh" })
+        {
+            builder = builder.WithResourceMapping(Lf(Path.Combine(deploy, script)), $"/opt/gatekeep/openbao/{script}");
+        }
 
         foreach (var policy in Directory.EnumerateFiles(Path.Combine(deploy, "policies"), "*.hcl"))
         {
@@ -265,5 +347,28 @@ public sealed class NoDeploymentKeysOpenBaoFixture : OpenBaoFixture
         }
 
         return string.Join('\n', kept);
+    }
+}
+
+/// <summary>
+/// Story 12.7: the same setup with its key directory on a volume, so a Master Key rotation can
+/// restart OpenBao and keep master/ as the secrets directory would.
+/// </summary>
+public sealed class RotationOpenBaoFixture : OpenBaoFixture
+{
+    protected override bool KeysSurviveRestart => true;
+}
+
+/// <summary>Sends each request to the fixture's current address, which a restart can change.</summary>
+internal sealed class FollowAddress(OpenBaoFixture bao, HttpMessageHandler inner) : DelegatingHandler(inner)
+{
+    protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+    {
+        if (request.RequestUri is { } uri)
+        {
+            request.RequestUri = new UriBuilder(uri) { Host = bao.Address.Host, Port = bao.Address.Port }.Uri;
+        }
+
+        return base.SendAsync(request, cancellationToken);
     }
 }

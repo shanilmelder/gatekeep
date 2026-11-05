@@ -415,6 +415,7 @@
           "Gatekeep.Kernel": "[0.1.0, )",
           "Gatekeep.Modules.Admins": "[0.1.0, )",
           "Gatekeep.Modules.Audit": "[0.1.0, )",
+          "Gatekeep.Modules.Keys": "[0.1.0, )",
           "Gatekeep.Modules.Operations": "[0.1.0, )"
         }
       },

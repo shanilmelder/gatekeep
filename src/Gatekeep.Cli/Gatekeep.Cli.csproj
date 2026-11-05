@@ -10,6 +10,7 @@
     <ProjectReference Include="../Modules/Operations/Gatekeep.Modules.Operations.csproj" />
     <ProjectReference Include="../Modules/Admins/Gatekeep.Modules.Admins.csproj" />
     <ProjectReference Include="../Modules/Audit/Gatekeep.Modules.Audit.csproj" />
+    <ProjectReference Include="../Modules/Keys/Gatekeep.Modules.Keys.csproj" />
     <ProjectReference Include="../Adapters/OpenBao/Gatekeep.Adapters.OpenBao.csproj" />
     <ProjectReference Include="../Adapters/Postgres/Gatekeep.Adapters.Postgres.csproj" />
   </ItemGroup>

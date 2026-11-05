@@ -30,6 +30,7 @@ dependency Host.Worker -> Adapters.Hosting
 dependency Cli -> Operations
 dependency Cli -> Admins
 dependency Cli -> Audit
+dependency Cli -> Keys
 dependency Cli -> Adapters.OpenBao
 dependency Cli -> Adapters.Postgres
 dependency Protocol -> Authentication

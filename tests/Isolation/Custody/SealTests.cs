@@ -24,8 +24,10 @@ public sealed class SealTests
         var exitCode = await ExitCodeAsync(container);
         var (stdout, stderr) = await container.GetLogsAsync(ct: Cancellation);
 
+        // Neither file exists, so start-openbao.sh refuses on the key ID first (Story 12.7). The
+        // restart test below shows the seal itself refusing a missing key whose ID is present.
         Assert.NotEqual(0, exitCode);
-        Assert.Contains("seal \"static\"", stdout + stderr);
+        Assert.Contains("refusing to start: /run/secrets/master_key_id is missing", stdout + stderr);
         Assert.DoesNotContain("OpenBao server started", stdout + stderr);
     }
 

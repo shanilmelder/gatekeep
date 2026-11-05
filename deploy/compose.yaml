@@ -29,7 +29,9 @@
 # has no route to Admin, directly or through Caddy (AD-2). Health ports listen on loopback
 # only.
 #
-# Production TLS for both sites adds deploy/compose.cloudflare.yaml (docs/install.md).
+# Production TLS for both sites adds deploy/compose.cloudflare.yaml (docs/install.md). A
+# Master Key rotation adds deploy/compose.rotate.yaml for its duration only
+# (docs/runbooks/master-key-rotation.md).
 
 name: gatekeep
 
@@ -149,8 +151,11 @@ services:
     restart: unless-stopped
     # No network at all: hosts reach it only on its socket, on the openbao-socket volume.
     network_mode: none
+    # The Master Key and its ID only. The image's start-openbao.sh renders the server config
+    # from them onto the /tmp tmpfs, and refuses to start without a valid ID.
     secrets:
       - master_key
+      - master_key_id
     volumes:
       - openbao-data:/var/lib/openbao
       - openbao-socket:/run/openbao
@@ -340,7 +345,7 @@ services:
       postgres-passwords:
         condition: service_completed_successfully
 
-  # Writes a new Master Key into master/. Refuses to replace one.
+  # Writes a new Master Key, generation 1, and its ID into master/. Refuses to replace either.
   keygen:
     image: gatekeep/openbao:local
     profiles: [setup]
@@ -392,6 +397,9 @@ services:
 secrets:
   master_key:
     file: ${GATEKEEP_SECRETS_DIR:-./secrets}/master/master-key
+  # The Master Key's ID, gatekeep-master-<N>, beside it: not a secret, but delivered the same way.
+  master_key_id:
+    file: ${GATEKEEP_SECRETS_DIR:-./secrets}/master/master-key-id
   postgres_password:
     file: ${GATEKEEP_SECRETS_DIR:-./secrets}/postgres/postgres_password
   gk_migrator_password:
