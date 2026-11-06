@@ -1,8 +1,8 @@
 #!/bin/sh
 # Release rehearsal (Story 12.5). Runs inside the release container of
-# deploy/compose.test.yaml, never on the machine itself:
+# deploy/compose.dev.yaml, never on the machine itself:
 #
-#   docker compose -f deploy/compose.test.yaml run --rm --build release
+#   docker compose -f deploy/compose.dev.yaml run --rm --build release
 #
 # It runs the real release scripts end to end, with a throwaway software key in place of
 # the hardware key and a local registry in place of GHCR: build.sh for openbao and

@@ -35,12 +35,12 @@ jobs:
       # The same gates as CI: restores from lockfiles with install scripts disabled, the
       # dependency audits, the build, and the Architecture and Isolation tests.
       - name: Build and test in the tests container
-        run: docker compose -f deploy/compose.test.yaml run --rm --build tests
+        run: docker compose -f deploy/compose.dev.yaml run --rm --build tests
 
       - name: Bring the stack up and check it
         env:
           GATEKEEP_HOST_REPO: ${{ github.workspace }}
-        run: docker compose -f deploy/compose.test.yaml run --rm --build stack
+        run: docker compose -f deploy/compose.dev.yaml run --rm --build stack
 
       - name: Build the release tools image
         run: docker build --file deploy/docker/release-tools.Dockerfile --tag gatekeep/release-tools:local .

@@ -1,0 +1,585 @@
+# Gatekeep for development and CI: the production stack of deploy/compose.yaml, service for
+# service, plus the test-only services that build, test and check it. Production installs use
+# deploy/compose.yaml (docs/install.md), never this file. The app services here must stay
+# identical to that file's: ComposeConfigTests.Dev_runs_the_production_stack_unchanged fails on
+# any difference, so a change to one is made in both.
+#
+# The app, as in deploy/compose.yaml, under its own project (gatekeep-dev), so a dev stack and
+# a local install never share containers or volumes:
+#
+#   docker compose -f deploy/compose.dev.yaml --profile tools --profile setup build
+#   docker compose -f deploy/compose.dev.yaml run --rm keygen
+#   docker compose -f deploy/compose.dev.yaml run --rm passwords
+#   docker compose -f deploy/compose.dev.yaml run --rm bootstrap-dir
+#   docker compose -f deploy/compose.dev.yaml up -d openbao
+#   docker compose -f deploy/compose.dev.yaml run --rm openbao-setup
+#   docker compose -f deploy/compose.dev.yaml run --rm cli migrate
+#   docker compose -f deploy/compose.dev.yaml up -d --wait
+#   docker compose -f deploy/compose.dev.yaml run --rm cli init
+#
+# After a code change, rebuild and replace only what changed, keeping the data:
+#
+#   docker compose -f deploy/compose.dev.yaml up -d --build --wait <service...>
+#
+# The test-only services (profile tests, stack, release or dev):
+#
+#   docker compose -f deploy/compose.dev.yaml run --rm --build tests
+#       The whole .NET build, both test suites, the token and lint checks and the browser tests.
+#
+#   docker compose -f deploy/compose.dev.yaml run --rm --build stack
+#       Installs the stack from deploy/compose.yaml and checks it (deploy/ci/stack-check.sh).
+#
+#   docker compose -f deploy/compose.dev.yaml run --rm --build release
+#       Rehearses the signed release path with a throwaway key and a local registry
+#       (deploy/ci/release-check.sh).
+#
+#   docker compose -f deploy/compose.dev.yaml --profile dev up -d --build dev
+#   docker compose -f deploy/compose.dev.yaml exec dev sh /host/deploy/docker/dev.sh [checkout] [command...]
+#       One long-lived workspace for every step of every task: the first line once (and
+#       again only when the toolchain changes), the second for each run. It syncs the
+#       checkout into its work volume, so a source change rebuilds no image and starts no
+#       new container, and bin/, obj/, node_modules and the NuGet and pnpm caches carry over
+#       from run to run. With no command it runs the same steps as the tests service. The
+#       checkout is a path under this repository: . (the default) or .claude/worktrees/<name>.
+#       Before a PR, run the tests service once too: CI runs that, from a clean image.
+#
+# The test-only services are the only ones that get the Docker socket: Testcontainers starts
+# PostgreSQL and OpenBao beside the tests and the dev workspace, the stack check drives Compose,
+# and the release rehearsal drives buildx and a registry. That makes them equal to root on the
+# machine they run on, so they run only code from this repository.
+
+name: gatekeep-dev
+
+# Every service: bounded processes, and rotated logs so a crash loop can't fill the disk.
+x-limits: &limits
+  pids_limit: 256
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
+
+x-hardened: &hardened
+  <<: *limits
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+  tmpfs: ["/tmp:size=16m,mode=1777"]
+
+x-host-healthcheck: &host-healthcheck
+  interval: 10s
+  timeout: 8s
+  retries: 3
+  start_period: 60s
+  start_interval: 2s
+
+x-host: &host
+  <<: *hardened
+  restart: unless-stopped
+  # The gatekeep-custody group, which owns OpenBao's socket.
+  group_add: ["4500"]
+  depends_on:
+    postgres:
+      condition: service_healthy
+    postgres-passwords:
+      condition: service_completed_successfully
+    openbao:
+      condition: service_healthy
+
+# One-shot tools that write into the secrets directory. Root, for chown into it, with
+# only the capabilities that needs, and no network. Each mounts only the subdirectory
+# it writes, so none of them can read the Master Key but keygen.
+x-secrets-tool: &secrets-tool
+  <<: *limits
+  read_only: true
+  network_mode: none
+  user: "0:0"
+  cap_drop: [ALL]
+  cap_add: [CHOWN, DAC_OVERRIDE, FOWNER]
+  security_opt: ["no-new-privileges:true"]
+  restart: "no"
+
+x-test: &test
+  build:
+    context: ..
+    dockerfile: deploy/docker/tests.Dockerfile
+  image: gatekeep/tests:local
+  pids_limit: 2048
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
+
+services:
+  postgres:
+    image: postgres:18.6@sha256:3a4264520e121176619f54ff867d12774bc81e95e7b84db58d63bccdb6144b81
+    <<: *hardened
+    pids_limit: 512
+    user: "999:999"
+    tmpfs: ["/tmp:size=16m,mode=1777", "/var/run/postgresql:size=1m,mode=1777"]
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: gatekeep
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+    secrets: &role-password-secrets
+      - postgres_password
+      - gk_migrator_password
+      - gk_hosted_password
+      - gk_admin_password
+      - gk_worker_password
+      - gk_dispatch_password
+      - gk_sealer_password
+      - gk_retention_password
+      - gk_cli_password
+    volumes:
+      - postgres-data:/var/lib/postgresql
+      - ./postgres/roles.sql:/docker-entrypoint-initdb.d/10-roles.sql:ro
+      - ./postgres/role-passwords.sh:/docker-entrypoint-initdb.d/20-role-passwords.sh:ro
+    networks: [hosted, admin, worker, tools]
+    healthcheck:
+      # Over tcp: the entrypoint's temporary init server listens on the unix socket only,
+      # so this passes only once init has finished and the real server is up.
+      test: ["CMD", "pg_isready", "--host=127.0.0.1", "--username=postgres", "--dbname=gatekeep"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  # Sets every login role's password from its file, on each `up`, so a password file
+  # changed or restored later can't drift from the database. Hosts start after it.
+  postgres-passwords:
+    image: postgres:18.6@sha256:3a4264520e121176619f54ff867d12774bc81e95e7b84db58d63bccdb6144b81
+    <<: *hardened
+    user: "999:999"
+    restart: "no"
+    entrypoint: ["sh", "/gatekeep/role-passwords.sh"]
+    environment:
+      PGHOST: postgres
+      PGUSER: postgres
+      PGDATABASE: gatekeep
+      GATEKEEP_SUPERUSER_PASSWORD_FILE: /run/secrets/postgres_password
+    secrets: *role-password-secrets
+    volumes:
+      - ./postgres/role-passwords.sh:/gatekeep/role-passwords.sh:ro
+    networks: [tools]
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  openbao:
+    build:
+      context: ..
+      dockerfile: deploy/docker/openbao.Dockerfile
+    image: gatekeep/openbao:local
+    <<: *hardened
+    user: "100:1000"
+    group_add: ["4500"]
+    restart: unless-stopped
+    # No network at all: hosts reach it only on its socket, on the openbao-socket volume.
+    network_mode: none
+    # The Master Key and its ID only. The image's start-openbao.sh renders the server config
+    # from them onto the /tmp tmpfs, and refuses to start without a valid ID.
+    secrets:
+      - master_key
+      - master_key_id
+    volumes:
+      - openbao-data:/var/lib/openbao
+      - openbao-socket:/run/openbao
+      - openbao-audit:/var/log/openbao
+    healthcheck:
+      # 0 only when initialized and unsealed: before openbao-setup it stays unhealthy.
+      test: ["CMD", "bao", "status", "-address=unix:///run/openbao/openbao.sock"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  hosted:
+    build:
+      context: ..
+      dockerfile: deploy/docker/hosted.Dockerfile
+    image: gatekeep/hosted:local
+    <<: *host
+    user: "10001:10001"
+    environment:
+      ConnectionStrings__Hosted: Host=postgres;Port=5432;Database=gatekeep;Username=gk_hosted;Gss Encryption Mode=Disable
+      Custody__SocketPath: /run/openbao/openbao.sock
+      Custody__RoleIdFile: /run/secrets/openbao_role_id
+      Custody__SecretIdFile: /run/secrets/openbao_secret_id
+    secrets:
+      - source: gk_hosted_password
+        target: Database__Hosted__Password
+      - source: openbao_hosted_role_id
+        target: openbao_role_id
+      - source: openbao_hosted_secret_id
+        target: openbao_secret_id
+    volumes:
+      - openbao-socket:/run/openbao:ro
+    networks: [hosted, hosted-edge]
+    healthcheck:
+      <<: *host-healthcheck
+      test: ["CMD", "dotnet", "/app/Gatekeep.Host.Hosted.dll", "--health-probe"]
+
+  admin:
+    build:
+      context: ..
+      dockerfile: deploy/docker/admin.Dockerfile
+    image: gatekeep/admin:local
+    <<: *host
+    user: "10002:10002"
+    environment:
+      ConnectionStrings__Admin: Host=postgres;Port=5432;Database=gatekeep;Username=gk_admin;Gss Encryption Mode=Disable
+      # The origin browsers reach the Admin Dashboard at, through Caddy: every state-changing
+      # request's Origin must be exactly this (Story 1.21). The default port 443 is left out.
+      Gatekeep__PublicOrigin: https://${GATEKEEP_ADMIN_HOST:-admin.gatekeep-admin.localhost}:${GATEKEEP_HTTPS_PORT:-443}
+      # Caddy's admin-edge subnet: the X-Forwarded-For it sets is believed from there only, so
+      # bootstrap claims are counted by the client's address (Story 1.21).
+      Gatekeep__ForwardedBy: 10.201.2.0/24
+      # The Tenant zone and the HTTPS port Tenant hosts are reached on, the same Caddy serves:
+      # a new Tenant's issuer, RP ID and email link base are derived from them once and stored (Story 1.27).
+      Gatekeep__TenantZone: ${GATEKEEP_TENANT_ZONE:-gatekeep.localhost}
+      Gatekeep__TenantHttpsPort: ${GATEKEEP_HTTPS_PORT:-443}
+      Custody__SocketPath: /run/openbao/openbao.sock
+      Custody__RoleIdFile: /run/secrets/openbao_role_id
+      Custody__SecretIdFile: /run/secrets/openbao_secret_id
+    secrets:
+      - source: gk_admin_password
+        target: Database__Admin__Password
+      - source: openbao_admin_role_id
+        target: openbao_role_id
+      - source: openbao_admin_secret_id
+        target: openbao_secret_id
+    volumes:
+      - openbao-socket:/run/openbao:ro
+    networks: [admin, admin-edge]
+    healthcheck:
+      <<: *host-healthcheck
+      test: ["CMD", "dotnet", "/app/Gatekeep.Host.Admin.dll", "--health-probe"]
+
+  worker:
+    build:
+      context: ..
+      dockerfile: deploy/docker/worker.Dockerfile
+    image: gatekeep/worker:local
+    <<: *host
+    user: "10003:10003"
+    environment:
+      ConnectionStrings__Dispatch: Host=postgres;Port=5432;Database=gatekeep;Username=gk_dispatch;Gss Encryption Mode=Disable
+      ConnectionStrings__Worker: Host=postgres;Port=5432;Database=gatekeep;Username=gk_worker;Gss Encryption Mode=Disable
+      ConnectionStrings__Sealer: Host=postgres;Port=5432;Database=gatekeep;Username=gk_sealer;Gss Encryption Mode=Disable
+      ConnectionStrings__Retention: Host=postgres;Port=5432;Database=gatekeep;Username=gk_retention;Gss Encryption Mode=Disable
+      Custody__SocketPath: /run/openbao/openbao.sock
+      Custody__RoleIdFile: /run/secrets/openbao_role_id
+      Custody__SecretIdFile: /run/secrets/openbao_secret_id
+    secrets:
+      - source: gk_dispatch_password
+        target: Database__Dispatch__Password
+      - source: gk_worker_password
+        target: Database__Worker__Password
+      - source: gk_sealer_password
+        target: Database__Sealer__Password
+      - source: gk_retention_password
+        target: Database__Retention__Password
+      - source: openbao_worker_role_id
+        target: openbao_role_id
+      - source: openbao_worker_secret_id
+        target: openbao_secret_id
+    volumes:
+      - openbao-socket:/run/openbao:ro
+    networks: [worker]
+    healthcheck:
+      <<: *host-healthcheck
+      test: ["CMD", "dotnet", "/app/Gatekeep.Host.Worker.dll", "--health-probe"]
+
+  # The only entry point. The zone and the Admin hostname are settings, not code; the
+  # defaults are for local runs and CI. The Admin hostname must be outside the zone, or
+  # Caddy refuses to start. Inside, Caddy listens on 8080 and 8443, so it needs
+  # no capability; the host ports default to 80 and 443.
+  caddy:
+    build:
+      context: ..
+      dockerfile: deploy/docker/caddy.Dockerfile
+    image: gatekeep/caddy:local
+    <<: *hardened
+    user: "10005:10005"
+    restart: unless-stopped
+    environment:
+      GATEKEEP_TENANT_ZONE: ${GATEKEEP_TENANT_ZONE:-gatekeep.localhost}
+      GATEKEEP_ADMIN_HOST: ${GATEKEEP_ADMIN_HOST:-admin.gatekeep-admin.localhost}
+      # Only deploy/compose.cloudflare.yaml switches the mode; .env can't.
+      GATEKEEP_TLS_MODE: internal
+    ports:
+      - "${GATEKEEP_HTTP_PORT:-80}:8080"
+      - "${GATEKEEP_HTTPS_PORT:-443}:8443"
+    # Certificates and their private keys (and the internal CA) live only here, mounted by
+    # no other service.
+    volumes:
+      - caddy-data:/data
+      - caddy-config:/config
+    networks: [edge, hosted-edge, admin-edge]
+    healthcheck:
+      test: ["CMD", "nc", "-z", "127.0.0.1", "8443"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  # gatekeep, run on demand: docker compose -f deploy/compose.yaml run --rm cli <command>.
+  # A bare `migrate` (as gk_migrator), `audit verify` and `init` (as gk_cli) take their
+  # connection and password files from the environment below. `init` also reaches OpenBao
+  # on its socket with the cli AppRole, and writes the one-time bootstrap token into
+  # bootstrap/ in the secrets directory, its only bind mount from there (Story 1.19).
+  cli:
+    build:
+      context: ..
+      dockerfile: deploy/docker/cli.Dockerfile
+    image: gatekeep/cli:local
+    profiles: [tools]
+    <<: *hardened
+    user: "10004:10004"
+    group_add: ["4500"]
+    restart: "no"
+    environment:
+      GATEKEEP_MIGRATE_CONNECTION_FILE: /gatekeep/migrator.connection
+      GATEKEEP_MIGRATE_PASSWORD_FILE: /run/secrets/gk_migrator_password
+      GATEKEEP_CLI_CONNECTION_FILE: /gatekeep/cli.connection
+      GATEKEEP_CLI_PASSWORD_FILE: /run/secrets/gk_cli_password
+      GATEKEEP_CUSTODY_SOCKET: /run/openbao/openbao.sock
+      GATEKEEP_CUSTODY_ROLE_ID_FILE: /run/secrets/openbao_role_id
+      GATEKEEP_CUSTODY_SECRET_ID_FILE: /run/secrets/openbao_secret_id
+    secrets:
+      - gk_migrator_password
+      - gk_cli_password
+      - source: openbao_cli_role_id
+        target: openbao_role_id
+      - source: openbao_cli_secret_id
+        target: openbao_secret_id
+    volumes:
+      - ./postgres/migrator.connection:/gatekeep/migrator.connection:ro
+      - ./postgres/cli.connection:/gatekeep/cli.connection:ro
+      - openbao-socket:/run/openbao:ro
+      # Read-write: init writes bootstrap-token here, mode 0600, in the 0700 directory
+      # bootstrap-dir gives the cli uid. Never in an image, a volume or a backup.
+      # Never created here: Docker would make it root-owned, and init would refuse it.
+      - type: bind
+        source: ${GATEKEEP_SECRETS_DIR:-./secrets}/bootstrap
+        target: /gatekeep/bootstrap
+        bind:
+          create_host_path: false
+    networks: [tools]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      postgres-passwords:
+        condition: service_completed_successfully
+
+  # Writes a new Master Key, generation 1, and its ID into master/. Refuses to replace either.
+  keygen:
+    image: gatekeep/openbao:local
+    profiles: [setup]
+    <<: *secrets-tool
+    entrypoint: ["sh", "/opt/gatekeep/openbao/generate-master-key.sh"]
+    volumes:
+      - ${GATEKEEP_SECRETS_DIR:-./secrets}/master:/secrets
+
+  # Writes any missing PostgreSQL password into postgres/.
+  passwords:
+    image: busybox:1.37.0@sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec
+    profiles: [setup]
+    <<: *secrets-tool
+    entrypoint: ["sh", "/gatekeep/generate-passwords.sh"]
+    volumes:
+      - ${GATEKEEP_SECRETS_DIR:-./secrets}/postgres:/secrets/postgres
+      - ./postgres/generate-passwords.sh:/gatekeep/generate-passwords.sh:ro
+
+  # Makes bootstrap/, where `cli init` writes the bootstrap token: mode 0700, owned by the
+  # cli uid, so on the host only root and that uid can read it (Story 1.19). It writes nothing
+  # else and sees no other subdirectory.
+  bootstrap-dir:
+    image: busybox:1.37.0@sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec
+    profiles: [setup]
+    <<: *secrets-tool
+    entrypoint: ["sh", "/gatekeep/prepare-bootstrap-dir.sh"]
+    volumes:
+      - ${GATEKEEP_SECRETS_DIR:-./secrets}/bootstrap:/secrets/bootstrap
+      - ./cli/prepare-bootstrap-dir.sh:/gatekeep/prepare-bootstrap-dir.sh:ro
+
+  # First setup of OpenBao, once, over its socket. Writes recovery keys into recovery/ and
+  # AppRole IDs into approle/ only. It can't see master/ or postgres/.
+  openbao-setup:
+    image: gatekeep/openbao:local
+    profiles: [setup]
+    <<: *secrets-tool
+    group_add: ["4500"]
+    environment:
+      HOME: /tmp
+      GATEKEEP_ESCROW_FILE: /secrets/recovery/openbao-init.json
+      GATEKEEP_APPROLE_DIR: /secrets/approle
+    tmpfs: ["/tmp:size=16m,mode=1777"]
+    entrypoint: ["sh", "/opt/gatekeep/openbao/setup.sh"]
+    volumes:
+      - ${GATEKEEP_SECRETS_DIR:-./secrets}/recovery:/secrets/recovery
+      - ${GATEKEEP_SECRETS_DIR:-./secrets}/approle:/secrets/approle
+      - openbao-socket:/run/openbao
+
+  # Test only, never part of a Deployment: see the header.
+  tests:
+    <<: *test
+    profiles: [tests]
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      # Containers Testcontainers starts are siblings, reached through the Docker host.
+      TESTCONTAINERS_HOST_OVERRIDE: host.docker.internal
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  stack:
+    <<: *test
+    profiles: [stack]
+    # The repository at the same path it has on the Docker host, because the Compose it
+    # drives sends bind mount paths to the Docker engine, which resolves them on the host.
+    # CI sets GATEKEEP_HOST_REPO to the checkout. Docker Desktop on Windows needs the
+    # /run/desktop/mnt/host/<drive>/... form of the path.
+    working_dir: ${GATEKEEP_HOST_REPO:-/gatekeep-host-repo-unset}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ..:${GATEKEEP_HOST_REPO:-/gatekeep-host-repo-unset}
+    environment:
+      GATEKEEP_HOST_REPO: ${GATEKEEP_HOST_REPO:-}
+      GATEKEEP_SECRETS_DIR: ${GATEKEEP_SECRETS_DIR:-}
+      # The host ports Caddy publishes, 80 and 443 unless set: a machine where they are taken
+      # (Windows often holds 80) runs the check on others.
+      GATEKEEP_HTTP_PORT: ${GATEKEEP_HTTP_PORT:-}
+      GATEKEEP_HTTPS_PORT: ${GATEKEEP_HTTPS_PORT:-}
+    entrypoint: ["sh", "deploy/ci/stack-check.sh"]
+
+  release:
+    build:
+      context: ..
+      dockerfile: deploy/docker/release-tools.Dockerfile
+    image: gatekeep/release-tools:local
+    profiles: [release]
+    # Root, to use the Docker socket, which is root on the machine anyway (see above). The
+    # same image runs non-root as release-verify in deploy/compose.release.yaml.
+    user: "0:0"
+    pids_limit: 2048
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    # The repository, read-only: build.sh sends it to buildx as the build context and
+    # writes its archives under /tmp.
+    working_dir: /work
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ..:/work:ro
+    entrypoint: ["sh", "deploy/ci/release-check.sh"]
+
+  dev:
+    build:
+      context: ..
+      dockerfile: deploy/docker/tests.Dockerfile
+      target: dev
+    image: gatekeep/dev:local
+    profiles: [dev]
+    pids_limit: 4096
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    init: true
+    restart: unless-stopped
+    command: ["sleep", "infinity"]
+    working_dir: /work
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      # The repository, worktrees included, read-only: dev.sh copies from it and never writes,
+      # and never copies deploy/secrets (which the socket could reach anyway, see above).
+      - ..:/host:ro
+      # One copy per checkout, with its build output, beside the shared NuGet and pnpm caches
+      # (on the same volume, so pnpm can hard-link from its store).
+      - dev-work:/work
+    environment:
+      NUGET_PACKAGES: /work/.cache/nuget
+      npm_config_store_dir: /work/.cache/pnpm-store
+      TESTCONTAINERS_HOST_OVERRIDE: host.docker.internal
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+secrets:
+  master_key:
+    file: ${GATEKEEP_SECRETS_DIR:-./secrets}/master/master-key
+  # The Master Key's ID, gatekeep-master-<N>, beside it: not a secret, but delivered the same way.
+  master_key_id:
+    file: ${GATEKEEP_SECRETS_DIR:-./secrets}/master/master-key-id
+  postgres_password:
+    file: ${GATEKEEP_SECRETS_DIR:-./secrets}/postgres/postgres_password
+  gk_migrator_password:
+    file: ${GATEKEEP_SECRETS_DIR:-./secrets}/postgres/gk_migrator_password
+  gk_hosted_password:
+    file: ${GATEKEEP_SECRETS_DIR:-./secrets}/postgres/gk_hosted_password
+  gk_admin_password:
+    file: ${GATEKEEP_SECRETS_DIR:-./secrets}/postgres/gk_admin_password
+  gk_worker_password:
+    file: ${GATEKEEP_SECRETS_DIR:-./secrets}/postgres/gk_worker_password
+  gk_dispatch_password:
+    file: ${GATEKEEP_SECRETS_DIR:-./secrets}/postgres/gk_dispatch_password
+  gk_sealer_password:
+    file: ${GATEKEEP_SECRETS_DIR:-./secrets}/postgres/gk_sealer_password
+  gk_retention_password:
+    file: ${GATEKEEP_SECRETS_DIR:-./secrets}/postgres/gk_retention_password
+  gk_cli_password:
+    file: ${GATEKEEP_SECRETS_DIR:-./secrets}/postgres/gk_cli_password
+  openbao_hosted_role_id:
+    file: ${GATEKEEP_SECRETS_DIR:-./secrets}/approle/host-hosted/role-id
+  openbao_hosted_secret_id:
+    file: ${GATEKEEP_SECRETS_DIR:-./secrets}/approle/host-hosted/secret-id
+  openbao_admin_role_id:
+    file: ${GATEKEEP_SECRETS_DIR:-./secrets}/approle/host-admin/role-id
+  openbao_admin_secret_id:
+    file: ${GATEKEEP_SECRETS_DIR:-./secrets}/approle/host-admin/secret-id
+  openbao_worker_role_id:
+    file: ${GATEKEEP_SECRETS_DIR:-./secrets}/approle/host-worker/role-id
+  openbao_worker_secret_id:
+    file: ${GATEKEEP_SECRETS_DIR:-./secrets}/approle/host-worker/secret-id
+  openbao_cli_role_id:
+    file: ${GATEKEEP_SECRETS_DIR:-./secrets}/approle/cli/role-id
+  openbao_cli_secret_id:
+    file: ${GATEKEEP_SECRETS_DIR:-./secrets}/approle/cli/secret-id
+
+volumes:
+  # The dev workspace: each checkout's copy and build output, and the NuGet and pnpm caches.
+  dev-work:
+  postgres-data:
+  openbao-data:
+  openbao-socket:
+  openbao-audit:
+  caddy-data:
+  caddy-config:
+
+networks:
+  hosted:
+    internal: true
+  admin:
+    internal: true
+  worker:
+    internal: true
+  tools:
+    internal: true
+  # Caddy's published ports, and its ACME and Cloudflare API traffic in cloudflare mode.
+  edge: {}
+  # Caddy to Host.Hosted, and nothing else. The subnets are fixed because the Caddyfile
+  # refuses each site to requests from the other host's edge subnet.
+  hosted-edge:
+    internal: true
+    ipam:
+      config:
+        - subnet: 10.201.1.0/24
+  # Caddy to Host.Admin, and nothing else.
+  admin-edge:
+    internal: true
+    ipam:
+      config:
+        - subnet: 10.201.2.0/24

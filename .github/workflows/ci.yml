@@ -9,7 +9,7 @@ permissions:
   contents: read
 
 # Docker only (AD-26): the runner needs nothing but Docker and Git. Every .NET and pnpm
-# step runs inside the tests container (deploy/compose.test.yaml).
+# step runs inside the tests container (deploy/compose.dev.yaml).
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -33,13 +33,13 @@ jobs:
       # critical audit: a critical advisory is NU1904, which TreatWarningsAsErrors turns
       # into a restore failure naming the package. pnpm installs with scripts disabled.
       - name: Build the tests image
-        run: docker compose -f deploy/compose.test.yaml build tests
+        run: docker compose -f deploy/compose.dev.yaml build tests
 
       # pnpm audit, the design token drift check, the raw hex lint, the .NET build, the
       # workspace build, the browser tests, and the Architecture and Isolation tests
       # (deploy/docker/run-tests.sh).
       - name: Build and test in the tests container
-        run: docker compose -f deploy/compose.test.yaml run --rm tests
+        run: docker compose -f deploy/compose.dev.yaml run --rm tests
 
   stack:
     runs-on: ubuntu-latest
@@ -54,7 +54,7 @@ jobs:
       - name: Bring the stack up and check it
         env:
           GATEKEEP_HOST_REPO: ${{ github.workspace }}
-        run: docker compose -f deploy/compose.test.yaml run --rm --build stack
+        run: docker compose -f deploy/compose.dev.yaml run --rm --build stack
 
   release:
     runs-on: ubuntu-latest
@@ -67,4 +67,4 @@ jobs:
       # refusal: unsigned digest, another key, a tag reference, no pinned key, a software key
       # outside the rehearsal and a drifted digest. Tears everything down.
       - name: Rehearse the signed release path
-        run: docker compose -f deploy/compose.test.yaml run --rm --build release
+        run: docker compose -f deploy/compose.dev.yaml run --rm --build release
