@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- IOffServerStore over the S3 API with Object Lock (Story 1.30): one SigV4-signed PUT,
+       written here over EgressHttp, with no SDK or HTTP client package. -->
+  <ItemGroup>
+    <ProjectReference Include="../../Gatekeep.Kernel/Gatekeep.Kernel.csproj" />
+    <ProjectReference Include="../Egress/Gatekeep.Adapters.Egress.csproj" />
+  </ItemGroup>
+
+</Project>

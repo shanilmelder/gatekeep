@@ -37,7 +37,9 @@ public sealed class CanarySurfaceTests
     {
         var program = File.ReadAllText(Path.Combine(BuildOutput.RepositoryRoot(), "src/Gatekeep.Cli/Program.cs"));
 
-        Assert.Equal(new[] { "audit verify", "init", "migrate", "rotate-transit-keys" }, CanaryFlows.CliCommands(program));
+        Assert.Equal(
+            new[] { "alerts test", "audit verify", "audit-ship", "init", "migrate", "records test", "rotate-transit-keys" },
+            CanaryFlows.CliCommands(program));
     }
 
     [Fact]
@@ -82,7 +84,7 @@ public sealed class CanarySurfaceTests
         var surfaces = CanaryFlows.Surfaces(
             OperationsContract.ProductionRegistry,
             OperationsContract.ProductionOperationRegistry,
-            ["audit verify", "init", "migrate", "rekey", "rotate-transit-keys"],
+            ["alerts test", "audit verify", "audit-ship", "init", "migrate", "records test", "rekey", "rotate-transit-keys"],
             Hosts,
             CanaryFlows.Routes(BuildOutput.RepositoryRoot()));
 
@@ -150,7 +152,7 @@ public sealed class CanarySurfaceTests
         var surfaces = CanaryFlows.Surfaces(
             OperationsContract.ProductionRegistry,
             OperationsContract.ProductionOperationRegistry,
-            ["audit verify", "init", "migrate", "rotate-transit-keys"],
+            ["alerts test", "audit verify", "audit-ship", "init", "migrate", "records test", "rotate-transit-keys"],
             Hosts,
             [.. CanaryFlows.Routes(BuildOutput.RepositoryRoot()), .. CanaryFlows.RoutesIn("app.MapPost(\"/connect/token\", Token);")]);
 

@@ -34,6 +34,15 @@ public static class SecretDefaults
         string.IsNullOrWhiteSpace(value)
         || Known.Contains(value.Trim(), StringComparer.OrdinalIgnoreCase);
 
+    /// <summary>
+    /// True when <paramref name="value"/>, a token or key sent in an HTTP header (Story 1.30), is
+    /// unsafe or, once trimmed, holds anything but printable ASCII: whitespace inside it, a control
+    /// character or a non-ASCII one. Startup and the adapters both refuse by this one rule, so a
+    /// file that passes startup is never refused at the first send.
+    /// </summary>
+    public static bool IsUnsafeCredential(string? value) =>
+        IsUnsafe(value) || value!.Trim().Any(c => c is < '!' or > '~');
+
     /// <summary>True when <paramref name="password"/> is unsafe or shorter than the minimum.</summary>
     public static bool IsUnsafePassword(string? password) =>
         IsUnsafe(password) || password!.Trim().Length < MinimumPasswordLength;

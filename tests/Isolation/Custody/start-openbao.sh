@@ -14,8 +14,13 @@ KEY_DIR=/secrets
 
 addgroup -S -g 4500 gatekeep-custody 2> /dev/null || true
 addgroup openbao gatekeep-custody 2> /dev/null || true
+# Story 1.30: the openbao-audit group (gid 4501) and the audit log directory, as the image makes them.
+addgroup -S -g 4501 openbao-audit 2> /dev/null || true
+addgroup openbao openbao-audit 2> /dev/null || true
 mkdir -p /var/lib/openbao/data /run/openbao /var/log/openbao
-chown openbao:openbao /var/lib/openbao /var/lib/openbao/data /var/log/openbao
+chown openbao:openbao /var/lib/openbao /var/lib/openbao/data
+chown openbao:openbao-audit /var/log/openbao
+chmod 2750 /var/log/openbao
 chown openbao:gatekeep-custody /run/openbao
 chmod 0750 /run/openbao
 

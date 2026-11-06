@@ -46,6 +46,29 @@ public sealed class WorkerStartupTests(PostgresFixture postgres) : IDisposable
         Assert.Contains("ConnectionStrings:Retention", text);
         Assert.DoesNotContain("ConnectionStrings:Dispatch", text);
         Assert.DoesNotContain(Canary, text);
+
+        // The harness gives the alert channel and bucket valid settings (Story 1.30), so only the
+        // connections are named; HostStartupTests refuses each of those settings in turn.
+        Assert.DoesNotContain("Alerts:", text);
+        Assert.DoesNotContain("Records:", text);
+    }
+
+    [Fact]
+    public async Task Worker_with_an_unsafe_bucket_setting_refuses_beside_its_missing_connections()
+    {
+        using var process = HostProcess.Start(
+            "Worker",
+            Custody()
+                .Append($"--ConnectionStrings:Dispatch=Host=localhost;Username=gk_dispatch;Password={Canary}")
+                .Append("--Records:Endpoint=http://objects.invalid")
+                .Append($"--Gatekeep:HealthPort={HostProcess.FreePort()}"));
+        var text = await process.WaitForExitAsync(Timeout, Cancellation);
+
+        Assert.Equal(1, process.ExitCode);
+        Assert.Contains("ConnectionStrings:Worker", text);
+        Assert.Contains("Records:Endpoint", text);
+        Assert.DoesNotContain("Alerts:", text);
+        Assert.DoesNotContain(Canary, text);
     }
 
     [Fact]

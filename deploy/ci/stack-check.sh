@@ -1,5 +1,5 @@
 #!/bin/sh
-# Stack check (Stories 1.10, 1.11, 1.20 and 12.7). Runs inside the stack container of deploy/compose.test.yaml,
+# Stack check (Stories 1.10, 1.11, 1.20, 12.7 and 1.30). Runs inside the stack container of deploy/compose.test.yaml,
 # never on the machine itself:
 #
 #   GATEKEEP_HOST_REPO=<this repository's path on the Docker host> \
@@ -108,6 +108,21 @@ say "building images."
 $C --profile tools --profile setup build --quiet
 
 say "install, as docs/install.md has it."
+# The alert channel and the bucket (Story 1.30): placeholders under .invalid, which never resolve,
+# so Host.Worker starts and nothing leaves. The secrets are random, so none is a known default.
+export GATEKEEP_ALERT_URL=https://alerts.invalid/gatekeep/stack-check
+export GATEKEEP_RECORDS_ENDPOINT=https://objects.invalid
+export GATEKEEP_RECORDS_REGION=us-east-1
+export GATEKEEP_RECORDS_BUCKET=gatekeep-stack-check
+docker run --rm -v "$(dirname "$SECRETS"):/parent" "$BUSYBOX" sh -c '
+    set -eu
+    dir="/parent/$1"
+    mkdir -p "$dir/alerts" "$dir/records"
+    chmod 0700 "$dir/alerts" "$dir/records"
+    for file in alerts/token records/access-key-id records/secret-access-key; do
+        head -c 24 /dev/urandom | base64 | tr -d "\n" | tr "+/" "xy" > "$dir/$file"
+        chmod 0444 "$dir/$file"
+    done' sh "$(basename "$SECRETS")" || fail "couldn't write the placeholder alert and bucket secrets."
 $C run --rm keygen
 $C run --rm passwords
 $C run --rm bootstrap-dir
@@ -172,7 +187,7 @@ say "the Master Key is in no volume, built image or container environment."
 search_key master-key
 
 say "hardening of each running container."
-for service in $HOSTS caddy; do
+for service in $HOSTS caddy openbao-audit-shipper; do
     id="$(container "$service")"
     user="$(docker inspect --format '{{.Config.User}}' "$id")"
     case "$user" in "" | 0 | 0:* | root | root:*) fail "$service runs as root." ;; esac
@@ -192,14 +207,77 @@ done
     = "8080/tcp=$HTTP_PORT 8443/tcp=$HTTPS_PORT " ] || fail "caddy publishes other than $HTTP_PORT and $HTTPS_PORT."
 [ "$(docker inspect --format '{{.HostConfig.NetworkMode}}' "$(container openbao)")" = none ] || fail "openbao is on a network."
 
-say "no egress from any host."
-for service in $HOSTS; do
+say "no egress from Host.Hosted or Host.Admin."
+for service in hosted admin; do
     reached="$(docker run --rm --network "container:$(container "$service")" "$TOOLS" node -e '
         fetch("http://1.1.1.1/", { signal: AbortSignal.timeout(5000) })
             .then(() => console.log("reached"))
             .catch(() => console.log("refused"))')"
     [ "$reached" = refused ] || fail "$service reached the internet."
 done
+
+# Story 1.30: application egress is Host.Worker's and the audit shipper's alone, on the egress
+# network beside only their own, and every request they make goes through EgressHttp.
+networks_of() { docker inspect --format '{{range $name, $_ := .NetworkSettings.Networks}}{{$name}} {{end}}' "$(container "$1")"; }
+P="$COMPOSE_PROJECT_NAME"
+[ "$(networks_of worker)" = "${P}_egress ${P}_worker " ] || fail "worker joins '$(networks_of worker)', not only egress and worker."
+[ "$(networks_of openbao-audit-shipper)" = "${P}_egress " ] \
+    || fail "openbao-audit-shipper joins '$(networks_of openbao-audit-shipper)', not only egress."
+for service in hosted admin; do
+    case "$(networks_of "$service")" in *"${P}_egress "*) fail "$service joins the egress network." ;; esac
+done
+
+say "the audit shipper reads the audit log through its group, which only it and OpenBao have."
+[ "$(docker exec "$(container openbao)" stat -c '%a %U %G' /var/log/openbao /var/log/openbao/audit.log | tr '\n' ' ')" \
+    = "2750 openbao openbao-audit 640 openbao openbao-audit " ] \
+    || fail "the audit log isn't 0640 in a setgid 0750 directory, both of group openbao-audit."
+for id in $(docker ps -aq --no-trunc --filter "label=com.docker.compose.project=$COMPOSE_PROJECT_NAME"); do
+    name="$(docker inspect --format '{{index .Config.Labels "com.docker.compose.service"}}' "$id")"
+    case "$name" in openbao | openbao-audit-shipper) continue ;; esac
+    if docker inspect --format '{{range .Mounts}}{{.Name}} {{end}}' "$id" | grep -q "${P}_openbao-audit "; then
+        fail "$name mounts the OpenBao audit volume."
+    fi
+    if docker inspect --format '{{.HostConfig.GroupAdd}}' "$id" | grep -q 4501; then
+        fail "$name has the openbao-audit group."
+    fi
+done
+
+# Fails unless cli alerts test to $1 exits 1 printing exactly the line $2.
+alerts_test_prints() {
+    if output="$($C run --rm -e GATEKEEP_ALERT_URL="$1" cli alerts test 2>&1)"; then
+        fail "cli alerts test to $1 exited 0: $output"
+    fi
+    echo "$output" | grep -qxF "$2" || fail "cli alerts test to $1 didn't print '$2': $output"
+}
+
+say "cli alerts test refuses a private address, sending nothing."
+for url in https://10.0.0.1/hook https://127.0.0.1/hook "https://[fd00::1]/hook" "https://[::ffff:192.168.1.1]/hook"; do
+    alerts_test_prints "$url" "Alert channel refused: private address."
+done
+# host.docker.internal is the Docker host's own address where the name exists (Docker Desktop);
+# where it doesn't, there is nothing to refuse.
+if docker run --rm --network "${P}_egress" "$BUSYBOX" nslookup host.docker.internal > /dev/null 2>&1; then
+    alerts_test_prints https://host.docker.internal/hook "Alert channel refused: private address."
+else
+    say "host.docker.internal doesn't resolve on the egress network here, so it isn't tried."
+fi
+
+say "cli alerts test reads the token secret and tries a public name: alerts.invalid never resolves."
+alerts_test_prints https://alerts.invalid/hook "Alert channel unavailable."
+
+# Story 1.30: the shipper read the audit file, which init's Transit calls wrote to, and tried the
+# bucket at objects.invalid, which never resolves: the unavailable line, said once, and no restart.
+shipper_tried() {
+    docker logs "$(container openbao-audit-shipper)" 2>&1 \
+        | grep -qxF "Off-server store unavailable: the audit file wasn't shipped. It will be tried again."
+}
+say "the audit shipper runs, reads the audit file and tries the bucket."
+until_true 30 shipper_tried || fail "the audit shipper never tried the bucket: $(docker logs --tail 20 "$(container openbao-audit-shipper)" 2>&1)"
+[ "$(docker inspect --format '{{.State.Status}} {{.RestartCount}}' "$(container openbao-audit-shipper)")" = "running 0" ] \
+    || fail "the audit shipper isn't running, or restarted."
+if docker logs "$(container openbao-audit-shipper)" 2>&1 | grep -qF "Can't read the audit file"; then
+    fail "the audit shipper can't read the audit file."
+fi
 
 # --- The edge (Story 1.11) ---
 

@@ -14,7 +14,7 @@ This document never holds a key, token, recovery share, role ID or secret ID, an
 | Master Key escrow copies, every generation | Offline, in two places, apart from backups | Esm |
 | Recovery keys and the first root token | `recovery/openbao-init.json` in the secrets directory for minutes, then offline with the Master Key | root, then Esm |
 | OpenBao data (Raft) | The `openbao-data` volume | OpenBao's user |
-| Audit log | The `openbao-audit` volume | OpenBao's user |
+| Audit log | The `openbao-audit` volume, the file `0640` in a setgid `2750` directory, so a file OpenBao makes again keeps the group `openbao-audit` (gid 4501). Every request and response value in it is an HMAC. Copied within 30 seconds into the Object Lock bucket (Story 1.30) | OpenBao's user writes it. `openbao-audit-shipper` alone reads it, read-only, through that group |
 | OpenBao's socket | The `openbao-socket` volume, mode `0660`, group `gatekeep-custody` (gid 4500) | The hosts and `cli`, which run with that group |
 | AppRole role ID and secret ID per host and the Cli | `approle/{role}/` in the secrets directory, `0400`, owned by that role's container user | That one container, as its Compose secrets `openbao_role_id` and `openbao_secret_id` |
 

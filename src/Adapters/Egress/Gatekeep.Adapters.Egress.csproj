@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- The one outbound HTTP path (AD-26, Story 1.30): BCL sockets and HTTP only, no package. -->
+  <ItemGroup>
+    <ProjectReference Include="../../Gatekeep.Kernel/Gatekeep.Kernel.csproj" />
+  </ItemGroup>
+
+  <!-- The private-address refusal can be relaxed only in process, by the isolation tests,
+       whose fixtures all sit on private addresses. No setting reaches the seam. -->
+  <ItemGroup>
+    <InternalsVisibleTo Include="Gatekeep.Tests.Isolation" />
+  </ItemGroup>
+
+</Project>

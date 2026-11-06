@@ -13,7 +13,7 @@ namespace Gatekeep.Tests.Isolation.Canary;
 /// Story 7.8: every registered canary flow, run normally and forced to fail with Trace logging
 /// on, leaves none of its canaries in any table, log, output stream or response (NFR-3, T-42).
 /// </summary>
-public sealed class CanaryFlowTests(PostgresFixture postgres) : IDisposable
+public sealed class CanaryFlowTests(PostgresFixture postgres, OffServer.ObjectLockFixture bucket) : IDisposable
 {
     private static readonly Guid TenantA = Guid.Parse("01900000-0000-7000-8000-0000000007b8");
 
@@ -29,7 +29,7 @@ public sealed class CanaryFlowTests(PostgresFixture postgres) : IDisposable
     public async Task Flow_leaves_no_canary_anywhere(string flow, bool failing)
     {
         var run = new FlowRun();
-        using (var context = new CanaryFlowContext(postgres, _directory))
+        using (var context = new CanaryFlowContext(postgres, _directory, bucket))
         {
             await CanaryFlows.All.Single(f => f.Name == flow).RunAsync(context, run, failing);
         }

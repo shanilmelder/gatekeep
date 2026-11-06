@@ -1,4 +1,7 @@
+using Gatekeep.Adapters.AlertChannel;
+using Gatekeep.Adapters.ObjectLock;
 using Gatekeep.Adapters.OpenBao;
+using Gatekeep.Kernel.Alerts;
 using Gatekeep.Kernel.Secrets;
 using Microsoft.Extensions.Configuration;
 using Npgsql;
@@ -21,13 +24,20 @@ namespace Gatekeep.Adapters.Hosting;
 /// The host's own settings it refuses, by name, such as Host.Admin's lock timeout: checked at
 /// startup with the rest, so a malformed one stops the host rather than failing each request.
 /// </param>
+/// <param name="UsesOffServer">
+/// Whether the host needs the alert channel and the off-server bucket (Story 1.30), as Host.Worker
+/// does: every <c>Alerts:*</c> and <c>Records:*</c> setting in <see cref="HostSettingNames"/> is then
+/// required, and the host gets <c>IAlertChannel</c> and <c>IOffServerStore</c> over
+/// <c>EgressHttp</c>. Only a host whose Compose service joins the <c>egress</c> network sets it.
+/// </param>
 public sealed record HostProfile(
     string Name,
     IReadOnlyList<string> Databases,
     bool HasPublicEndpoint,
     bool HasPublicOrigin = false,
     bool HasForwardingProxy = false,
-    Func<IConfiguration, IEnumerable<string>>? RefusedHostSettings = null);
+    Func<IConfiguration, IEnumerable<string>>? RefusedHostSettings = null,
+    bool UsesOffServer = false);
 
 /// <summary>
 /// The names of every setting a host reads. A refusal names these, never a value. None of
@@ -69,6 +79,28 @@ public static class HostSettingNames
     public const string CustodyRoleIdFile = "Custody:RoleIdFile";
 
     public const string CustodySecretIdFile = "Custody:SecretIdFile";
+
+    /// <summary>The alert channel's webhook: an absolute <c>https</c> URL with no user info (Story 1.30).</summary>
+    public const string AlertUrl = "Alerts:Url";
+
+    /// <summary>The file holding the webhook's bearer token, a Compose secret.</summary>
+    public const string AlertTokenFile = "Alerts:TokenFile";
+
+    /// <summary>The Admin hostname, which names the Deployment in every alert.</summary>
+    public const string AlertDeployment = "Alerts:Deployment";
+
+    /// <summary>The bucket's S3 API endpoint: an absolute <c>https</c> URL with nothing after the host and port.</summary>
+    public const string RecordsEndpoint = "Records:Endpoint";
+
+    public const string RecordsRegion = "Records:Region";
+
+    public const string RecordsBucket = "Records:Bucket";
+
+    /// <summary>The file holding the write-only credential's access key ID, a Compose secret.</summary>
+    public const string RecordsAccessKeyIdFile = "Records:AccessKeyIdFile";
+
+    /// <summary>The file holding the write-only credential's secret key, a Compose secret.</summary>
+    public const string RecordsSecretAccessKeyFile = "Records:SecretAccessKeyFile";
 
     /// <summary>The connection string, which may leave out its password.</summary>
     public static string ConnectionString(string database) => $"ConnectionStrings:{database}";
@@ -118,6 +150,9 @@ public sealed class HostOrigin
     }
 }
 
+/// <summary>The alert channel and the off-server bucket, resolved (Story 1.30).</summary>
+internal sealed record OffServerSettings(WebhookAlertOptions Alerts, AlertDeployment Deployment, ObjectLockOptions Records);
+
 /// <summary>Settings after resolution, and the name of every setting refused.</summary>
 internal sealed record ResolvedSettings(
     HostProfile Profile,
@@ -132,6 +167,9 @@ internal sealed record ResolvedSettings(
 
     /// <summary>The network whose forwarded client address is believed, when one is set.</summary>
     public System.Net.IPNetwork? ForwardedBy { get; init; }
+
+    /// <summary>The alert channel and bucket, when the profile uses them and every setting resolved.</summary>
+    public OffServerSettings? OffServer { get; init; }
 }
 
 internal static class HostSettings
@@ -202,11 +240,81 @@ internal static class HostSettings
             refused.AddRange(hostSettings(configuration));
         }
 
+        var offServer = profile.UsesOffServer ? ResolveOffServer(configuration, refused) : null;
+
         return new ResolvedSettings(profile, databases, custody, healthPort, publicPort, refused)
         {
             Origin = origin,
             ForwardedBy = forwardedBy,
+            OffServer = offServer,
         };
+    }
+
+    /// <summary>
+    /// Every alert and bucket setting, each required: a URL that isn't absolute <c>https</c> or has
+    /// user info, a bucket or region that breaks S3 naming, a Deployment name that isn't a hostname,
+    /// and a secret file that is missing, empty, a known default or, for a token or key, anything
+    /// but printable ASCII are each refused by name. Only settings and files are checked: nothing is
+    /// sent at startup.
+    /// </summary>
+    private static OffServerSettings? ResolveOffServer(IConfiguration configuration, List<string> refused)
+    {
+        var before = refused.Count;
+
+        var url = WebhookAlertOptions.TryParseUrl(configuration[HostSettingNames.AlertUrl]);
+        if (url is null)
+        {
+            refused.Add(HostSettingNames.AlertUrl);
+        }
+
+        var tokenFile = configuration[HostSettingNames.AlertTokenFile];
+        CheckSecretFile(tokenFile, HostSettingNames.AlertTokenFile, refused, credential: true);
+
+        var deployment = configuration[HostSettingNames.AlertDeployment]?.Trim();
+        if (!AlertDeployment.IsValid(deployment))
+        {
+            refused.Add(HostSettingNames.AlertDeployment);
+        }
+
+        var endpoint = ObjectLockOptions.TryParseEndpoint(configuration[HostSettingNames.RecordsEndpoint]);
+        if (endpoint is null)
+        {
+            refused.Add(HostSettingNames.RecordsEndpoint);
+        }
+
+        var region = configuration[HostSettingNames.RecordsRegion]?.Trim();
+        if (!ObjectLockOptions.IsValidRegion(region))
+        {
+            refused.Add(HostSettingNames.RecordsRegion);
+        }
+
+        var bucket = configuration[HostSettingNames.RecordsBucket]?.Trim();
+        if (!ObjectLockOptions.IsValidBucket(bucket))
+        {
+            refused.Add(HostSettingNames.RecordsBucket);
+        }
+
+        var accessKeyIdFile = configuration[HostSettingNames.RecordsAccessKeyIdFile];
+        CheckSecretFile(accessKeyIdFile, HostSettingNames.RecordsAccessKeyIdFile, refused, credential: true);
+        var secretAccessKeyFile = configuration[HostSettingNames.RecordsSecretAccessKeyFile];
+        CheckSecretFile(secretAccessKeyFile, HostSettingNames.RecordsSecretAccessKeyFile, refused, credential: true);
+
+        if (refused.Count > before)
+        {
+            return null;
+        }
+
+        return new OffServerSettings(
+            new WebhookAlertOptions { Url = url!, TokenFile = tokenFile! },
+            new AlertDeployment(deployment!),
+            new ObjectLockOptions
+            {
+                Endpoint = endpoint!,
+                Region = region!,
+                Bucket = bucket!,
+                AccessKeyIdFile = accessKeyIdFile!,
+                SecretAccessKeyFile = secretAccessKeyFile!,
+            });
     }
 
     private static string? ResolveDatabase(IConfiguration configuration, string database, List<string> refused)
@@ -280,8 +388,12 @@ internal static class HostSettings
             : new OpenBaoOptions { SocketPath = socket, RoleIdFile = roleIdFile!, SecretIdFile = secretIdFile! };
     }
 
-    /// <summary>The file must be readable and hold a value that isn't a default. Its contents aren't kept.</summary>
-    private static void CheckSecretFile(string? path, string name, List<string> refused)
+    /// <summary>
+    /// The file must be readable and hold a value that isn't a default. A <paramref name="credential"/>,
+    /// sent in an HTTP header, must also pass <see cref="SecretDefaults.IsUnsafeCredential"/>, the rule
+    /// the adapters refuse it by. Its contents aren't kept.
+    /// </summary>
+    private static void CheckSecretFile(string? path, string name, List<string> refused, bool credential = false)
     {
         if (string.IsNullOrWhiteSpace(path))
         {
@@ -291,7 +403,8 @@ internal static class HostSettings
 
         try
         {
-            if (SecretDefaults.IsUnsafe(File.ReadAllText(path)))
+            var value = File.ReadAllText(path);
+            if (credential ? SecretDefaults.IsUnsafeCredential(value) : SecretDefaults.IsUnsafe(value))
             {
                 refused.Add(name);
             }

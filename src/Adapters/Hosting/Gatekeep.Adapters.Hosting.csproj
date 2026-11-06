@@ -13,6 +13,9 @@
   <ItemGroup>
     <ProjectReference Include="../../Gatekeep.Kernel/Gatekeep.Kernel.csproj" />
     <ProjectReference Include="../OpenBao/Gatekeep.Adapters.OpenBao.csproj" />
+    <ProjectReference Include="../Egress/Gatekeep.Adapters.Egress.csproj" />
+    <ProjectReference Include="../AlertChannel/Gatekeep.Adapters.AlertChannel.csproj" />
+    <ProjectReference Include="../ObjectLock/Gatekeep.Adapters.ObjectLock.csproj" />
   </ItemGroup>
 
 </Project>

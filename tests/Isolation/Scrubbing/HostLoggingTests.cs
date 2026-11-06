@@ -38,7 +38,14 @@ public sealed class HostLoggingTests
         using (DiagnosticListener.AllListeners.Subscribe(capture))
         {
             var cancellation = TestContext.Current.CancellationToken;
-            var run = Task.Run(() => entryPoint.Invoke(null, [Array.Empty<string>()]), cancellation);
+            var run = Task.Run(
+                () =>
+                {
+                    // Only this host's build is stopped: other tests build hosts in this process too.
+                    ProviderCapture.Capturing.Value = true;
+                    return entryPoint.Invoke(null, [Array.Empty<string>()]);
+                },
+                cancellation);
 
             var stopped = await Assert.ThrowsAsync<TargetInvocationException>(
                 () => run.WaitAsync(HostTimeout, cancellation));
@@ -54,6 +61,9 @@ public sealed class HostLoggingTests
 
     private sealed class ProviderCapture : IObserver<DiagnosticListener>, IObserver<KeyValuePair<string, object?>>
     {
+        /// <summary>Set on the flow that runs the host under test, so a host another test builds meanwhile is left alone.</summary>
+        public static readonly AsyncLocal<bool> Capturing = new();
+
         public List<Type> ProviderTypes { get; } = [];
 
         public void OnNext(DiagnosticListener value)
@@ -66,7 +76,7 @@ public sealed class HostLoggingTests
 
         public void OnNext(KeyValuePair<string, object?> value)
         {
-            if (value.Key != HostBuilt)
+            if (value.Key != HostBuilt || !Capturing.Value)
             {
                 return;
             }

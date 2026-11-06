@@ -2,7 +2,7 @@
 
 How the Operator installs one Deployment (AD-26). Gatekeep runs only inside Docker: every process, OpenBao, the CLI, setup and key generation included, is a Compose service. The machine needs Docker with Compose and Git, and nothing else. Every command below is a `docker` or `git` command, run from the repository root.
 
-Written for Story 1.10, with Caddy, TLS and published ports added by Story 1.11. Story 1.12 added the dedicated-zone rule and the "Not yet covered" list. Run on Docker Desktop (Linux containers) and in CI. Production TLS (`cloudflare` mode) has been validated offline only: it hasn't yet obtained a real certificate.
+Written for Story 1.10, with Caddy, TLS and published ports added by Story 1.11. Story 1.12 added the dedicated-zone rule and the "Not yet covered" list, and Story 1.30 the alert channel and off-server bucket. Run on Docker Desktop (Linux containers) and in CI. Production TLS (`cloudflare` mode) has been validated offline only: it hasn't yet obtained a real certificate.
 
 ## What the Docker host must provide
 
@@ -19,7 +19,7 @@ Gatekeep can't check any of these. They're the host owner's job, and the securit
 | **The secrets directory stays out of backups** and is never committed | It holds the Master Key, recovery keys, AppRole IDs and database passwords. Escrow the Master Key and recovery keys offline instead (`docs/key-custody.md`). |
 | **Linux containers** | Every image is Linux. |
 
-The secrets directory is `deploy/secrets` unless `GATEKEEP_SECRETS_DIR` says otherwise; a relative value is resolved against `deploy/`. Set it the same way for every command. It has five subdirectories: `master/` (the Master Key), `postgres/` (database passwords), `recovery/` (OpenBao recovery keys, until escrowed), `approle/` (each role's AppRole IDs) and `bootstrap/` (the one-time bootstrap token, see step 11), and in production a sixth, `cloudflare/`, holding the Cloudflare DNS token (see "Hostnames and TLS"). Each setup tool mounts only the subdirectories it writes.
+The secrets directory is `deploy/secrets` unless `GATEKEEP_SECRETS_DIR` says otherwise; a relative value is resolved against `deploy/`. Set it the same way for every command. It has seven subdirectories: `master/` (the Master Key), `postgres/` (database passwords), `recovery/` (OpenBao recovery keys, until escrowed), `approle/` (each role's AppRole IDs), `bootstrap/` (the one-time bootstrap token, see step 12), `alerts/` (the alert channel's token) and `records/` (the off-server bucket's write-only credential), both written by the Operator (see step 9), and in production an eighth, `cloudflare/`, holding the Cloudflare DNS token (see "Hostnames and TLS"). Each setup tool mounts only the subdirectories it writes.
 
 ## Steps
 
@@ -43,7 +43,7 @@ The secrets directory is `deploy/secrets` unless `GATEKEEP_SECRETS_DIR` says oth
 
 4. **Escrow the Master Key offline** now, before anything is sealed with it: `docs/key-custody.md`, step 3.
 
-5. **Make the database passwords and the bootstrap directory.** The `passwords` service writes a random password for the PostgreSQL superuser and each login role into `postgres/`, and keeps any that exists and isn't empty. The `bootstrap-dir` service makes `bootstrap/`, where step 11 writes the bootstrap token, with mode `0700` and the `cli` service's uid, `10004`, as owner. `bootstrap/` must be a real directory, not a symbolic link; running `bootstrap-dir` again changes nothing. Compose never creates it, so `cli init` fails until this step has run.
+5. **Make the database passwords and the bootstrap directory.** The `passwords` service writes a random password for the PostgreSQL superuser and each login role into `postgres/`, and keeps any that exists and isn't empty. The `bootstrap-dir` service makes `bootstrap/`, where step 12 writes the bootstrap token, with mode `0700` and the `cli` service's uid, `10004`, as owner. `bootstrap/` must be a real directory, not a symbolic link; running `bootstrap-dir` again changes nothing. Compose never creates it, so `cli init` fails until this step has run.
 
    ```sh
    docker compose -f deploy/compose.yaml run --rm passwords
@@ -65,19 +65,21 @@ The secrets directory is `deploy/secrets` unless `GATEKEEP_SECRETS_DIR` says oth
    docker compose -f deploy/compose.yaml run --rm cli migrate
    ```
 
-9. **Start the stack.** `--wait` returns once every service reports healthy. On a production host, first set the hostnames and add the Cloudflare override to this and every later command, as "Hostnames and TLS" below says. Without them Caddy serves the local defaults with its internal CA.
+9. **Connect the alert channel and the off-server bucket.** Security Alerts and the off-server record leave the Deployment for services on another provider, which an intruder on this host can't reach into (AD-17). `Host.Worker` refuses to start until both are set, as below, and names each setting it refuses. "Alert channel and off-server bucket" below says what each provider must offer, every setting and secret file, and how to prove both work. Do that now, before the stack starts.
 
-   ```sh
-   docker compose -f deploy/compose.yaml up -d --wait
-   ```
+10. **Start the stack.** `--wait` returns once every service reports healthy. On a production host, first set the hostnames and add the Cloudflare override to this and every later command, as "Hostnames and TLS" below says. Without them Caddy serves the local defaults with its internal CA.
 
-10. **Check.** Every service should show `healthy`, and `postgres-passwords` should have exited `0`.
+    ```sh
+    docker compose -f deploy/compose.yaml up -d --wait
+    ```
+
+11. **Check.** Every service should show `healthy`, and `postgres-passwords` should have exited `0`. `openbao-audit-shipper` should be `running`: it has no healthcheck.
 
     ```sh
     docker compose -f deploy/compose.yaml ps -a
     ```
 
-11. **Initialise the Deployment.** `gatekeep init` runs in the `cli` container. It first makes sure the Deployment's own keys exist in OpenBao (`dep-email`, `dep-payload`, `dep-hmac` and `dep-records`, which sign off-server records), leaving any that exist unchanged. Then, as `gk_cli`, it writes a fresh one-time bootstrap token, 64 hex characters, to `bootstrap/bootstrap-token` in the secrets directory, mode `0600` in the `0700` directory, and stores only the token's SHA-256 in the database with an expiry 15 minutes later. It prints the file's place and the expiry in UTC, never the token. It refuses, changing nothing, if bootstrap is already complete, or if the token directory is a symbolic link, isn't owned by uid `10004` or is writable by anyone else: run `bootstrap-dir` again to fix it. Until the new token is committed, the previous token file stays in place.
+12. **Initialise the Deployment.** `gatekeep init` runs in the `cli` container. It first makes sure the Deployment's own keys exist in OpenBao (`dep-email`, `dep-payload`, `dep-hmac` and `dep-records`, which sign off-server records), leaving any that exist unchanged. Then, as `gk_cli`, it writes a fresh one-time bootstrap token, 64 hex characters, to `bootstrap/bootstrap-token` in the secrets directory, mode `0600` in the `0700` directory, and stores only the token's SHA-256 in the database with an expiry 15 minutes later. It prints the file's place and the expiry in UTC, never the token. It refuses, changing nothing, if bootstrap is already complete, or if the token directory is a symbolic link, isn't owned by uid `10004` or is writable by anyone else: run `bootstrap-dir` again to fix it. Until the new token is committed, the previous token file stays in place.
 
     ```sh
     docker compose -f deploy/compose.yaml run --rm cli init
@@ -107,6 +109,80 @@ verified 4 chains, 1,203 sealed rows, 1 problem
 The `cli` service supplies its own connection and password files. A row sealed in the last second or so isn't walked yet. The range the daily retention job removed is accounted for by the checkpoint it writes, sealed or not yet.
 
 Audit events are kept for 90 days. Retention runs daily in `Host.Worker` and deletes only older, sealed events. The period is fixed in the release, and no setting, route or command changes it.
+
+## Alert channel and off-server bucket
+
+Step 9 (Story 1.30). Gatekeep sends Security Alerts to a service outside the Deployment and keeps its evidence in a bucket the server can write to but never erase (AD-17). Both are chosen at install, on a provider other than the one that runs the Docker host, so an intruder here can't silence or rewrite them. Each is reached over HTTPS through Gatekeep's one outbound path, `EgressHttp`, which refuses any name that resolves only to a private, loopback, link-local or otherwise reserved address (`docs/threat-model.md`, TB-12 lists the ranges), and tries a name's IPv4 addresses before its IPv6 ones.
+
+### What each provider must offer
+
+- **The alert channel: an HTTPS webhook** at a service that pages or emails a person, such as an incident service, directly or through its webhook bridge. It must accept a `POST` of JSON with an `Authorization: Bearer` token, and answer `2xx`. Anything else, a redirect included, counts as a failure, and nothing is retried. Each alert holds only `code` (such as `operations.alert.test`), `alertId`, `raisedAt` in UTC, `deployment` (the Admin hostname), a fixed `summary` for the code, and `tenantId` and `eventId` when it has them: no personal data, credential, token, address query or free text. The webhook's URL must carry no credential: it sits in `deploy/.env` and in each container's environment, where `docker inspect` shows it. A service whose webhook URL is itself the secret, with a key in its path or query, needs a bridge that takes a bearer token instead. The token goes in `alerts/token` (below), which only reaches the containers as a Compose secret.
+- **The off-server bucket: an S3-API bucket on a separate provider**, created with **versioning and Object Lock** on, and a default retention in **compliance** mode of **at least 90 days**. Every object Gatekeep writes carries compliance mode, a retain-until date at least 90 days on, and `Content-MD5`, at path-style URLs (`https://<endpoint>/<bucket>/<key>`), so the bucket needs no DNS name of its own.
+- **A write-only credential for the server.** It may write objects and nothing else: no read, list, delete, version delete or governance bypass. S3 requires `s3:PutObjectRetention` beside `s3:PutObject` for a write that carries Object Lock headers, and in compliance mode that lets it lengthen a retention but never shorten or remove one. A policy in the AWS form, which most S3 providers take:
+
+  ```json
+  {
+    "Version": "2012-10-17",
+    "Statement": [
+      {
+        "Effect": "Allow",
+        "Action": ["s3:PutObject", "s3:PutObjectRetention"],
+        "Resource": ["arn:aws:s3:::gatekeep-records-example/*"]
+      }
+    ]
+  }
+  ```
+
+- **Console logins kept off this host.** Whoever holds the provider's console can lift these protections from outside Gatekeep (`docs/threat-model.md`, provider console logins).
+
+### Settings and secret files
+
+Put the settings in `deploy/.env`, which Compose reads and which never leaves the host:
+
+```text
+GATEKEEP_ALERT_URL=https://alerts.example.net/hooks/gatekeep
+GATEKEEP_RECORDS_ENDPOINT=https://s3.eu-central-1.example.net
+GATEKEEP_RECORDS_REGION=eu-central-1
+GATEKEEP_RECORDS_BUCKET=gatekeep-records-example
+```
+
+| Setting | Must be |
+| --- | --- |
+| `GATEKEEP_ALERT_URL` | The webhook: an absolute `https` URL with no user info. A path and query are allowed, but no credential in either: the token belongs in `alerts/token` |
+| `GATEKEEP_RECORDS_ENDPOINT` | The S3 API endpoint: an absolute `https` URL with nothing after the host and port |
+| `GATEKEEP_RECORDS_REGION` | The bucket's region, such as `eu-central-1`: lower-case letters, digits and hyphens |
+| `GATEKEEP_RECORDS_BUCKET` | The bucket's name, following the S3 naming rules |
+| `GATEKEEP_ADMIN_HOST` | Already set for Caddy ("Hostnames and TLS"): it names the Deployment in every alert |
+
+The secrets are files in the secrets directory, each value on one line, never in `deploy/.env` or an environment variable. Each value is printable ASCII with no space inside it, as an HTTP header needs. Like the database passwords, give each file mode `0444` in a `0700` directory on a Linux host file system: `Host.Worker` and the `cli` read all three, and the audit shipper the bucket's two.
+
+| File | Holds |
+| --- | --- |
+| `alerts/token` | The webhook's bearer token |
+| `records/access-key-id` | The write-only credential's access key ID |
+| `records/secret-access-key` | The write-only credential's secret key |
+
+`Host.Worker` refuses to start, naming every setting it refuses and never a value, when one is missing, a URL isn't absolute `https` or has user info, the bucket or region breaks the S3 rules, or a file is missing, empty, a known default such as `changeme`, or holds a space, tab, control or non-ASCII character inside its value. The `cli` commands refuse by the same rules, and the adapters check each file again at every send, by the same rule, so a file that passes at startup isn't refused later unless it changes. It only checks them: it sends nothing at startup. Inside the containers the settings are `Alerts:Url`, `Alerts:TokenFile`, `Alerts:Deployment`, `Records:Endpoint`, `Records:Region`, `Records:Bucket`, `Records:AccessKeyIdFile` and `Records:SecretAccessKeyFile` for `Host.Worker`, and the `GATEKEEP_ALERT_*` and `GATEKEEP_RECORDS_*` variables for the `cli` and the shipper, which `deploy/compose.yaml` sets.
+
+### Prove both work
+
+Send a test alert, then write a signed test record. Each refuses the same way before doing anything when a setting is wrong, and prints only fixed lines: never the address, the token, the credential or the provider's answer.
+
+```sh
+docker compose -f deploy/compose.yaml run --rm cli alerts test
+docker compose -f deploy/compose.yaml run --rm cli records test
+```
+
+- `alerts test` sends one `operations.alert.test` alert and prints `Test alert delivered.` with the alert's ID. Check that it reached a person. On failure it prints `Alert channel rejected the alert.`, `Alert channel unavailable.` `Alert channel refused: private address.` (the URL's name resolves only to private addresses) or `Alert channel refused: token file unusable.` (the token file changed since the check and can't be read, or holds an unusable value), and exits `1`.
+- `records test` signs a test record with `dep-records`, as the `cli` AppRole, and writes it to `records/test/{yyyy}/{MM}/{dd}/{recordId}.json`, printing that key. In the provider's console, check that the object is in compliance mode until at least 90 days from now. On failure it prints `Off-server store rejected the record.`, `Off-server store unavailable.` `Off-server store refused: private address.` or `Off-server store refused: credential file unusable.`, and exits `1`.
+
+### The audit shipper
+
+The `openbao-audit-shipper` service starts with the stack. It runs `gatekeep audit-ship` from the `cli` image, as uid `10006`, and copies what OpenBao appends to its audit file into the bucket within 30 seconds, in whole lines, as `openbao-audit/{yyyy}/{MM}/{dd}/{fileId}-{startOffset}.jsonl`, at most 1 MiB each, so each goes up well inside the 10-second timeout. It reads the `openbao-audit` volume read-only, through the `openbao-audit` group (gid `4501`) that only it and OpenBao have (the directory is setgid, so a file OpenBao makes again keeps that group), keeps its read offset on its own `shipper-state` volume, and resumes there after a restart. It refuses to start, naming `GATEKEEP_AUDIT_SHIP_STATE_DIR`, unless it can write there. The saved state also holds a hash of the file's first 4 KiB: a file that is shorter than the offset, or starts differently, was replaced, so the shipper says so and ships it again from the start under a new file ID. A saved state it can't read is said in one line too, and shipping starts over the same way, which repeats chunks rather than leaving a gap. OpenBao's audit device HMACs every request and response value, so no key material, plaintext or token is shipped. The chunks aren't signed: the shipper holds no OpenBao login, and Object Lock keeps them from erasure. Its log shows each chunk's key, and one line when the bucket fails, which it retries every 5 seconds:
+
+```sh
+docker compose -f deploy/compose.yaml logs openbao-audit-shipper
+```
 
 ## Hostnames and TLS
 
@@ -156,7 +232,7 @@ Challenge records never go into the zone that serves Gatekeep's names (NFR-21). 
    GATEKEEP_ADMIN_ACME_CHALLENGE_DOMAIN=admin.example-acme.com
    ```
 
-   Then add `-f deploy/compose.cloudflare.yaml` to every command, starting with step 9:
+   Then add `-f deploy/compose.cloudflare.yaml` to every command, starting with step 10:
 
    ```sh
    docker compose -f deploy/compose.yaml -f deploy/compose.cloudflare.yaml up -d --wait
@@ -171,7 +247,7 @@ Challenge records never go into the zone that serves Gatekeep's names (NFR-21). 
 ### What Caddy doesn't do yet
 
 - **Its healthcheck proves only that it listens** on 8443, not that it holds valid certificates. A certificate Caddy couldn't obtain or renew shows up only in its log and in clients' errors.
-- **`edge` gives Caddy unrestricted egress.** It needs it for ACME and the Cloudflare API in `cloudflare` mode, but nothing limits it to them, so code execution in Caddy can reach the internet (`docs/threat-model.md`, Z-9).
+- **`edge` gives Caddy unrestricted egress.** It needs it for ACME and the Cloudflare API in `cloudflare` mode, but nothing limits it to them, so code execution in Caddy can reach the internet (`docs/threat-model.md`, Z-9). The `egress` network that `Host.Worker`, the `cli` and the audit shipper join (Story 1.30) is the same: Gatekeep's code sends only through `EgressHttp`, which refuses private addresses, but the network itself limits no destination, so code execution in those containers can reach any public address.
 - **The hosts see Caddy's address, not the client's,** and no forwarded header is trusted yet. Which forwarded headers to trust, and so real client addresses for rate limits, is Story 1.20's decision.
 - **No access log at the edge.** One is deferred, because a request line can carry sensitive query values such as codes and tokens (`docs/threat-model.md`, T-42).
 
@@ -196,20 +272,20 @@ The steps above build every image from source. To run a published release instea
    docker compose -f deploy/compose.yaml -f deploy/compose.release.yaml --env-file deploy/release.env --profile release run --rm release-verify
    ```
 
-4. **Install** with steps 3 to 11 above, adding the overlay and the env file to every command. Skip step 2: nothing is built, and Compose refuses to start if any image variable is missing rather than build one. For example:
+4. **Install** with steps 3 to 12 above, adding the overlay and the env file to every command. Skip step 2: nothing is built, and Compose refuses to start if any image variable is missing rather than build one. For example:
 
    ```sh
    docker compose -f deploy/compose.yaml -f deploy/compose.release.yaml --env-file deploy/release.env run --rm keygen
    docker compose -f deploy/compose.yaml -f deploy/compose.release.yaml --env-file deploy/release.env up -d --wait
    ```
 
-   On a production host, also add the Cloudflare override, and name `deploy/.env` as well: once any `--env-file` is given, Compose reads only the files named, so the hostnames in `deploy/.env` would otherwise be lost. Use this form for step 3 above too:
+   On a production host, also add the Cloudflare override, and name `deploy/.env` as well: once any `--env-file` is given, Compose reads only the files named, so the hostnames, the alert channel and the bucket in `deploy/.env` would otherwise be lost. Use this form for step 3 above too:
 
    ```sh
    docker compose -f deploy/compose.yaml -f deploy/compose.cloudflare.yaml -f deploy/compose.release.yaml --env-file deploy/.env --env-file deploy/release.env up -d --wait
    ```
 
-Caddy keeps its `edge` network, and `release-verify` alone gets egress besides, on a `registry` network that exists only in the overlay. The pinned key is mounted into `release-verify` alone, read-only. Moving an existing Deployment to a new release is `gatekeep upgrade` (Story 12.6), which isn't built yet.
+Caddy keeps its `edge` network and `Host.Worker`, the `cli` and the audit shipper their `egress` network, and `release-verify` alone gets egress besides, on a `registry` network that exists only in the overlay. The pinned key is mounted into `release-verify` alone, read-only. Moving an existing Deployment to a new release is `gatekeep upgrade` (Story 12.6), which isn't built yet.
 
 ## Changing a database password
 
@@ -227,7 +303,7 @@ docker compose -f deploy/compose.yaml up -d --wait --force-recreate
 - **Refusal of missing or default secrets.** Each host refuses to start if a required setting is missing, empty, a known default such as `changeme` or `postgres`, or a password under 16 characters. That includes its key custody settings: every host uses OpenBao. It logs the setting's name, never its value, and exits non-zero, so Compose shows it restarting. `gatekeep migrate` refuses an unsafe password the same way.
 - **Hardened containers.** `Host.Hosted`, `Host.Admin`, `Host.Worker` and `cli` run as their own non-root user, with a read-only root filesystem, every capability dropped and `no-new-privileges`, as do PostgreSQL and OpenBao. Every service has a process limit and rotated logs. No runtime service has the Docker socket.
 - **One way in.** Only Caddy publishes ports, 80 and 443. It runs as its own non-root user, read-only, with every capability dropped and no admin API.
-- **No egress, and separate networks.** Only Caddy's `edge` network reaches outside; every other network is internal. Each host has its own network and shares only PostgreSQL. Caddy reaches `Host.Hosted` over `hosted-edge` and `Host.Admin` over `admin-edge`, each holding just that host and Caddy, on fixed subnets (`10.201.1.0/24` and `10.201.2.0/24`). Each site closes the connection on a request from the other host's edge subnet, so `Host.Hosted` has no route to `Host.Admin`, directly or through Caddy, and Caddy has none to the worker, PostgreSQL or OpenBao. Those subnets must not clash with other networks on the Docker host. OpenBao is on no network at all.
+- **Egress only where it's needed, and separate networks.** Only two networks reach outside: Caddy's `edge`, and `egress` (Story 1.30), which only `Host.Worker`, the `cli` and the audit shipper join, to reach the alert channel and the bucket. Every request they make goes through `EgressHttp`, which refuses private, loopback and link-local addresses, follows no redirect and uses no proxy. `Host.Hosted` and `Host.Admin` have no egress. Every other network is internal. Each host has its own network and shares only PostgreSQL. Caddy reaches `Host.Hosted` over `hosted-edge` and `Host.Admin` over `admin-edge`, each holding just that host and Caddy, on fixed subnets (`10.201.1.0/24` and `10.201.2.0/24`). Each site closes the connection on a request from the other host's edge subnet, so `Host.Hosted` has no route to `Host.Admin`, directly or through Caddy, and Caddy has none to the worker, PostgreSQL or OpenBao. Those subnets must not clash with other networks on the Docker host. OpenBao is on no network at all.
 - **Health.** Each host answers `/healthz` on port 8081 on its own loopback only, never published and unreachable from any other container, Caddy included: `200 healthy`, or `503` with `unhealthy: database` or `unhealthy: custody`, within 3 seconds even when a dependency hangs. Compose uses it as the healthcheck.
 
 ## When it doesn't start
@@ -238,6 +314,8 @@ docker compose -f deploy/compose.yaml up -d --wait --force-recreate
   docker compose -f deploy/compose.yaml logs hosted
   ```
 
+- **`Host.Worker` keeps restarting, naming `Alerts:` or `Records:` settings.** The alert channel or the bucket isn't set, or a setting or secret file is unsafe: see "Alert channel and off-server bucket" above.
+- **`openbao-audit-shipper` keeps restarting, naming `GATEKEEP_RECORDS_` settings.** The same, for the bucket. If it runs but logs `Off-server store unavailable` or `rejected`, the bucket or its credential is wrong: run `cli records test` to see which.
 - **Caddy keeps restarting.** Its log starts with `caddy: refusing to start:` and names the setting, for example an Admin hostname under the Tenant zone:
 
   ```sh
@@ -283,4 +361,6 @@ These steps install the stack, not a usable product. What they can't deliver yet
 - **Real client addresses.** No forwarded header is trusted yet, so the hosts see Caddy's address, not the client's (Story 1.20).
 - **IPv6.** The Compose networks are IPv4 only. Add no `AAAA` records.
 - **A real production certificate.** `cloudflare` mode has been validated offline only and has never obtained a real certificate. On the first production start, watch Caddy's log until both certificates are obtained.
+- **Alerts from events, and evidence in the bucket.** Only `alerts test` sends an alert yet: deriving Security Alerts from audit events is Story 11.1, decrypt-rate alerts Story 11.2 and the heartbeat Story 11.3. Only `records test` and the audit shipper write to the bucket: sealed events, revocations and chain heads follow in Story 7.2.
+- **Audit log rotation.** OpenBao's one audit file grows without bound, and OpenBao refuses every request when it can't write it. Watch the `openbao-audit` volume's size; rotation and a second audit device are deferred.
 - **Backups and upgrades.** No backup, restore or `gatekeep upgrade` yet. Backups must leave the secrets directory out (Epic 12). Signed releases can be installed ("Install a signed release" above), but `gatekeep upgrade`, which will check signatures itself, is Story 12.6.

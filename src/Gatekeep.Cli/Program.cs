@@ -31,6 +31,12 @@ const string Usage = """
                                                   GATEKEEP_CUSTODY_SECRET_ID_FILE set;
                                                   the token directory defaults to /gatekeep/bootstrap)
            gatekeep rotate-transit-keys    (with the same settings as init: the last step of a Master Key rotation)
+           gatekeep alerts test    (with GATEKEEP_ALERT_URL, GATEKEEP_ALERT_TOKEN_FILE and GATEKEEP_ALERT_DEPLOYMENT set)
+           gatekeep records test    (with GATEKEEP_RECORDS_ENDPOINT, GATEKEEP_RECORDS_REGION, GATEKEEP_RECORDS_BUCKET,
+                                     GATEKEEP_RECORDS_ACCESS_KEY_ID_FILE, GATEKEEP_RECORDS_SECRET_ACCESS_KEY_FILE
+                                     and the custody settings init uses set)
+           gatekeep audit-ship [--once]    (with the GATEKEEP_RECORDS_* settings, GATEKEEP_AUDIT_LOG_FILE and
+                                            GATEKEEP_AUDIT_SHIP_STATE_DIR set)
     """;
 
 var defaultConnectionFile = Environment.GetEnvironmentVariable(ConnectionFileVariable);
@@ -52,6 +58,10 @@ return args switch
     ["init", "--token-dir", var tokenDirectory] when cliReady && tokenDirectory.Length > 0 =>
         await InitAsync(cliConnectionFile!, cliPasswordFile!, tokenDirectory, defaultDirectory: false),
     ["rotate-transit-keys"] when cliReady => await RotateTransitKeysAsync(cliConnectionFile!, cliPasswordFile!),
+    ["alerts", "test"] => await AlertsTestCommand.RunAsync(),
+    ["records", "test"] => await RecordsTestCommand.RunAsync(),
+    ["audit-ship"] => await AuditShipCommand.RunAsync(once: false),
+    ["audit-ship", "--once"] => await AuditShipCommand.RunAsync(once: true),
     _ => ShowUsage(),
 };
 

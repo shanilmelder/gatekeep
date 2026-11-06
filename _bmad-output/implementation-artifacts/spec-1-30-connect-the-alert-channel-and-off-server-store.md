@@ -2,10 +2,10 @@
 title: 'Story 1.30: Connect the alert channel and off-server store'
 type: 'feature'
 created: '2026-11-06'
-status: 'ready-for-dev'
-baseline_revision: 'e69eac7f11063bcef1bfdcb20c6305fdae8f4282'
-review_loop_iteration: 0
-followup_review_recommended: false
+status: 'done'
+baseline_revision: 'ba1f82a903cb7117ec73083d19f7da15d5d63937'
+review_loop_iteration: 1
+followup_review_recommended: true
 context:
   - '{project-root}/_bmad-output/planning-artifacts/architecture/architecture-gatekeep-2026-11-02/ARCHITECTURE-SPINE.md'
   - '{project-root}/_bmad-output/implementation-artifacts/epic-1-context.md'
@@ -15,7 +15,13 @@ context:
   - '{project-root}/docs/threat-model.md'
   - '{project-root}/docs/install.md'
 warnings: ['oversized']
-deferred: []
+deferred:
+  - 'Audit shipper re-ships a chunk after a crash between the PUT and the offset save'
+  - 'Read the alert webhook URL from a secret file'
+  - 'Bind a signed record to its object key when verifying (Story 7.2)'
+  - 'Filtering egress proxy for the egress network (T-59)'
+  - 'EgressHttp edge cases: empty DNS answer, named-zone literal, secret size cap, handler mutability, hung connect'
+  - 'Audit-ship canary flow with real OpenBao lines and both days'"'"' prefixes'
 ---
 
 <intent-contract>
@@ -178,20 +184,20 @@ deferred: []
 ## Tasks & Acceptance
 
 **Execution:**
-- [ ] **Kernel ports and record writer**, as in the Code Map. Unit-test the canonical bytes and that the signature covers them.
-- [ ] **`Adapters.Egress`:** the classifier, the vetted `ConnectCallback`, no proxy, redirects or cookies, and the internal permit seam with `InternalsVisibleTo("Gatekeep.Tests.Isolation")`.
-- [ ] **`Adapters.AlertChannel` and `Adapters.ObjectLock`:** the webhook adapter, and SigV4 `PUT` with the Object Lock headers and `Content-MD5`, path-style URLs and failure mapping.
-- [ ] **Settings and startup:** the `HostProfile` flag, names and refusals; registration in `GatekeepHosting`; the Worker profile; the Cli variables and refusals.
-- [ ] **Cli:** `alerts test`, `records test` and `audit-ship [--once]`, with the fixed output lines from the matrix.
-- [ ] **Deploy:** the Compose network, service, volumes and secrets; the OpenBao audit mode and group; the stack check.
-- [ ] **Isolation tests:**
+- [x] **Kernel ports and record writer**, as in the Code Map. Unit-test the canonical bytes and that the signature covers them.
+- [x] **`Adapters.Egress`:** the classifier, the vetted `ConnectCallback`, no proxy, redirects or cookies, and the internal permit seam with `InternalsVisibleTo("Gatekeep.Tests.Isolation")`.
+- [x] **`Adapters.AlertChannel` and `Adapters.ObjectLock`:** the webhook adapter, and SigV4 `PUT` with the Object Lock headers and `Content-MD5`, path-style URLs and failure mapping.
+- [x] **Settings and startup:** the `HostProfile` flag, names and refusals; registration in `GatekeepHosting`; the Worker profile; the Cli variables and refusals.
+- [x] **Cli:** `alerts test`, `records test` and `audit-ship [--once]`, with the fixed output lines from the matrix.
+- [x] **Deploy:** the Compose network, service, volumes and secrets; the OpenBao audit mode and group; the stack check.
+- [x] **Isolation tests:**
   - every matrix row, with the two fixtures;
   - startup refusals for each missing and unsafe setting;
   - the Compose test updates;
   - the audit-log canary, with Transit plaintext added;
   - the three canary flows and Cli surfaces.
-- [ ] **Architecture tests:** `EgressRuleTests` with self-checks, the edges and diagram, and the hcl assertion.
-- [ ] **Docs:** `install.md`, the threat model and `deferred-work.md`.
+- [x] **Architecture tests:** `EgressRuleTests` with self-checks, the edges and diagram, and the hcl assertion.
+- [x] **Docs:** `install.md`, the threat model and `deferred-work.md`.
 
 **Acceptance Criteria:**
 - Given `IAlertChannel` and its webhook adapter, when `gatekeep alerts test` runs, then a service outside the Deployment receives the alert, and the alert carries only the listed fields.
@@ -203,7 +209,70 @@ deferred: []
 
 ## Spec Change Log
 
+- **2026-11-06 — the bucket credential also has `s3:PutObjectRetention`.** S3 needs it for a `PUT` that carries Object Lock headers. Against a COMPLIANCE object it can only lengthen retention, never shorten it, so nothing can be erased early (T-61). The "never change retention" rule now means never shorten or remove it. `ObjectLockStoreTests` assert a 403 `AccessDenied` for delete, delete-version, read and list.
+- **2026-11-06 — "no reference to `Adapters.Egress`" means no direct one.** `Host.Admin` and `Host.Hosted` load the egress assemblies through `Adapters.Hosting`, as the Code Map's edges require. They stay off the `egress` network, they register no `IAlertChannel` (`OffServerRegistrationTests`), and `EgressRuleTests` keep `EgressHttp` and `UsesOffServer` out of their source.
+- **2026-11-06 — the MinIO fixture image is `bitnamilegacy/minio`, pinned by digest.** `minio/minio:RELEASE.*` tags can no longer be pulled.
+- **2026-11-06 — more refused ranges, and IPv4 is tried first.** The refusal also covers:
+  - IPv4 `192.88.99.0/24`;
+  - IPv6 `3fff::/20`, `fec0::/10`, `100::/64`, `2001::/32` (Teredo), `2001:10::/28`, `2001:20::/28`, `64:ff9b:1::/48` and `::ffff:0:0:0/96`.
+
+  `EgressHttp` dials allowed IPv4 addresses before IPv6, so a dead IPv6 route can't use up the 10-second connect timeout.
+- **2026-11-06 — refusals say why.** A `Refused` failure says whether the address or the token or credential file was refused. The Cli prints the private-address line only for the address, and a fixed `… file unusable` line otherwise.
+- **2026-11-06 — the shipper.**
+  - It ships chunks of at most 1 MiB.
+  - It spots a replaced file by the hash of its first bytes.
+  - It refuses at startup when its state directory can't be written.
+  - The audit directory is setgid (`2750`), so a file OpenBao recreates keeps the `openbao-audit` group.
+
 ## Review Triage Log
+
+### 2026-11-06 — Review pass
+
+- **Verdicts:** 4 reviewers (Blind Hunter, Edge Case Hunter, Verification Gap and Intent Alignment) found 59 findings, about 30 distinct after merging duplicates. 27 were patched, including the 3 found by verification, 7 deferred and 3 recorded as spec changes. None were rejected.
+- **Found by verification, before review:**
+  - `[high]` `[patch]` `records test` against `https://[::1]` crashed with exit 134. SigV4 built the `Host` header without the IPv6 brackets. Fixed and unit-tested.
+  - `[medium]` `[patch]` The classifier refused `::ffff:1.1.1.1`. IPv4-mapped addresses are now unwrapped before the IPv6 ranges are checked.
+  - `[medium]` `[patch]` `cli.Dockerfile` used `COPY --chmod`, which needs BuildKit, so the stack-check build failed. The build stage now sets the mode.
+- **Patched from review:**
+  - `[high]` `[patch]` VG: the bucket's default retention hid missing Object Lock headers. A capturing-handler test now asserts mode, retain-until and `Content-MD5`, and the fixture default is GOVERNANCE 1d.
+  - `[high]` `[patch]` VG: nothing showed that the shipper container can read the audit file. The stack check now waits for its fixed "unavailable" line, then expects it running with 0 restarts.
+  - `[medium]` `[patch]` BH, ECH: startup accepted token and credential files that the adapters refuse. One rule, `SecretDefaults.IsUnsafeCredential`, is now used everywhere.
+  - `[medium]` `[patch]` BH, VG, ECH, IA: every `Refused` printed "private address". The reason is now carried, with fixed token and credential lines, and the stack check proves the token is readable.
+  - `[medium]` `[patch]` BH, ECH: the shipper ignored file identity. A hash of the first bytes now catches a replaced and regrown file.
+  - `[medium]` `[patch]` BH: a 4 MiB chunk couldn't finish inside the 10-second timeout. Chunks are now capped at 1 MiB.
+  - `[medium]` `[patch]` BH, ECH: a failed save looped forever, adding locked versions, and corrupt state reset silently. The state directory is now probed at startup, and corrupt state prints a fixed line.
+  - `[medium]` `[patch]` BH, ECH: local-use NAT64, site-local, Teredo, ORCHID, SIIT, `3fff::/20` and `192.88.99.0/24` weren't refused. They are now.
+  - `[medium]` `[patch]` BH, ECH: one dead IPv6 route used up the whole connect timeout. IPv4 is now tried first.
+  - `[medium]` `[patch]` ECH: HTTP/3 skips `ConnectCallback`. An architecture test now forbids `Version30` and `RequestVersionOrHigher`.
+  - `[medium]` `[patch]` VG: the `EgressRuleTests` regexes could be dodged. String literals are emptied first, and the rule catches target-typed `new()`, subclasses and raw sockets.
+  - `[medium]` `[patch]` VG: DNS rebinding was untested. An internal resolver seam now shows that only checked public addresses are dialled.
+  - `[medium]` `[patch]` VG: the Worker's registrations were never resolved. `OffServerRegistrationTests` now resolves them.
+  - `[medium]` `[patch]` VG: each missing setting was only tested together with the others. There is now one row per setting, for the Worker and each Cli command.
+  - `[medium]` `[patch]` VG: the write-only credential tests accepted any status of 400 or more. They now require 403 `AccessDenied`, and a new test shows that a GOVERNANCE `PUT` still can't be removed.
+  - `[low]` `[patch]` BH: `start-openbao.sh` aborted under `set -e` when it couldn't create the audit file. Creating it is now inside the warn-only block.
+  - `[low]` `[patch]` BH: a recreated audit log lost its group. The directory is now setgid `2750`.
+  - `[low]` `[patch]` BH: the shipper had `pull_policy: never` and no build. It now has the cli image's build.
+  - `[low]` `[patch]` ECH: the SigV4 IPv6 host was untested. A test now covers it.
+  - `[low]` `[patch]` ECH: `AuditShipTests` could flake at midnight. Both days' prefixes are now searched.
+  - `[low]` `[patch]` VG: no-retry was only partly asserted. There is now one request each on a timeout and on a 500.
+  - `[low]` `[patch]` VG: the bucket metadata scan covered three fields. It now covers every HEAD header.
+  - `[low]` `[patch]` VG: nothing showed that a Cli refusal happens before custody is reached. The fake socket's request count is now asserted to be 0.
+  - `[low]` `[patch]` VG: the stack check didn't try `host.docker.internal`. It now does when the name resolves.
+  - `[low]` `[patch]` ECH: bucket names were too strict. Only dotted-quad IPv4 names are refused now.
+- **Recorded as spec changes:** IA, VG: `s3:PutObjectRetention`; IA, VG: the transitive Egress reference; IA: the MinIO image. See the Spec Change Log.
+- **Deferred:**
+  - `[low]` `[defer]` ECH, IA: a crash between `PUT` and save re-ships the same key as a second version.
+  - `[medium]` `[defer]` BH: the webhook URL is a plain environment variable. `install.md` now says it must carry no credential.
+  - `[low]` `[defer]` BH: a signed record can be replayed under another key. Belongs to Story 7.2's verifier.
+  - `[low]` `[defer]` IA: no filtering egress proxy (T-59).
+  - `[low]` `[defer]` ECH: an empty DNS answer reads as "private address", and a literal with a named zone gives Unavailable.
+  - `[low]` `[defer]` ECH: secret file reads have no size cap.
+  - `[low]` `[defer]` VG, ECH, IA:
+    - the hung-connect path isn't exercised;
+    - a partial last line gets glued to the next after an OpenBao crash;
+    - the handler can be changed after `Create()`;
+    - the canary flow uses synthetic audit lines and builds its prefix from `UtcNow`.
+- **Already tracked:** `MasterKeyRotationTests.Full_rotation_…` fails at the census step on `main` too. It is the existing Story 12.7 item in `deferred-work.md`.
 
 ## Design Notes
 
@@ -224,3 +293,41 @@ deferred: []
 - `docker compose -f deploy/compose.test.yaml run --rm --build stack` (on Windows, from PowerShell with `GATEKEEP_HOST_REPO=/run/desktop/mnt/host/d/Projects/Personal/gatekeep`, `GATEKEEP_HTTP_PORT=18080` and `GATEKEEP_HTTPS_PORT=18443`): the stack check passes, including the egress-network assertions and the private-address refusal.
 
 Nothing runs on the host. From a worktree, use a worktree-only image tag.
+
+## Auto Run Result
+
+Status: done
+
+**Summary:**
+- Gatekeep can now reach two places outside the server:
+  - an HTTPS webhook alert channel, behind `IAlertChannel`;
+  - an S3-API Object Lock bucket, behind `IOffServerStore`, written in compliance mode for at least `RetentionPeriods.LogDays` days with a hand-written SigV4 `PUT`.
+- `OffServerRecordWriter` signs records with `dep-records`.
+- Every outbound request goes through `EgressHttp`. It resolves names itself, dials only addresses it has checked, tries IPv4 first, and refuses private, loopback, link-local, reserved and embedded-private addresses. It has no proxy, follows no redirect, and allows no HTTP/3. Architecture tests forbid any other handler, socket or client.
+- `Host.Worker` and the new Cli commands `alerts test`, `records test` and `audit-ship` refuse unsafe or missing settings by name. Startup and the adapters refuse token and credential files by one shared rule.
+- The `openbao-audit-shipper` service copies what OpenBao appends to its audit log into the bucket in 1 MiB chunks. It reads the log through the setgid `openbao-audit` group, resumes from its offset, and spots a shrunk or replaced file.
+- Only `worker`, `cli` and the shipper join the new `egress` network.
+
+**Files:**
+- **Kernel:** `src/Gatekeep.Kernel/Alerts/` and `Records/`, plus `Secrets/SecretDefaults.cs`.
+- **New adapters:** `src/Adapters/Egress/`, `AlertChannel/` and `ObjectLock/`.
+- **Hosting:** `src/Adapters/Hosting/` (settings and registration) and `src/Gatekeep.Host.Worker/WorkerJobs.cs`.
+- **Cli:** `src/Gatekeep.Cli/` (`AlertsTestCommand`, `RecordsTestCommand`, `AuditShipCommand` and `OffServerSettings`).
+- **Deploy:** `deploy/compose.yaml`, `compose.release.yaml`, the OpenBao config, Dockerfile and start script, `cli.Dockerfile`, and `deploy/ci/stack-check.sh`.
+- **Tests:** `tests/Isolation/OffServer/`, plus the startup, Compose, custody and canary tests.
+- **Architecture tests:** `tests/Architecture/EgressRuleTests.cs`, plus the module edges and diagram.
+- **Docs:** `docs/install.md`, `threat-model.md` and `key-custody.md`.
+
+**Review:**
+- Verification found 3 issues, all fixed: the SigV4 IPv6 `Host` header, an IPv4-mapped public address being refused, and `COPY --chmod` without BuildKit.
+- Four reviewers found 59 findings, about 30 distinct.
+- 27 were patched, 7 deferred and 3 recorded as spec changes. None were rejected.
+
+**Follow-up review:** recommended. The shipper's state format, the egress rule regexes and the refusal reasons all changed during review, and their only proof is the new tests.
+
+**Verification:**
+- The full suite ran in the `tests` container:
+  - Architecture: 694/694.
+  - Browser: 527 passed.
+  - Isolation: 2759/2771. Eleven tests failed under shared-Docker load, and their ten classes pass on rerun (690/690). The other failure, `MasterKeyRotationTests.Full_rotation_…`, also fails on `main` and is an existing Story 12.7 item.
+- The local stack check couldn't run, because a running `gatekeep-dev` stack holds the fixed edge subnets. CI's `stack` job runs it.
