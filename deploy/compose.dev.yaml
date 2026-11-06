@@ -86,6 +86,15 @@ x-host: &host
     openbao:
       condition: service_healthy
 
+# The off-server bucket (Story 1.30), for the cli and the shipper. Host.Worker reads the same
+# values under its own names.
+x-records-environment: &records-environment
+  GATEKEEP_RECORDS_ENDPOINT: ${GATEKEEP_RECORDS_ENDPOINT:-}
+  GATEKEEP_RECORDS_REGION: ${GATEKEEP_RECORDS_REGION:-}
+  GATEKEEP_RECORDS_BUCKET: ${GATEKEEP_RECORDS_BUCKET:-}
+  GATEKEEP_RECORDS_ACCESS_KEY_ID_FILE: /run/secrets/records_access_key_id
+  GATEKEEP_RECORDS_SECRET_ACCESS_KEY_FILE: /run/secrets/records_secret_access_key
+
 # One-shot tools that write into the secrets directory. Root, for chown into it, with
 # only the capabilities that needs, and no network. Each mounts only the subdirectory
 # it writes, so none of them can read the Master Key but keygen.
@@ -174,7 +183,9 @@ services:
     image: gatekeep/openbao:local
     <<: *hardened
     user: "100:1000"
-    group_add: ["4500"]
+    # gatekeep-custody, which owns the socket, and openbao-audit, which alone may read the audit
+    # file: start-openbao.sh gives the file and its directory that group (Story 1.30).
+    group_add: ["4500", "4501"]
     restart: unless-stopped
     # No network at all: hosts reach it only on its socket, on the openbao-socket volume.
     network_mode: none
@@ -271,6 +282,16 @@ services:
       Custody__SocketPath: /run/openbao/openbao.sock
       Custody__RoleIdFile: /run/secrets/openbao_role_id
       Custody__SecretIdFile: /run/secrets/openbao_secret_id
+      # The alert channel and the off-server bucket (Story 1.30): required, and refused by name
+      # when missing or unsafe, though nothing calls them until Stories 11.1 and 7.2.
+      Alerts__Url: ${GATEKEEP_ALERT_URL:-}
+      Alerts__TokenFile: /run/secrets/alert_token
+      Alerts__Deployment: ${GATEKEEP_ADMIN_HOST:-admin.gatekeep-admin.localhost}
+      Records__Endpoint: ${GATEKEEP_RECORDS_ENDPOINT:-}
+      Records__Region: ${GATEKEEP_RECORDS_REGION:-}
+      Records__Bucket: ${GATEKEEP_RECORDS_BUCKET:-}
+      Records__AccessKeyIdFile: /run/secrets/records_access_key_id
+      Records__SecretAccessKeyFile: /run/secrets/records_secret_access_key
     secrets:
       - source: gk_dispatch_password
         target: Database__Dispatch__Password
@@ -284,9 +305,13 @@ services:
         target: openbao_role_id
       - source: openbao_worker_secret_id
         target: openbao_secret_id
+      - alert_token
+      - records_access_key_id
+      - records_secret_access_key
     volumes:
       - openbao-socket:/run/openbao:ro
-    networks: [worker]
+    # egress reaches the alert channel and the bucket, through EgressHttp only (Story 1.30).
+    networks: [worker, egress]
     healthcheck:
       <<: *host-healthcheck
       test: ["CMD", "dotnet", "/app/Gatekeep.Host.Worker.dll", "--health-probe"]
@@ -346,6 +371,11 @@ services:
       GATEKEEP_CUSTODY_SOCKET: /run/openbao/openbao.sock
       GATEKEEP_CUSTODY_ROLE_ID_FILE: /run/secrets/openbao_role_id
       GATEKEEP_CUSTODY_SECRET_ID_FILE: /run/secrets/openbao_secret_id
+      # alerts test and records test (Story 1.30).
+      GATEKEEP_ALERT_URL: ${GATEKEEP_ALERT_URL:-}
+      GATEKEEP_ALERT_TOKEN_FILE: /run/secrets/alert_token
+      GATEKEEP_ALERT_DEPLOYMENT: ${GATEKEEP_ADMIN_HOST:-admin.gatekeep-admin.localhost}
+      <<: *records-environment
     secrets:
       - gk_migrator_password
       - gk_cli_password
@@ -353,6 +383,9 @@ services:
         target: openbao_role_id
       - source: openbao_cli_secret_id
         target: openbao_secret_id
+      - alert_token
+      - records_access_key_id
+      - records_secret_access_key
     volumes:
       - ./postgres/migrator.connection:/gatekeep/migrator.connection:ro
       - ./postgres/cli.connection:/gatekeep/cli.connection:ro
@@ -365,12 +398,41 @@ services:
         target: /gatekeep/bootstrap
         bind:
           create_host_path: false
-    networks: [tools]
+    networks: [tools, egress]
     depends_on:
       postgres:
         condition: service_healthy
       postgres-passwords:
         condition: service_completed_successfully
+
+  # Copies what OpenBao appends to its audit file into the Object Lock bucket, within 30 seconds
+  # of each write (Story 1.30): gatekeep audit-ship from the cli image, as a uid of its own. It
+  # reads the openbao-audit volume read-only, through the openbao-audit group, which no other
+  # service has, keeps its read offset on its own volume and reaches only the bucket, over egress.
+  # It holds no OpenBao login, so it signs nothing: Object Lock keeps the chunks from erasure.
+  openbao-audit-shipper:
+    # The cli image, built here too, so a plain `docker compose up --build` has it without the
+    # tools profile that the cli service sits behind.
+    build:
+      context: ..
+      dockerfile: deploy/docker/cli.Dockerfile
+    image: gatekeep/cli:local
+    <<: *hardened
+    user: "10006:10006"
+    group_add: ["4501"]
+    restart: unless-stopped
+    command: ["audit-ship"]
+    environment:
+      <<: *records-environment
+      GATEKEEP_AUDIT_LOG_FILE: /var/log/openbao/audit.log
+      GATEKEEP_AUDIT_SHIP_STATE_DIR: /var/lib/gatekeep/audit-ship
+    secrets:
+      - records_access_key_id
+      - records_secret_access_key
+    volumes:
+      - openbao-audit:/var/log/openbao:ro
+      - shipper-state:/var/lib/gatekeep/audit-ship
+    networks: [egress]
 
   # Writes a new Master Key, generation 1, and its ID into master/. Refuses to replace either.
   keygen:
@@ -548,6 +610,14 @@ secrets:
     file: ${GATEKEEP_SECRETS_DIR:-./secrets}/approle/cli/role-id
   openbao_cli_secret_id:
     file: ${GATEKEEP_SECRETS_DIR:-./secrets}/approle/cli/secret-id
+  # The alert channel's bearer token and the bucket's write-only credential, written by the
+  # Operator (docs/install.md, "Alert channel and off-server bucket").
+  alert_token:
+    file: ${GATEKEEP_SECRETS_DIR:-./secrets}/alerts/token
+  records_access_key_id:
+    file: ${GATEKEEP_SECRETS_DIR:-./secrets}/records/access-key-id
+  records_secret_access_key:
+    file: ${GATEKEEP_SECRETS_DIR:-./secrets}/records/secret-access-key
 
 volumes:
   # The dev workspace: each checkout's copy and build output, and the NuGet and pnpm caches.
@@ -556,6 +626,8 @@ volumes:
   openbao-data:
   openbao-socket:
   openbao-audit:
+  # The shipper's read offset into the audit file (Story 1.30).
+  shipper-state:
   caddy-data:
   caddy-config:
 
@@ -570,6 +642,10 @@ networks:
     internal: true
   # Caddy's published ports, and its ACME and Cloudflare API traffic in cloudflare mode.
   edge: {}
+  # Application egress (Story 1.30): worker, cli and openbao-audit-shipper, to the alert channel
+  # and the bucket, every request through EgressHttp. Not internal, and holding no PostgreSQL,
+  # OpenBao or edge service.
+  egress: {}
   # Caddy to Host.Hosted, and nothing else. The subnets are fixed because the Caddyfile
   # refuses each site to requests from the other host's edge subnet.
   hosted-edge:

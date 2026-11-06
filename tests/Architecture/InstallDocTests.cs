@@ -100,6 +100,33 @@ public class InstallDocTests
         [
             @"\*\*Backups and upgrades\.\*\*[^\n]*\(Epic 12",
         ],
+        ["alert channel and off-server bucket (Story 1.30)"] =
+        [
+            @"^9\. \*\*Connect the alert channel and the off-server bucket\.\*\*",
+            @"^## Alert channel and off-server bucket$",
+            @"\*\*The alert channel: an HTTPS webhook\*\*",
+            @"The webhook's URL must carry no credential",
+            @"\*\*The off-server bucket: an S3-API bucket on a separate provider\*\*",
+            @"\*\*versioning and Object Lock\*\* on, and a default retention in \*\*compliance\*\* mode of \*\*at least 90 days\*\*",
+            @"\*\*A write-only credential for the server\.\*\*[^\n]*no read, list, delete, version delete or governance bypass",
+            @"""Action"": \[""s3:PutObject"", ""s3:PutObjectRetention""\]",
+            @"^\| `GATEKEEP_ALERT_URL` \|",
+            @"^\| `GATEKEEP_RECORDS_ENDPOINT` \|",
+            @"^\| `GATEKEEP_RECORDS_REGION` \|",
+            @"^\| `GATEKEEP_RECORDS_BUCKET` \|",
+            @"^\| `alerts/token` \|",
+            @"^\| `records/access-key-id` \|",
+            @"^\| `records/secret-access-key` \|",
+            @"docker compose -f deploy/compose\.yaml run --rm cli alerts test",
+            @"docker compose -f deploy/compose\.yaml run --rm cli records test",
+            @"^### The audit shipper$",
+        ],
+        ["the egress network (Story 1.30)"] =
+        [
+            @"`egress` \(Story 1\.30\), which only `Host\.Worker`, the `cli` and the audit shipper join",
+            @"`Host\.Hosted` and `Host\.Admin` have no egress",
+            @"The `egress` network that `Host\.Worker`, the `cli` and the audit shipper join \(Story 1\.30\) is the same",
+        ],
     };
 
     public static TheoryData<string> TopicNames => [.. Topics.Keys];
@@ -134,6 +161,9 @@ public class InstallDocTests
     [InlineData("`admin.example.com` as `A` records", "`admin.example.com` as `CNAME` records", "wildcard DNS")]
     [InlineData(", the zone itself included", "", "dedicated Tenant zone")]
     [InlineData("**The Admin hostname must be outside the Tenant zone**", "**The Admin hostname**", "Admin hostname outside the Tenant zone")]
+    [InlineData("mode of **at least 90 days**", "mode of **at least 30 days**", "alert channel and off-server bucket (Story 1.30)")]
+    [InlineData("\"Action\": [\"s3:PutObject\", \"s3:PutObjectRetention\"]", "\"Action\": [\"s3:*\"]", "alert channel and off-server bucket (Story 1.30)")]
+    [InlineData("`Host.Hosted` and `Host.Admin` have no egress", "`Host.Hosted` has no egress", "the egress network (Story 1.30)")]
     public void Altered_text_is_detected(string original, string replacement, string topic)
     {
         var doc = InstallDoc();

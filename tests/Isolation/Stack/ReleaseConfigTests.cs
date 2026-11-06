@@ -30,10 +30,15 @@ public sealed class ReleaseConfigTests
     private static readonly Lazy<string[]> Workflow = new(() =>
         File.ReadAllLines(Path.Combine(Repository.Root, ".github", "workflows", "release.yml")));
 
-    /// <summary>Every service <c>deploy/compose.yaml</c> builds.</summary>
+    /// <summary>
+    /// Every image <c>deploy/compose.yaml</c> builds, named by its Dockerfile, as its service is: the
+    /// audit shipper builds the cli image too (Story 1.30), so it adds no image of its own.
+    /// </summary>
     private static List<string> BuiltServices => Base.Value.GetProperty("services").EnumerateObject()
         .Where(s => s.Value.TryGetProperty("build", out _))
-        .Select(s => s.Name)
+        .Select(s => Path.GetFileName(s.Value.GetProperty("build").GetProperty("dockerfile").GetString()!)
+            .Replace(".Dockerfile", string.Empty, StringComparison.Ordinal))
+        .Distinct(StringComparer.Ordinal)
         .Order()
         .ToList();
 
@@ -72,14 +77,20 @@ public sealed class ReleaseConfigTests
         var services = Overlay.Value.GetProperty("services");
         var environment = SampleEnvironment();
 
-        foreach (var name in BuiltServices.Concat(["keygen", "openbao-setup"]))
+        foreach (var name in BuiltServices.Concat(["keygen", "openbao-setup", "openbao-audit-shipper"]))
         {
             var service = services.GetProperty(name);
             Assert.False(service.TryGetProperty("build", out _), $"{name} still builds from source.");
 
             var image = service.GetProperty("image").GetString()!;
             Assert.Matches(DigestReference, image);
-            var source = name is "keygen" or "openbao-setup" ? "openbao" : name;
+            var source = name switch
+            {
+                "keygen" or "openbao-setup" => "openbao",
+                // Story 1.30: the shipper runs the cli image.
+                "openbao-audit-shipper" => "cli",
+                _ => name,
+            };
             Assert.Equal(environment[Variable(source)], image);
         }
 

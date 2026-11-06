@@ -11,7 +11,8 @@ namespace Gatekeep.Tests.Isolation.Stack;
 /// </summary>
 public sealed class ComposeConfigTests
 {
-    private static readonly string[] HardenedServices = ["hosted", "admin", "worker", "cli", "postgres", "postgres-passwords", "openbao", "caddy"];
+    private static readonly string[] HardenedServices =
+        ["hosted", "admin", "worker", "cli", "postgres", "postgres-passwords", "openbao", "caddy", "openbao-audit-shipper"];
     private static readonly string[] Hosts = ["hosted", "admin", "worker"];
 
     private static readonly Lazy<JsonElement> Stack = new(() => Config("deploy/compose.yaml", "--profile", "tools", "--profile", "setup"));
@@ -98,14 +99,25 @@ public sealed class ComposeConfigTests
         }
     }
 
+    /// <summary>
+    /// Story 1.30 adds <c>egress</c>, the second network with a way out, for application egress: only
+    /// Host.Worker, the cli and the audit shipper join it. Host.Hosted and Host.Admin get none.
+    /// </summary>
     [Fact]
-    public void Only_the_edge_network_has_egress_and_each_host_has_its_own()
+    public void Only_the_edge_and_egress_networks_have_egress_and_each_host_has_its_own()
     {
         foreach (var network in Stack.Value.GetProperty("networks").EnumerateObject())
         {
             var isInternal = network.Value.TryGetProperty("internal", out var value) && value.GetBoolean();
-            Assert.True(isInternal == (network.Name != "edge"), $"Network {network.Name} is internal: {isInternal}.");
+            Assert.True(isInternal == (network.Name is not ("edge" or "egress")), $"Network {network.Name} is internal: {isInternal}.");
         }
+
+        var egress = Services.EnumerateObject()
+            .Where(s => s.Value.TryGetProperty("networks", out var networks) && networks.TryGetProperty("egress", out _))
+            .Select(s => s.Name)
+            .Order();
+        Assert.Equal(["cli", "openbao-audit-shipper", "worker"], egress);
+        Assert.Equal(["egress"], NetworksOf(Services.GetProperty("openbao-audit-shipper")));
 
         // Each host's own network is the one named after it, and it joins no other host's.
         foreach (var host in Hosts)
@@ -123,7 +135,7 @@ public sealed class ComposeConfigTests
         Assert.Equal(["admin-edge", "edge", "hosted-edge"], NetworksOf(Services.GetProperty("caddy")));
         Assert.Equal(["hosted", "hosted-edge"], NetworksOf(Services.GetProperty("hosted")));
         Assert.Equal(["admin", "admin-edge"], NetworksOf(Services.GetProperty("admin")));
-        Assert.Equal(["worker"], NetworksOf(Services.GetProperty("worker")));
+        Assert.Equal(["egress", "worker"], NetworksOf(Services.GetProperty("worker")));
 
         // The Caddyfile proxies to the two public ports only, and its admin API is off.
         var caddy = Path.Combine(Repository.Root, "deploy", "caddy");
@@ -537,8 +549,10 @@ public sealed class ComposeConfigTests
             ["hosted"] = ["gk_hosted_password", "openbao_hosted_role_id", "openbao_hosted_secret_id"],
             ["admin"] = ["gk_admin_password", "openbao_admin_role_id", "openbao_admin_secret_id"],
             ["worker"] = ["gk_dispatch_password", "gk_worker_password", "gk_sealer_password", "gk_retention_password",
-                "openbao_worker_role_id", "openbao_worker_secret_id"],
-            ["cli"] = ["gk_migrator_password", "gk_cli_password", "openbao_cli_role_id", "openbao_cli_secret_id"],
+                "openbao_worker_role_id", "openbao_worker_secret_id", .. OffServerSecrets],
+            ["cli"] = ["gk_migrator_password", "gk_cli_password", "openbao_cli_role_id", "openbao_cli_secret_id", .. OffServerSecrets],
+            // Story 1.30: the bucket's credential only, and no OpenBao login.
+            ["openbao-audit-shipper"] = ["records_access_key_id", "records_secret_access_key"],
         };
 
         foreach (var service in Services.EnumerateObject())
@@ -548,6 +562,101 @@ public sealed class ComposeConfigTests
                 : [];
             Assert.Equal(expected.GetValueOrDefault(service.Name, []).Order(), actual);
         }
+    }
+
+    /// <summary>Story 1.30: the alert channel's token and the bucket's write-only credential.</summary>
+    private static readonly string[] OffServerSecrets = ["alert_token", "records_access_key_id", "records_secret_access_key"];
+
+    /// <summary>
+    /// Story 1.30: the alert and bucket secrets are files under alerts/ and records/ in the secrets
+    /// directory, read by Host.Worker and the cli under their own names, and the bucket's alone by the shipper.
+    /// </summary>
+    [Fact]
+    public void Alert_and_bucket_secrets_are_files_in_the_secrets_directory_named_in_each_service()
+    {
+        var secrets = Stack.Value.GetProperty("secrets");
+        var directory = Normalized(secrets.GetProperty("master_key").GetProperty("file").GetString()!)[..^"/master/master-key".Length];
+        Assert.Equal(directory + "/alerts/token", Normalized(secrets.GetProperty("alert_token").GetProperty("file").GetString()!));
+        Assert.Equal(directory + "/records/access-key-id", Normalized(secrets.GetProperty("records_access_key_id").GetProperty("file").GetString()!));
+        Assert.Equal(directory + "/records/secret-access-key", Normalized(secrets.GetProperty("records_secret_access_key").GetProperty("file").GetString()!));
+
+        var worker = Services.GetProperty("worker").GetProperty("environment");
+        Assert.Equal("/run/secrets/alert_token", worker.GetProperty("Alerts__TokenFile").GetString());
+        Assert.Equal("/run/secrets/records_access_key_id", worker.GetProperty("Records__AccessKeyIdFile").GetString());
+        Assert.Equal("/run/secrets/records_secret_access_key", worker.GetProperty("Records__SecretAccessKeyFile").GetString());
+        foreach (var name in new[] { "Alerts__Url", "Alerts__Deployment", "Records__Endpoint", "Records__Region", "Records__Bucket" })
+        {
+            Assert.True(worker.TryGetProperty(name, out _), $"worker has no {name}.");
+        }
+
+        foreach (var service in new[] { "cli", "openbao-audit-shipper" })
+        {
+            var environment = Services.GetProperty(service).GetProperty("environment");
+            Assert.Equal("/run/secrets/records_access_key_id", environment.GetProperty("GATEKEEP_RECORDS_ACCESS_KEY_ID_FILE").GetString());
+            Assert.Equal("/run/secrets/records_secret_access_key", environment.GetProperty("GATEKEEP_RECORDS_SECRET_ACCESS_KEY_FILE").GetString());
+        }
+
+        Assert.Equal("/run/secrets/alert_token", Services.GetProperty("cli").GetProperty("environment").GetProperty("GATEKEEP_ALERT_TOKEN_FILE").GetString());
+    }
+
+    /// <summary>
+    /// Story 1.30: the audit shipper runs the cli image's <c>audit-ship</c> as a uid of its own. Only it
+    /// and OpenBao mount the audit volume, the shipper read-only, and only they hold the openbao-audit
+    /// group (gid 4501) that may read the file. Its state volume is its own, and it has no OpenBao socket.
+    /// </summary>
+    [Fact]
+    public void Audit_shipper_alone_reads_the_audit_volume_read_only_through_its_group()
+    {
+        var shipper = Services.GetProperty("openbao-audit-shipper");
+        Assert.Equal("gatekeep/cli:local", shipper.GetProperty("image").GetString());
+        // Built as the cli service builds it, so `docker compose up --build` has it without the tools profile.
+        var cliBuild = Services.GetProperty("cli").GetProperty("build");
+        var shipperBuild = shipper.GetProperty("build");
+        Assert.Equal(cliBuild.GetProperty("dockerfile").GetString(), shipperBuild.GetProperty("dockerfile").GetString());
+        Assert.Equal(cliBuild.GetProperty("context").GetString(), shipperBuild.GetProperty("context").GetString());
+        Assert.False(shipper.TryGetProperty("profiles", out _));
+        Assert.Equal(["audit-ship"], Strings(shipper, "command"));
+        Assert.Equal("10006:10006", shipper.GetProperty("user").GetString());
+        Assert.Equal(["4501"], Strings(shipper, "group_add"));
+        Assert.Equal("unless-stopped", shipper.GetProperty("restart").GetString());
+
+        foreach (var service in Services.EnumerateObject())
+        {
+            var mounts = Volumes(service.Value).Where(v => v.Source is "openbao-audit" or "shipper-state").Select(v => $"{v.Source}:{v.Target}").Order().ToList();
+            string[] expected = service.Name switch
+            {
+                "openbao" => ["openbao-audit:/var/log/openbao"],
+                "openbao-audit-shipper" => ["openbao-audit:/var/log/openbao", "shipper-state:/var/lib/gatekeep/audit-ship"],
+                _ => [],
+            };
+            Assert.Equal(expected, mounts);
+
+            var audit = Strings(service.Value, "group_add").Contains("4501");
+            Assert.Equal(service.Name is "openbao" or "openbao-audit-shipper", audit);
+        }
+
+        var auditMount = shipper.GetProperty("volumes").EnumerateArray().Single(v => v.GetProperty("source").GetString() == "openbao-audit");
+        Assert.True(auditMount.GetProperty("read_only").GetBoolean());
+        Assert.DoesNotContain(Volumes(shipper), v => v.Source == "openbao-socket");
+        Assert.Equal(["4500", "4501"], Strings(Services.GetProperty("openbao"), "group_add").Order());
+
+        var environment = shipper.GetProperty("environment");
+        Assert.Equal("/var/log/openbao/audit.log", environment.GetProperty("GATEKEEP_AUDIT_LOG_FILE").GetString());
+        Assert.Equal("/var/lib/gatekeep/audit-ship", environment.GetProperty("GATEKEEP_AUDIT_SHIP_STATE_DIR").GetString());
+
+        // The image gives the state directory to the shipper's uid alone, and OpenBao's the audit log's group.
+        var cli = File.ReadAllText(Path.Combine(Repository.Root, "deploy", "docker", "cli.Dockerfile"));
+        Assert.Contains("mkdir -p /audit-ship && chmod 0700 /audit-ship", cli);
+        Assert.Contains("COPY --from=build --chown=10006:10006 /audit-ship /var/lib/gatekeep/audit-ship", cli);
+        // The stack check builds without BuildKit, which COPY --chmod needs.
+        Assert.DoesNotContain("--chmod", cli);
+        var openbao = File.ReadAllText(Path.Combine(Repository.Root, "deploy", "docker", "openbao.Dockerfile"));
+        Assert.Contains("addgroup -S -g 4501 openbao-audit", openbao);
+        Assert.Contains("chown openbao:openbao-audit /var/log/openbao", openbao);
+        Assert.Contains("chmod 2750 /var/log/openbao", openbao);
+        var start = File.ReadAllText(Path.Combine(Repository.Root, "deploy", "openbao", "start-openbao.sh"));
+        Assert.Contains("AUDIT_GROUP=openbao-audit", start);
+        Assert.Contains("chmod 0640 \"$AUDIT_DIR/audit.log\"", start);
     }
 
     [Fact]
@@ -560,6 +669,7 @@ public sealed class ComposeConfigTests
             ["worker"] = ["postgres", "worker"],
             ["tools"] = ["cli", "postgres", "postgres-passwords"],
             ["edge"] = ["caddy"],
+            ["egress"] = ["cli", "openbao-audit-shipper", "worker"],
             ["hosted-edge"] = ["caddy", "hosted"],
             ["admin-edge"] = ["admin", "caddy"],
         };
@@ -607,6 +717,9 @@ public sealed class ComposeConfigTests
             Assert.Matches($@"(?m)^USER {Regex.Escape(user)}\s*$", image);
             Assert.Matches($@"(?m)^\s*{Regex.Escape(appRole)}\) echo {uid} ;;", setup);
         }
+
+        // Story 1.30: the audit shipper runs the cli image as a uid of its own.
+        users.Add(Services.GetProperty("openbao-audit-shipper").GetProperty("user").GetString()!.Split(':')[0]);
 
         // Caddy's uid is its own too, and the one its image runs as.
         var caddyUser = Services.GetProperty("caddy").GetProperty("user").GetString()!;

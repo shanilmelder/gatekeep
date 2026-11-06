@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- IAlertChannel over an HTTPS webhook (Story 1.30): BCL HTTP and JSON, through EgressHttp only. -->
+  <ItemGroup>
+    <ProjectReference Include="../../Gatekeep.Kernel/Gatekeep.Kernel.csproj" />
+    <ProjectReference Include="../Egress/Gatekeep.Adapters.Egress.csproj" />
+  </ItemGroup>
+
+</Project>

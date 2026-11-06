@@ -13,6 +13,9 @@
     <ProjectReference Include="../Modules/Keys/Gatekeep.Modules.Keys.csproj" />
     <ProjectReference Include="../Adapters/OpenBao/Gatekeep.Adapters.OpenBao.csproj" />
     <ProjectReference Include="../Adapters/Postgres/Gatekeep.Adapters.Postgres.csproj" />
+    <ProjectReference Include="../Adapters/Egress/Gatekeep.Adapters.Egress.csproj" />
+    <ProjectReference Include="../Adapters/AlertChannel/Gatekeep.Adapters.AlertChannel.csproj" />
+    <ProjectReference Include="../Adapters/ObjectLock/Gatekeep.Adapters.ObjectLock.csproj" />
   </ItemGroup>
 
 </Project>

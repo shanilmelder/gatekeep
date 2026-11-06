@@ -18,7 +18,10 @@ internal static class WorkerSettings
     public static readonly HostProfile Profile = new(
         "Host.Worker",
         [Dispatch, Worker, Sealer, Retention],
-        HasPublicEndpoint: false);
+        HasPublicEndpoint: false,
+        // The alert channel and the off-server bucket are required, though nothing calls them until
+        // Story 11.1 and Story 7.2, so no Deployment runs without them (Story 1.30).
+        UsesOffServer: true);
 
     public static JobDatabases Databases(HostDatabases databases) =>
         new(databases[Dispatch], databases[Worker], databases[Sealer], databases[Retention]);
