@@ -1,9 +1,9 @@
 #!/bin/sh
-# Stack check (Stories 1.10, 1.11, 1.20 and 12.7). Runs inside the stack container of deploy/compose.test.yaml,
+# Stack check (Stories 1.10, 1.11, 1.20 and 12.7). Runs inside the stack container of deploy/compose.dev.yaml,
 # never on the machine itself:
 #
 #   GATEKEEP_HOST_REPO=<this repository's path on the Docker host> \
-#     docker compose -f deploy/compose.test.yaml run --rm --build stack
+#     docker compose -f deploy/compose.dev.yaml run --rm --build stack
 #
 # It installs the stack exactly as docs/install.md says, checks every service healthy,
 # then checks what a unit test can't reach: the Master Key in no volume, image or
