@@ -305,8 +305,8 @@ public sealed class ReleaseConfigTests
         Assert.Contains("runs-on: ubuntu-latest", text, StringComparison.Ordinal);
 
         // It runs the gates, then build.sh, and hands over only an artifact.
-        Assert.Contains("docker compose -f deploy/compose.test.yaml run --rm --build tests", text, StringComparison.Ordinal);
-        Assert.Contains("docker compose -f deploy/compose.test.yaml run --rm --build stack", text, StringComparison.Ordinal);
+        Assert.Contains("docker compose -f deploy/compose.dev.yaml run --rm --build tests", text, StringComparison.Ordinal);
+        Assert.Contains("docker compose -f deploy/compose.dev.yaml run --rm --build stack", text, StringComparison.Ordinal);
         Assert.Contains("/opt/gatekeep/release/build.sh", text, StringComparison.Ordinal);
         Assert.Contains("actions/upload-artifact@", text, StringComparison.Ordinal);
     }

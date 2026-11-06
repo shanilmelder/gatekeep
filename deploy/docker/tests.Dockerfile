@@ -1,4 +1,4 @@
-# The build and test container (deploy/compose.test.yaml): the exact .NET SDK in
+# The build and test container (deploy/compose.dev.yaml): the exact .NET SDK in
 # global.json, Node and pnpm at the versions package.json pins, and the Docker CLI with
 # Compose, so a machine needs only Docker and Git. Base images pinned by digest.
 #
@@ -16,7 +16,10 @@ COPY src/ src/
 COPY tests/ tests/
 RUN find src tests -type f ! -name '*.csproj' ! -name 'packages.lock.json' -delete
 
-FROM mcr.microsoft.com/dotnet/sdk:10.0.403-noble@sha256:de4fe90a98845d75910b9769662465c84de1a934665c431279d1382b2bddc02b
+# The toolchain alone, with no repository in it: the tests image below builds on it, and the
+# long-lived dev container (deploy/compose.dev.yaml, profile dev) runs it with the checkout
+# mounted, so a source change rebuilds no image.
+FROM mcr.microsoft.com/dotnet/sdk:10.0.403-noble@sha256:de4fe90a98845d75910b9769662465c84de1a934665c431279d1382b2bddc02b AS toolchain
 
 ENV DOTNET_NOLOGO=true \
     DOTNET_CLI_TELEMETRY_OPTOUT=true \
@@ -36,15 +39,6 @@ RUN ln -s /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
     && pnpm --version \
     && head -c 4 "$(readlink -f /usr/local/bin/pnpm)" | grep -q ELF
 
-WORKDIR /src
-
-# Restore first, from project and lock files only, so a source change keeps the cached
-# restore: the COPY from the projects stage is cached by its contents.
-COPY global.json nuget.config Directory.Build.props Directory.Build.targets Directory.Packages.props Gatekeep.slnx ./
-COPY tests/Architecture/module-edges.txt tests/Architecture/
-COPY --from=projects /src/ ./
-RUN dotnet restore Gatekeep.slnx --locked-mode
-
 # Chromium for the browser tests (tests/browser), at the Playwright version the catalog in
 # pnpm-workspace.yaml pins, with the system libraries it needs. It is downloaded here, at
 # image build, and only here: the tests themselves run with no egress beyond localhost.
@@ -56,6 +50,22 @@ RUN version="$(node /tmp/playwright/playwright-version.mjs /tmp/playwright/pnpm-
     && npm install --ignore-scripts --no-audit --no-fund --cache /tmp/playwright/.npm "playwright@$version" \
     && node_modules/.bin/playwright install --with-deps --only-shell chromium \
     && cd / && rm -rf /tmp/playwright /var/lib/apt/lists/*
+
+WORKDIR /src
+
+# The long-lived dev container: the toolchain and rsync, which deploy/docker/dev.sh uses to
+# bring a checkout into the container's work volume. Test only, like the stage it builds on.
+FROM toolchain AS dev
+RUN apt-get update     && apt-get install --yes --no-install-recommends rsync     && rm -rf /var/lib/apt/lists/*
+
+FROM toolchain
+
+# Restore first, from project and lock files only, so a source change keeps the cached
+# restore: the COPY from the projects stage is cached by its contents.
+COPY global.json nuget.config Directory.Build.props Directory.Build.targets Directory.Packages.props Gatekeep.slnx ./
+COPY tests/Architecture/module-edges.txt tests/Architecture/
+COPY --from=projects /src/ ./
+RUN dotnet restore Gatekeep.slnx --locked-mode
 
 COPY . .
 RUN pnpm install --frozen-lockfile --ignore-scripts

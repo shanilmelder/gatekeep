@@ -34,6 +34,11 @@ public sealed class ComposeConfigTests
         new Dictionary<string, string>(),
         "--profile", "tools", "--profile", "setup", "--profile", "rotate"));
 
+    /// <summary>Dev and CI: the same stack, and the test-only services beside it.</summary>
+    private static readonly Lazy<JsonElement> DevStack = new(() => Config(
+        "deploy/compose.dev.yaml", "--profile", "tools", "--profile", "setup", "--profile", "tests",
+        "--profile", "stack", "--profile", "release", "--profile", "dev"));
+
     private static JsonElement Services => Stack.Value.GetProperty("services");
 
     public static TheoryData<string> HardenedServiceNames => [.. HardenedServices];
@@ -478,14 +483,45 @@ public sealed class ComposeConfigTests
     [Fact]
     public void Only_the_test_services_get_the_Docker_socket()
     {
-        var tests = Config("deploy/compose.test.yaml", "--profile", "stack", "--profile", "release").GetProperty("services");
+        string[] testServices = ["dev", "release", "stack", "tests"];
+        var dev = DevStack.Value.GetProperty("services");
 
-        Assert.Equal(["release", "stack", "tests"], tests.EnumerateObject().Select(s => s.Name).Order());
-        foreach (var service in tests.EnumerateObject())
+        foreach (var service in dev.EnumerateObject())
         {
-            Assert.Contains(Volumes(service.Value), v => v.Target == "/var/run/docker.sock");
+            var mountsSocket = Volumes(service.Value).Any(v => v.Target == "/var/run/docker.sock");
+            Assert.True(mountsSocket == testServices.Contains(service.Name), $"{service.Name} mounts the Docker socket: {mountsSocket}.");
         }
+
+        Assert.All(testServices, name => Assert.True(dev.TryGetProperty(name, out _), $"{name} is missing."));
     }
+
+    [Fact]
+    public void Dev_runs_the_production_stack_unchanged()
+    {
+        // Every service, secret, network and volume of deploy/compose.yaml is in deploy/compose.dev.yaml
+        // exactly as Compose resolves it there, so dev and CI run what production runs. Only the
+        // project's own resource names differ, gatekeep-dev_ for gatekeep_.
+        foreach (var section in new[] { "services", "secrets", "networks", "volumes" })
+        {
+            var dev = DevStack.Value.GetProperty(section);
+            foreach (var entry in Stack.Value.GetProperty(section).EnumerateObject())
+            {
+                Assert.True(dev.TryGetProperty(entry.Name, out var twin), $"{section}.{entry.Name} is missing from deploy/compose.dev.yaml.");
+                Assert.Equal(WithoutProjectName(entry.Value), WithoutProjectName(twin));
+            }
+        }
+
+        // What dev adds is only the test services and their work volume.
+        var added = DevStack.Value.GetProperty("services").EnumerateObject().Select(s => s.Name)
+            .Except(Services.EnumerateObject().Select(s => s.Name)).Order();
+        Assert.Equal(["dev", "release", "stack", "tests"], added);
+        var addedVolumes = DevStack.Value.GetProperty("volumes").EnumerateObject().Select(v => v.Name)
+            .Except(Stack.Value.GetProperty("volumes").EnumerateObject().Select(v => v.Name));
+        Assert.Equal(["dev-work"], addedVolumes);
+    }
+
+    private static string WithoutProjectName(JsonElement element) =>
+        Regex.Replace(element.GetRawText(), @"""name"":\s*""gatekeep(-dev)?_", @"""name"":""PROJECT_");
 
     [Fact]
     public void Every_service_has_a_process_limit_and_rotated_logs()

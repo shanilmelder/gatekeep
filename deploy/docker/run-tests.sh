@@ -1,5 +1,5 @@
 #!/bin/sh
-# Runs inside the tests container (deploy/compose.test.yaml): the same steps CI used to
+# Runs inside the tests container (deploy/compose.dev.yaml): the same steps CI used to
 # run on the runner. Restore already ran, from lockfiles, when the image was built.
 set -eu
 
