@@ -1,6 +1,6 @@
 #!/bin/sh
 # Release publish (Story 12.5, docs/release-signing.md). Runs only in the CI sign job, on
-# the self-hosted signing runner, and in the rehearsal. It is the only step that touches
+# its own fresh GitHub-hosted runner, and in the rehearsal. It is the only step that touches
 # the signing key. It never builds anything: it pushes the OCI archives the build job made,
 # checks each pushed digest against the one the build job recorded, signs each digest,
 # attests its SBOM and writes release.env.

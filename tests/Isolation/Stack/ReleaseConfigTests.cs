@@ -302,7 +302,7 @@ public sealed class ReleaseConfigTests
         Assert.DoesNotMatch(@"\blogin\b", text);
         Assert.DoesNotContain("publish.sh", text, StringComparison.Ordinal);
         Assert.DoesNotContain("cosign", text, StringComparison.Ordinal);
-        Assert.Matches(@"(?m)^    runs-on: self-hosted$", text);
+        Assert.Matches(@"(?m)^    runs-on: ubuntu-latest$", text);
 
         // It runs the gates, then build.sh, and hands over only an artifact.
         Assert.Contains("docker compose -f deploy/compose.dev.yaml run --rm --build tests", text, StringComparison.Ordinal);
@@ -320,13 +320,13 @@ public sealed class ReleaseConfigTests
     }
 
     [Fact]
-    public void Sign_job_is_self_hosted_tag_gated_and_builds_nothing()
+    public void Sign_job_is_on_its_own_hosted_runner_tag_gated_and_builds_nothing()
     {
         var sign = Jobs()["sign"];
         var text = string.Join('\n', sign);
 
         Assert.Contains("    needs: build", sign);
-        Assert.Contains("    runs-on: [self-hosted, gatekeep-signing]", sign);
+        Assert.Contains("    runs-on: ubuntu-latest", sign);
         Assert.Contains("    environment: release-signing", sign);
         Assert.Equal(["contents: write", "packages: write"], Permissions(sign).Order());
 
@@ -349,6 +349,27 @@ public sealed class ReleaseConfigTests
         {
             Assert.DoesNotContain(build, text, StringComparison.Ordinal);
         }
+    }
+
+    [Fact]
+    public void Sign_job_installs_the_cosign_and_crane_the_release_tools_image_pins()
+    {
+        // The hosted runner has neither tool: the sign job copies them out of the very images,
+        // by the very digests, that release-tools.Dockerfile builds from, so the job and the
+        // rehearsal sign with the same binaries, and bumping one without the other fails here.
+        var dockerfile = File.ReadAllLines(Path.Combine(Repository.Root, "deploy", "docker", "release-tools.Dockerfile"));
+        var install = string.Join('\n', Step(Jobs()["sign"], "Install the pinned cosign and crane"));
+
+        foreach (var tool in new[] { "cosign", "crane" })
+        {
+            var from = Assert.Single(dockerfile, l => Regex.IsMatch(l, $@"^FROM\s+\S+\s+AS\s+{tool}$"));
+            var image = from.Split(' ', StringSplitOptions.RemoveEmptyEntries)[1];
+            Assert.Matches(@"^[a-z0-9./-]+:v[0-9.]+@sha256:[0-9a-f]{64}$", image);
+            Assert.Contains($"\"{tool} {image}\"", install, StringComparison.Ordinal);
+        }
+
+        Assert.Contains("docker cp", install, StringComparison.Ordinal);
+        Assert.Contains(">> \"$GITHUB_PATH\"", install, StringComparison.Ordinal);
     }
 
     [Fact]

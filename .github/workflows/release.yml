@@ -1,7 +1,8 @@
 name: Release
 
 # A signed release (Story 12.5, docs/release-signing.md), from a pushed v* tag. Two jobs,
-# both on the self-hosted runner (shanilmelder-vps):
+# each on its own fresh GitHub-hosted runner, so nothing the build job runs is on the
+# machine that signs:
 #
 #   build  Read-only token, nothing secret. It runs third-party code (the NuGet and pnpm
 #          restores, buildx, syft), so it gets nothing worth stealing: it runs the gates,
@@ -27,7 +28,7 @@ concurrency:
 
 jobs:
   build:
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     timeout-minutes: 120
     permissions:
       contents: read
@@ -35,6 +36,17 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+
+      # As in CI: the tests image, the stack and the release images outgrow the hosted
+      # runner's free disk, so drop the preinstalled toolchains the job never uses.
+      - name: Free runner disk space
+        run: |
+          df -h /
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup \
+            /opt/hostedtoolcache/CodeQL /usr/share/swift /usr/local/share/powershell \
+            /usr/local/share/chromium /usr/local/lib/node_modules
+          docker image prune --all --force
+          df -h /
 
       # The same gates as CI: restores from lockfiles with install scripts disabled, the
       # dependency audits, the build, and the Architecture and Isolation tests.
@@ -67,7 +79,7 @@ jobs:
 
   sign:
     needs: build
-    runs-on: [self-hosted, gatekeep-signing]
+    runs-on: ubuntu-latest
     environment: release-signing
     timeout-minutes: 60
     permissions:
@@ -89,6 +101,23 @@ jobs:
           name: release-dist
           path: dist
 
+      # cosign and crane at the versions publish.sh pins, copied out of the same images,
+      # pinned by the same digests, that deploy/docker/release-tools.Dockerfile builds from.
+      # The digest is the integrity check: a different binary is a different digest.
+      - name: Install the pinned cosign and crane
+        run: |
+          bin="$RUNNER_TEMP/bin"
+          mkdir -p "$bin"
+          for tool in \
+            "cosign ghcr.io/sigstore/cosign/cosign:v2.6.5@sha256:ad281047f85c5e1fc6ffbc30c2b55be3b07b4032bef715a12122ce5829619aca" \
+            "crane gcr.io/go-containerregistry/crane:v0.22.1@sha256:1f968817b95790bed063f71175aa6b8ff879fa17064020415f3e18bb6e6a36e1"; do
+            set -- $tool
+            id=$(docker create "$2")
+            docker cp "$id:/ko-app/$1" "$bin/$1"
+            docker rm "$id" > /dev/null
+          done
+          echo "$bin" >> "$GITHUB_PATH"
+
       # The job's own token, in a registry config that lives only in this job's temp dir.
       - name: Log in to GHCR
         env:
@@ -99,7 +128,7 @@ jobs:
           echo "$GITHUB_TOKEN" | DOCKER_CONFIG="$RUNNER_TEMP/docker-config" \
             docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
 
-      # Host cosign and crane, at the versions publish.sh pins. The encrypted key and its
+      # The pinned cosign and crane from the step above. The encrypted key and its
       # password are the release-signing environment's secrets, in this step's environment
       # only, never in a file.
       - name: Push, sign and attest each image

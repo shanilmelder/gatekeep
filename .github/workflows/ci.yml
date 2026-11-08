@@ -8,9 +8,8 @@ on:
 permissions:
   contents: read
 
-# One self-hosted runner serves every job, so a superseded run only holds up the queue. A new
-# push to a pull request cancels that branch's older run; runs on main queue instead, so every
-# merge is still checked.
+# A new push to a pull request cancels that branch's older run, which would only spend
+# runner minutes on a superseded commit; runs on main queue instead, so every merge is checked.
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -19,7 +18,7 @@ concurrency:
 # step runs inside the tests container (deploy/compose.dev.yaml).
 jobs:
   build:
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -33,9 +32,7 @@ jobs:
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup \
             /opt/hostedtoolcache/CodeQL /usr/share/swift /usr/local/share/powershell \
             /usr/local/share/chromium /usr/local/lib/node_modules
-          # On the self-hosted runner a build killed mid-way can leave a dangling BuildKit
-          # lease that makes the prune fail; a failed prune only means less space freed.
-          docker image prune --all --force || echo "image prune failed; continuing."
+          docker image prune --all --force
           df -h /
 
       # The image build restores from lockfiles in locked mode, which is also the NuGet
@@ -50,15 +47,9 @@ jobs:
       - name: Build and test in the tests container
         run: docker compose -f deploy/compose.dev.yaml run --rm tests
 
-      # A cancelled job kills only the compose client, so the one-off tests container keeps
-      # running and holds the gatekeep-dev project for the next run. Remove it either way.
-      - name: Remove leftover tests containers
-        if: always()
-        run: |
-          docker ps -aq --filter label=com.docker.compose.project=gatekeep-dev --filter label=com.docker.compose.service=tests | xargs -r docker rm -f
 
   stack:
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -72,18 +63,9 @@ jobs:
           GATEKEEP_HOST_REPO: ${{ github.workspace }}
         run: docker compose -f deploy/compose.dev.yaml run --rm --build stack
 
-      # A cancelled job kills only the compose client, so the one-off stack container keeps
-      # running and holds the gatekeep-dev project for the next run. Remove it either way.
-      - name: Remove leftover stack containers
-        if: always()
-        run: |
-          docker ps -aq --filter label=com.docker.compose.project=gatekeep-dev --filter label=com.docker.compose.service=stack | xargs -r docker rm -f
-          # The stack the check installs, under its own project, with its volumes.
-          docker ps -aq --filter label=com.docker.compose.project=gatekeep-stack-check | xargs -r docker rm -f
-          docker volume ls -q --filter label=com.docker.compose.project=gatekeep-stack-check | xargs -r docker volume rm
 
   release:
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -95,10 +77,3 @@ jobs:
       # digest. Signs with an encrypted env:// key, as the sign job does. Tears everything down.
       - name: Rehearse the signed release path
         run: docker compose -f deploy/compose.dev.yaml run --rm --build release
-
-      # A cancelled job kills only the compose client, so the one-off release container keeps
-      # running and holds the gatekeep-dev project for the next run. Remove it either way.
-      - name: Remove leftover release containers
-        if: always()
-        run: |
-          docker ps -aq --filter label=com.docker.compose.project=gatekeep-dev --filter label=com.docker.compose.service=release | xargs -r docker rm -f
