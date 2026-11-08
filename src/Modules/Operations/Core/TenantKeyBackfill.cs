@@ -2,6 +2,7 @@ using Gatekeep.Kernel.Audit;
 using Gatekeep.Kernel.Jobs;
 using Gatekeep.Kernel.Persistence;
 using Gatekeep.Modules.Audit.Contracts;
+using Gatekeep.Modules.Directory.Contracts;
 using Gatekeep.Modules.Keys.Contracts;
 using Gatekeep.Modules.Operations.Contracts;
 using Microsoft.Extensions.Logging;
@@ -15,7 +16,10 @@ namespace Gatekeep.Modules.Operations.Core;
 /// Each Tenant runs in its own scope and commits on its own; a Tenant that already has every key
 /// is only read. One Tenant's failure is logged and the others still run; then the job fails, so the
 /// failure is recorded and the job retried. A Tenant still being
-/// created is its creation Operation's, not this job's.
+/// created is its creation Operation's, not this job's. Story 2.8: in the same scope, it also gives every
+/// active Tenant its hidden <c>system</c> Application (AD-12) when it has none, through
+/// <see cref="IDirectory.EnsureSystemApplicationAsync"/>, so a Tenant an older Worker activated during an
+/// upgrade, after the migration's one-time backfill, gets one too.
 /// </summary>
 internal static class TenantKeyBackfill
 {
@@ -24,6 +28,8 @@ internal static class TenantKeyBackfill
     private const string ListActive = "SELECT id FROM tenant WHERE status = 'active' ORDER BY id";
 
     private static readonly IAuditAppender Appender = AuditContract.CreateAppender();
+
+    private static readonly IDirectory Applications = DirectoryContract.CreateDirectory(Appender, TimeProvider.System);
 
     public static async Task RunAsync(JobRun run, CancellationToken cancellationToken)
     {
@@ -48,7 +54,15 @@ internal static class TenantKeyBackfill
             try
             {
                 await using var scope = await TenantScope.BeginAsync(run.Services.Source, tenantId, cancellationToken);
-                if (await KeysContract.EnsureTenantKeysAsync(scope.CreateCommandContext(), custody, Appender, tenantId, cancellationToken))
+                var context = scope.CreateCommandContext();
+                var changed = await KeysContract.EnsureTenantKeysAsync(context, custody, Appender, tenantId, cancellationToken);
+                if (await Applications.FindSystemApplicationAsync(context, cancellationToken) is null)
+                {
+                    await Applications.EnsureSystemApplicationAsync(context, cancellationToken);
+                    changed = true;
+                }
+
+                if (changed)
                 {
                     await scope.CommitAsync(cancellationToken);
                 }

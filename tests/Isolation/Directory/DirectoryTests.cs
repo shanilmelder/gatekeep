@@ -378,7 +378,7 @@ public sealed class DirectoryTests(PostgresFixture postgres)
     [InlineData("UPDATE application SET name = 'Renamed' WHERE kind = 'system'")]
     [InlineData("UPDATE application SET created_at = now() WHERE kind = 'system'")]
     [InlineData("UPDATE application SET kind = 'system' WHERE kind = 'machine'")]
-    public async Task The_system_Application_is_never_edited_even_by_the_owner(string statement)
+    public async Task The_system_Application_is_never_edited_even_by_the_superuser(string statement)
     {
         var database = await DatabaseAsync();
         await CreateAsync(database, TenantB);

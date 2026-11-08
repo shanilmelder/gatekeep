@@ -5,7 +5,7 @@ created: '2026-11-09'
 status: 'done'
 baseline_revision: 'dad2cc31f32a7c634278d199475c6bfe4b3c4357'
 review_loop_iteration: 0
-followup_review_recommended: true
+followup_review_recommended: false
 context:
   - '{project-root}/_bmad-output/implementation-artifacts/epic-2-context.md'
 warnings: ['oversized']
@@ -129,6 +129,37 @@ deferred: []
 | 14 | medium | patch | Edge Case Hunter: a Tenant `creating` at migration time can end up active with none | Same root cause as row 3. |
 | 15 | medium | patch | Edge Case Hunter (claim): the doc says the database enforces "no authorization or token", but the guard covers INSERT only | Same root cause as row 2. The doc comment is updated with the trigger. |
 
+### 2026-11-09 — Review pass (follow-up)
+- Layers: Blind Hunter, Edge Case Hunter, Verification Gap and Intent Alignment.
+- The diff is the story's own diff, `dad2cc3..f7b897f`, excluding the merge of `main`.
+- Intent Alignment was descriptive and filed no findings. It found the literal reading implemented, plus the review's deliberate widenings (the `creating` backfill and the UPDATE guard).
+- The named follow-up risk was checked and is benign:
+  - the only UPDATEs Sessions runs on `token` or `"authorization"` (`SessionRevocation.cs:26,33`) set `status`, never `application_id`, so `UPDATE OF application_id` doesn't fire;
+  - a 2.9 store that rewrites `application_id` to the same machine Application passes after one indexed read;
+  - a backfilled row for a `creating` Tenant is removed by its purge, since the delete guard allows `deleting` and `deleted`.
+- Verdicts: 16 findings in total (high 0, medium 3, low 9, false 4, maybe-false 0).
+
+| # | Verdict | Route | Finding | Evidence / action |
+|---|---------|-------|---------|-------------------|
+| 1 | medium | patch | Blind Hunter: nothing repairs an active Tenant with no system Application | `cli migrate` runs while the old hosts still run, so a Tenant that an old Admin creates after the one-time backfill, and an old Worker activates, never gets one. The hourly `keys.tenant_keys.backfill` now also ensures each active Tenant's system Application, with a test. |
+| 2 | low | reject | Blind Hunter: the race-safe ensure is untested under concurrency and depends on the isolation level | `TenantScope` sets no isolation level, so it runs at READ COMMITTED. There, `ON CONFLICT DO NOTHING` waits for the winner and the next select sees its row. A blocking two-connection test is more complexity than a race that only an upgrade overlap reaches. |
+| 3 | false | reject | Blind Hunter: the migration grant and its documentation disagree | carried: same as the first pass's row 7. `tenant_id` was granted to gk_worker in `CreateDirectoryTables`, and `CatalogueAudit` checks the union against the registry. |
+| 4 | low | reject | Blind Hunter: the registry entry restates `PurgeColumns` by hand | `CatalogueAudit` compares every registry entry with the live grants, so drift fails a test. Rebuilding the entry is churn with no named harm. |
+| 5 | low | reject | Blind Hunter: the insert guard is tested only as superuser | carried: same as the first pass's row 8. Real-role inserts (gk_hosted `token`, gk_admin `client_secret`) already fire it in the Client Credentials and machine-client tests. |
+| 6 | low | defer | Blind Hunter: SECURITY INVOKER guards make future writers need reads | No current writer lacks them. Recorded in `deferred-work.md` for Epic 3 with the GK011–GK013 mapping. |
+| 7 | low | reject | Blind Hunter: delete-guard cases untested (machine delete, `deleted` status, machine plus system purge) | No role can delete a machine Application outside the purge. The deletion test already purges a Tenant holding both a seeded machine Application and the system row. |
+| 8 | false | reject | Blind Hunter: `VerifyClientSecretAsync` may not apply `Visible` | `Visible` governs reads that return Applications. Verify returns a bool from `client_secret`, which the GK011 trigger keeps empty for the system row. |
+| 9 | low | reject | Blind Hunter: backfilled rows leave no record | A schema migration is a Deployment upgrade, not a Tenant command (Design Notes). A row count adds output plumbing for no consumer. |
+| 10 | low | reject | Blind Hunter: `TenantCreation` hard-codes the clock | carried: same as the first pass's row 11. |
+| 11 | false | reject | Blind Hunter: `ListApplicationsAsync` has no caller | The intent mandates it as the repository list for Epic 3.1 and 8.6. |
+| 12 | low | patch | Blind Hunter: `..._even_by_the_owner` runs as superuser; the real upgrade order is untested | Renamed to say superuser. The upgrade-order half is the first pass's Verification Gap item, already closed by pinning `Up()` to the backfill. |
+| 13 | low | reject | Verification Gap: the concurrent-insert path of Ensure never runs in a test | Same root cause as row 2. |
+| 14 | medium | patch | Edge Case Hunter: a Tenant activated by an old Worker after the backfill never gets one | Same root cause as row 1. |
+| 15 | medium | patch | Edge Case Hunter: a Tenant created by an old Admin after the one-time backfill is missed | Same root cause as row 1. |
+| 16 | false | reject | Edge Case Hunter: Ensure for a deleting Tenant after the purge writes a row that outlives it | `tenant_row_guard('creating', 'active')` on `application` refuses that insert with GK010. |
+
+The user also asked to address the open `GK011`–`GK013` mapping. No Admin route writes `application` or `client_secret` yet, so the mapping is recorded in `deferred-work.md` for Epic 3's routes, together with row 6.
+
 ## Design Notes
 
 **Why the completion handler.** Tenant creation's start command runs in a Deployment scope, and `application` is a forced-RLS `tenant` table, so the start command can't write the row. The completion handler already runs in the Tenant's own scope and activates the Tenant. Writing the row there means "active" implies "has its system Application" for every new Tenant, with no new stage or retry path.
@@ -183,3 +214,26 @@ deferred: []
 **Residual risks**
 - `GK011` to `GK013` aren't mapped in Host.Admin's `AdminResponses`. No route can reach them yet, but Epic 3's edit and delete APIs must map them.
 - Story 2.9's authorize endpoint must keep the system `client_id` unknown. The store filter does that, but no authorize-level test exists until 2.9.
+
+### Follow-up pass (2026-11-09)
+
+**Summary.** This pass is a follow-up review of the merged story, plus the open `GK011`–`GK013` mapping.
+
+**Files changed**
+- `src/Modules/Operations/Core/TenantKeyBackfill.cs`: the hourly `keys.tenant_keys.backfill` now also gives each active Tenant its system Application when it has none. In the same per-Tenant scope, it checks `FindSystemApplicationAsync` and then calls `EnsureSystemApplicationAsync`. It commits only when the keys or the Application changed.
+- `tests/Isolation/Keys/TenantKeysTests.cs`: a new test checks that an active Tenant with keys but no system Application gets exactly one, and a second run keeps the same row.
+- `tests/Isolation/Directory/DirectoryTests.cs`: the edit-guard test is renamed to say superuser.
+- `_bmad-output/implementation-artifacts/deferred-work.md`: an Epic 3 entry. Its routes must map `GK011`–`GK013`, and their roles need the guards' reads.
+
+**Review findings.** 16 findings: 4 patched (1 root cause, plus a rename), 1 deferred (SECURITY INVOKER reads, with the GK mapping) and 11 rejected (4 false, 7 low). Reasons are in the follow-up triage log.
+
+**Named risk from the first pass: checked and benign.** Today's only UPDATEs on `token` and `authorization` set `status`, so `UPDATE OF application_id` never fires. A Story 2.9 store that rewrites the same `application_id` passes the guard.
+
+**Follow-up review recommendation: `false`.** This is a follow-up pass and it patched no `high` finding (patched counts by verdict: medium 1, low 1).
+
+**Verification**
+- The implementer ran `TenantKeysTests` and `DirectoryTests` in the tests container: 86 passed, 0 failed.
+- CI on the PR runs the full suites.
+
+**Residual risks**
+- `GK011`–`GK013` stay unmapped until Epic 3 adds routes that can raise them (tracked in `deferred-work.md`).
