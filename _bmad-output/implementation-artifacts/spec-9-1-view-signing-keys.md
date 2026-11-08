@@ -1,0 +1,237 @@
+---
+title: 'Story 9.1: View Signing Keys'
+type: 'feature'
+created: '2026-11-06'
+status: 'done'
+baseline_revision: '80fcc409db449ea809f46ba229d548cfa4c6d71c'
+review_loop_iteration: 0
+followup_review_recommended: false
+context:
+  - '{project-root}/_bmad-output/implementation-artifacts/epic-9-context.md'
+  - '{project-root}/_bmad-output/implementation-artifacts/spec-2-3-publish-discovery-and-jwks-per-tenant.md'
+  - '{project-root}/_bmad-output/implementation-artifacts/spec-2-4-rotate-signing-keys-automatically.md'
+  - '{project-root}/_bmad-output/implementation-artifacts/spec-1-28-switch-tenants-and-set-the-environment-label.md'
+  - '{project-root}/design/Gatekeep Admin.dc.html'
+warnings: ['oversized']
+deferred: []
+---
+
+<intent-contract>
+
+## Intent
+
+**Problem:** FR-37 and UX-DR44 need a Signing keys page. An Admin should see a Tenant's keys in every state (`next`, `current`, `previous`, `retired`, `revoked`), each key ID in mono with Copy, and the public JWKS sample below them. Today nothing in Host.Admin can read keys:
+- `gk_admin` has no grant on `signing_key`.
+- `host-admin.hcl` has no `read` on `transit/keys/sig-*`, so Host.Admin can't fetch public halves.
+- `KeysContract` reads only the published rows (`ReadPublishedSigningKeysAsync`).
+- The Dashboard has no Security nav item.
+
+**Approach:**
+- Two read-only Tenant routes on Host.Admin, both under `tenant.configuration.read`, which every Tenant Role holds:
+  - `GET /api/v1/tenants/{tenantId}/signing-keys` returns the rows, read from Postgres only.
+  - `GET /api/v1/tenants/{tenantId}/signing-keys/jwks` returns the public JWKS sample, built from custody's public halves.
+- A new Keys read, a Management service that re-checks the capability (AD-5), one migration for the grant, and one policy line.
+- The Dashboard gains the "Signing keys" page in the Security group. A JWKS failure never hides the table.
+
+## Boundaries & Constraints
+
+**Always:**
+- **Scope of keys:** only `purpose = 'signing'` rows are listed and sampled. Management keys (AD-33) never appear in either response, in the page, or in a log.
+- **List order and content:**
+  - Order: `next`, then `current`, then `previous`, then `retired` and `revoked` rows together by `created_at DESC, id DESC`.
+  - Retired rows are listed whether or not `destroyed_at` is set.
+  - Each row carries `keyId` (`SigningKeys` format `{transit name}.v{version}`), `algorithm` (`"RS256"`, the algorithm Host.Hosted signs with), `state` and `createdAt` (ISO 8601 UTC).
+  - It carries nothing else: no Transit ciphertext, no row UUID beyond what `keyId` already contains, no `published_at` or other lifecycle columns.
+- **JWKS sample:**
+  - Keys are the Tenant's published rows (`ReadPublishedSigningKeysAsync`: `current`, `next`, `previous`), in that order.
+  - Each key has exactly the public members Host.Hosted's JWKS serves for it, expected to be `{ kty: "RSA", use: "sig", alg: "RS256", kid, n, e }` (confirm against `DiscoveryAndJwksTests`). `n` and `e` are base64url without padding, from `KeysContract.RsaPublicParameters` over the PEM custody returns for that row's `transit_version`.
+  - It never holds a private member (`d`, `p`, `q`, `dp`, `dq`, `qi`).
+  - The response also carries `jwksUri` = the Tenant's issuer + `/.well-known/jwks` (the path `ProtocolContract` serves).
+  - A custody failure, or a published row whose version custody doesn't return, gives the existing fixed 503 for the whole sample. The list route doesn't depend on custody.
+- **Schema:** new migration `Migration20261108090000ViewSigningKeys`, which runs `GRANT SELECT ON signing_key TO gk_admin`. In `TableRegistry`, `signing_key` gains `[Admin] = [Select]`. Row-level security applies unchanged, and no other privilege is granted.
+- **Custody policy:** `deploy/openbao/policies/host-admin.hcl` gives `transit/keys/sig-*` the capabilities `["update", "read"]`, keeping its parameter rules. Update the header comment ("it has no read …") to say it reads Signing Keys' public halves for the Signing keys page (Story 9.1). `mgmt-*` stays `update` only.
+- **Keys contract:** `KeysContract.ListSigningKeysAsync(CommandContext, CancellationToken)` returns `IReadOnlyList<ListedSigningKey(KeyName Key, int Version, SigningKeyState State, DateTimeOffset CreatedAt)>`.
+  - New public enum `SigningKeyState` in `SigningKeys.cs` covers all five states.
+  - The SQL lives in `Keys/Core` and names `WHERE tenant_id = @tenant_id AND purpose = 'signing'`.
+  - It rebuilds and checks the name the way `TenantKeys.ReadPublishedAsync` does.
+  - It needs a Tenant context, otherwise it throws `InvalidOperationException`. It only reads.
+- **Management:** new `ISigningKeyManagement` in `Management/Contracts`, with its implementation in `Core` and registration beside `ITenantManagement`.
+  - `ListAsync(context, principal, grant, tenantId)` and `GetJwksAsync(…)` each re-check `AdminCapabilities.Allows(TenantConfigurationRead, …)` as `TenantManagement` does, giving `Forbidden` otherwise.
+  - `GetJwksAsync` reads the issuer through the Tenancy contract. Add an `ITenants` read in the Tenant's own context if none returns it.
+  - Each key's public half comes from `IKeyCustody.GetPublicKeysAsync`. A `KeyCustodyException` becomes `Unavailable`.
+  - It writes no audit event, because reads aren't state changes.
+- **Routes (`AdminApi.cs`, handlers in new `SigningKeysApi.cs`, modelled on `GET …/label` and `TenantLabelApi.cs`):**
+  - Both routes use `TenantApiEndpoint.Instance` and `RequiresCapability(TenantConfigurationRead)`, open `TenantScope.BeginAsync(services.Source, PathTenant)`, and send `Cache-Control: no-store`.
+  - Answers: 200; 401; 403 `access_denied`; the fixed 503 (any `DbException`, or custody `Unavailable`).
+  - Path IDs are handled as other Tenant routes handle them.
+  - Shapes: `SigningKeysResponse { keys: SigningKeyResponse[] }` and `SigningKeysJwksResponse { jwksUri, keys: JwkResponse[] }`.
+  - OpenAPI summaries and descriptions follow the existing ones.
+- **Generated artifacts:**
+  - `docs/api/openapi-v1.json` and `packages/api-client/src/schema.generated.ts` are regenerated in Docker (`sh deploy/docker/api-contract.sh --write <abs dir>`).
+  - `client.ts` gains `listSigningKeys(tenantId)` and `getSigningKeysJwks(tenantId)`, each with the ID encoded in the path. `client.test.mjs` covers both.
+- **Dashboard (`apps/admin-dashboard`, `packages/ui`; every string in `messages.tsx`; no inline style or script; no new runtime dependency):**
+  - **Navigation:**
+    - `nav.ts` gains `{ group: 'security', label: 'navSigningKeys', href: t => /tenants/{t}/signing-keys, requires: 'tenant.configuration.read' }`.
+    - `Shell.tsx`'s `TENANT_ROUTE` and its page branch accept `/signing-keys`, keyed by `tenantId` like Settings.
+  - **Page:** new `src/shell/SigningKeysPage.tsx`, using `SectionPage`.
+    - Title "Signing keys". Description "Keys used to sign ID and access tokens. Rotate regularly; revoke if compromised." (design L1277).
+    - A `DataTable` with the columns Key ID, Algorithm, Status and Created, and no Expires column.
+    - The Key ID cell is `<code>` plus `CopyButton` (`what` "key ID"). Created is shown as a date.
+  - **Badge:** new `KeyStateBadge` in `packages/ui` (exported from `admin.ts`). Next = info, Current = ok, Previous = muted, Retired = muted, Revoked = bad. The text carries the meaning. Colours come from existing tokens only (`check-no-raw-hex`).
+  - **JWKS:**
+    - Below the table, a `CodeBlock` titled "JWKS · {jwksUri}" holds the pretty-printed `{ "keys": [...] }`, with its own Copy.
+    - `n` is shown in full, because Copy must give a usable JWKS.
+  - **Loading and errors:**
+    - Loading shows `SkeletonRows` (the existing 300 ms rule).
+    - A failed list read shows the page's failed state with `ErrorReference`.
+    - A failed JWKS read shows, in place of the block, "Couldn't load the public keys." with `ErrorReference`, and the table stays.
+    - A 403 shows the existing forbidden page.
+  - Story 9.1 adds no Rotate or Revoke control and no view-only banner.
+- **Docs:**
+  - `docs/threat-model.md`: the "exists in code" list adds Story 9.1. T-45 (or the Host.Admin custody control) notes the new public-half read, with the test names.
+  - `docs/install.md`: the "Not yet covered" Admin item mentions Signing keys being viewable.
+
+**Ask First:**
+- **Management keys are not listed.** "Signing Key" and "Management key" are distinct terms (AD-33), and the page title is "Signing keys". Confirm before showing `mgmt-` rows in the table.
+- **The JWKS sample is built by Host.Admin from custody**, which needs the new `read` on `sig-*`. Confirm before instead fetching Host.Hosted's public endpoint over the network.
+- **Copy text `[ASSUMPTION]`:** "Couldn't load the public keys.", the badge labels "Next", "Current", "Previous", "Retired" and "Revoked", and the nav label "Signing keys".
+
+**Never:**
+- No private key material, Transit ciphertext, `transit_name` as a separate field, or Management key anywhere in either response, the page, or logs.
+- No new capability, no write route, no audit event, no state change and no `UPDATE`/`INSERT` grant to `gk_admin`.
+- No `read` on `mgmt-*` or on any secret class key for Host.Admin, and no `exportable` path.
+- No query that spans Tenants (AD-4).
+- Out of scope: Rotate (9.2), Revoke and its modal (9.3), the "Tenant Owner only" read-only controls (9.2 and 9.3).
+
+## I/O & Edge-Case Matrix
+
+| Scenario | Input / State | Expected Output / Behavior | Error Handling |
+|----------|--------------|---------------------------|----------------|
+| Fresh Tenant | Viewer of A; A has one `current` and one `next` per purpose | List: 2 rows (next, current), signing only. JWKS: 2 keys (current, next) with `kid` equal to the rows' `keyId` | — |
+| Every state | A seeded with signing rows in all five states, plus a destroyed retired row and management rows | List order: next, current, previous, then retired and revoked newest first; 6 rows; no `mgmt-`. JWKS: current, next, previous only | — |
+| No private material | Either response | No `d`/`p`/`q`/`dp`/`dq`/`qi`, no `vault:`, no `mgmt-`; each JWK has exactly the expected public members; `n` and `e` match custody's public key | Test fails |
+| Other Tenant | Owner of B only, GET A's routes | 403 `access_denied` | — |
+| Any role | Owner, Editor, Viewer of A | 200 on both | — |
+| Unknown | Unknown or malformed `tenantId` | As other Tenant routes | — |
+| Custody down | OpenBao refuses or is unreachable | JWKS: fixed 503; list still 200 | 503 |
+| Policy | `host-admin` reads `sig-` public key; reads `mgmt-` public key | Allowed; refused | — |
+| Browser: page | Mocked list and JWKS | Title, 4 columns, badges, a mono key ID with Copy (accessible name "Copy key ID"), CodeBlock titled with the URI | — |
+| Browser: JWKS fails | JWKS 503 with trace ID | Table shown; "Couldn't load the public keys." with reference | — |
+| Browser: nav | Tenant path, capability held | "Signing keys" under Security, active on the page | — |
+| CSP and axe | Page states, light and dark, 1100 and 768 | No violations; `watchCsp` clean | Test fails |
+
+</intent-contract>
+
+## Code Map
+
+- `src/Adapters/Postgres/Migrations/Migration20261105000000CreateSigningKeyTables.cs:28-50,86-87`: the table, the five-state CHECK, and the existing grants. A new migration sits beside it (copy the attribute pattern from `Migration20261105010000RotateSigningKeys.cs`).
+- `src/Adapters/Postgres/Schema/TableRegistry.cs:472-492`: the `signing_key` entry. `tests/Isolation/Tenancy/TenantTablesTests.cs` checks the registry against the DB.
+- `src/Modules/Keys/Contracts/SigningKeys.cs`: `SigningKeyPurpose`, `PublishedKeyState`, and `PublishedSigningKey.KeyId` (:35). Add `SigningKeyState` and `ListedSigningKey` here.
+- `src/Modules/Keys/Core/TenantKeys.cs:42-47,169-201`: the published read and its name check, which the new list read copies. `KeysContract.cs:203,219`: `ReadPublishedSigningKeysAsync` and `RsaPublicParameters`.
+- `src/Gatekeep.Kernel/Secrets/IKeyCustody.cs:104`: `GetPublicKeysAsync`. `src/Modules/Protocol/Core/TenantRuntimes.cs:191-208`: how Hosted picks the version and checks RSA-3072 (read-only reference; don't reference Protocol from Management).
+- `src/Modules/Protocol/Contracts/ProtocolContract.cs:19`: the JWKS path. An architecture test asserts Management's suffix equals it.
+- `deploy/openbao/policies/host-admin.hcl`: the `sig-*` block. `tests/Architecture/KeyCustodyRuleTests.cs:170-195`: policy rules (`read` on `sig-*` is already allowed).
+- `src/Modules/Management/Core/TenantManagement.cs:237-258` and `Contracts/ITenantManagement.cs:273-282`: the re-check pattern.
+- `src/Modules/Tenancy/Contracts/ITenants.cs`: the issuer (`ResolvedTenant.Issuer` :275). `Core/Tenants.cs` holds the SQL for any new read.
+- `src/Gatekeep.Host.Admin/AdminApi.cs:536-547`, `TenantLabelApi.cs:7-71`, `AdminRequestChecks.cs:448-452` and `AdminResponses.cs:242-263`: the route, handler, path-Tenant and response patterns.
+- `apps/admin-dashboard/src/shell/nav.ts:32-40`, `Shell.tsx:163,506-522`, `TenantSettingsPage.tsx:104-131` (load pattern) and `TenantsPage.tsx` (table, `<code>`).
+- `packages/ui/src/components/{Badge.tsx,DataTable.tsx,CopyButton.tsx,CodeBlock.tsx}`, `admin.ts`, `messages.tsx:346,583` and `adminNav.tsx:56` (the `security` group).
+- `packages/api-client/src/client.ts:237-242` and `test/client.test.mjs`.
+- Tests to copy:
+  - `tests/Isolation/Tenancy/TenantLabelTests.cs`, using `TenantRequests.cs` and `Admins/AdminHost.cs`;
+  - `tests/Isolation/Protocol/DiscoveryAndJwksTests.cs:51-87` and `tests/Isolation/Keys/TenantKeysTests.cs` (key seeding, no `d`);
+  - `tests/Isolation/Custody/*` with `OpenBaoFixture` (real policies);
+  - `tests/browser/admin-tenant-switcher.spec.ts`, using `admin-host.mjs` and `playwright.config.ts`.
+
+## Tasks & Acceptance
+
+**Execution:**
+- [x] Schema:
+  - write the migration and the `TableRegistry` entry;
+  - extend `TenantTablesTests` so `gk_admin` has SELECT only on `signing_key` and RLS still holds.
+- [x] Keys:
+  - add `SigningKeyState`, `ListedSigningKey`, `ListSigningKeysAsync` and its Core SQL;
+  - add Isolation tests for order, signing-only, every state and the Tenant context guard.
+- [x] Custody policy:
+  - update `host-admin.hcl` and its comment;
+  - add an `OpenBaoFixture` test: `host-admin` reads a `sig-` key's public half and is refused on `mgmt-`.
+- [x] Tenancy: add the issuer read if needed, with a test.
+- [x] Management: add `ISigningKeyManagement` with its implementation and registration, plus a test for the forbidden re-check.
+- [x] Host.Admin:
+  - add the routes in `AdminApi.cs`, `SigningKeysApi.cs` and the DTOs;
+  - add new `tests/Isolation/Keys/SigningKeysApiTests.cs` covering every API row of the matrix, including custody down via the fake OpenBao socket.
+- [x] Architecture: a test that Management's JWKS suffix equals `ProtocolContract`'s path. The existing capability and OpenAPI rule tests must pass unchanged in intent.
+- [x] Regenerate the OpenAPI and api-client schema, then add the client methods and tests.
+- [x] UI package: add `KeyStateBadge`, its CSS module, the export and the messages.
+- [x] Dashboard:
+  - add the nav entry, the Shell route and `SigningKeysPage.tsx`;
+  - add new `tests/browser/admin-signing-keys.spec.ts` (axe, `watchCsp`, both themes, both widths), registered in `playwright.config.ts` as other admin specs are.
+- [x] Docs: update the threat model and install.md.
+
+**Acceptance Criteria:**
+- Given a Tenant, when an Admin with any Tenant Role opens Signing keys, then the page shows its signing keys in every state they exist in (next, current, previous, retired, revoked), each key ID in mono with a working Copy, and the public JWKS sample below.
+- Given either Signing keys response, when it is inspected, then it has no private material and the JWKS sample has no `management` key.
+- Given the full suite in Docker, when it runs, then every test passes, including the existing architecture, isolation and browser tests.
+
+## Spec Change Log
+
+- 2026-11-06, implementation:
+  - **Public-half read carries `type`.** OpenBao applies `required_parameters` to reads too, so with the kept `type` rule a plain `GET transit/keys/sig-*` by `host-admin` is refused (the policy matrix showed it). `OpenBaoKeyCustody.GetPublicKeysAsync` now sends `?type=rsa-3072`, which OpenBao reads as request data; the policy keeps its parameter rules unchanged, and every other policy ignores the parameter. Covered by `PolicyMatrixTests` for every role.
+  - **Management returns its own row type.** Host.Admin may not reference Keys (module edges), so `ISigningKeyManagement.ListAsync` returns `SigningKeyListing(KeyId, State, CreatedAt)` built from `KeysContract.ListSigningKeysAsync`'s `ListedSigningKey`, with the state as stored.
+  - **Hosted's JWKS members confirmed.** `SigningKeyManagementTests.The_sample_is_exactly_what_Host_Hosted_serves_for_the_Tenant` compares the sample with Host.Hosted's real JWKS: exactly `kty`, `use`, `alg`, `kid`, `n`, `e`, the same values and order.
+
+- 2026-11-08, merge of main (Stories 1.29 to 1.32, 2.5 and 7.4):
+  - **Migration renamed** to `20261108090000_ViewSigningKeys`, so it applies after main's newest (`20261108000000_CreateAdminEnrolment`); `MigrateCommandTests` now expects 24.
+  - **Cross-tenant route registry** (Story 1.31): both Signing keys routes are registered as `TenantPath` cases, so `CrossTenantRouteTests` probes them with a foreign Tenant.
+  - **Sidebar order**: Story 7.4's Monitoring group sits between Security and Settings; the browser spec expects `security`, `monitoring`, `settings`.
+  - The OpenAPI document and api-client schema were regenerated in Docker after the merge.
+
+## Review Triage Log
+
+### 2026-11-06 — Review pass
+- verdicts: 26 findings — high 0, medium 2, low 17, false 7, maybe-false 0
+- findings:
+  - `[low]` `[patch]` Blind: the JWKS failure banner has no Retry. Fixed: a Retry that re-reads only the sample.
+  - `[low]` `[patch]` Blind: the JWKS request runs even when the list is refused, so a visit writes two audited denials and calls custody for a forbidden page. Fixed: the sample is requested only after the list reads; the browser spec asserts no JWKS request after a 403 or a failed list.
+  - `[medium]` `[patch]` Blind: custody is bounded per key, not per request, so a slow OpenBao holds the request up to 3× the bound. Grouped with Edge #3. Fixed: one linked `KeyCustodyCallTimeout` deadline for the whole sample.
+  - `[low]` `[patch]` Blind: some failures reach an unhandled 500. The `ArgumentException` from a blank PEM is real. Grouped with Edge #1. Fixed: also caught, so the route gives 503; new test `A_blank_public_half_from_custody_is_503_not_500`. The `InvalidOperationException` part (a row naming a foreign Transit key, or an unknown state) is corrupt data failing loudly, which is correct.
+  - `[low]` `[patch]` Blind: the Unavailable log carries no cause, yet the canary entry says failures are "logged by type only". Fixed: the canary text now says what is logged (one fixed message and the trace ID). Adding the cause was rejected as extra plumbing.
+  - `[low]` `[reject]` Blind: OpenAPI `state` has no enum and `createdAt` no date-time format. A schema-typing nicety that no current caller trips over, and the existing Tenant responses follow the same convention.
+  - `[false]` `[reject]` Blind: the `?type=rsa-3072` adapter change is untested. `PolicyMatrixTests.Role_can_do_only_what_AD_10_grants` exercises it through the real adapter against real OpenBao for every role, as the Verification Gap layer confirmed.
+  - `[low]` `[reject]` Blind: untested branches (no published keys, the custody timeout, the list's DbException 503, creating or deleting Tenants). A Tenant always has `current` and `next`, so an empty sample can't be reached. A deleting Tenant has no roles, so it is refused before the handler. The other branches follow existing patterns, and testing them would mean new fault seams.
+  - `[low]` `[reject]` Blind: the browser spec skips the loading state, the hidden nav without the capability, and 768 px wrapping. The shared components already test these behaviours, and the spec runs axe and layout checks at both widths.
+  - `[false]` `[reject]` Blind: Created shows only a date. The design (GEN.keys) shows a date such as "1 Nov 2026", and the API carries the full UTC time.
+  - `[low]` `[reject]` Blind: "exactly what Host.Hosted serves" ignores Hosted's cache window. That cache lasts at most 5 s and a NOTIFY clears it, so any visible mismatch is momentary.
+  - `[low]` `[reject]` Blind: `SigningKeyManagement` takes an `IAuditAppender` only to build `ITenants`. A design nit with no named failure: `GetIssuerAsync` only reads.
+  - `[low]` `[patch]` Blind: the threat-model change sits under T-45 with no residual risk for the extra metadata a Transit read returns. Fixed: a Residual sentence naming `min_decryption_version`, `deletion_allowed`, `exportable` and the version times.
+  - `[low]` `[patch]` Edge: a blank PEM gives `ArgumentException` and a 500. Grouped with Blind #4.
+  - `[false]` `[reject]` Edge: duplicate versions ("1" and "01") make `SingleOrDefault` throw. OpenBao's `keys` map is keyed by canonical version integers, so no response holds two names for one version.
+  - `[medium]` `[patch]` Edge: the custody calls run one after another while the TenantScope transaction is open. Grouped with Blind #3: the single deadline caps the hold at one bound.
+  - `[low]` `[patch]` Edge: the JWKS banner has no retry. Grouped with Blind #1.
+  - `[low]` `[patch]` Verification gap: the JWKS URI is pinned to Hosted's only by a source-text regex. Fixed: `The_sample_is_exactly_what_Host_Hosted_serves_for_the_Tenant` now asserts that the running ProtocolHost's discovery `jwks_uri` equals `sample.JwksUri`.
+  - `[low]` `[reject]` Verification gap (other): no published keys is untested. Unreachable, as above.
+  - `[low]` `[reject]` Intent: AC1 is never exercised from real Tenant data through to the rendered page. That split is the repository's convention: browser specs intercept the API, and the Isolation tests prove the server's states and order.
+  - `[low]` `[reject]` Intent: "mono" is checked by tag, not by font. The `code` element uses `--gk-font-code`, the design system's mono, and `check-no-raw-hex` and the design tokens keep it so.
+  - `[low]` `[reject]` Intent: Copy is clicked on one row only. Every row renders the same `CopyButton`, and the shared component's tests cover it.
+  - `[false]` `[reject]` Intent: AC2 is checked on success bodies only. The 403 is the fixed `ApiProblem {code, traceId}` and the 503 is bodiless, so neither can carry key material.
+  - `[false]` `[reject]` Intent: the policy now gives Host.Admin more. That is the intended design (Ask First), limited to public halves, with `mgmt-*` refused and tested.
+  - `[false]` `[reject]` Intent: the diff departs from the mockup (no Rotate, real kid format, `/jwks`). Rotate is Story 9.2. The kid and path are the system's real ones, and the epic's delta allows these.
+  - `[false]` `[reject]` Intent: whether the worktree is new can't be confirmed. It was created in this run (`git worktree add -b feature/9-1-view-signing-keys .claude/worktrees/epic-9 origin/main`).
+
+## Design Notes
+
+There are two routes rather than one, so the table (Postgres only) still renders when custody is down. The sample is built in Host.Admin from custody, not from OpenIddict: only Protocol and Host.Hosted may reference OpenIddict (`ProtocolRuleTests.cs:70`). The members are expected to be the six RFC 7517 members Hosted publishes for RSA. If Hosted's serializer emits a different public set (for example it adds `x5t`), the sample follows Hosted, and the implementer records the difference in the Spec Change Log.
+
+## Verification
+
+**Commands:**
+- `docker build -t gatekeep/tests:epic-9 -f deploy/docker/tests.Dockerfile .` then `MSYS_NO_PATHCONV=1 docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -e TESTCONTAINERS_HOST_OVERRIDE=host.docker.internal --add-host host.docker.internal:host-gateway gatekeep/tests:epic-9`. Expected: all tests pass. Use this worktree-only tag, never `gatekeep/tests:local`.
+
+## Auto Run Result
+
+Status: done
+
+- Implemented: the two read-only Signing keys routes, the `gk_admin` SELECT grant, `read` on `transit/keys/sig-*` for host-admin, the Keys list, the Tenancy issuer read, Management `ISigningKeyManagement`, the api-client methods, `KeyStateBadge`, and the Signing keys page under Security, with Isolation, Architecture and browser tests and the docs.
+- Review: 7 patch entries applied (2 medium, 5 low), none deferred, the rest rejected with reasons in the triage log.
+- Verified 2026-11-08 after merging main, in Docker under `gatekeep/tests:epic-9`: Browser 552/552, Architecture 752/752, the API contract check and its self-check. Isolation: 2990/3001 on the full run; the 10 load failures (`Failed to connect to 192.168.65.254`, 15 to 19 s timeouts from parallel sessions sharing the engine) passed on a rerun of their classes, with the cross-tenant, signing-key and migration classes (479/480).
+- Still failing locally: `MasterKeyRotationTests.Full_rotation_keeps_every_value_and_leaves_the_old_generation_unable_to_unseal` (root-token census reads "" for "1"). It touches no code this story changed, it failed the same way at the baseline, and main's CI passed it at 13:33 on 2026-11-08, so it is left to CI. The final verification is the PR's CI run, not a local one.

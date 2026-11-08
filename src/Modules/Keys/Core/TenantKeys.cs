@@ -46,6 +46,16 @@ internal static class TenantKeys
         ORDER BY CASE state WHEN 'current' THEN 0 WHEN 'next' THEN 1 ELSE 2 END, created_at, id
         """;
 
+    // Story 9.1: every signing row, whatever its state, retired ones destroyed or not. Next, current
+    // and previous first, then retired and revoked together, newest first.
+    private const string SelectListed =
+        """
+        SELECT id, transit_name, transit_version, state, created_at FROM signing_key
+        WHERE tenant_id = @tenant_id AND purpose = 'signing'
+        ORDER BY CASE state WHEN 'next' THEN 0 WHEN 'current' THEN 1 WHEN 'previous' THEN 2 ELSE 3 END,
+                 created_at DESC, id DESC
+        """;
+
     private const string SelectWrap = "SELECT ciphertext FROM protection_key_wrap WHERE tenant_id = @tenant_id";
 
     /// <summary>The first key of every Keys advisory lock, so no other advisory lock can collide with one.</summary>
@@ -195,6 +205,43 @@ internal static class TenantKeys
             };
 
             keys.Add(new PublishedSigningKey(key, reader.GetInt32(2), state));
+        }
+
+        return keys;
+    }
+
+    public static async Task<IReadOnlyList<ListedSigningKey>> ListAsync(CommandContext context, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        var tenantId = context.TenantId ?? throw new InvalidOperationException("Signing Keys are listed in their Tenant's own scope.");
+
+        var keys = new List<ListedSigningKey>();
+        await using var command = context.CreateCommand();
+        command.CommandText = SelectListed;
+        Add(command, "tenant_id", tenantId);
+
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            // Rebuilt from the row's own IDs, so only a sig- name of this Tenant can come out.
+            var key = KeyName.Signing(tenantId, reader.GetGuid(0));
+            if (key.Value != reader.GetString(1))
+            {
+                throw new InvalidOperationException("A signing_key row names a Transit key that isn't its own.");
+            }
+
+            var state = reader.GetString(3) switch
+            {
+                "next" => SigningKeyState.Next,
+                "current" => SigningKeyState.Current,
+                "previous" => SigningKeyState.Previous,
+                "retired" => SigningKeyState.Retired,
+                "revoked" => SigningKeyState.Revoked,
+                _ => throw new InvalidOperationException("Unknown Signing Key state."),
+            };
+
+            var createdAt = reader.GetFieldValue<DateTimeOffset>(4);
+            keys.Add(new ListedSigningKey(key, reader.GetInt32(2), state, createdAt));
         }
 
         return keys;

@@ -367,6 +367,19 @@ internal static class CanaryFlows
             + "and enqueues the ID-only purge job.",
             "Story 1.29 build review",
             new DateOnly(2026, 11, 5)),
+        new(
+            new(SurfaceKind.Route, "/api/v1/tenants/{tenantId}/signing-keys"),
+            "A read with no body: it returns the path Tenant's signing rows' key IDs, fixed algorithm, states and creation times, "
+            + "never key material, ciphertext or a Management key, and writes nothing. Refusals are logged by fixed code only.",
+            "Story 9.1 build review",
+            new DateOnly(2026, 11, 6)),
+        new(
+            new(SurfaceKind.Route, "/api/v1/tenants/{tenantId}/signing-keys/jwks"),
+            "A read with no body: it returns the public halves custody gives for the path Tenant's published Signing Keys, as JWKS "
+            + "members, never a private member or a Management key, and writes nothing. A custody failure logs one fixed message with "
+            + "the trace ID, never a key name or version.",
+            "Story 9.1 build review",
+            new DateOnly(2026, 11, 6)),
     ];
 
     /// <summary>Every production surface: the job and Operation registries, the Cli's commands and the hosts.</summary>

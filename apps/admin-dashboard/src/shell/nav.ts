@@ -8,7 +8,8 @@
 // Each story adds its own item with its page: Story 1.27 the first Deployment item, Tenants,
 // which only an Admin holding deployment.tenants.read sees, the Deployment Owner; Story 1.28 the
 // first Tenant one, Settings → Tenant, which any Tenant Role in the path Tenant sees; Story 7.4
-// Monitoring → Logs, for tenant.logs.read; Epic 3 adds the Applications ones.
+// Monitoring → Logs, for tenant.logs.read; Story 9.1 Security → Signing keys, which any Tenant Role
+// sees too; Epic 3 adds the Applications ones.
 
 import type { AdminNavGroupId, AdminNavItem, Messages } from '@gatekeep/ui/admin';
 import type { Capability } from './capabilities';
@@ -36,6 +37,12 @@ export const NAV: readonly NavEntry[] = [
     label: 'navLogs',
     href: (tenantId) => `/tenants/${encodeURIComponent(tenantId)}/logs`,
     requires: 'tenant.logs.read',
+  },
+  {
+    group: 'security',
+    label: 'navSigningKeys',
+    href: (tenantId) => `/tenants/${encodeURIComponent(tenantId)}/signing-keys`,
+    requires: 'tenant.configuration.read',
   },
   {
     group: 'settings',

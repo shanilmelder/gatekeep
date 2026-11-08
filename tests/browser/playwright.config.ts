@@ -24,6 +24,7 @@
 // Story 1.28: the Tenant switcher, the landing rules, Tenant settings' environment and the mismatch banner (admin-tenant-switcher.spec.ts), on that same host.
 // Story 1.29: deleting a Tenant, retrying its deletion and the lost-Tenant banner (admin-tenant-delete.spec.ts), on that same host.
 // Story 7.4: a Tenant's Logs, its field search, URL, Load more and sidebar item (admin-logs.spec.ts), on that same host.
+// Story 9.1: the Signing keys page, its JWKS sample and its failures (admin-signing-keys.spec.ts), on that same host.
 
 import { existsSync } from 'node:fs';
 import path from 'node:path';
@@ -61,7 +62,7 @@ export default defineConfig({
       name,
       // Every spec that isn't another project's own, so a new spec runs by default.
       testMatch: '*.spec.ts',
-      testIgnore: ['admin-csp.spec.ts', 'bootstrap.spec.ts', 'credential-setup.spec.ts', 'signin.spec.ts', 'controls.spec.ts', 'data.spec.ts', 'overlay.spec.ts', 'drawer.spec.ts', 'hosted.spec.ts', 'shell.spec.ts', 'admin-shell.spec.ts', 'admin-credentials.spec.ts', 'admin-recovery.spec.ts', 'admin-tenants.spec.ts', 'admin-tenant-switcher.spec.ts', 'admin-tenant-delete.spec.ts', 'admin-logs.spec.ts'],
+      testIgnore: ['admin-csp.spec.ts', 'bootstrap.spec.ts', 'credential-setup.spec.ts', 'signin.spec.ts', 'controls.spec.ts', 'data.spec.ts', 'overlay.spec.ts', 'drawer.spec.ts', 'hosted.spec.ts', 'shell.spec.ts', 'admin-shell.spec.ts', 'admin-credentials.spec.ts', 'admin-recovery.spec.ts', 'admin-tenants.spec.ts', 'admin-tenant-switcher.spec.ts', 'admin-tenant-delete.spec.ts', 'admin-logs.spec.ts', 'admin-signing-keys.spec.ts'],
       use: { baseURL: `http://127.0.0.1:${port}` },
     })),
     { name: fixture.name, testMatch: 'controls.spec.ts', use: { baseURL: `http://127.0.0.1:${fixture.port}` } },
@@ -146,6 +147,12 @@ export default defineConfig({
     {
       name: 'admin-logs',
       testMatch: 'admin-logs.spec.ts',
+      use: { baseURL: `http://localhost:${adminHost.port}` },
+    },
+    // The Signing keys page (Story 9.1), from localhost, as the other Tenant pages are.
+    {
+      name: 'admin-signing-keys',
+      testMatch: 'admin-signing-keys.spec.ts',
       use: { baseURL: `http://localhost:${adminHost.port}` },
     },
   ],

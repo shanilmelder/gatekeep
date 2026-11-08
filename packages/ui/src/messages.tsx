@@ -430,6 +430,28 @@ export interface Messages {
   logsLoadMore: string;
   /** The banner when the server refused the search as malformed: nothing was read. */
   logsInvalid: string;
+  /** The Security group's Signing keys item (Story 9.1), which opens the Signing keys page. */
+  navSigningKeys: string;
+  /** The Signing keys page's heading and description (design GEN.keys). */
+  signingKeysTitle: string;
+  signingKeysDescription: string;
+  /** The Signing keys table's column headers. */
+  signingKeysColumnKeyId: string;
+  signingKeysColumnAlgorithm: string;
+  signingKeysColumnStatus: string;
+  signingKeysColumnCreated: string;
+  /** What a key ID's Copy copies, as its name says: "Copy key ID". Placeholder for `copyNamed`. */
+  signingKeyIdWhat: string;
+  /** The public JWKS sample's code block title. Placeholder: {uri}, the Tenant's JWKS URI. */
+  signingKeysJwksTitle: string;
+  /** In place of the JWKS sample when it couldn't be read: the table stays. */
+  signingKeysJwksFailed: string;
+  /** A Signing Key's state badges: the text carries the state. */
+  keyStateNext: string;
+  keyStateCurrent: string;
+  keyStatePrevious: string;
+  keyStateRetired: string;
+  keyStateRevoked: string;
 }
 
 export const defaultMessages: Readonly<Messages> = Object.freeze({
@@ -678,6 +700,21 @@ export const defaultMessages: Readonly<Messages> = Object.freeze({
   logsEmpty: 'No events in this range',
   logsLoadMore: 'Load more',
   logsInvalid: "That search isn't valid. Check the value and search again.",
+  navSigningKeys: 'Signing keys',
+  signingKeysTitle: 'Signing keys',
+  signingKeysDescription: 'Keys used to sign ID and access tokens. Rotate regularly; revoke if compromised.',
+  signingKeysColumnKeyId: 'Key ID',
+  signingKeysColumnAlgorithm: 'Algorithm',
+  signingKeysColumnStatus: 'Status',
+  signingKeysColumnCreated: 'Created',
+  signingKeyIdWhat: 'key ID',
+  signingKeysJwksTitle: 'JWKS · {uri}',
+  signingKeysJwksFailed: "Couldn't load the public keys.",
+  keyStateNext: 'Next',
+  keyStateCurrent: 'Current',
+  keyStatePrevious: 'Previous',
+  keyStateRetired: 'Retired',
+  keyStateRevoked: 'Revoked',
 });
 
 /**

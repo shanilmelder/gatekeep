@@ -16,4 +16,14 @@ public static class ManagementContract
         ArgumentNullException.ThrowIfNull(addressing);
         return new TenantManagement(appender, addressing);
     }
+
+    /// <summary>
+    /// The Signing keys page's reads (Story 9.1), as <c>gk_admin</c>, in the path Tenant's own scope.
+    /// They write nothing: <paramref name="appender"/> only builds the Tenancy reads they use.
+    /// </summary>
+    public static ISigningKeyManagement CreateSigningKeys(IAuditAppender appender)
+    {
+        ArgumentNullException.ThrowIfNull(appender);
+        return new SigningKeyManagement(appender);
+    }
 }

@@ -693,6 +693,69 @@ public sealed class TenantTablesTests(PostgresFixture postgres)
         Assert.Equal(PermissionDenied, failure.SqlState);
     }
 
+    /// <summary>
+    /// Story 9.1: gk_admin reads <c>signing_key</c> for the Signing keys page, and nothing more: no
+    /// INSERT, UPDATE, DELETE or TRUNCATE on the table or any column, and row-level security still
+    /// holds it to the scope's own Tenant.
+    /// </summary>
+    [Fact]
+    public async Task Admin_only_reads_signing_keys_and_only_its_scopes_Tenants()
+    {
+        var database = await SeededAsync();
+        var tenantB = Guid.CreateVersion7();
+        await TestTenants.InsertAsync(postgres.SuperuserConnection(database), tenantB, "beta.tenants.gatekeep.test");
+        var seed = TenantSeeds.Seeds.Single(s => s.Table == "signing_key").Sql;
+        await PostgresFixture.ExecuteAsync(
+            postgres.SuperuserConnection(database),
+            $"{seed(TenantA, Guid.CreateVersion7())}; {seed(tenantB, Guid.CreateVersion7())}");
+
+        Assert.True(await ScalarAsync<bool>(database, "SELECT has_table_privilege('gk_admin', 'public.signing_key', 'SELECT')"));
+        foreach (var privilege in new[] { "INSERT", "UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "TRIGGER" })
+        {
+            Assert.False(await ScalarAsync<bool>(database, $"SELECT has_table_privilege('gk_admin', 'public.signing_key', '{privilege}')"), privilege);
+        }
+
+        var writable = await ReadAsync(
+            database,
+            """
+            SELECT attname FROM pg_attribute
+            WHERE attrelid = 'public.signing_key'::regclass AND attnum > 0 AND NOT attisdropped
+              AND (has_column_privilege('gk_admin', 'public.signing_key', attname, 'UPDATE')
+                   OR has_column_privilege('gk_admin', 'public.signing_key', attname, 'INSERT'))
+            """);
+        Assert.Empty(writable);
+
+        Assert.Equal([TenantA.ToString()], await AdminReadsAsync(database, TenantA));
+        Assert.Equal([tenantB.ToString()], await AdminReadsAsync(database, tenantB));
+
+        var update = await Assert.ThrowsAsync<PostgresException>(() => PostgresFixture.ExecuteAsync(
+            postgres.RoleConnection(TableRegistry.Admin, database),
+            $"BEGIN; SELECT set_config('gatekeep.tenant_id', '{TenantA}', true); UPDATE signing_key SET state = 'revoked'; COMMIT;"));
+        Assert.Equal(PermissionDenied, update.SqlState);
+    }
+
+    /// <summary>The <c>tenant_id</c> of each <c>signing_key</c> row gk_admin sees in <paramref name="tenant"/>'s scope.</summary>
+    private async Task<List<string>> AdminReadsAsync(string database, Guid tenant)
+    {
+        await using var connection = new NpgsqlConnection(postgres.RoleConnection(TableRegistry.Admin, database));
+        await connection.OpenAsync(Cancellation);
+        await using var transaction = await connection.BeginTransactionAsync(Cancellation);
+        await using (var scope = new NpgsqlCommand($"SELECT set_config('gatekeep.tenant_id', '{tenant}', true)", connection, transaction))
+        {
+            await scope.ExecuteScalarAsync(Cancellation);
+        }
+
+        await using var command = new NpgsqlCommand("SELECT tenant_id::text FROM signing_key", connection, transaction);
+        await using var reader = await command.ExecuteReaderAsync(Cancellation);
+        var rows = new List<string>();
+        while (await reader.ReadAsync(Cancellation))
+        {
+            rows.Add(reader.GetString(0));
+        }
+
+        return rows;
+    }
+
     private async Task<string> SeededAsync(string status = "active")
     {
         var database = await postgres.NewMigratedDatabaseAsync();

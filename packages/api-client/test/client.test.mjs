@@ -234,6 +234,39 @@ describe('api-client', () => {
     assert.equal(retried.status, 202);
   });
 
+  it("reads a Tenant's Signing Keys and its JWKS sample on their own paths, the ID encoded, with no page Tenant", async () => {
+    const keys = { keys: [{ keyId: 'sig-a.v1', algorithm: 'RS256', state: 'current', createdAt: '2026-11-06T09:00:00.000Z' }] };
+    const { calls, fetch } = fakeFetch(200, JSON.stringify(keys));
+    const client = createApiClient({ fetch, csrfToken: () => 'csrf-1', pageTenant: () => 'ten_a' });
+
+    const listed = await client.listSigningKeys('ten_a/b');
+    const sample = await client.getSigningKeysJwks('ten_c?d');
+
+    assert.equal(calls[0].input, '/api/v1/tenants/ten_a%2Fb/signing-keys');
+    assert.equal(calls[0].init.method, 'GET');
+    assert.equal(calls[1].input, '/api/v1/tenants/ten_c%3Fd/signing-keys/jwks');
+    assert.equal(calls[1].init.method, 'GET');
+    for (const call of calls) {
+      assert.equal(call.init.body, undefined);
+      assert.equal(CSRF_HEADER in call.init.headers, false);
+      assert.equal(TENANT_HEADER in call.init.headers, false);
+    }
+    assert.equal(listed.ok, true);
+    assert.deepEqual(listed.data, keys);
+    assert.equal(sample.ok, true);
+  });
+
+  it("reads a JWKS sample's 503 as a failure with no problem body", async () => {
+    const { fetch } = fakeFetch(503);
+    const client = createApiClient({ fetch });
+
+    const sample = await client.getSigningKeysJwks('ten_a');
+
+    assert.equal(sample.ok, false);
+    assert.equal(sample.status, 503);
+    assert.equal(sample.path, '/api/v1/tenants/ten_a/signing-keys/jwks');
+  });
+
   it('sends the page Tenant only on state-changing Tenant-surface calls, when there is one', async () => {
     const { calls, fetch } = fakeFetch(200, JSON.stringify({ label: 'dev' }));
     let page = 'ten_a';

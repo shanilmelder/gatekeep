@@ -1,6 +1,7 @@
 # Host.Admin (AD-10): creates Signing and Management keys, signs with Management keys
 # (AD-33), encrypts social, email and payload, and computes the Deployment hmac.
-# It decrypts nothing, and it has no read: the public halves come back from create.
+# It decrypts nothing. It reads Signing Keys' public halves for the Signing keys page
+# (Story 9.1), and nothing of a Management key or any other key.
 #
 # A grant on transit/keys/sig-* also reaches transit/keys/sig-*/rotate, because a
 # policy glob can't stop at the end of a name. Requiring and pinning `type` refuses
@@ -8,7 +9,7 @@
 # unknown `type` on rotate, so a crafted request can still rotate these keys (T-45).
 
 path "transit/keys/sig-*" {
-  capabilities        = ["update"]
+  capabilities        = ["update", "read"]
   required_parameters = ["type"]
   allowed_parameters = {
     "type" = ["rsa-3072"]

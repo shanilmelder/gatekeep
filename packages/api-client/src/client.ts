@@ -39,6 +39,10 @@ export type LogReference = components['schemas']['LogReference'];
 
 /** A Log search's filters (Story 7.4), each optional and sent at most once, and the next page's cursor. */
 export type TenantLogsQuery = NonNullable<operations['SearchTenantLogs']['parameters']['query']>;
+export type SigningKeysResponse = components['schemas']['SigningKeysResponse'];
+export type SigningKey = components['schemas']['SigningKeyResponse'];
+export type SigningKeysJwksResponse = components['schemas']['SigningKeysJwksResponse'];
+export type Jwk = components['schemas']['JwkResponse'];
 
 /** A path the committed OpenAPI document has, so a removed endpoint fails to compile. */
 export type ApiPath = keyof paths;
@@ -271,6 +275,15 @@ export function createApiClient(options: ApiClientOptions = {}) {
     /** Changes the Tenant's environment label. Removing Prod needs a fresh assertion bound to this Tenant. */
     setTenantLabel: (tenantId: string, body: SetTenantLabelRequest) =>
       request(`/api/v1/tenants/${encodeURIComponent(tenantId)}/label` as '/api/v1/tenants/{tenantId}/label', 'put', body),
+    /** The Tenant's Signing Keys in every state (Story 9.1), next first. Never a Management key. Its ID goes into the path encoded. */
+    listSigningKeys: (tenantId: string) =>
+      request(`/api/v1/tenants/${encodeURIComponent(tenantId)}/signing-keys` as '/api/v1/tenants/{tenantId}/signing-keys', 'get'),
+    /** The Tenant's public JWKS sample and its JWKS URI (Story 9.1): a 503 when key custody is down. Its ID goes into the path encoded. */
+    getSigningKeysJwks: (tenantId: string) =>
+      request(
+        `/api/v1/tenants/${encodeURIComponent(tenantId)}/signing-keys/jwks` as '/api/v1/tenants/{tenantId}/signing-keys/jwks',
+        'get',
+      ),
     /** Begins a fresh assertion for a Tenant action, bound to the Tenant `tenantId` names. The Deployment complete finishes it. */
     beginTenantFreshAssertion: (tenantId: string, binding: FreshAssertionBeginRequest) =>
       request(`/api/v1/tenants/${encodeURIComponent(tenantId)}/assertions` as '/api/v1/tenants/{tenantId}/assertions', 'post', binding),

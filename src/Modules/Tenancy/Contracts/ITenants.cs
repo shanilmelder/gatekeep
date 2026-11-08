@@ -212,6 +212,13 @@ public interface ITenants
     Task<TenantLabelState?> GetLabelAsync(CommandContext context, Guid tenantId, CancellationToken cancellationToken);
 
     /// <summary>
+    /// The Tenant's issuer as stored at creation (AD-6), read with no lock, in its own context,
+    /// whatever its status; null when there is no such Tenant (Story 9.1).
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The context isn't <paramref name="tenantId"/>'s.</exception>
+    Task<string?> GetIssuerAsync(CommandContext context, Guid tenantId, CancellationToken cancellationToken);
+
+    /// <summary>
     /// Sets an <c>active</c> Tenant's label, and nothing else, in its own context, and appends
     /// <see cref="TenancyEvents.ProdLabelRemoved"/> when <paramref name="removedProd"/>, else
     /// <see cref="TenancyEvents.LabelChanged"/>, on its chain, the Actor <paramref name="actor"/>
