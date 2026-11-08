@@ -1,15 +1,19 @@
 name: Release
 
-# A signed release (Story 12.5, docs/release-signing.md), from a pushed v* tag. Two jobs:
+# A signed release (Story 12.5, docs/release-signing.md), from a pushed v* tag. Two jobs,
+# both on the self-hosted runner (shanilmelder-vps):
 #
-#   build  GitHub-hosted, read-only token, nothing secret. It runs third-party code (the
-#          NuGet and pnpm restores, buildx, syft), so it gets nothing worth stealing: it
-#          runs the gates, then builds each release image to an OCI archive with its SBOM
-#          and digest, and hands those over only as a workflow artifact.
-#   sign   Esm's self-hosted signing runner, behind the release-signing environment, which
-#          needs Esm's approval. It runs nothing the build job made and builds nothing: it
+#   build  Read-only token, nothing secret. It runs third-party code (the NuGet and pnpm
+#          restores, buildx, syft), so it gets nothing worth stealing: it runs the gates,
+#          then builds each release image to an OCI archive with its SBOM and digest, and
+#          hands those over only as a workflow artifact.
+#   sign   Behind the release-signing environment, which only a v* tag can deploy to, and
+#          has no required reviewer (the repository's plan doesn't offer one), so a pushed
+#          tag signs straight away: pushing the tag is the approval. The only job that gets
+#          the signing key: an encrypted cosign key and its password, the
+#          environment's secrets. It runs nothing the build job made and builds nothing: it
 #          pushes the archives, refuses any digest that differs from the build's, signs each
-#          digest and attests its SBOM with the hardware key, and publishes release.env.
+#          digest and attests its SBOM, and publishes release.env.
 
 on:
   push:
@@ -71,9 +75,9 @@ jobs:
       packages: write
     env:
       GATEKEEP_RELEASE_TAG: ${{ github.ref_name }}
-      # A reference to the hardware key ("sk" for the YubiKey's PIV slot), from a repository
-      # variable. Never key material: the private key never leaves the YubiKey.
-      GATEKEEP_SIGNING_KEY: ${{ vars.GATEKEEP_SIGNING_KEY }}
+      # A reference to the key, never key material: publish.sh hands cosign the variable's
+      # name, and the key itself reaches only the step that signs.
+      GATEKEEP_SIGNING_KEY: env://COSIGN_PRIVATE_KEY
     steps:
       # Only for deploy/release/publish.sh at the tag. Nothing from the build job runs here.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -95,8 +99,13 @@ jobs:
           echo "$GITHUB_TOKEN" | DOCKER_CONFIG="$RUNNER_TEMP/docker-config" \
             docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
 
-      # Host cosign (the pivkey build) and crane. The YubiKey asks for a touch per signature.
+      # Host cosign and crane, at the versions publish.sh pins. The encrypted key and its
+      # password are the release-signing environment's secrets, in this step's environment
+      # only, never in a file.
       - name: Push, sign and attest each image
+        env:
+          COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
+          COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
         run: |
           GATEKEEP_REGISTRY="ghcr.io/$(echo "$GITHUB_REPOSITORY_OWNER" | tr 'A-Z' 'a-z')" \
             sh deploy/release/publish.sh
