@@ -2,10 +2,10 @@
 title: 'Story 1.32: Recover Admin access from the host'
 type: 'feature'
 created: '2026-11-08'
-status: 'in-review'
+status: 'done'
 baseline_revision: '49ef4b3a246319af4313a70528eac78478c697e7'
 review_loop_iteration: 0
-followup_review_recommended: false
+followup_review_recommended: true
 context:
   - '{project-root}/_bmad-output/implementation-artifacts/epic-1-context.md'
   - '{project-root}/docs/threat-model.md'
@@ -214,3 +214,70 @@ deferred:
 **Commands:**
 - `docker compose -f deploy/compose.dev.yaml run --rm --build tests` — expected: all tests pass.
 - `pnpm -r build` and `pnpm -r lint` (inside the tests image) — expected: success. The api-client diff matches the OpenAPI document.
+
+## Auto Run Result
+
+Status: done
+
+**Summary:** `gatekeep recover-admin` lets an Admin who lost every WebAuthn credential, or a first Admin whose setup Session ended, register new credentials, and it never happens quietly.
+
+The command runs in the `cli` container as `gk_cli`, in a fixed order:
+1. It reads the Admin and the database clock.
+2. It sends the `admin.recovery.started` Security Alert and waits for a 2xx.
+3. It signs and writes the `admin_recovery` off-server record.
+4. Only then, in one transaction, it stores the SHA-256 of a 256-bit value in `admin_enrolment` and writes `admin.enrolment.issued`.
+5. It prints `https://<admin host>/recover#<value>` once.
+
+**Redemption:** Host.Admin redeems the value at `POST /api/v1/deployment/signin/enrolment`, which takes no Session.
+- Both rate limits are counted before the lookup: per client first, then Deployment-wide.
+- In one transaction it:
+  - uses up that enrolment and every other unused enrolment of the Admin;
+  - revokes all of the Admin's Sessions;
+  - supersedes the Session the browser presented;
+  - starts a Setup or Recovery Session, which can reach only credential registration;
+  - writes `admin.enrolment.used`.
+- Every refusal is the same 400 `enrolment_refused`.
+
+**Files changed:**
+- `src/Adapters/Postgres/Migrations/Migration20261108000000CreateAdminEnrolment.cs` and `Schema/TableRegistry.cs`: the table, its CHECKs, the guard trigger and the grants. It also revokes `gk_cli`'s unused read on `admin_recovery_code`.
+- `src/Modules/Admins/Contracts/IAdminEnrolments.cs` and `Core/AdminEnrolments.cs`: the value, the issuer and the redemption.
+- `AdminsContract.cs`: the factories and the two rate-limit policies.
+- `AdminsEvents.cs`: two new events.
+- `src/Gatekeep.Kernel/`:
+  - `SecurityAlertCode.AdminRecovery` and `AlertEnrolment`;
+  - `PublicIdType.Admin` (`adm_`);
+  - the `SecurityLimits` constants.
+- `src/Adapters/AlertChannel/WebhookAlertChannel.cs`: the alert body carries the enrolment references.
+- `src/Gatekeep.Cli/RecoverAdminCommand.cs` and `Program.cs`: the command and its Usage text.
+- `src/Gatekeep.Host.Admin/EnrolmentApi.cs`, `AdminApi.cs`, `AdminApiServices.cs`, `AdminResponses.cs` and `AdminOpenApi.cs`: the redemption route.
+- `apps/admin-dashboard/src/RecoverPage.tsx`, `main.tsx` and `packages/ui/src/messages.tsx`: the `/recover` page.
+- `docs/api/openapi-v1.json` and `packages/api-client`: regenerated.
+- `docs/threat-model.md` (T-21), `docs/audit-events.md` and `docs/install.md` ("Recover Admin access").
+- **Tests:**
+  - `tests/Isolation/Admins/RecoverAdminTests.cs` (new);
+  - `AdminTablesTests`, `AdminEndpointTests` and `AdminHost`;
+  - `CanaryFlows` and `CanarySurfaceTests`;
+  - `RouteRegistry` and `HostedGrantsTests`;
+  - `OffServerRecordTests`, `ComposeConfigTests` and `MigrateCommandTests`;
+  - `tests/Architecture` (`AdminApiRuleTests`, `CapabilityRuleTests`, `TenantKeyedTypes`);
+  - `tests/browser/admin-recovery.spec.ts`.
+
+**Review findings:** 31 findings: 0 high, 8 medium, 21 low, 2 false.
+- **Patched:** 14 rows (5 medium, 9 low).
+- **Deferred:** 2 medium, both for Story 8.3: the lost credentials stay registered, and an Admin at the 10-credential maximum can't register.
+- **Rejected:** 15 rows (13 low, 2 false), each with its reason in the triage log.
+
+**Follow-up review:** recommended (`true`), because five medium entries were patched. No reviewer has looked at the patched code since. The unverified risks are:
+- the reordered rate-limit counting in `EnrolmentApi` (per client, then Deployment-wide);
+- the sweep in `AdminEnrolments.RedeemAsync` that uses up an Admin's other unused enrolments.
+
+**Verification:**
+- **Final full Docker run on the merged tree:** browser 533 passed and architecture 720 passed. The isolation tests were stopped by Claude Code because the machine was low on memory.
+- **Earlier runs:** every `RecoverAdminTests`, compose and migrate test passed. The other failures were Docker-load connection errors (`192.168.65.254` refused, IPv6 unreachable) that hit different tests on each run.
+- **`MasterKeyRotationTests.Full_rotation…`** failed locally in every run. It is untouched by this diff and passes in `main`'s CI.
+- **CI** runs the full suite on a clean runner before merge.
+
+**Residual risks:**
+- The printed link carries no port, so a non-443 deployment must add `:{port}` by hand (documented in `docs/install.md`).
+- Sessions end at redemption, not at issue, so an intruder's Session lasts at most until the link is used or expires.
+- The alert goes out before the commit, so a failed commit gives a false alarm (by design).
