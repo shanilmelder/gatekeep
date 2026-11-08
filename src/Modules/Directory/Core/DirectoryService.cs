@@ -99,7 +99,8 @@ internal sealed class DirectoryService(IAuditAppender audit, TimeProvider time) 
         var tenantId = context.TenantId
             ?? throw new InvalidOperationException("A client secret is verified only in a Tenant context.");
 
-        // Hashed first, so an unknown client costs what a known one does before the lookup.
+        // Hashed before the client_id is parsed, so every request pays for the hash; a malformed
+        // client_id still returns before the lookup.
         var presented = secret.Use(ClientSecrets.Hash);
         if (!PublicId.TryParse(PublicIdType.Application, clientId, out var applicationId))
         {

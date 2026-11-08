@@ -1249,7 +1249,6 @@ internal static class CanaryFlows
         Assert.Matches(@"""LogLevel"":""(?:Trace|Debug)""", host.Output);
     }
 
-    /// <summary>A response's status, every header and its body, as one text to scan.</summary>
     /// <summary>
     /// Story 2.5: Client Credentials on the real Protocol pipeline at Trace, through the hosts' scrubbing
     /// logging, with a real machine client signing through the real Transit. Normally the client gets a
@@ -1311,6 +1310,7 @@ internal static class CanaryFlows
         Assert.Contains("connect/token", captured.Text, StringComparison.Ordinal);
     }
 
+    /// <summary>A response's status, every header and its body, as one text to scan.</summary>
     private static async Task<string> ResponseTextAsync(HttpResponseMessage response)
     {
         var headers = response.Headers.Concat(response.Content.Headers).Select(h => $"{h.Key}: {string.Join(", ", h.Value)}");

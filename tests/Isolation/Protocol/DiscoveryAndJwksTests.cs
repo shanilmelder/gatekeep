@@ -434,11 +434,15 @@ public sealed class DiscoveryAndJwksTests(PostgresFixture postgres, OpenBaoFixtu
         Assert.Single(handlers, d => d.ContextType == typeof(ProcessRequestContext) && d.Order == int.MinValue);
         Assert.DoesNotContain(handlers, d => d.ServiceDescriptor.ServiceType == typeof(OpenIddictServerAspNetCoreHandlers.ResolveRequestUri));
 
-        // Story 2.5: OpenIddict's secret check is gone, and Gatekeep's runs before its client lookup.
+        // Story 2.5: OpenIddict's secret check is gone, and Gatekeep's runs on token request validation
+        // after the grant type check, before OpenIddict's parameter checks and its client lookup (which
+        // runs later, in ValidateAuthentication).
         Assert.DoesNotContain(handlers, d => d.ServiceDescriptor.ServiceType == typeof(OpenIddict.Server.OpenIddictServerHandlers.ValidateClientSecret));
         var gatekeep = Assert.Single(handlers, d => d.ServiceDescriptor.ServiceType.FullName == "Gatekeep.Modules.Protocol.Core.AuthenticateGatekeepClient");
-        var lookup = Assert.Single(handlers, d => d.ServiceDescriptor.ServiceType == typeof(OpenIddict.Server.OpenIddictServerHandlers.ValidateClientId));
-        Assert.True(gatekeep.Order < lookup.Order);
+        Assert.Equal(typeof(ValidateTokenRequestContext), gatekeep.ContextType);
+        Assert.True(gatekeep.Order > OpenIddict.Server.OpenIddictServerHandlers.Exchange.ValidateGrantType.Descriptor.Order);
+        Assert.True(gatekeep.Order < OpenIddict.Server.OpenIddictServerHandlers.Exchange.ValidateClientIdParameter.Descriptor.Order);
+        Assert.True(gatekeep.Order < OpenIddict.Server.OpenIddictServerHandlers.Exchange.ValidateAuthentication.Descriptor.Order);
         Assert.False(host.GlobalOptions.EnableDegradedMode);
         Assert.Equal(
             ["client_secret_basic", "client_secret_post"],

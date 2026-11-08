@@ -434,3 +434,13 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-1-30-connect-the-alert-channel-and-off-server-store.md`
   summary: Make the `openbao.audit.ship` canary flow ship real OpenBao audit lines and search both days' prefixes.
   evidence: Story 1.30's `CanaryFlows.AuditShipAsync` ships synthetic HMAC lines and builds its prefix from `DateTime.UtcNow`, so it can flake at midnight UTC. `AuditShipTests` cover real Transit output. After an OpenBao crash, a partial last line is glued to the next line and shipped as is.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-5-issue-a-token-by-client-credentials.md`
+  summary: Keep unauthenticated token traffic from locking real machine clients out of a Tenant through the per-Tenant token limit.
+  evidence: Story 2.5 review. `LimitTokenRequests` counts the 1200/min per-Tenant limit before client authentication (as §5.2 asks), so about 20 sources at 60/min each make every token request at that Tenant answer 429, valid clients included. Needs a product decision, such as counting the Tenant limit after authentication or reserving capacity for authenticated clients.
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-5-issue-a-token-by-client-credentials.md`
+  summary: Prune expired access-token rows from `token`.
+  evidence: Story 2.5 review. Every Client Credentials token writes a `token` row and Story 2.5 excludes pruning; at the per-Tenant limit that is up to about 1.7 M rows per Tenant per day, with nothing removing expired ones.
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-5-issue-a-token-by-client-credentials.md`
+  summary: Sweep stale `tenant_attempt` (and `admin_attempt`) counter rows.
+  evidence: Story 2.5 review. Each distinct IPv4 address or IPv6 /64 leaves a lasting row per policy per Tenant; rows go only on a crash (UNLOGGED) or Tenant deletion. `admin_attempt` has the same gap.

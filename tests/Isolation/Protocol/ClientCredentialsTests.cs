@@ -132,6 +132,25 @@ public sealed class ClientCredentialsTests(PostgresFixture postgres, OpenBaoFixt
     }
 
     [Theory]
+    [InlineData("post", null)]
+    [InlineData("post", "")]
+    [InlineData("basic", "")]
+    public async Task Missing_or_empty_secret_gets_the_same_invalid_client_as_a_wrong_one(string method, string? secret)
+    {
+        var (database, a, _) = await TwoTenantsAsync();
+        var client = await database.CreateClientAsync(a.TenantId);
+        await using var host = await ProtocolHost.StartAsync(database.Hosted, bao);
+
+        using var wrong = await TokenAsync(host, HostA, client.ClientId, WithRandomPart(client.Secret), method);
+        using var missing = await TokenAsync(host, HostA, client.ClientId, secret, method);
+
+        Assert.Equal(HttpStatusCode.Unauthorized, missing.Status);
+        Assert.Equal("invalid_client", missing.Error);
+        Assert.Equal(wrong.Body.RootElement.ToString(), missing.Body.RootElement.ToString());
+        Assert.Equal(0L, await database.ScalarAsync<long>("SELECT count(*) FROM token"));
+    }
+
+    [Theory]
     [InlineData("revoked_at = now()")]
     [InlineData("expires_at = now() - interval '1 second'")]
     public async Task Revoked_or_expired_secret_is_invalid_client(string change)
@@ -252,6 +271,21 @@ public sealed class ClientCredentialsTests(PostgresFixture postgres, OpenBaoFixt
     }
 
     [Fact]
+    public async Task Another_Tenants_valid_credential_asking_for_a_resource_is_still_logged_in_the_probed_Tenant()
+    {
+        var (database, a, b) = await TwoTenantsAsync();
+        var client = await database.CreateClientAsync(a.TenantId);
+        await using var host = await ProtocolHost.StartAsync(database.Hosted, bao);
+
+        using var refused = await TokenAsync(host, HostB, client.ClientId, client.Secret, extra: ("resource", "https://api.example.test/"));
+
+        Assert.True(refused.Error is "invalid_client" or "invalid_target", refused.Error);
+        Assert.False(refused.Body.RootElement.TryGetProperty("access_token", out _));
+        Assert.Equal(1L, await RejectionsAsync(database, b.TenantId));
+        Assert.Equal(0L, await RejectionsAsync(database, a.TenantId));
+    }
+
+    [Fact]
     public async Task Another_Tenants_prefix_with_a_wrong_secret_is_counted_and_logged_once_per_source_per_hour()
     {
         var (database, a, b) = await TwoTenantsAsync();
@@ -339,6 +373,28 @@ public sealed class ClientCredentialsTests(PostgresFixture postgres, OpenBaoFixt
         using var other = await TokenAsync(host, HostA, client.ClientId, client.Secret, source: "2001:db8:1:2::5");
         Assert.Equal(HttpStatusCode.OK, other.Status);
         Assert.Equal(1, await AttemptsAsync(database, a.TenantId, AuthenticationContract.TokenRequestSourcePolicy.Code, "2001:db8:1:2::/64"));
+    }
+
+    [Fact]
+    public async Task IPv4_mapped_IPv6_source_is_counted_as_its_IPv4_address()
+    {
+        var (database, a, _) = await TwoTenantsAsync();
+        var client = await database.CreateClientAsync(a.TenantId);
+        await using var host = await ProtocolHost.StartAsync(database.Hosted, bao);
+
+        using (var plain = await TokenAsync(host, HostA, client.ClientId, client.Secret, source: "203.0.113.20"))
+        {
+            Assert.Equal(HttpStatusCode.OK, plain.Status);
+        }
+
+        using (var mapped = await TokenAsync(host, HostA, client.ClientId, client.Secret, source: "::ffff:203.0.113.20"))
+        {
+            Assert.Equal(HttpStatusCode.OK, mapped.Status);
+        }
+
+        var policy = AuthenticationContract.TokenRequestSourcePolicy.Code;
+        Assert.Equal(2, await AttemptsAsync(database, a.TenantId, policy, "203.0.113.20"));
+        Assert.Equal(1L, await database.ScalarAsync<long>($"SELECT count(*) FROM tenant_attempt WHERE tenant_id = '{a.TenantId}' AND policy = '{policy}'"));
     }
 
     [Fact]
@@ -455,13 +511,27 @@ public sealed class ClientCredentialsTests(PostgresFixture postgres, OpenBaoFixt
         Assert.Equal(PostgresErrorCodes.ForeignKeyViolation, error.SqlState);
     }
 
+    /// <summary>The User and Session an <c>"authorization"</c> row in Tenant <c>{0}</c> anchors to, so only its Application reference can fail.</summary>
+    private const string SessionInB =
+        """
+        INSERT INTO "user" (tenant_id, id) VALUES ('{0}', '01900000-0000-7000-8000-0000000025a1');
+        INSERT INTO user_session (tenant_id, id, user_id, id_hash, amr, auth_time, idle_expires_at, absolute_expires_at, created_at)
+          VALUES ('{0}', '01900000-0000-7000-8000-0000000025a2', '01900000-0000-7000-8000-0000000025a1', sha256('s'::bytea), '{{pwd}}', now(), now() + interval '1 hour', now() + interval '1 hour', now());
+        """;
+
     [Theory]
-    [InlineData("signin_transaction", "INSERT INTO signin_transaction (tenant_id, id, application_id, binding_hash, parameters, created_at, expires_at) VALUES ('{0}', gen_random_uuid(), '{1}', sha256(gen_random_uuid()::text::bytea), '{{}}', now(), now() + interval '1 minute')")]
-    [InlineData("token", "INSERT INTO token (tenant_id, id, application_id, type, status, concurrency_token) VALUES ('{0}', gen_random_uuid(), '{1}', 'access_token', 'valid', gen_random_uuid())")]
-    public async Task A_row_may_not_reference_another_Tenants_Application(string table, string insert)
+    [InlineData("signin_transaction", "", "INSERT INTO signin_transaction (tenant_id, id, application_id, binding_hash, parameters, created_at, expires_at) VALUES ('{0}', gen_random_uuid(), '{1}', sha256(gen_random_uuid()::text::bytea), '{{}}', now(), now() + interval '1 minute')")]
+    [InlineData("authorization", SessionInB, "INSERT INTO \"authorization\" (tenant_id, id, application_id, user_session_id, status, type, concurrency_token) VALUES ('{0}', gen_random_uuid(), '{1}', '01900000-0000-7000-8000-0000000025a2', 'valid', 'ad-hoc', gen_random_uuid())")]
+    [InlineData("token", "", "INSERT INTO token (tenant_id, id, application_id, type, status, concurrency_token) VALUES ('{0}', gen_random_uuid(), '{1}', 'access_token', 'valid', gen_random_uuid())")]
+    public async Task A_row_may_not_reference_another_Tenants_Application(string table, string setup, string insert)
     {
         var (database, a, b) = await TwoTenantsAsync();
         var client = await database.CreateClientAsync(a.TenantId);
+        if (setup.Length > 0)
+        {
+            await database.ExecuteAsync(string.Format(System.Globalization.CultureInfo.InvariantCulture, setup, b.TenantId));
+        }
+
         await using var source = NpgsqlDataSource.Create(database.Hosted);
         await using var scope = await TenantScope.BeginAsync(source, b.TenantId, Cancellation);
 
@@ -469,6 +539,7 @@ public sealed class ClientCredentialsTests(PostgresFixture postgres, OpenBaoFixt
             scope.CreateCommandContext(), string.Format(System.Globalization.CultureInfo.InvariantCulture, insert, b.TenantId, client.ApplicationId)));
 
         Assert.True(error.SqlState == PostgresErrorCodes.ForeignKeyViolation, $"{table}: {error.SqlState}");
+        Assert.Equal($"{table}_application_fkey", error.ConstraintName);
     }
 
     /// <summary>The source TestServer requests have when a test names none.</summary>
@@ -492,7 +563,7 @@ public sealed class ClientCredentialsTests(PostgresFixture postgres, OpenBaoFixt
         ProtocolHost host,
         string tenantHost,
         string clientId,
-        string secret,
+        string? secret,
         string method = "basic",
         string grant = "client_credentials",
         (string Name, string Value)? extra = null,
@@ -502,7 +573,10 @@ public sealed class ClientCredentialsTests(PostgresFixture postgres, OpenBaoFixt
         if (method == "post")
         {
             form["client_id"] = clientId;
-            form["client_secret"] = secret;
+            if (secret is not null)
+            {
+                form["client_secret"] = secret;
+            }
         }
 
         if (extra is { } parameter)
@@ -518,7 +592,7 @@ public sealed class ClientCredentialsTests(PostgresFixture postgres, OpenBaoFixt
         if (method == "basic")
         {
             request.Headers.Authorization = new AuthenticationHeaderValue(
-                "Basic", Convert.ToBase64String(Encoding.UTF8.GetBytes($"{Uri.EscapeDataString(clientId)}:{Uri.EscapeDataString(secret)}")));
+                "Basic", Convert.ToBase64String(Encoding.UTF8.GetBytes($"{Uri.EscapeDataString(clientId)}:{Uri.EscapeDataString(secret ?? string.Empty)}")));
         }
 
         if (source is not null)

@@ -2,16 +2,29 @@
 title: 'Story 2.5: Issue a token by Client Credentials'
 type: 'feature'
 created: '2026-11-06'
-status: 'in-progress'
+status: 'done'
 baseline_revision: '68883cf2b16fa025d8e8d7aa130bfb930ca9a129'
+baseline_commit: '68883cf2b16fa025d8e8d7aa130bfb930ca9a129'
 review_loop_iteration: 0
-followup_review_recommended: false
+followup_review_recommended: true
 context:
   - '{project-root}/_bmad-output/implementation-artifacts/epic-2-context.md'
   - '{project-root}/docs/spikes/2-2-openiddict-stores.md'
   - '{project-root}/docs/spikes/2-1-openiddict-per-tenant.md'
 warnings: ['oversized']
-deferred: []
+deferred:
+  - summary: >-
+      Unauthenticated token traffic can lock real machine clients out of a Tenant through the per-Tenant limit.
+    evidence: |-
+      LimitTokenRequests counts the 1200/min per-Tenant limit before client authentication, as §5.2 asks, so about 20 sources at 60/min each make every token request at that Tenant answer 429. Needs a product decision.
+  - summary: >-
+      Expired access-token rows in token are never pruned.
+    evidence: |-
+      Every Client Credentials token writes a row and this story excludes pruning.
+  - summary: >-
+      Stale tenant_attempt (and admin_attempt) counter rows are never swept.
+    evidence: |-
+      Each distinct source leaves a lasting row per policy per Tenant, removed only by a crash (UNLOGGED) or Tenant deletion.
 ---
 
 <intent-contract>
@@ -122,17 +135,17 @@ deferred: []
 ## Tasks & Acceptance
 
 **Execution:**
-- `src/Gatekeep.Kernel/Limits/SecurityLimits.cs` -- the new constants -- fixed limits live in one file.
-- `src/Adapters/Postgres/Migrations/Migration20261106000000CreateDirectoryTables.cs`, `TableRegistry.cs`, `MigrateCommandTests.cs`, `TenantSeeds.cs` -- the three tables, RLS, grants, guards and the three FKs -- schema.
-- `src/Modules/Directory/**` -- the contract, machine-client creation (one `CommandContext` command with an audit event), secret verification, the application store and the purge -- Directory owns Applications (AD-8, AD-27).
-- `src/Modules/Authentication/**` -- the Tenant `IRateLimiter` adapter, the token policies and the purge -- Authentication owns attempt counters.
-- `src/Modules/Sessions/**` -- the token store (create plus whatever Client Credentials calls), the throwing authorization store, purge order -- Sessions owns tokens.
-- `src/Modules/Protocol/**`, `src/Gatekeep.Host.Hosted/Program.cs`, `Directory.Packages.props`, module csprojs -- Core registration, the client-auth handler, the grant/audience checks, the token-endpoint transaction, rate limits, cross-Tenant classification and events, forwarded client.
-- `src/Modules/Operations/Core/TenantDeletion.cs` -- purge order.
-- `tests/Architecture/ProtocolRuleTests.cs`, `AuditCatalogue.cs`, `module-edges.txt` -- the rule updates.
-- `tests/Isolation/Protocol/ClientCredentialsTests.cs` (new), `DiscoveryAndJwksTests.cs`, `tests/Isolation/Directory/*`, `tests/Isolation/Authentication/*`, `CanaryFlows.cs` -- one test per I/O matrix row against real Postgres and OpenBao, plus the grant and RLS theories for the new tables.
-- `docs/audit-events.md`, the module diagram, `docs/spikes/2-2-openiddict-stores.md` -- regenerate, and record where the stores live.
-- `_bmad-output/implementation-artifacts/deferred-work.md` -- mark the FK and load-test items done.
+- [x] `src/Gatekeep.Kernel/Limits/SecurityLimits.cs` -- the new constants -- fixed limits live in one file.
+- [x] `src/Adapters/Postgres/Migrations/Migration20261106000000CreateDirectoryTables.cs`, `TableRegistry.cs`, `MigrateCommandTests.cs`, `TenantSeeds.cs` -- the three tables, RLS, grants, guards and the three FKs -- schema.
+- [x] `src/Modules/Directory/**` -- the contract, machine-client creation (one `CommandContext` command with an audit event), secret verification, the application store and the purge -- Directory owns Applications (AD-8, AD-27).
+- [x] `src/Modules/Authentication/**` -- the Tenant `IRateLimiter` adapter, the token policies and the purge -- Authentication owns attempt counters.
+- [x] `src/Modules/Sessions/**` -- the token store (create plus whatever Client Credentials calls), the throwing authorization store, purge order -- Sessions owns tokens.
+- [x] `src/Modules/Protocol/**`, `src/Gatekeep.Host.Hosted/Program.cs`, `Directory.Packages.props`, module csprojs -- Core registration, the client-auth handler, the grant/audience checks, the token-endpoint transaction, rate limits, cross-Tenant classification and events, forwarded client.
+- [x] `src/Modules/Operations/Core/TenantDeletion.cs` -- purge order.
+- [x] `tests/Architecture/ProtocolRuleTests.cs`, `AuditCatalogue.cs`, `module-edges.txt` -- the rule updates.
+- [x] `tests/Isolation/Protocol/ClientCredentialsTests.cs` (new), `DiscoveryAndJwksTests.cs`, `tests/Isolation/Directory/*`, `tests/Isolation/Authentication/*`, `CanaryFlows.cs` -- one test per I/O matrix row against real Postgres and OpenBao, plus the grant and RLS theories for the new tables.
+- [x] `docs/audit-events.md`, the module diagram, `docs/spikes/2-2-openiddict-stores.md` -- regenerate, and record where the stores live.
+- [x] `_bmad-output/implementation-artifacts/deferred-work.md` -- mark the FK and load-test items done.
 
 **Acceptance Criteria:**
 - Given a running Hosted host and a seeded machine client, when it calls `POST /connect/token` with `grant_type=client_credentials`, then it gets an RS256 `at+jwt` that validates only against that Tenant's `/.well-known/jwks`, and no `application` column holds a secret.
@@ -142,6 +155,30 @@ deferred: []
 ## Spec Change Log
 
 ## Review Triage Log
+
+Review 1 (2026-11-08; Blind Hunter, Edge Case Hunter, Verification Gap; diff against `origin/main` after merging it):
+
+| # | Finding | Verdict | Evidence | Route |
+|---|---------|---------|----------|-------|
+| 1 | `VerifiesAtAsync` opens a second pooled connection while the request transaction holds one (pool 50) | medium | `TokenEndpoint.cs` `AuthenticateGatekeepClient`: the request scope is open from `BeginTokenTransaction`; 50 concurrent cross-Tenant probes hold-and-wait until the 5 s connect timeout, then the catch counts an authenticated attempt as unauthenticated | patch |
+| 2 | FKs `token`/`"authorization"` `(tenant_id, application_id)` have no index | false | `Migration20261102110000ConstrainSessionEndReason.cs:33-34` already creates `authorization_application` and `token_application`; a comment in the new migration now points to them | reject |
+| 3 | No real Host.Hosted test of the token endpoint (appender registration, `UseGatekeepForwardedClient`) | gap | Verification-gap layer: `ProtocolHost` supplies both itself; `TenantResolutionTests` only hits `/connect/token` on unknown hosts | patch |
+| 4 | IPv4-mapped IPv6 source folding in `TokenEndpoint.Source` untested | gap | Verification-gap layer and Blind Hunter: no `::ffff:` case for the token endpoint | patch |
+| 5 | `client_id` with no or empty `client_secret` never sent | gap | Verification-gap layer: every test sends a secret | patch |
+| 6 | `A_row_may_not_reference_another_Tenants_Application` skips `"authorization"` | low | Its `InlineData` covers `signin_transaction` and `token` only; a direct addition | patch |
+| 7 | A cross-Tenant secret with `resource=` is refused by `RefuseTokenTargets` before client authentication, so no event is written | medium | The new test failed: OpenIddict runs its resource, audience and missing-secret checks before `ValidateAuthentication`. `AuthenticateGatekeepClient` now runs on `ValidateTokenRequestContext` at `ValidateGrantType`+250 | patch |
+| 8 | `ClientCredentialsAsync` inserted under `ResponseTextAsync`'s summary | low | `CanaryFlows.cs`: two summaries on one method, none on the other; a direct correction | patch |
+| 9 | `VerifyClientSecretAsync` comment claims equal cost for unknown clients | low | A malformed `client_id` returns before the query; the comment is wrong, the timing reveals only the public ID format | patch (comment only) |
+| 10 | `DirectoryTests.cs` declares namespace `...Applications` | false | Deliberate: `Gatekeep.Tests.Isolation.Directory` would shadow `System.IO.Directory` in the 27 test files that call it, and break the build | reject |
+| 11 | Per-Tenant limit counted before authentication lets unauthenticated traffic lock out real clients | medium | Real, but the intent mandates per-Tenant counting before client authentication (§5.2) | defer |
+| 12 | `token` rows are never pruned | medium | Real growth; the intent's Never excludes pruning | defer |
+| 13 | `tenant_attempt` rows are never swept | low | Same as the existing `admin_attempt`, which has no sweep either; pre-existing pattern | defer |
+| 14 | DB failure in `LimitTokenRequests`/`BeginTokenTransaction`, or a failing failure effect, answers a bare 500 | low | Real, but only during a database outage, and the fix adds guards | reject |
+| 15 | Unpaired surrogate in an Application name escapes as a non-`ArgumentException` | low | No caller yet passes user input (no Admin UI or API until Epic 3) | reject |
+| 16 | `invalid_scope` refusal not in the spec | low | Extra strictness, tested; the fix would be a spec edit | reject |
+| 17 | Several Application lookups per request with entity caching disabled | low | Performance only; the fix adds a per-request cache | reject |
+| 18 | FORCE RLS toggle around the FK additions may be unnecessary | maybe-false | Low even if true; runs once in a transactional migration | reject |
+| 19 | Spec `in-review` vs sprint-status `in-progress` | false | The workflow moves sprint-status only at `done` | reject |
 
 ## Design Notes
 
@@ -156,3 +193,29 @@ deferred: []
 **Commands:**
 - `docker build -t gatekeep/tests:epic2-rest -f deploy/docker/tests.Dockerfile .` -- expected: the image builds with locked restore.
 - `MSYS_NO_PATHCONV=1 docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -e TESTCONTAINERS_HOST_OVERRIDE=host.docker.internal --add-host host.docker.internal:host-gateway gatekeep/tests:epic2-rest` -- expected: all architecture and isolation tests pass.
+
+## Auto Run Result
+
+**Summary.** Tenant hosts now issue access tokens by Client Credentials. Directory owns the `application` and `client_secret` tables, machine-client creation (the `{tenantPublicId}.{random}` secret, shown once and stored as SHA-256) and secret verification. Authentication owns the UNLOGGED `tenant_attempt` counters behind a Tenant `IRateLimiter`. Sessions writes the `token` row. Protocol enables the grant with:
+- Gatekeep's own client authentication (`client_secret_basic` and `client_secret_post` only)
+- the request transaction, opened only by the token endpoint
+- per-Tenant and per-source limits answered 429 with `Retry-After`
+- the cross-Tenant classification and its `protocol.client.cross_tenant_rejected` event
+- `invalid_target` for any `resource`/`audience`, and the placeholder audience
+
+Host.Hosted now calls `UseGatekeepForwardedClient()`, and both Compose files set its `ForwardedBy` to Caddy's hosted-edge subnet.
+
+**Deviations from the spec**
+- Client authentication runs on `ValidateTokenRequestContext` right after the grant-type check, not on `ProcessAuthenticationContext`. OpenIddict's resource, audience and missing-secret checks run before `ValidateAuthentication`, so there a cross-Tenant credential sent with `resource=` wrote no event and a missing secret got 400.
+- A requested `scope` is refused with `invalid_scope`, since no scope exists yet.
+- At most 8 cross-Tenant classifications run at once per process (zero-wait); one over the cap counts as unauthenticated, so classification can never hold one pooled connection while waiting for another.
+- A `TenantArtifact` shape in `CredentialShapes` masks the new secret format, which no existing shape covered.
+
+**Review findings.** 19 findings: 8 patched (the classification cap, the reorder and 6 tests or comments), 3 deferred (per-Tenant lockout by unauthenticated traffic, `token` pruning, counter sweeps), 8 rejected (3 false, 5 low). Reasons are in the triage log.
+
+**Follow-up review: recommended (`true`).** The reorder moves client authentication ahead of OpenIddict's own parameter checks. A second pass should confirm that no OpenIddict check that used to reject before client authentication now lets a request through, and that the error a valid client gets for a bad parameter is unchanged.
+
+**Verification**
+- After the patches, the full Docker suite (`gatekeep/tests:epic2-rest`) passed Architecture 701/701 and Isolation 2846/2852. Five failures were 15–17 s Postgres connection timeouts or the 503s they cause, in unrelated classes (TenantDeletion, TenantLabel, FreshAssertion, SessionTables); rerun alone, those classes passed 144/144.
+- The sixth, `MasterKeyRotationTests.Full_rotation_…` (census at line 155), also fails alone. This story changes no custody code, tests or OpenBao files; it is the Story 12.7 instability already in `deferred-work.md`.
+- The matrix audit found a covering test for every I/O matrix row, and each one ran and passed.

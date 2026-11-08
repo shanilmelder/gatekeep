@@ -44,6 +44,16 @@ internal sealed class TokenEndpointServices(
     public TokenRequestLimits Limits { get; } = limits;
 
     public ILogger? Logger { get; } = loggers?.CreateLogger("Gatekeep.Protocol");
+
+    /// <summary>
+    /// The most cross-Tenant classifications that may run at once in this process, each holding a
+    /// second connection while its request holds one. Well under <see cref="HostedDataSource.MaxConnections"/>,
+    /// so probes can never take the pool from other requests.
+    /// </summary>
+    public const int MaxConcurrentClassifications = 8;
+
+    /// <summary>Taken without waiting: a classification over the cap isn't run, and counts as unauthenticated.</summary>
+    public static SemaphoreSlim Classifications { get; } = new(MaxConcurrentClassifications, MaxConcurrentClassifications);
 }
 
 /// <summary>The token endpoint's shared pieces: the request's Tenant and source, and the one refusal every bad client gets.</summary>
@@ -200,48 +210,48 @@ internal sealed class RefuseTokenTargets : IOpenIddictServerHandler<ValidateToke
 }
 
 /// <summary>
-/// Gatekeep's client authentication (AD-8, AD-9), in place of OpenIddict's <c>ValidateClientSecret</c>,
-/// and before its <c>ValidateClientId</c>, so an unknown client and a wrong secret get the one same
-/// <c>invalid_client</c>. A secret whose <c>{tenantPublicId}.</c> prefix isn't this Tenant's is refused
+/// Gatekeep's client authentication (AD-8, AD-9), in place of OpenIddict's <c>ValidateClientSecret</c>.
+/// It runs on token request validation right after the grant type check, before any of OpenIddict's
+/// parameter checks and its client lookup, so a missing secret, an unknown client and a wrong secret
+/// get the one same <c>invalid_client</c>, and a cross-Tenant credential is classified whatever else
+/// the request asks for, such as a <c>resource</c>. A secret whose <c>{tenantPublicId}.</c> prefix isn't this Tenant's is refused
 /// before anything is looked up here, then classified: when the prefix names another Tenant and the
 /// credential verifies there, read-only, the attempt is authenticated and always writes
 /// <c>protocol.client.cross_tenant_rejected</c> to this Tenant's Log; otherwise it is only counted per
 /// source, and logged at most once per source per hour. Both commit after the request's rollback.
 /// </summary>
 internal sealed class AuthenticateGatekeepClient(TokenRequestTransaction transaction, TokenEndpointServices services)
-    : IOpenIddictServerHandler<ProcessAuthenticationContext>
+    : IOpenIddictServerHandler<ValidateTokenRequestContext>
 {
     public static OpenIddictServerHandlerDescriptor Descriptor { get; } =
-        OpenIddictServerHandlerDescriptor.CreateBuilder<ProcessAuthenticationContext>()
+        OpenIddictServerHandlerDescriptor.CreateBuilder<ValidateTokenRequestContext>()
             .UseScopedHandler<AuthenticateGatekeepClient>()
-            .SetOrder(OpenIddictServerHandlers.ValidateClientId.Descriptor.Order - 500)
+            .SetOrder(OpenIddictServerHandlers.Exchange.ValidateGrantType.Descriptor.Order + 250)
             .SetType(OpenIddictServerHandlerType.Custom)
             .Build();
 
-    public async ValueTask HandleAsync(ProcessAuthenticationContext context)
+    public async ValueTask HandleAsync(ValidateTokenRequestContext context)
     {
         ArgumentNullException.ThrowIfNull(context);
 
-        // Every endpoint that authenticates clients must be covered here before it is enabled (Story 2.2).
-        if (context.EndpointType is not OpenIddictServerEndpointType.Token)
-        {
-            return;
-        }
-
-        if (string.IsNullOrEmpty(context.ClientId) || string.IsNullOrEmpty(context.ClientSecret))
+        // The token endpoint's only. Every endpoint that authenticates clients must be covered by a
+        // handler like this one before it is enabled (Story 2.2).
+        var clientId = context.Request.ClientId;
+        var clientSecret = context.Request.ClientSecret;
+        if (string.IsNullOrEmpty(clientId) || string.IsNullOrEmpty(clientSecret))
         {
             TokenEndpoint.RejectClient(context);
             return;
         }
 
         var tenant = TokenEndpoint.Tenant(context);
-        var secret = new Secret<string>(context.ClientSecret);
-        var dot = context.ClientSecret.IndexOf('.', StringComparison.Ordinal);
-        var prefix = dot > 0 ? context.ClientSecret[..dot] : null;
+        var secret = new Secret<string>(clientSecret);
+        var dot = clientSecret.IndexOf('.', StringComparison.Ordinal);
+        var prefix = dot > 0 ? clientSecret[..dot] : null;
 
         if (prefix == PublicId.Format(PublicIdType.Tenant, tenant.TenantId))
         {
-            if (!await services.Directory.VerifyClientSecretAsync(transaction.Context, context.ClientId, secret, context.CancellationToken))
+            if (!await services.Directory.VerifyClientSecretAsync(transaction.Context, clientId, secret, context.CancellationToken))
             {
                 TokenEndpoint.RejectClient(context);
             }
@@ -251,7 +261,7 @@ internal sealed class AuthenticateGatekeepClient(TokenRequestTransaction transac
 
         // Another Tenant's, or no Tenant's at all: refused before any lookup in this Tenant.
         var other = PublicId.TryParse(PublicIdType.Tenant, prefix, out var otherId) && otherId != tenant.TenantId ? otherId : (Guid?)null;
-        var authenticated = other is { } id && await VerifiesAtAsync(id, context.ClientId, secret, context.CancellationToken);
+        var authenticated = other is { } id && await VerifiesAtAsync(id, clientId, secret, context.CancellationToken);
         var rejected = new AuditEvent(ProtocolEvents.ClientCrossTenantRejected.Code, Actor.Anonymous);
 
         if (authenticated)
@@ -279,9 +289,20 @@ internal sealed class AuthenticateGatekeepClient(TokenRequestTransaction transac
         TokenEndpoint.RejectClient(context);
     }
 
-    /// <summary>Whether the credential verifies in <paramref name="tenantId"/>, in its own read-only scope that writes nothing.</summary>
+    /// <summary>
+    /// Whether the credential verifies in <paramref name="tenantId"/>, in its own read-only scope that
+    /// writes nothing. It never waits for a classification slot or so holds its request's connection
+    /// while waiting for another: over <see cref="TokenEndpointServices.MaxConcurrentClassifications"/>,
+    /// the attempt is unclassified, so counted as unauthenticated.
+    /// </summary>
     private async Task<bool> VerifiesAtAsync(Guid tenantId, string clientId, Secret<string> secret, CancellationToken cancellationToken)
     {
+        if (!TokenEndpointServices.Classifications.Wait(0, CancellationToken.None))
+        {
+            services.Logger?.LogWarning("A cross-Tenant credential wasn't classified: too many classifications at once.");
+            return false;
+        }
+
         try
         {
             await using var scope = await TenantScope.BeginAsync(services.Database.Source, tenantId, cancellationToken);
@@ -300,6 +321,10 @@ internal sealed class AuthenticateGatekeepClient(TokenRequestTransaction transac
             // Unclassified is counted as unauthenticated; the type only, since a message could name the Tenant.
             services.Logger?.LogWarning("A cross-Tenant credential couldn't be classified, on {ErrorType}.", e.GetType().Name);
             return false;
+        }
+        finally
+        {
+            TokenEndpointServices.Classifications.Release();
         }
     }
 }

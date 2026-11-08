@@ -112,6 +112,7 @@ flowchart TD
   TestsIsolation --> Admins
   TestsIsolation --> Audit
   TestsIsolation --> Authentication
+  TestsIsolation --> Directory
   TestsIsolation --> Cli
   TestsIsolation --> Keys
   TestsIsolation --> Management

@@ -175,6 +175,7 @@ public sealed class ScrubbingTests
     [InlineData("/cb%3Fcode%3Dcanary-value-1234%26state%3D1", $"/cb%3Fcode%3D{Masked}%26state%3D1")]
     [InlineData("issued eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJ4In0.c2lnbmF0dXJl to app", $"issued {Masked} to app")]
     [InlineData("issued eyJhbGciOiJub25lIn0.eyJzdWIiOiJ4In0. to app", $"issued {Masked} to app")]
+    [InlineData("secret ten_aaaaaaaaaaaaaaaaaaaaaaaaaa.Y2FuYXJ5LXZhbHVlLTEyMzQ1Njc4OTAxMjM0NTY3ODkw for app", $"secret {Masked} for app")]
     [InlineData("GET /cb?code=canary-value-1234 HTTP/1.1", $"GET /cb?code={Masked} HTTP/1.1")]
     [InlineData("GET /cb?state=1&code=canary-value-1234&x=2", $"GET /cb?state=1&code={Masked}&x=2")]
     [InlineData("-----BEGIN PRIVATE KEY-----\nY2FuYXJ5\nLXZhbHVl\n-----END PRIVATE KEY----- loaded", $"{Masked} loaded")]

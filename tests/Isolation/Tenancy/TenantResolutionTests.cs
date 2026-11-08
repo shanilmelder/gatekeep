@@ -112,6 +112,63 @@ public sealed class TenantResolutionTests(PostgresFixture postgres) : IDisposabl
     }
 
     [Fact]
+    public async Task Real_Host_Hosted_refuses_another_Tenants_client_logs_it_and_counts_the_forwarded_source()
+    {
+        // Story 2.5, through Program.cs itself: its IAuditAppender and its forwarded client. Neither
+        // Tenant has a Signing Key, so the fake OpenBao is never asked to sign: the credential is A's
+        // own, sent to B, refused, and logged in B through the host's appender.
+        var database = await Protocol.ProtocolDatabase.CreateAsync(postgres);
+        var a = await database.AddTenantAsync("alpha.gatekeep.test");
+        var b = await database.AddTenantAsync("bravo.gatekeep.test");
+        var client = await database.CreateClientAsync(a.TenantId);
+
+        using var socket = new FakeOpenBaoSocket();
+        var health = HostProcess.FreePort();
+        var port = HostProcess.FreePort();
+        using var process = HostProcess.Start(
+            "Hosted",
+            $"--ConnectionStrings:Hosted={database.Hosted}",
+            $"--Custody:SocketPath={socket.Path}",
+            $"--Custody:RoleIdFile={SecretFile("role-id")}",
+            $"--Custody:SecretIdFile={SecretFile("secret-id")}",
+            $"--Gatekeep:HealthPort={health}",
+            $"--Gatekeep:PublicPort={port}",
+            "--Gatekeep:ForwardedBy=127.0.0.0/8");
+        Assert.Equal(HttpStatusCode.OK, (await process.GetAsync(health, "/healthz", Timeout, Cancellation)).Status);
+
+        using var http = Client();
+        using var request = new HttpRequestMessage(HttpMethod.Post, new Uri($"http://127.0.0.1:{port}/connect/token"))
+        {
+            Content = new FormUrlEncodedContent(new Dictionary<string, string>
+            {
+                ["grant_type"] = "client_credentials",
+                ["client_id"] = client.ClientId,
+                ["client_secret"] = client.Secret,
+            }),
+        };
+        request.Headers.TryAddWithoutValidation("Host", "bravo.gatekeep.test");
+        request.Headers.TryAddWithoutValidation("X-Forwarded-For", "203.0.113.77");
+        using var response = await http.SendAsync(request, Cancellation);
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        using (var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync(Cancellation)))
+        {
+            Assert.Equal("invalid_client", body.RootElement.GetProperty("error").GetString());
+        }
+
+        Assert.Equal(1L, await database.ScalarAsync<long>(
+            $"SELECT count(*) FROM audit_event WHERE tenant_id = '{b.TenantId}' AND type_code = 'protocol.client.cross_tenant_rejected'"));
+        Assert.Equal(0L, await database.ScalarAsync<long>($"SELECT count(*) FROM audit_event WHERE tenant_id = '{a.TenantId}' AND type_code = 'protocol.client.cross_tenant_rejected'"));
+
+        // Counted by the address Caddy forwarded, not the peer's.
+        var policy = Gatekeep.Modules.Authentication.Contracts.AuthenticationContract.TokenRequestSourcePolicy.Code;
+        Assert.Equal(1L, await database.ScalarAsync<long>(
+            $"SELECT coalesce(max(attempts), 0)::bigint FROM tenant_attempt WHERE tenant_id = '{b.TenantId}' AND policy = '{policy}' AND subject_hash = sha256(convert_to('203.0.113.77', 'UTF8'))"));
+        Assert.Equal(1L, await database.ScalarAsync<long>(
+            $"SELECT count(*) FROM tenant_attempt WHERE tenant_id = '{b.TenantId}' AND policy = '{policy}'"));
+    }
+
+    [Fact]
     public async Task Active_host_runs_the_probe_with_the_stored_Tenant()
     {
         await using var probe = await ProbeServer.StartAsync(postgres.RoleConnection(TableRegistry.Hosted, await SeededAsync()));

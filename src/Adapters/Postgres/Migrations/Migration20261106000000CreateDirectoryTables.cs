@@ -90,6 +90,9 @@ public sealed class Migration20261106000000CreateDirectoryTables : Migration
             ALTER TABLE "authorization" FORCE ROW LEVEL SECURITY;
             ALTER TABLE token FORCE ROW LEVEL SECURITY;
 
+            -- So the RESTRICT check on an Application's delete or purge reads an index, not the table.
+            -- "authorization" and token already have theirs (authorization_application, token_application,
+            -- from ConstrainSessionEndReason).
             CREATE INDEX signin_transaction_application ON signin_transaction (tenant_id, application_id);
 
 
