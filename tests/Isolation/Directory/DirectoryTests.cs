@@ -35,6 +35,7 @@ public sealed class DirectoryTests(PostgresFixture postgres)
     private static readonly Guid TenantA = Guid.Parse("01900000-0000-7000-8000-0000000025d1");
     private static readonly Guid TenantB = Guid.Parse("01900000-0000-7000-8000-0000000025d2");
     private static readonly Guid TenantC = Guid.Parse("01900000-0000-7000-8000-0000000025d3");
+    private static readonly Guid TenantD = Guid.Parse("01900000-0000-7000-8000-0000000025d4");
 
     private static readonly Regex SecretShape = new(@"\Aten_[a-z2-7]{26}\.[A-Za-z0-9_-]{43}\z", RegexOptions.Compiled);
 
@@ -324,6 +325,35 @@ public sealed class DirectoryTests(PostgresFixture postgres)
         Assert.Equal(0L, await PostgresFixture.ScalarAsync<long>(superuser, $"SELECT count(*) FROM \"{table}\""));
     }
 
+    /// <summary>Host.Hosted may update <c>"authorization"</c> and <c>token</c> rows: no update may point one at the system Application.</summary>
+    [Theory]
+    [InlineData("authorization", SessionIn, "INSERT INTO \"authorization\" (tenant_id, id, application_id, user_session_id, status, type, concurrency_token) VALUES ('{0}', '01900000-0000-7000-8000-0000000028b1', '{1}', '01900000-0000-7000-8000-0000000028a2', 'valid', 'ad-hoc', gen_random_uuid())")]
+    [InlineData("token", "", "INSERT INTO token (tenant_id, id, application_id, type, status, concurrency_token) VALUES ('{0}', '01900000-0000-7000-8000-0000000028b1', '{1}', 'access_token', 'valid', gen_random_uuid())")]
+    public async Task No_update_may_point_an_authorization_or_token_at_the_system_Application(string table, string setup, string insert)
+    {
+        var database = await DatabaseAsync();
+        var machine = await CreateAsync(database, TenantA);
+        var id = await EnsureAsync(database, TenantA);
+        var superuser = postgres.SuperuserConnection(database);
+        if (setup.Length > 0)
+        {
+            await PostgresFixture.ExecuteAsync(superuser, string.Format(System.Globalization.CultureInfo.InvariantCulture, setup, TenantA));
+        }
+
+        await PostgresFixture.ExecuteAsync(superuser, string.Format(System.Globalization.CultureInfo.InvariantCulture, insert, TenantA, machine.ApplicationId));
+
+        var error = await Assert.ThrowsAsync<PostgresException>(() => InTenantAsync(database, TableRegistry.Hosted, TenantA, async c =>
+        {
+            await using var command = c.CreateCommand();
+            command.CommandText = $"UPDATE \"{table}\" SET application_id = '{id}' WHERE id = '01900000-0000-7000-8000-0000000028b1'";
+            return await command.ExecuteNonQueryAsync(Cancellation);
+        }));
+
+        Assert.True(error.SqlState == SystemApplicationNamed, $"{table}: {error.SqlState}");
+        Assert.Equal(1L, await PostgresFixture.ScalarAsync<long>(
+            superuser, $"SELECT count(*) FROM \"{table}\" WHERE application_id = '{machine.ApplicationId}'"));
+    }
+
     [Fact]
     public async Task A_signin_transaction_binds_to_the_system_Application()
     {
@@ -434,16 +464,22 @@ public sealed class DirectoryTests(PostgresFixture postgres)
     /// the migrator over Tenants seeded after migrating: no hook migrates only up to the migration before it.
     /// </summary>
     [Fact]
-    public async Task Backfill_gives_each_active_Tenant_without_one_exactly_one_system_Application()
+    public async Task Backfill_gives_each_creating_or_active_Tenant_without_one_exactly_one_system_Application()
     {
         var database = await DatabaseAsync();
         var superuser = postgres.SuperuserConnection(database);
         await TestTenants.InsertAsync(superuser, TenantC, status: "deleting");
+        await TestTenants.InsertAsync(superuser, TenantD, status: "creating");
         var existing = await EnsureAsync(database, TenantA);
 
         var builder = new MigrationBuilder("Npgsql.EntityFrameworkCore.PostgreSQL");
         builder.ForEachTenant(Migration20261109000000AddSystemApplication.Backfill);
         var sql = Assert.IsType<SqlOperation>(Assert.Single(builder.Operations)).Sql;
+
+        // The migration's Up() runs exactly that statement, last.
+        var migration = new Migration20261109000000AddSystemApplication { ActiveProvider = "Npgsql.EntityFrameworkCore.PostgreSQL" };
+        Assert.Equal(sql, Assert.IsType<SqlOperation>(migration.UpOperations[^1]).Sql);
+
         await PostgresFixture.ExecuteAsync(postgres.RoleConnection(TableRegistry.Migrator, database), sql);
         await PostgresFixture.ExecuteAsync(postgres.RoleConnection(TableRegistry.Migrator, database), sql);
 
@@ -454,7 +490,8 @@ public sealed class DirectoryTests(PostgresFixture postgres)
             ("name", DirectoryContract.SystemApplicationName)));
         Assert.Equal(7, (await PostgresFixture.ScalarAsync<Guid>(superuser, $"SELECT id FROM application WHERE tenant_id = '{TenantB}' AND kind = 'system'")).Version);
         Assert.Equal(0L, await PostgresFixture.ScalarAsync<long>(superuser, $"SELECT count(*) FROM application WHERE tenant_id = '{TenantC}'"));
-        Assert.Equal(2L, await PostgresFixture.ScalarAsync<long>(superuser, "SELECT count(*) FROM application"));
+        Assert.Equal(1L, await PostgresFixture.ScalarAsync<long>(superuser, $"SELECT count(*) FROM application WHERE tenant_id = '{TenantD}' AND kind = 'system'"));
+        Assert.Equal(3L, await PostgresFixture.ScalarAsync<long>(superuser, "SELECT count(*) FROM application"));
         Assert.Equal(0L, await PostgresFixture.ScalarAsync<long>(superuser, "SELECT count(*) FROM audit_event"));
     }
 

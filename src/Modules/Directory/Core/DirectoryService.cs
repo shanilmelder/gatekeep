@@ -25,10 +25,12 @@ internal sealed class DirectoryService(IAuditAppender audit, TimeProvider time) 
         """;
 
     // grant_types and audiences take their empty defaults, which the system CHECK requires (Story 2.8).
+    // A concurrent insert that won leaves this one doing nothing, so the caller re-selects the winner.
     private const string InsertSystemApplication =
         """
         INSERT INTO application (tenant_id, id, name, kind, created_at)
         VALUES (@tenant_id, @id, @name, 'system', @created_at)
+        ON CONFLICT (tenant_id) WHERE kind = 'system' DO NOTHING
         """;
 
     private const string InsertSecret =
@@ -148,19 +150,19 @@ internal sealed class DirectoryService(IAuditAppender audit, TimeProvider time) 
             return existing;
         }
 
-        // The caller holds its Tenant's row locked (Tenant creation's activation), so no second insert
-        // races this one; the unique index refuses one regardless.
         var now = _time.GetUtcNow();
-        var applicationId = Guid.CreateVersion7(now);
-        await using var command = context.CreateCommand();
-        command.CommandText = InsertSystemApplication;
-        Add(command, "tenant_id", tenantId);
-        Add(command, "id", applicationId);
-        Add(command, "name", DirectoryContract.SystemApplicationName);
-        Add(command, "created_at", now);
-        await command.ExecuteNonQueryAsync(cancellationToken);
+        await using (var command = context.CreateCommand())
+        {
+            command.CommandText = InsertSystemApplication;
+            Add(command, "tenant_id", tenantId);
+            Add(command, "id", Guid.CreateVersion7(now));
+            Add(command, "name", DirectoryContract.SystemApplicationName);
+            Add(command, "created_at", now);
+            await command.ExecuteNonQueryAsync(cancellationToken);
+        }
 
-        return applicationId;
+        return await ApplicationRows.FindSystemAsync(context, cancellationToken)
+            ?? throw new InvalidOperationException("The Tenant's system Application was neither inserted nor found.");
     }
 
     public Task<Guid?> FindSystemApplicationAsync(CommandContext context, CancellationToken cancellationToken)
