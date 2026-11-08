@@ -12,6 +12,8 @@
 
   <ItemGroup>
     <PackageReference Include="Npgsql" />
+    <!-- Story 2.5: the managers over the Directory and Sessions stores. -->
+    <PackageReference Include="OpenIddict.Core" />
     <PackageReference Include="OpenIddict.Server.AspNetCore" />
   </ItemGroup>
 

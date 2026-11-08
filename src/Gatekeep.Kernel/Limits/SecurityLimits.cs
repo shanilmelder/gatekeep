@@ -102,6 +102,27 @@ public static class SecurityLimits
     public const int AdminRecoveryCodeDeploymentAttempts = 50;
 
     /// <summary>
+    /// How long a <c>gatekeep recover-admin</c> enrolment can be redeemed: 15 minutes from its issue
+    /// (Story 1.32, AD-31, PRD §5.2). It is single use, and <c>admin_enrolment</c> refuses any other expiry.
+    /// </summary>
+    public static readonly TimeSpan AdminEnrolmentLifetime = TimeSpan.FromMinutes(15);
+
+    /// <summary>
+    /// Enrolment redemptions one client may make in <see cref="AdminEnrolmentWindow"/>: 5 (Story 1.32).
+    /// Each is counted before the value is looked up, whatever its outcome.
+    /// </summary>
+    public const int AdminEnrolmentAttempts = 5;
+
+    /// <summary>
+    /// Enrolment redemptions the whole Deployment may take in <see cref="AdminEnrolmentWindow"/>: 50
+    /// (Story 1.32), whatever client sends them.
+    /// </summary>
+    public const int AdminEnrolmentDeploymentAttempts = 50;
+
+    /// <summary>The fixed window enrolment redemptions are counted in: 15 minutes (Story 1.32).</summary>
+    public static readonly TimeSpan AdminEnrolmentWindow = TimeSpan.FromMinutes(15);
+
+    /// <summary>
     /// The most WebAuthn credentials one Admin may hold: 10 (Story 1.26). It bounds the exclude list
     /// and Your credentials, and the database refuses an 11th.
     /// </summary>
@@ -154,4 +175,49 @@ public static class SecurityLimits
     /// sweep deletes it: 24 hours (AD-11), far past any provisioning or rotation still in flight.
     /// </summary>
     public static readonly TimeSpan OrphanKeyGrace = TimeSpan.FromHours(24);
+
+    /// <summary>
+    /// The default lifetime of an access token: 15 minutes (PRD §5.2, Story 2.5), never more than
+    /// <see cref="HardSignedTokenLifetime"/>. A Client Credentials token carries it as <c>expires_in</c> 900.
+    /// </summary>
+    public static readonly TimeSpan DefaultAccessTokenLifetime = TimeSpan.FromMinutes(15);
+
+    /// <summary>
+    /// Token requests one Tenant's token endpoint takes in <see cref="TokenRequestWindow"/>: 1200, from
+    /// every source together (PRD §5.2, AD-14, Story 2.5). Each is counted before its client is
+    /// authenticated, so past it every request is a 429 until the window ends.
+    /// </summary>
+    public const int TokenRequestTenantAttempts = 1200;
+
+    /// <summary>
+    /// Token requests one source (an IPv4 address, or an IPv6 /64) may send one Tenant's token endpoint
+    /// in <see cref="TokenRequestWindow"/>: 60 (PRD §5.2, AD-14, Story 2.5), counted like the Tenant's.
+    /// </summary>
+    public const int TokenRequestSourceAttempts = 60;
+
+    /// <summary>The fixed window token requests are counted in: 1 minute (PRD §5.2, Story 2.5).</summary>
+    public static readonly TimeSpan TokenRequestWindow = TimeSpan.FromMinutes(1);
+
+    /// <summary>
+    /// How often one source's unauthenticated cross-Tenant mismatches reach the probed Tenant's Log: once
+    /// per hour at most (PRD §5.2, AD-9, Story 2.5). Every mismatch is still counted, and an authenticated
+    /// cross-Tenant attempt is always written.
+    /// </summary>
+    public static readonly TimeSpan CrossTenantMismatchLogWindow = TimeSpan.FromHours(1);
+
+    /// <summary>
+    /// The unauthenticated cross-Tenant mismatches one source's counter records in
+    /// <see cref="CrossTenantMismatchLogWindow"/> before it stops growing: 10,000 (Story 2.5). It only
+    /// measures: a mismatch past it is refused exactly alike.
+    /// </summary>
+    public const int CrossTenantMismatchCountedAttempts = 10_000;
+
+    /// <summary>
+    /// How long a rotated-out client secret keeps working beside its replacement by default: 24 hours
+    /// (PRD §5.2). Epic 3 rotates; Story 2.5 adds only the <c>expires_at</c> it ends by.
+    /// </summary>
+    public static readonly TimeSpan ClientSecretOverlap = TimeSpan.FromHours(24);
+
+    /// <summary>The longest a rotated-out client secret may overlap its replacement: 7 days (PRD §5.2).</summary>
+    public static readonly TimeSpan HardClientSecretOverlap = TimeSpan.FromDays(7);
 }

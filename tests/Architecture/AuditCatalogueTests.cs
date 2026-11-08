@@ -102,6 +102,21 @@ public class AuditCatalogueTests
         Assert.Contains("Restore it from git first", Assert.Single(problems), StringComparison.OrdinalIgnoreCase);
     }
 
+    /// <summary>
+    /// Story 7.4: Host.Admin's generated table of every code's outcome and summary is what the
+    /// generator writes now, so a Log lists and searches every module's codes, Protocol's too.
+    /// </summary>
+    [Fact]
+    public void Host_Admin_log_catalogue_matches_its_generator()
+    {
+        var path = Path.Combine(Root, AuditCatalogue.HostCataloguePath);
+        var actual = File.Exists(path) ? File.ReadAllText(path).ReplaceLineEndings("\n") : string.Empty;
+
+        Assert.True(
+            actual == AuditCatalogue.RenderHostCatalogue(Catalogue),
+            $"{AuditCatalogue.HostCataloguePath} is stale. Build the solution, then regenerate it: {AuditCatalogue.RegenerateCommand}");
+    }
+
     [Fact]
     public void Regenerating_the_committed_document_writes_the_render()
     {
@@ -249,6 +264,12 @@ public class AuditCatalogueTests
                 allowed.Add((string)code.GetType().GetProperty("Value")!.GetValue(code)!);
             }
         }
+
+        // Security Alert codes share the shape (Story 1.30): each one the Kernel defines is allowed.
+        allowed.UnionWith(typeof(Gatekeep.Kernel.Alerts.SecurityAlertCode)
+            .GetProperties(BindingFlags.Public | BindingFlags.Static)
+            .Where(p => p.PropertyType == typeof(Gatekeep.Kernel.Alerts.SecurityAlertCode))
+            .Select(p => ((Gatekeep.Kernel.Alerts.SecurityAlertCode)p.GetValue(null)!).Code.Value));
 
         // Rate limit policy codes share the shape (AD-14): each one a contract publishes is allowed.
         foreach (var module in Directory.EnumerateDirectories(Path.Combine(Root, "src", "Modules")).Select(Path.GetFileName))

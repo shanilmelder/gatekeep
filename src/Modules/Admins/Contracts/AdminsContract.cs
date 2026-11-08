@@ -102,6 +102,26 @@ public static class AdminsContract
         SecurityLimits.AdminRecoveryCodeDeploymentAttempts,
         SecurityLimits.AdminRecoveryCodeWindow);
 
+    /// <summary>
+    /// <c>recover-admin</c> enrolment redemptions (Story 1.32): 5 per client in a fixed 15-minute
+    /// window, counted in <c>admin_attempt</c> in their own committed transaction before the value
+    /// is looked up.
+    /// </summary>
+    public static readonly RateLimitPolicy EnrolmentPolicy = new(
+        "admins.enrolment.redeem",
+        SecurityLimits.AdminEnrolmentAttempts,
+        SecurityLimits.AdminEnrolmentWindow);
+
+    /// <summary>
+    /// <c>recover-admin</c> enrolment redemptions across the Deployment (Story 1.32): 50 in a fixed
+    /// 15-minute window under <see cref="DeploymentSubject"/>, counted before the per-client count
+    /// and before the value is looked up.
+    /// </summary>
+    public static readonly RateLimitPolicy EnrolmentDeploymentPolicy = new(
+        "admins.enrolment.deployment",
+        SecurityLimits.AdminEnrolmentDeploymentAttempts,
+        SecurityLimits.AdminEnrolmentWindow);
+
     /// <summary>The fixed subject Deployment-wide limits are counted under.</summary>
     public const string DeploymentSubject = "deployment";
 
@@ -223,5 +243,27 @@ public static class AdminsContract
         ArgumentNullException.ThrowIfNull(appender);
         ArgumentNullException.ThrowIfNull(custody);
         return new AdminRecoveryCodes(appender, custody);
+    }
+
+    /// <summary>
+    /// The enrolment issuer behind <c>gatekeep recover-admin</c> (Story 1.32, AD-31). It runs as
+    /// <c>gk_cli</c>, in a Deployment scope, and writes its event through <paramref name="appender"/>.
+    /// Only <c>Gatekeep.Cli</c> calls this: no HTTP route or job issues an enrolment.
+    /// </summary>
+    public static IAdminEnrolmentIssuer CreateEnrolmentIssuer(IAuditAppender appender)
+    {
+        ArgumentNullException.ThrowIfNull(appender);
+        return new EnrolmentIssuer(appender);
+    }
+
+    /// <summary>
+    /// <c>recover-admin</c> enrolment redemption behind <c>POST /api/v1/deployment/signin/enrolment</c>
+    /// (Story 1.32). It runs as <c>gk_admin</c>, in a Deployment scope, and writes its events through
+    /// <paramref name="appender"/>.
+    /// </summary>
+    public static IAdminEnrolments CreateEnrolments(IAuditAppender appender)
+    {
+        ArgumentNullException.ThrowIfNull(appender);
+        return new AdminEnrolments(appender);
     }
 }

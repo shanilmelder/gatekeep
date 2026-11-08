@@ -256,6 +256,45 @@ public class KeyCustodyRuleTests
         Assert.Contains("PREVIOUS_ID_FILE=/run/secrets/master_key_previous_id", start);
     }
 
+    /// <summary>
+    /// Story 1.30: the audit file leaves the server, so the device keeps OpenBao's default HMAC of
+    /// every request and response value. No <c>log_raw</c>, and neither <c>hmac_accessor</c> nor
+    /// <c>elide_list_responses</c> set to false; and the file is readable by its group alone, the
+    /// one the shipper reads it through.
+    /// </summary>
+    [Fact]
+    public void Audit_device_keeps_its_default_HMAC_and_is_readable_by_its_group_alone()
+    {
+        var config = HclComment.Replace(File.ReadAllText(Path.Combine(Root, DeployDirectory, "openbao.hcl")), string.Empty);
+
+        Assert.Empty(AuditViolations(config));
+        var options = Regex.Match(config, @"(?s)audit\s+""file""\s+""file""\s*\{.*?options\s*\{(?<options>[^}]*)\}");
+        Assert.True(options.Success, "openbao.hcl declares no file audit device.");
+        Assert.Matches(@"(?m)^\s*file_path\s*=\s*""/var/log/openbao/audit\.log""\s*$", options.Groups["options"].Value);
+        Assert.Matches(@"(?m)^\s*mode\s*=\s*""0640""\s*$", options.Groups["options"].Value);
+        Assert.Single(Regex.Matches(config, @"(?m)^\s*audit\s+"""));
+    }
+
+    [Theory]
+    [InlineData("audit \"file\" \"file\" {\n  options {\n    file_path = \"/x\"\n  }\n}", 0)]
+    [InlineData("audit \"file\" \"file\" {\n  options {\n    log_raw = true\n  }\n}", 1)]
+    [InlineData("audit \"file\" \"file\" {\n  options {\n    log_raw = \"true\"\n  }\n}", 1)]
+    [InlineData("audit \"file\" \"file\" {\n  options {\n    hmac_accessor = false\n  }\n}", 1)]
+    [InlineData("audit \"file\" \"file\" {\n  options {\n    hmac_accessor = \"false\"\n  }\n}", 1)]
+    [InlineData("audit \"file\" \"file\" {\n  options {\n    elide_list_responses = false\n  }\n}", 1)]
+    [InlineData("audit \"file\" \"file\" {\n  options {\n    hmac_accessor = true\n  }\n}", 0)]
+    public void Audit_violation_detection(string config, int violations)
+    {
+        Assert.Equal(violations, AuditViolations(config).Count);
+    }
+
+    private static List<string> AuditViolations(string config) =>
+    [
+        .. Regex.Matches(config, @"\blog_raw\b").Select(_ => "log_raw"),
+        .. Regex.Matches(config, @"\bhmac_accessor\s*=\s*""?false""?").Select(_ => "hmac_accessor = false"),
+        .. Regex.Matches(config, @"\belide_list_responses\s*=\s*""?false""?").Select(_ => "elide_list_responses = false"),
+    ];
+
     [Fact]
     public void No_deploy_file_is_a_systemd_unit()
     {

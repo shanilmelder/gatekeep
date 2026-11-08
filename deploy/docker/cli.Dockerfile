@@ -26,11 +26,18 @@ COPY --from=projects /src/ ./
 RUN dotnet restore src/Gatekeep.Cli/Gatekeep.Cli.csproj --locked-mode
 
 COPY src/ src/
-RUN dotnet publish src/Gatekeep.Cli/Gatekeep.Cli.csproj --no-restore --configuration Release --output /app
+RUN dotnet publish src/Gatekeep.Cli/Gatekeep.Cli.csproj --no-restore --configuration Release --output /app \
+    && mkdir -p /audit-ship && chmod 0700 /audit-ship
 
 FROM mcr.microsoft.com/dotnet/aspnet:10.0.14-noble-chiseled@sha256:c89a6a61f494f20a5ae302990e814627a8d91b332fd4a8e7c1707c2d4da9555d
 WORKDIR /app
 COPY --from=build /app ./
+
+# The openbao-audit-shipper service's read offset (Story 1.30): the shipper-state volume copies
+# this directory's owner and mode on first use, so it belongs to the shipper's uid, 10006, alone.
+# The build stage sets its 0700 mode, which COPY keeps: COPY's chmod flag needs BuildKit, and the stack
+# check builds without it.
+COPY --from=build --chown=10006:10006 /audit-ship /var/lib/gatekeep/audit-ship
 
 # No diagnostics IPC socket.
 ENV DOTNET_EnableDiagnostics=0

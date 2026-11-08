@@ -394,6 +394,9 @@ internal static class AdminOpenApi
                             Description = context.Description.RelativePath?.EndsWith("recovery-code", StringComparison.Ordinal) == true
                                 ? "The recovery Admin Session: __Host-gk-admin={43 base64url characters}; Path=/; Secure; HttpOnly; " +
                                   "SameSite=Strict, a browser session cookie with no Domain, Expires or Max-Age."
+                                : context.Description.RelativePath?.EndsWith("enrolment", StringComparison.Ordinal) == true
+                                ? "The setup or recovery Admin Session: __Host-gk-admin={43 base64url characters}; Path=/; Secure; HttpOnly; " +
+                                  "SameSite=Strict, a browser session cookie with no Domain, Expires or Max-Age."
                                 : metadata.OfType<JsonRequestBody>().Any()
                                 ? "The Admin Session: __Host-gk-admin={43 base64url characters}; Path=/; Secure; HttpOnly; SameSite=Strict, a " +
                                   "browser session cookie with no Domain, Expires or Max-Age. And __Host-gk-admin-signin cleared with Max-Age=0, " +

@@ -80,6 +80,7 @@ public class CapabilityRuleTests
         "post /api/v1/deployment/bootstrap",
         "post /api/v1/deployment/signin",
         "post /api/v1/deployment/signin/complete",
+        "post /api/v1/deployment/signin/enrolment",
         "post /api/v1/deployment/signin/recovery-code",
     ];
 
@@ -398,9 +399,10 @@ public class CapabilityRuleTests
         var registry = Registry();
         var entryType = registry.Assembly.GetType("Gatekeep.Adapters.Postgres.Schema.TableEntry", throwOnError: true)!;
         var tableClass = registry.Assembly.GetType("Gatekeep.Adapters.Postgres.Schema.TableClass", throwOnError: true)!;
+        var tableUse = registry.Assembly.GetType("Gatekeep.Adapters.Postgres.Schema.TableUse", throwOnError: true)!;
         var constructor = entryType.GetConstructors().Single();
         var grants = new Dictionary<string, IReadOnlyList<string>> { ["gk_hosted"] = ["SELECT"] };
-        var entry = constructor.Invoke(["tenant_role", Enum.Parse(tableClass, "Control"), "Admins", grants, null, null, false]);
+        var entry = constructor.Invoke(["tenant_role", Enum.Parse(tableClass, "Control"), "Admins", Enum.Parse(tableUse, "Configuration"), grants, null, null, false]);
 
         Assert.Equal(["tenant_role"], HostedGrants([entry]));
     }

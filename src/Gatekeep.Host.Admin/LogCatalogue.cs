@@ -1,67 +1,34 @@
-using System.Reflection;
 using Gatekeep.Kernel.Audit;
 
 namespace Gatekeep.Host.Admin;
 
-/// <summary>
-/// Every published audit event by its code (Story 7.4), composed here from each module's
-/// <c>Gatekeep.Modules.{Module}.Contracts.{Module}Events</c> catalogue, the same members
-/// <c>docs/audit-events.md</c> is generated from. Host.Admin references only some modules, so
-/// it reads the catalogues of the module assemblies beside it, which its references bring into
-/// its output. A Log row's summary and outcome come from here, and an outcome search is a search
-/// by the codes this gives that outcome. Read once, on first use: the OpenAPI build never reads it.
-/// </summary>
-internal static class LogCatalogue
-{
-    private const string ModulePrefix = "Gatekeep.Modules.";
+/// <summary>One published audit code as a Log shows it: its outcome and one-line summary.</summary>
+internal sealed record LogCatalogueEntry(string Code, AuditOutcome Outcome, string Summary);
 
-    private static readonly Lazy<IReadOnlyDictionary<string, AuditEventDefinition>> Definitions = new(Load);
+/// <summary>
+/// Every published audit event by its code (Story 7.4). The table is generated into
+/// <c>LogCatalogue.Generated.cs</c> from each module's <c>{Module}Events</c> catalogue, the same
+/// members <c>docs/audit-events.md</c> is generated from, because Host.Admin may reference only
+/// some modules (<c>tests/Architecture/module-edges.txt</c>). <c>AuditCatalogueTests</c> fails
+/// when it is stale. A Log row's summary and outcome come from here, and an outcome search is a
+/// search by the codes this gives that outcome.
+/// </summary>
+internal static partial class LogCatalogue
+{
+    // Lazy: the generated field is in another part of this class, and initializers across
+    // partial files run in no defined order.
+    private static readonly Lazy<IReadOnlyDictionary<string, LogCatalogueEntry>> Table =
+        new(() => Generated.ToDictionary(e => e.Code, StringComparer.Ordinal));
+
+    private static IReadOnlyDictionary<string, LogCatalogueEntry> ByCode => Table.Value;
 
     /// <summary>Every catalogued code, ordinally sorted.</summary>
-    public static IReadOnlyList<string> Codes => [.. Definitions.Value.Keys.Order(StringComparer.Ordinal)];
+    public static IReadOnlyList<string> Codes => [.. ByCode.Keys.Order(StringComparer.Ordinal)];
 
-    /// <summary>The definition published for <paramref name="code"/>, or null for a code no catalogue declares.</summary>
-    public static AuditEventDefinition? Find(string code) => Definitions.Value.GetValueOrDefault(code);
+    /// <summary>The entry published for <paramref name="code"/>, or null for a code no catalogue declares.</summary>
+    public static LogCatalogueEntry? Find(string code) => ByCode.GetValueOrDefault(code);
 
     /// <summary>The catalogued codes whose outcome is <paramref name="outcome"/>.</summary>
     public static IReadOnlyList<AuditTypeCode> CodesWith(AuditOutcome outcome) =>
-        [.. Definitions.Value.Values.Where(d => d.Outcome == outcome).Select(d => d.Code).OrderBy(c => c.Value, StringComparer.Ordinal)];
-
-    private static IReadOnlyDictionary<string, AuditEventDefinition> Load()
-    {
-        var definitions = new Dictionary<string, AuditEventDefinition>(StringComparer.Ordinal);
-        var files = Directory.EnumerateFiles(AppContext.BaseDirectory, ModulePrefix + "*.dll").Order(StringComparer.Ordinal);
-        foreach (var file in files)
-        {
-            var name = Path.GetFileNameWithoutExtension(file);
-            var module = name[ModulePrefix.Length..];
-            if (module.Length == 0 || module.Contains('.'))
-            {
-                continue;
-            }
-
-            var catalogue = Assembly.Load(new AssemblyName(name)).GetType($"{name}.Contracts.{module}Events");
-            if (catalogue is null)
-            {
-                continue;
-            }
-
-            foreach (var field in catalogue.GetFields(BindingFlags.Public | BindingFlags.Static)
-                .Where(f => f.FieldType == typeof(AuditEventDefinition)))
-            {
-                var definition = (AuditEventDefinition)field.GetValue(null)!;
-                if (!definitions.TryAdd(definition.Code.Value, definition))
-                {
-                    throw new InvalidOperationException($"Two catalogues declare {definition.Code.Value}.");
-                }
-            }
-        }
-
-        if (definitions.Count == 0)
-        {
-            throw new InvalidOperationException("No module audit catalogue was found beside Host.Admin.");
-        }
-
-        return definitions;
-    }
+        [.. Generated.Where(e => e.Outcome == outcome).Select(e => new AuditTypeCode(e.Code)).OrderBy(c => c.Value, StringComparer.Ordinal)];
 }

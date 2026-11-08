@@ -23,6 +23,18 @@ public enum PublicIdType
     /// <c>cursor</c>. A malformed one is 400 <c>invalid_request</c>.
     /// </summary>
     AuditEvent,
+
+    /// <summary>
+    /// <c>app_</c>: an Application (AD-8, Story 2.5), as its OAuth <c>client_id</c>. A malformed one
+    /// is an unknown client, refused like a wrong secret.
+    /// </summary>
+    Application,
+
+    /// <summary>
+    /// <c>adm_</c>: an Admin (Story 1.32), as <c>gatekeep recover-admin --admin</c> takes it and lists
+    /// it. Never their WebAuthn user handle.
+    /// </summary>
+    Admin,
 }
 
 /// <summary>
@@ -48,6 +60,8 @@ public static class PublicId
         PublicIdType.AdminCredential => "acr",
         PublicIdType.Operation => "opr",
         PublicIdType.AuditEvent => "evt",
+        PublicIdType.Application => "app",
+        PublicIdType.Admin => "adm",
         _ => throw new ArgumentOutOfRangeException(nameof(type)),
     };
 

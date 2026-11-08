@@ -1,5 +1,15 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
+  <PropertyGroup>
+    <!-- The architecture tests load this assembly from its own output, so OpenIddict.Abstractions must sit beside it. -->
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Story 2.5 (AD-8): the application store interfaces only. The engine stays in Protocol. -->
+    <PackageReference Include="OpenIddict.Abstractions" />
+  </ItemGroup>
+
   <ItemGroup>
     <ProjectReference Include="../../Gatekeep.Kernel/Gatekeep.Kernel.csproj" />
     <ProjectReference Include="../Sessions/Gatekeep.Modules.Sessions.csproj" />

@@ -5,7 +5,7 @@ created: '2026-11-06'
 status: 'done'
 baseline_revision: 'adc2f5944b2b9428656884f856f2ebfb47e9d25c'
 review_loop_iteration: 0
-followup_review_recommended: false
+followup_review_recommended: true
 context:
   - '{project-root}/_bmad-output/implementation-artifacts/epic-7-context.md'
   - '{project-root}/_bmad-output/implementation-artifacts/spec-7-8-plant-canaries-and-publish-the-event-catalogue.md'
@@ -177,7 +177,7 @@ deferred:
 ## Review Triage Log
 
 ### 2026-11-08 — Review pass
-- verdicts: 39 findings — high 0, medium 1, low 22, false 9, maybe-false 7
+- verdicts: 39 findings — high 0, medium 2, low 22, false 9, maybe-false 6
 - notes:
   - The resumed run reused the interrupted session's implementation, completed by a fresh implementer.
   - The reviewed diff left out the generated `openapi-v1.json` and `schema.generated.ts`, which the API-contract drift check covers, and `_bmad-output`.
@@ -217,7 +217,7 @@ deferred:
     - `low` `reject` The time index lacks `id`, so a long range sorts the whole range for each page. Before the first release no Tenant has a large Log, the index set is the one the spec prescribes, and fixing it means editing the spec.
     - `low` `reject` `CREATE INDEX` is not `CONCURRENTLY`. No deployment exists before the first release; upgrades with large Logs are Story 12.6's concern, and existing migrations follow the same pattern.
     - `low` `reject` An uncatalogued code shows a success tone. Same as the Edge Case Hunter row.
-    - `maybe-false` `reject` Scanning DLLs at runtime breaks single-file publish. Settled as false: no such publish mode is configured. A startup check against the catalogue would add surface for a case that can't happen.
+    - `medium` `patch` Scanning module DLLs beside Host.Admin can miss catalogues. Rejected at first because no single-file publish exists. Merging main showed the real failure: Story 2.5's `protocol.client.cross_tenant_rejected` lives in Protocol, which Host.Admin may not reference, so it was listed with no summary or outcome and `?outcome=failure` missed it. Fixed after the merge: the Architecture generator writes `src/Gatekeep.Host.Admin/LogCatalogue.Generated.cs` from every catalogue, `LogCatalogue` reads it, and `AuditCatalogueTests.Host_Admin_log_catalogue_matches_its_generator` fails when it is stale.
     - `low` `reject` Catalogue summaries read like engineering notes in the Description column. The spec sets the column as the catalogue summary, and the readers are deployment Admins; display copy is out of scope here.
     - `false` `reject` The empty-state text is wrong for non-range searches. Disproved: the spec fixes the text as "No events in this range".
     - `false` `reject` The URL can't hold a picked field with an empty value. Disproved as a defect: an empty value means no filter, and `paramsOf` drops both by design.
@@ -262,7 +262,7 @@ Status: done
 - `docs/{audit-events.md,api/openapi-v1.json,threat-model.md}`, `deferred-work.md` -- the regenerated catalogue and contract, T-53 with its timing residual, and the closed and new deferred items.
 
 **Review findings:**
-- 39 findings: 6 patched, 7 maybe-false findings deferred as 2 items, and 26 rejected. The Review Triage Log records each one with its reason.
+- 39 findings: 7 patched (one of them, the DLL scan, only after merging main), 6 maybe-false findings deferred as 2 items, and 26 rejected. The Review Triage Log records each one with its reason.
 - Patched (1 medium, 5 low):
   - the failed Load more test (medium)
   - the unchanged re-submit test
@@ -274,7 +274,7 @@ Status: done
   - the nested pooled connections on refusal, medium (unverified)
   - the email-resolution semantics, medium (unverified)
 
-**Follow-up review recommended:** false. This first pass patched 0 high and 1 medium finding.
+**Follow-up review recommended:** true. This pass patched 2 medium findings, and the second (the generated Host.Admin catalogue) was reviewed only by its own Architecture test after the merge.
 
 **Verification:**
 - On the `gatekeep/tests:story-7-4` image:

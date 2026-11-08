@@ -191,12 +191,13 @@ public static class AdminsEvents
     /// <summary>
     /// Written on the Deployment chain once for each live Admin Session another action ended as
     /// <c>revoked</c> (Story 1.26): removing a credential ends the Admin's other Sessions, and
-    /// redeeming a Recovery Code ends all of them. The Actor is the Admin who acted; the target is
-    /// the Admin whose Session ended. Holds no Session ID.
+    /// redeeming a Recovery Code, or from Story 1.32 a <c>recover-admin</c> enrolment, ends all of
+    /// them. The Actor is the Admin who acted; the target is the Admin whose Session ended. Holds no
+    /// Session ID.
     /// </summary>
     public static readonly AuditEventDefinition SessionRevoked = new(
         new AuditTypeCode("admin.session.revoked"),
-        "A credential removal or a Recovery Code ended a live Admin Session as revoked. Holds no Session ID.",
+        "A credential removal, a Recovery Code or a recover-admin enrolment ended a live Admin Session as revoked. Holds no Session ID.",
         AuditOutcome.Success);
 
     /// <summary>
@@ -218,5 +219,27 @@ public static class AdminsEvents
     public static readonly AuditEventDefinition RecoveryCodeUsed = new(
         new AuditTypeCode("admin.recovery_code.used"),
         "An Admin's offline Recovery Code was used to start a Session that reaches only credential registration. Holds no code or HMAC.",
+        AuditOutcome.Success);
+
+    /// <summary>
+    /// Written on the Deployment chain by <c>gatekeep recover-admin</c> (Story 1.32, AD-31), in the
+    /// transaction that stores the enrolment's SHA-256, only after its Security Alert was delivered
+    /// and its off-server record written. The Actor is System; the target is the Admin it is for.
+    /// Holds no value, hash or time: the expiry, 15 minutes after issue, is in <c>admin_enrolment</c>.
+    /// </summary>
+    public static readonly AuditEventDefinition EnrolmentIssued = new(
+        new AuditTypeCode("admin.enrolment.issued"),
+        "gatekeep recover-admin issued a single-use 15-minute enrolment for an Admin, after its Security Alert and off-server record. Holds no value or hash.",
+        AuditOutcome.Success);
+
+    /// <summary>
+    /// Written on the Deployment chain when a <c>recover-admin</c> enrolment is redeemed (Story
+    /// 1.32), in the transaction that uses it up, ends every Session of its Admin and starts a setup
+    /// or recovery Session, which reaches only credential registration. The Actor and the target
+    /// are that Admin. Holds no value, hash or Session ID.
+    /// </summary>
+    public static readonly AuditEventDefinition EnrolmentUsed = new(
+        new AuditTypeCode("admin.enrolment.used"),
+        "An Admin's recover-admin enrolment was used to end their Sessions and start one that reaches only credential registration. Holds no value or hash.",
         AuditOutcome.Success);
 }

@@ -33,15 +33,19 @@
 
   <ItemGroup>
     <ProjectReference Include="../../src/Gatekeep.Kernel/Gatekeep.Kernel.csproj" />
+    <ProjectReference Include="../../src/Adapters/AlertChannel/Gatekeep.Adapters.AlertChannel.csproj" />
+    <ProjectReference Include="../../src/Adapters/Egress/Gatekeep.Adapters.Egress.csproj" />
     <ProjectReference Include="../../src/Adapters/Fido2/Gatekeep.Adapters.Fido2.csproj" />
     <ProjectReference Include="../../src/Adapters/Hosting/Gatekeep.Adapters.Hosting.csproj" />
     <ProjectReference Include="../../src/Adapters/Logging/Gatekeep.Adapters.Logging.csproj" />
+    <ProjectReference Include="../../src/Adapters/ObjectLock/Gatekeep.Adapters.ObjectLock.csproj" />
     <ProjectReference Include="../../src/Adapters/OpenBao/Gatekeep.Adapters.OpenBao.csproj" />
     <ProjectReference Include="../../src/Adapters/Postgres/Gatekeep.Adapters.Postgres.csproj" />
     <ProjectReference Include="../../src/Gatekeep.Cli/Gatekeep.Cli.csproj" />
     <ProjectReference Include="../../src/Modules/Admins/Gatekeep.Modules.Admins.csproj" />
     <ProjectReference Include="../../src/Modules/Audit/Gatekeep.Modules.Audit.csproj" />
     <ProjectReference Include="../../src/Modules/Authentication/Gatekeep.Modules.Authentication.csproj" />
+    <ProjectReference Include="../../src/Modules/Directory/Gatekeep.Modules.Directory.csproj" />
     <ProjectReference Include="../../src/Modules/Keys/Gatekeep.Modules.Keys.csproj" />
     <ProjectReference Include="../../src/Modules/Management/Gatekeep.Modules.Management.csproj" />
     <ProjectReference Include="../../src/Modules/Operations/Gatekeep.Modules.Operations.csproj" />

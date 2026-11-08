@@ -39,10 +39,16 @@ public class AdminApiRuleTests
     // of a Tenant whose deletion starts; Story 8.4 UPDATE.
     [InlineData("tenant_role", new[] { "gk_admin DELETE", "gk_admin INSERT", "gk_admin SELECT" }, new string[0])]
     [InlineData("admin_fresh_assertion", new[] { "gk_admin DELETE", "gk_admin INSERT", "gk_admin SELECT" }, new string[0], true)]
+    // Story 1.32 took back gk_cli's SELECT, granted for recover-admin, which reads no code.
     [InlineData(
         "admin_recovery_code",
-        new[] { "gk_admin DELETE", "gk_admin INSERT", "gk_admin SELECT", "gk_cli SELECT" },
+        new[] { "gk_admin DELETE", "gk_admin INSERT", "gk_admin SELECT" },
         new[] { "gk_admin UPDATE confirmed_at,used_at" })]
+    // Story 1.32: only gk_cli issues an enrolment; gk_admin reads it and marks it used. Nobody deletes.
+    [InlineData(
+        "admin_enrolment",
+        new[] { "gk_admin SELECT", "gk_cli INSERT", "gk_cli SELECT" },
+        new[] { "gk_admin UPDATE used_at" })]
     public void Registry_lists_the_Admins_tables_with_exactly_their_grants(string table, string[] grants, string[] columns, bool unlogged = false)
     {
         var entry = Entry(table);
@@ -304,9 +310,71 @@ public class AdminApiRuleTests
             m => m.Groups["rest"].Value.Contains("SignInEndpoint.Instance") && m.Groups["rest"].Value.Contains("SetupAllowed.Instance"));
     }
 
+    /// <summary>
+    /// Story 1.32 (AD-31): an enrolment is issued only by <c>gatekeep recover-admin</c>, which sends
+    /// its Security Alert and off-server record first. No host, job or other source, in the Admins
+    /// module or not, but the three that define it names the issuer's factory, its interface or its class, so no route or job
+    /// can issue one.
+    /// </summary>
+    [Fact]
+    public void Only_the_Cli_references_the_enrolment_issuer()
+    {
+        var references = new[] { "src", "tests/Isolation" }
+            .SelectMany(d => SourceFiles(Path.Combine(Root, d)))
+            .Select(f => (Path: Path.GetRelativePath(Root, f).Replace('\\', '/'), Text: File.ReadAllText(f)))
+            .Where(f => !IssuerDefinitions.Contains(f.Path))
+            .Where(f => IssuerReference.IsMatch(f.Text))
+            .Select(f => f.Path)
+            .ToList();
+
+        Assert.Equal(["src/Gatekeep.Cli/RecoverAdminCommand.cs"], references.Where(p => p.StartsWith("src/", StringComparison.Ordinal)));
+        Assert.All(references, p => Assert.True(
+            p.StartsWith("src/Gatekeep.Cli/", StringComparison.Ordinal) || p.StartsWith("tests/", StringComparison.Ordinal),
+            $"{p} references the enrolment issuer."));
+        Assert.Contains("CreateEnrolmentIssuer", File.ReadAllText(Path.Combine(Root, "src/Gatekeep.Cli/RecoverAdminCommand.cs")));
+
+        // The edge list agrees: no host or module reaches the Cli; only the isolation tests do.
+        Assert.Equal(["Tests.Isolation"], EdgeList.Load(Root).Where(e => e.To == "Cli").Select(e => e.From));
+    }
+
+    [Theory]
+    [InlineData("var issuer = AdminsContract.CreateEnrolmentIssuer(appender);", true)]
+    [InlineData("IAdminEnrolmentIssuer issuer", true)]
+    [InlineData("new EnrolmentIssuer(appender)", true)]
+    [InlineData("services.Enrolments.RedeemAsync(context, value, null, ct)", false)]
+    [InlineData("AdminsContract.CreateEnrolments(appender)", false)]
+    public void Issuer_reference_detection(string source, bool expected)
+    {
+        Assert.Equal(expected, IssuerReference.IsMatch(source));
+    }
+
+    /// <summary>The files that define the issuer, its interface and its factory: every other file is scanned, the rest of the Admins module included.</summary>
+    private static readonly string[] IssuerDefinitions =
+    [
+        "src/Modules/Admins/Contracts/AdminsContract.cs",
+        "src/Modules/Admins/Contracts/IAdminEnrolments.cs",
+        "src/Modules/Admins/Core/AdminEnrolments.cs",
+    ];
+
+    private static readonly Regex IssuerReference = new(@"\b(?:CreateEnrolmentIssuer|IAdminEnrolmentIssuer|EnrolmentIssuer)\b", RegexOptions.Compiled);
+
+    private static readonly string[] SkippedDirectories = ["bin", "obj", "node_modules"];
+
+    private static IEnumerable<string> SourceFiles(string directory) =>
+        Directory.EnumerateFiles(directory, "*.cs")
+            .Concat(Directory.EnumerateDirectories(directory)
+                .Where(d => !SkippedDirectories.Contains(Path.GetFileName(d)))
+                .SelectMany(SourceFiles));
+
     /// <summary>The operations with no Session: they need the exact Admin Origin only.</summary>
     private static readonly string[] Sessionless =
-        ["/api/v1/deployment/bootstrap", "/api/v1/deployment/signin", "/api/v1/deployment/signin/complete", "/api/v1/deployment/signin/recovery-code"];
+    [
+        "/api/v1/deployment/bootstrap",
+        "/api/v1/deployment/signin",
+        "/api/v1/deployment/signin/complete",
+        "/api/v1/deployment/signin/enrolment",
+        "/api/v1/deployment/signin/recovery-code",
+    ];
 
     private const string TenantCapabilities = "/api/v1/tenants/{tenantId}/capabilities";
 

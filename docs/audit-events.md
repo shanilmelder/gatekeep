@@ -11,11 +11,13 @@ Every audit type code Gatekeep writes, declared in its module's contract. Codes 
 | `admin.credential.removed` | Admins | Success | An Admin removed one of their WebAuthn credentials. Holds no credential ID or public key. | None |
 | `admin.credential.sign_count_regressed` | Admins | Failure | A sign-in with an Admin's WebAuthn credential was refused because its signature counter went backwards: it may be cloned. | None |
 | `admin.cross_tenant.rejected` | Admins | Failure | An Admin holding no Tenant Role in this Tenant was refused a request in it. Past 30 refusals per Admin in 15 minutes, only logged. Holds no capability name. | Rejected cross-Tenant attempts |
+| `admin.enrolment.issued` | Admins | Success | gatekeep recover-admin issued a single-use 15-minute enrolment for an Admin, after its Security Alert and off-server record. Holds no value or hash. | None |
+| `admin.enrolment.used` | Admins | Success | An Admin's recover-admin enrolment was used to end their Sessions and start one that reaches only credential registration. Holds no value or hash. | None |
 | `admin.fresh_assertion.failed` | Admins | Failure | A fresh assertion whose signature verified over an Admin's own WebAuthn credential was refused. Holds no credential ID, challenge or binding. | None |
 | `admin.fresh_assertion.verified` | Admins | Success | An Admin confirmed a sensitive action with a fresh WebAuthn assertion. Holds no credential ID, challenge, binding or Session ID. | None |
 | `admin.recovery_code.issued` | Admins | Success | An Admin confirmed they saved an offline Recovery Code, which can now be used once. Holds no code or HMAC. | None |
 | `admin.recovery_code.used` | Admins | Success | An Admin's offline Recovery Code was used to start a Session that reaches only credential registration. Holds no code or HMAC. | None |
-| `admin.session.revoked` | Admins | Success | A credential removal or a Recovery Code ended a live Admin Session as revoked. Holds no Session ID. | None |
+| `admin.session.revoked` | Admins | Success | A credential removal, a Recovery Code or a recover-admin enrolment ended a live Admin Session as revoked. Holds no Session ID. | None |
 | `admin.session.signed_out` | Admins | Success | An Admin signed out, which ended their Admin Session. Holds no Session ID. | None |
 | `admin.session.superseded` | Admins | Success | A sign-in in the same browser ended a live Admin Session as superseded. Holds no Session ID. | None |
 | `admin.setup.completed` | Admins | Success | An Admin came to hold two WebAuthn credentials, or one and an offline Recovery Code, which completed setup and made their Session full. | None |
@@ -26,6 +28,7 @@ Every audit type code Gatekeep writes, declared in its module's contract. Codes 
 | `bootstrap.admin.created` | Admins | Success | The bootstrap token was claimed: the first Admin was created as Deployment Owner and bootstrap completed. Holds no token or hash. | None |
 | `bootstrap.token.issued` | Admins | Success | gatekeep init issued the first one-time bootstrap token. It expires 15 minutes after issue. Holds no token or hash. | None |
 | `bootstrap.token.reissued` | Admins | Success | gatekeep init reissued the bootstrap token, voiding the previous one. It expires 15 minutes after issue. Holds no token or hash. | None |
+| `directory.application.created` | Directory | Success | An Application was created with its first client secret. Names the Application only: the secret is stored only as its hash. | None |
 | `keys.signing_key.created` | Keys | Success | A Tenant's replacement next Signing or Management key was created in key custody. Names no key. | None |
 | `keys.signing_key.destroyed` | Keys | Success | A Tenant's retired Signing or Management key was destroyed in key custody. Names no key. | None |
 | `keys.signing_key.destruction_failed` | Keys | Failure | Key custody failed to destroy a Tenant's retired Signing or Management key; the destruction retries. Names no key. | None |
@@ -36,6 +39,7 @@ Every audit type code Gatekeep writes, declared in its module's contract. Codes 
 | `keys.transit_key.swept` | Keys | Success | A Signing or Management key at least 24 hours old, named by no row when checked, was deleted from key custody. Names no key. | None |
 | `operations.job.dead` | Operations | Failure | A job used its last attempt and went dead. Only its fixed failure code is kept. | None |
 | `operations.operation.retried` | Operations | Success | An Admin retried a failed Operation's failed steps. Names the Operation's Tenant only, when it has one. | None |
+| `protocol.client.cross_tenant_rejected` | Protocol | Failure | A client credential issued by another Tenant was refused at this Tenant's token endpoint. Names nothing of the other Tenant. | Rejected cross-Tenant attempts |
 | `sessions.access.revoked` | Sessions | Success | Sessions in scope ended and their Token Families and tokens were revoked. User scope targets the User. | Session and token revocation |
 | `sessions.session.started` | Sessions | Success | A User's Session started. Names the User only: the Session ID is stored only as its hash. | None |
 | `tenancy.tenant.activated` | Tenancy | Success | A Tenant's creation Operation succeeded: its settings exist and its Tenant Subdomain now resolves. | None |
@@ -61,4 +65,4 @@ Each class a Tenant's Log must cover, and the codes that prove it. A pending cla
 | Key operations | None yet | Pending: Story 9.2 |
 | Management API grants | None yet | Pending: Story 17.2 |
 | Token Family revocations | None yet | Pending: Story 2.10 |
-| Rejected cross-Tenant attempts | `admin.cross_tenant.rejected` | Proved |
+| Rejected cross-Tenant attempts | `admin.cross_tenant.rejected`, `protocol.client.cross_tenant_rejected` | Proved |

@@ -1,4 +1,10 @@
+using Gatekeep.Adapters.AlertChannel;
+using Gatekeep.Adapters.Egress;
+using Gatekeep.Adapters.ObjectLock;
 using Gatekeep.Adapters.OpenBao;
+using Gatekeep.Kernel.Alerts;
+using Gatekeep.Kernel.Records;
+using Gatekeep.Kernel.Secrets;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.HttpOverrides;
@@ -58,6 +64,11 @@ public static class GatekeepHosting
             builder.Services.AddOpenBaoKeyCustody(custody);
         }
 
+        if (settings.OffServer is { } offServer)
+        {
+            AddOffServer(builder.Services, offServer);
+        }
+
         builder.WebHost.ConfigureKestrel(kestrel =>
         {
             kestrel.AddServerHeader = false;
@@ -71,6 +82,23 @@ public static class GatekeepHosting
         });
 
         return builder;
+    }
+
+    /// <summary>
+    /// The alert channel and the off-server store, each over its own <see cref="EgressHttp"/> handler,
+    /// the only outbound path, plus the record writer that signs with <c>dep-records</c> (Story 1.30).
+    /// Each is built when first asked for, and nothing is sent at startup.
+    /// </summary>
+    private static void AddOffServer(IServiceCollection services, OffServerSettings offServer)
+    {
+        services.AddSingleton(offServer.Deployment);
+        services.AddSingleton<IAlertChannel>(_ => new WebhookAlertChannel(EgressHttp.Create(), offServer.Alerts));
+        services.AddSingleton<IOffServerStore>(provider =>
+            new S3ObjectLockStore(EgressHttp.Create(), offServer.Records, provider.GetService<TimeProvider>() ?? TimeProvider.System));
+        services.AddSingleton(provider => new OffServerRecordWriter(
+            provider.GetRequiredService<IKeyCustody>(),
+            provider.GetRequiredService<IOffServerStore>(),
+            provider.GetService<TimeProvider>() ?? TimeProvider.System));
     }
 
     /// <summary>

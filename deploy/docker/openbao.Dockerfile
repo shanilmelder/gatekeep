@@ -3,7 +3,8 @@
 # Base image pinned by digest.
 #
 # It adds only what the stack needs: the gatekeep-custody group (gid 4500), which owns the
-# socket, directories whose ownership the named volumes copy on first use, and the config
+# socket, the openbao-audit group (gid 4501), through which the audit shipper alone reads the
+# audit log (Story 1.30), directories whose ownership the named volumes copy on first use, and the config
 # template, scripts and policies. No key, token or ID is ever in this image: the Master Key
 # and its ID arrive at runtime as the Compose secrets master_key and master_key_id, and
 # start-openbao.sh renders the server config from them onto the /tmp tmpfs (Story 12.7).
@@ -13,9 +14,13 @@ FROM openbao/openbao:2.7.2@sha256:5046911075e137e154ce49ab051502f4ec7cf367d484ae
 USER root
 RUN addgroup -S -g 4500 gatekeep-custody \
     && addgroup openbao gatekeep-custody \
+    && addgroup -S -g 4501 openbao-audit \
+    && addgroup openbao openbao-audit \
     && mkdir -p /var/lib/openbao/data /run/openbao /var/log/openbao /opt/gatekeep/openbao/policies \
-    && chown openbao:openbao /var/lib/openbao /var/lib/openbao/data /var/log/openbao \
-    && chmod 0700 /var/lib/openbao /var/lib/openbao/data /var/log/openbao \
+    && chown openbao:openbao /var/lib/openbao /var/lib/openbao/data \
+    && chmod 0700 /var/lib/openbao /var/lib/openbao/data \
+    && chown openbao:openbao-audit /var/log/openbao \
+    && chmod 2750 /var/log/openbao \
     && chown openbao:gatekeep-custody /run/openbao \
     && chmod 0750 /run/openbao
 

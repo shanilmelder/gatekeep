@@ -12,14 +12,14 @@
 #                                                 the repository mounted at DIR.
 #
 # Regenerate both after changing an endpoint, in Docker only, with the repository mounted:
-#   docker compose -f deploy/compose.test.yaml run --rm --build -v "<repository>:/out" tests sh deploy/docker/api-contract.sh --write /out
+#   docker compose -f deploy/compose.dev.yaml run --rm --build -v "<repository>:/out" tests sh deploy/docker/api-contract.sh --write /out
 set -eu
 
 generated=src/Gatekeep.Host.Admin/obj/openapi/openapi.json
 # The committed files. The self-check points these at altered copies.
 document="${API_CONTRACT_DOCUMENT:-docs/api/openapi-v1.json}"
 client="${API_CONTRACT_CLIENT:-packages/api-client/src/schema.generated.ts}"
-regenerate='docker compose -f deploy/compose.test.yaml run --rm --build -v "<repository>:/out" tests sh deploy/docker/api-contract.sh --write /out'
+regenerate='docker compose -f deploy/compose.dev.yaml run --rm --build -v "<repository>:/out" tests sh deploy/docker/api-contract.sh --write /out'
 hint="Regenerate both in Docker:"
 
 # openapi-typescript's output for a document, as the api-client package runs it.
