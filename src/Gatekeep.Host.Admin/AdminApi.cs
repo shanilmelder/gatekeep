@@ -546,6 +546,40 @@ internal static class AdminApi
             .Produces<ApiProblem>(StatusCodes.Status403Forbidden, AdminResponses.ProblemContentType)
             .Produces(StatusCodes.Status503ServiceUnavailable);
 
+        app.MapGet("/api/v1/tenants/{tenantId}/signing-keys", static (HttpContext context, AdminApiServices services) => SigningKeysApi.ListAsync(context, services))
+            .WithMetadata(TenantApiEndpoint.Instance, new RequiresCapability(AdminCapabilities.TenantConfigurationRead))
+            .WithName("ListSigningKeys")
+            .WithTags(TenantTag)
+            .WithSummary("The path Tenant's Signing Keys in every state: next, current, previous, retired and revoked.")
+            .WithDescription(
+                "Any Tenant Role in the path Tenant. Its signing keys only, never a Management key: next, then current, then " +
+                "previous, then retired and revoked keys together, newest first; a retired key is listed whether or not its " +
+                "Transit key is destroyed yet. Each key has its key ID (the kid tokens and JWKS carry), its algorithm, its " +
+                "state and when it was created, and nothing of its key material. It reads the database only, so it answers " +
+                "while key custody is down. It writes nothing. A malformed, unknown or role-less Tenant is 403 access_denied, " +
+                "audited as every Tenant capability refusal is.")
+            .Produces<SigningKeysResponse>(StatusCodes.Status200OK)
+            .Produces(StatusCodes.Status401Unauthorized)
+            .Produces<ApiProblem>(StatusCodes.Status403Forbidden, AdminResponses.ProblemContentType)
+            .Produces(StatusCodes.Status503ServiceUnavailable);
+
+        app.MapGet("/api/v1/tenants/{tenantId}/signing-keys/jwks", static (HttpContext context, AdminApiServices services) => SigningKeysApi.GetJwksAsync(context, services))
+            .WithMetadata(TenantApiEndpoint.Instance, new RequiresCapability(AdminCapabilities.TenantConfigurationRead))
+            .WithName("GetSigningKeysJwks")
+            .WithTags(TenantTag)
+            .WithSummary("The path Tenant's public JWKS sample, as its Tenant host serves it, and the JWKS URI.")
+            .WithDescription(
+                "Any Tenant Role in the path Tenant. One public RSA key per published Signing Key (current, then next, then " +
+                "previous), with exactly the members the Tenant's own JWKS serves: kty, use, alg, kid, n and e, never a private " +
+                "member and never a Management key. The public halves come from key custody, and the URI is the Tenant's stored " +
+                "issuer with /.well-known/jwks. Key custody down, or without a published key's version, is 503 for the whole " +
+                "sample. It writes nothing. A malformed, unknown or role-less Tenant is 403 access_denied, audited as every " +
+                "Tenant capability refusal is.")
+            .Produces<SigningKeysJwksResponse>(StatusCodes.Status200OK)
+            .Produces(StatusCodes.Status401Unauthorized)
+            .Produces<ApiProblem>(StatusCodes.Status403Forbidden, AdminResponses.ProblemContentType)
+            .Produces(StatusCodes.Status503ServiceUnavailable);
+
         app.MapPut("/api/v1/tenants/{tenantId}/label", static (HttpContext context, AdminApiServices services) => TenantLabelApi.SetAsync(context, services))
             .WithMetadata(
                 TenantApiEndpoint.Instance,

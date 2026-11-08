@@ -102,6 +102,7 @@ const ADMIN_ONLY = [
   'EmptyState',
   'EventDrawer',
   'JsonViewer',
+  'KeyStateBadge',
   'Menu',
   'Modal',
   'ModalProvider',

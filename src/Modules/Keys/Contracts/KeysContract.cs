@@ -204,6 +204,17 @@ public static class KeysContract
         TenantKeys.ReadPublishedAsync(context, cancellationToken);
 
     /// <summary>
+    /// Every Signing Key of the context's Tenant, for the Signing keys page (Story 9.1): its
+    /// <c>signing</c> rows in any state, <c>next</c>, then <c>current</c>, then <c>previous</c>, then
+    /// <c>retired</c> and <c>revoked</c> together, newest first. A retired row is listed whether or not
+    /// its Transit key is destroyed. Never a <c>management</c> key. It only reads, so <c>gk_admin</c> may
+    /// run it.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The context has no Tenant, or a row names a Transit key that isn't its own.</exception>
+    public static Task<IReadOnlyList<ListedSigningKey>> ListSigningKeysAsync(CommandContext context, CancellationToken cancellationToken) =>
+        TenantKeys.ListAsync(context, cancellationToken);
+
+    /// <summary>
     /// The context's Tenant's token protection key, as Transit wrapped it under
     /// <see cref="TokenProtectionKey"/>, or null when it has none yet. It only reads.
     /// </summary>

@@ -71,6 +71,9 @@ internal sealed class AdminApiServices : IAsyncDisposable
     /// <summary>Creating and listing Tenants (Story 1.27), under the configured Tenant zone and HTTPS port.</summary>
     public ITenantManagement Tenants => _tenants.Value;
 
+    /// <summary>The Signing keys page's reads (Story 9.1): the path Tenant's keys and its public JWKS sample.</summary>
+    public ISigningKeyManagement SigningKeys { get; } = ManagementContract.CreateSigningKeys(AuditContract.CreateAppender());
+
     public IRateLimiter Limiter { get; } = AdminsContract.CreateAttemptLimiter();
 
     public IAdminSessions Sessions { get; }

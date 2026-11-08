@@ -1,0 +1,54 @@
+/*
+ * A Signing Key's state (Story 9.1), on DESIGN.md's badge-status tokens, as Badge.module.css
+ * draws a status. Heights are min-heights, so text at 200% doesn't clip.
+ */
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--gk-space-4);
+  box-sizing: border-box;
+  min-height: var(--gk-badge-status-height);
+  padding: 0 var(--gk-space-8);
+  border: 1px solid transparent;
+  border-radius: var(--gk-badge-status-radius);
+  font: var(--gk-badge-status-typography);
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+/* The 6px dot, in the badge's text colour. Decorative: the text carries the state. */
+.dot {
+  flex: none;
+  width: calc(var(--gk-space-12) / 2);
+  height: calc(var(--gk-space-12) / 2);
+  border-radius: var(--gk-radius-full);
+  background: currentColor;
+}
+
+.info {
+  background: var(--gk-color-info-sf);
+  color: var(--gk-color-info);
+}
+
+.ok {
+  background: var(--gk-color-ok-sf);
+  color: var(--gk-color-ok);
+}
+
+.muted {
+  background: var(--gk-color-sf2);
+  color: var(--gk-color-tx2);
+}
+
+.bad {
+  background: var(--gk-color-bad-sf);
+  color: var(--gk-color-bad);
+}
+
+/* Forced colours drop the fills, so every badge keeps a visible edge. */
+@media (forced-colors: active) {
+  .badge {
+    border-color: CanvasText;
+  }
+}

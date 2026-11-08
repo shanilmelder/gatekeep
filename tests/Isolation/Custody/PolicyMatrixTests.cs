@@ -47,6 +47,8 @@ public sealed class PolicyMatrixTests(OpenBaoFixture bao)
         [OpenBaoFixture.Admin] =
         [
             (CustodyOp.Create, "sig"), (CustodyOp.Create, "mgmt"), (CustodyOp.Sign, "mgmt"),
+            // Story 9.1: the Signing keys page's public JWKS sample. Never a Management key's public half.
+            (CustodyOp.ReadPublic, "sig"),
             (CustodyOp.Encrypt, "social"), (CustodyOp.Encrypt, "email"), (CustodyOp.Encrypt, "payload"),
             (CustodyOp.Encrypt, "dep-email"), (CustodyOp.Encrypt, "dep-payload"),
             (CustodyOp.Hmac, "dep-hmac"),
@@ -195,6 +197,26 @@ public sealed class PolicyMatrixTests(OpenBaoFixture bao)
         Assert.InRange(signing.CreatedAt, DateTimeOffset.UtcNow - TimeSpan.FromHours(2), DateTimeOffset.UtcNow + TimeSpan.FromMinutes(5));
         Assert.Contains(listed, k => k.Key.Equals(bao.ManagementA));
         Assert.All(listed, k => Assert.True(KeyName.TryParseRowKey(k.Key.Value, out _)));
+    }
+
+    /// <summary>
+    /// Story 9.1: <c>host-admin</c> reads a Signing Key's public half, for the Signing keys page's
+    /// JWKS sample, and is refused a Management key's: its policy reads <c>sig-*</c> only.
+    /// </summary>
+    [Fact]
+    public async Task Admin_reads_a_Signing_Keys_public_half_and_is_refused_a_Management_keys()
+    {
+        using var admin = bao.Custody(OpenBaoFixture.Admin);
+        using var worker = bao.Custody(OpenBaoFixture.Worker);
+
+        var read = await admin.GetPublicKeysAsync(bao.SigningA, Cancellation);
+        Assert.Equal(
+            (await worker.GetPublicKeysAsync(bao.SigningA, Cancellation)).Select(v => (v.KeyVersion, v.PublicKeyPem)),
+            read.Select(v => (v.KeyVersion, v.PublicKeyPem)));
+        Assert.All(read, v => Assert.DoesNotContain("PRIVATE", v.PublicKeyPem, StringComparison.Ordinal));
+
+        var refused = await Assert.ThrowsAsync<KeyCustodyException>(() => admin.GetPublicKeysAsync(bao.ManagementA, Cancellation));
+        Assert.Equal(KeyCustodyFailure.Refused, refused.Failure);
     }
 
     [Theory]

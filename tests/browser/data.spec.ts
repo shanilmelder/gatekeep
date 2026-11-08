@@ -128,6 +128,7 @@ for (const surface of ['admin', 'hosted'] as const) {
           'EmptyState',
           'EventDrawer',
           'JsonViewer',
+          'KeyStateBadge',
           'Menu',
           'Modal',
           'ModalProvider',

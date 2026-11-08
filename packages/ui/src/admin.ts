@@ -10,6 +10,7 @@ export { Drawer, type DrawerProps } from './components/Drawer';
 export { EmptyState, type EmptyStateAction, type EmptyStateProps } from './components/EmptyState';
 export { EventDrawer, type EventDrawerProps, type EventSummaryRow } from './components/EventDrawer';
 export { JsonViewer, type JsonViewerProps } from './components/JsonViewer';
+export { KeyStateBadge, type KeyState, type KeyStateBadgeProps } from './components/KeyStateBadge';
 export { Menu, type MenuItem, type MenuProps } from './components/Menu';
 export { Modal, ModalProvider, type ModalProps, type ModalProviderProps } from './components/Modal';
 export { OneTimeReveal, type OneTimeRevealProps } from './components/OneTimeReveal';

@@ -33,6 +33,7 @@ import { NotFoundPage } from './NotFoundPage';
 import { createRenewal, type Renewal, type RenewalState } from './renewal';
 import { signInAgain } from './signInAgain';
 import { NEW_TENANT_PATH, TENANTS_PATH } from './tenants';
+import { SigningKeysPage } from './SigningKeysPage';
 import { TenantSettingsPage } from './TenantSettingsPage';
 import { TenantsPage } from './TenantsPage';
 import { TenantSwitcher } from './TenantSwitcher';
@@ -159,8 +160,8 @@ interface Mismatch {
   pageTenant: string | null;
 }
 
-/** A Tenant path's page (Story 1.28): the Tenant's landing, its settings, or another page of it. */
-const TENANT_ROUTE = /^\/tenants\/[^/]+(\/settings)?$/;
+/** A Tenant path's page (Story 1.28): the Tenant's landing, its settings, or its Signing keys (Story 9.1). */
+const TENANT_ROUTE = /^\/tenants\/[^/]+(\/settings|\/signing-keys)?$/;
 
 /** Replaces the URL with `to` once mounted, as a redirect does: /tenants/{tenantId} is its settings until Story 3.1. */
 function Redirect({ to }: { to: string }) {
@@ -507,6 +508,8 @@ function ShellFrame({ adminId }: { adminId: string }) {
     const tenant = pathTenant(answered.path);
     const tenantId = tenant !== null && tenant !== 'malformed' ? tenant.tenantId : null;
     if (tenantId === null) page = <NotFoundPage />;
+    else if (answered.path.endsWith('/signing-keys'))
+      page = <SigningKeysPage key={tenantId} request={shellRequest} tenantId={tenantId} />;
     else if (!answered.path.endsWith('/settings'))
       page = <Redirect to={`/tenants/${encodeURIComponent(tenantId)}/settings`} />;
     else

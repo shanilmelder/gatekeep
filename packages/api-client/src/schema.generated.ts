@@ -460,6 +460,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/tenants/{tenantId}/signing-keys": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The path Tenant's Signing Keys in every state: next, current, previous, retired and revoked.
+         * @description Any Tenant Role in the path Tenant. Its signing keys only, never a Management key: next, then current, then previous, then retired and revoked keys together, newest first; a retired key is listed whether or not its Transit key is destroyed yet. Each key has its key ID (the kid tokens and JWKS carry), its algorithm, its state and when it was created, and nothing of its key material. It reads the database only, so it answers while key custody is down. It writes nothing. A malformed, unknown or role-less Tenant is 403 access_denied, audited as every Tenant capability refusal is.
+         */
+        get: operations["ListSigningKeys"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tenants/{tenantId}/signing-keys/jwks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The path Tenant's public JWKS sample, as its Tenant host serves it, and the JWKS URI.
+         * @description Any Tenant Role in the path Tenant. One public RSA key per published Signing Key (current, then next, then previous), with exactly the members the Tenant's own JWKS serves: kty, use, alg, kid, n and e, never a private member and never a Management key. The public halves come from key custody, and the URI is the Tenant's stored issuer with /.well-known/jwks. Key custody down, or without a published key's version, is 503 for the whole sample. It writes nothing. A malformed, unknown or role-less Tenant is 403 access_denied, audited as every Tenant capability refusal is.
+         */
+        get: operations["GetSigningKeysJwks"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/tenants/{tenantId}/assertions": {
         parameters: {
             query?: never;
@@ -613,6 +653,14 @@ export interface components {
             action: string;
             target?: null | string;
         };
+        JwkResponse: {
+            kty: string;
+            use: string;
+            alg: string;
+            kid: string;
+            n: string;
+            e: string;
+        };
         OperationResponse: {
             id: string;
             type: string;
@@ -677,6 +725,19 @@ export interface components {
         SetTenantLabelRequest: {
             /** @enum {string} */
             label: "dev" | "staging" | "prod";
+        };
+        SigningKeyResponse: {
+            keyId: string;
+            algorithm: string;
+            state: string;
+            createdAt: string;
+        };
+        SigningKeysJwksResponse: {
+            jwksUri: string;
+            keys: components["schemas"]["JwkResponse"][];
+        };
+        SigningKeysResponse: {
+            keys: components["schemas"]["SigningKeyResponse"][];
         };
         TenantCreatedResponse: {
             tenant: components["schemas"]["TenantResponse"];
@@ -2153,6 +2214,98 @@ export interface operations {
             };
             /** @description tenant_mismatch, with the problem body, when X-Gatekeep-Tenant is missing, sent twice or isn't {tenantId}, and nothing ran; or another conflict the operation's description names. */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    ListSigningKeys: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The Tenant's public ID: ten_ and the UUID's 16 bytes in lowercase RFC 4648 base32 with no padding, whose last character carries two zero bits. Only this canonical spelling, after URL decoding, names a Tenant, and the empty UUID's never does; anything else is refused like a Tenant the Admin holds no role in. */
+                tenantId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SigningKeysResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description access_denied, with the problem body, when the capability is refused. No body when an earlier check refuses first: a Session restricted to setup, or on a state-changing call a wrong Origin or CSRF token. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    GetSigningKeysJwks: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The Tenant's public ID: ten_ and the UUID's 16 bytes in lowercase RFC 4648 base32 with no padding, whose last character carries two zero bits. Only this canonical spelling, after URL decoding, names a Tenant, and the empty UUID's never does; anything else is refused like a Tenant the Admin holds no role in. */
+                tenantId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SigningKeysJwksResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description access_denied, with the problem body, when the capability is refused. No body when an earlier check refuses first: a Session restricted to setup, or on a state-changing call a wrong Origin or CSRF token. */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };
