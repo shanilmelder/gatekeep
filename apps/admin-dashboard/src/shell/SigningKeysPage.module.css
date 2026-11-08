@@ -1,0 +1,25 @@
+/*
+ * Signing keys (Story 9.1): the table and the JWKS sample under it, stacked across the page's
+ * whole grid, and each key ID in the code type with its Copy beside it. Tokens only.
+ */
+
+.content {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--gk-space-16);
+  min-width: 0;
+}
+
+.keyId {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--gk-space-4);
+  min-width: 0;
+}
+
+.keyId > code {
+  font: var(--gk-font-code);
+  overflow-wrap: anywhere;
+}

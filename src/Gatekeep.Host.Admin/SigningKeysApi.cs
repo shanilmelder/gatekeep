@@ -1,0 +1,164 @@
+using System.Data.Common;
+using System.Globalization;
+using Gatekeep.Kernel.Persistence;
+using Gatekeep.Kernel.Secrets;
+using Gatekeep.Modules.Management.Contracts;
+
+namespace Gatekeep.Host.Admin;
+
+/// <summary>A Tenant's Signing Keys, in every state (Story 9.1).</summary>
+public sealed class SigningKeysResponse
+{
+    /// <summary><c>next</c>, then <c>current</c>, then <c>previous</c>, then <c>retired</c> and <c>revoked</c> newest first.</summary>
+    public required IReadOnlyList<SigningKeyResponse> Keys { get; init; }
+}
+
+/// <summary>One Signing Key: its ID and state, never its key material or a Management key.</summary>
+public sealed class SigningKeyResponse
+{
+    /// <summary>The <c>kid</c> tokens and JWKS carry: <c>{Transit key name}.v{version}</c>.</summary>
+    public required string KeyId { get; init; }
+
+    /// <summary>The algorithm it signs with: <c>RS256</c>.</summary>
+    public required string Algorithm { get; init; }
+
+    /// <summary><c>next</c>, <c>current</c>, <c>previous</c>, <c>retired</c> or <c>revoked</c>.</summary>
+    public required string State { get; init; }
+
+    /// <summary>When it was created, ISO 8601 in UTC.</summary>
+    public required string CreatedAt { get; init; }
+}
+
+/// <summary>A Tenant's public JWKS sample, as Host.Hosted serves it, and where it serves it.</summary>
+public sealed class SigningKeysJwksResponse
+{
+    /// <summary>The Tenant's JWKS URI: its stored issuer and <c>/.well-known/jwks</c>.</summary>
+    public required string JwksUri { get; init; }
+
+    /// <summary>One public key per published Signing Key: <c>current</c>, then <c>next</c>, then <c>previous</c>.</summary>
+    public required IReadOnlyList<JwkResponse> Keys { get; init; }
+}
+
+/// <summary>One public RSA JSON Web Key (RFC 7517). It never has a private member.</summary>
+public sealed class JwkResponse
+{
+    /// <summary><c>RSA</c>.</summary>
+    public required string Kty { get; init; }
+
+    /// <summary><c>sig</c>.</summary>
+    public required string Use { get; init; }
+
+    /// <summary><c>RS256</c>.</summary>
+    public required string Alg { get; init; }
+
+    /// <summary>The key's ID, as the Signing Keys list names it.</summary>
+    public required string Kid { get; init; }
+
+    /// <summary>The modulus, base64url without padding.</summary>
+    public required string N { get; init; }
+
+    /// <summary>The public exponent, base64url without padding.</summary>
+    public required string E { get; init; }
+}
+
+/// <summary>
+/// The Signing keys page's two reads (Story 9.1, FR-37), each with any Tenant Role, in the path
+/// Tenant's own scope. The list reads PostgreSQL only, so it still answers while custody is down;
+/// the JWKS sample needs custody's public halves. The request checks have decided the capability,
+/// and Management decides it again from the same grant. Neither writes anything.
+/// </summary>
+internal static class SigningKeysApi
+{
+    public static async Task ListAsync(HttpContext context, AdminApiServices services)
+    {
+        var path = AdminRequestChecks.PathTenantGrant(context);
+        var cancellationToken = context.RequestAborted;
+
+        SigningKeyListRead read;
+        try
+        {
+            await using var scope = await TenantScope.BeginAsync(services.Source, AdminRequestChecks.PathTenant(context), cancellationToken);
+            read = await services.SigningKeys.ListAsync(
+                scope.CreateCommandContext(), AdminRequestChecks.Principal(context), path.Grant, path.TenantId, cancellationToken);
+            await scope.CommitAsync(cancellationToken);
+        }
+        catch (DbException e) when (!context.Response.HasStarted)
+        {
+            AdminRequestChecks.Log(context, e);
+            await AdminResponses.UnavailableAsync(context);
+            return;
+        }
+
+        if (read.Status != SigningKeyReadStatus.Read)
+        {
+            await RefuseAsync(context);
+            return;
+        }
+
+        await AdminResponses.JsonAsync(context, new SigningKeysResponse
+        {
+            Keys = [.. read.Keys.Select(k => new SigningKeyResponse
+            {
+                KeyId = k.KeyId,
+                Algorithm = ISigningKeyManagement.Algorithm,
+                State = k.State,
+                CreatedAt = k.CreatedAt.UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", CultureInfo.InvariantCulture),
+            })],
+        });
+    }
+
+    public static async Task GetJwksAsync(HttpContext context, AdminApiServices services)
+    {
+        var path = AdminRequestChecks.PathTenantGrant(context);
+        var cancellationToken = context.RequestAborted;
+        var custody = context.RequestServices.GetService<IKeyCustody>();
+
+        SigningKeyJwksRead read;
+        try
+        {
+            await using var scope = await TenantScope.BeginAsync(services.Source, AdminRequestChecks.PathTenant(context), cancellationToken);
+            read = await services.SigningKeys.GetJwksAsync(
+                scope.CreateCommandContext(), custody, AdminRequestChecks.Principal(context), path.Grant, path.TenantId, cancellationToken);
+            await scope.CommitAsync(cancellationToken);
+        }
+        catch (DbException e) when (!context.Response.HasStarted)
+        {
+            AdminRequestChecks.Log(context, e);
+            await AdminResponses.UnavailableAsync(context);
+            return;
+        }
+
+        switch (read.Status)
+        {
+            case SigningKeyReadStatus.Read:
+                await AdminResponses.JsonAsync(context, new SigningKeysJwksResponse
+                {
+                    JwksUri = read.JwksUri!,
+                    Keys = [.. read.Keys.Select(k => new JwkResponse { Kty = k.Kty, Use = k.Use, Alg = k.Alg, Kid = k.Kid, N = k.N, E = k.E })],
+                });
+                return;
+
+            case SigningKeyReadStatus.Unavailable:
+                // The failure's kind only: never a key name, a version or what custody answered.
+                Logger(context).LogWarning(
+                    "Key custody gave no public JWKS sample for a Signing keys read, trace {TraceId}.", AdminResponses.TraceId(context));
+                await AdminResponses.UnavailableAsync(context);
+                return;
+
+            default:
+                await RefuseAsync(context);
+                return;
+        }
+    }
+
+    /// <summary>A refusal, logged under its fixed code only.</summary>
+    private static Task RefuseAsync(HttpContext context)
+    {
+        Logger(context).LogInformation(
+            "A Signing keys read was refused with {Problem}, trace {TraceId}.", AdminResponses.AccessDenied, AdminResponses.TraceId(context));
+        return AdminResponses.ProblemAsync(context, StatusCodes.Status403Forbidden, AdminResponses.AccessDenied);
+    }
+
+    private static ILogger Logger(HttpContext context) =>
+        context.RequestServices.GetRequiredService<ILoggerFactory>().CreateLogger("Gatekeep.Host.Admin");
+}

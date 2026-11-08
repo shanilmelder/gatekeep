@@ -66,6 +66,8 @@ internal sealed class Tenants(IAuditAppender appender) : ITenants
 
     private const string ReadLabel = "SELECT label, status FROM tenant WHERE id = @id";
 
+    private const string ReadIssuer = "SELECT issuer FROM tenant WHERE id = @id";
+
     private const string SetLabel = "UPDATE tenant SET label = @label WHERE id = @id AND status = 'active'";
 
     /// <summary>
@@ -256,6 +258,16 @@ internal sealed class Tenants(IAuditAppender appender) : ITenants
     public Task<TenantLabelState?> GetLabelAsync(CommandContext context, Guid tenantId, CancellationToken cancellationToken) =>
         LabelAsync(context, tenantId, ReadLabel, cancellationToken);
 
+    public async Task<string?> GetIssuerAsync(CommandContext context, Guid tenantId, CancellationToken cancellationToken)
+    {
+        RequireOwnContext(context, tenantId);
+
+        await using var command = context.CreateCommand();
+        command.CommandText = ReadIssuer;
+        Add(command, "id", tenantId);
+        return await command.ExecuteScalarAsync(cancellationToken) as string;
+    }
+
     private static async Task<TenantLabelState?> LabelAsync(CommandContext context, Guid tenantId, string sql, CancellationToken cancellationToken)
     {
         RequireOwnContext(context, tenantId);
@@ -401,7 +413,7 @@ internal sealed class Tenants(IAuditAppender appender) : ITenants
         }
     }
 
-    /// <summary>A Tenant's label is read under lock and written in that Tenant's own context only.</summary>
+    /// <summary>A Tenant's label and issuer are read, and its label written, in that Tenant's own context only.</summary>
     private static void RequireOwnContext(CommandContext context, Guid tenantId)
     {
         ArgumentNullException.ThrowIfNull(context);

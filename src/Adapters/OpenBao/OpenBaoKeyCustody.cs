@@ -276,7 +276,10 @@ public sealed class OpenBaoKeyCustody : IKeyCustody, IDisposable
     {
         RequireKind(key, KeyKind.Signing);
 
-        var data = await SendAsync(key, KeyOperation.ReadPublicKey, HttpMethod.Get, $"keys/{key}", null, cancellationToken);
+        // The key type rides along as a query parameter, which OpenBao reads as the request's data:
+        // host-admin's policy requires and pins `type` on transit/keys/sig-* for every operation,
+        // read included (Story 9.1), and every other policy ignores it. The read itself changes nothing.
+        var data = await SendAsync(key, KeyOperation.ReadPublicKey, HttpMethod.Get, $"keys/{key}?type=rsa-3072", null, cancellationToken);
 
         return PublicKeys(key, KeyOperation.ReadPublicKey, data);
     }

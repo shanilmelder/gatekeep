@@ -143,6 +143,32 @@ public class ProtocolRuleTests
         Assert.Equal(expected, ManagementKey.IsMatch(Code(source)));
     }
 
+    /// <summary>
+    /// Story 9.1: the Signing keys page names the Tenant's JWKS URI with Management's own copy of the
+    /// path, since Management can't reference Protocol. It must be the path Host.Hosted serves.
+    /// </summary>
+    [Fact]
+    public void Managements_JWKS_path_is_the_one_Protocol_serves()
+    {
+        var protocol = ConstantIn(File.ReadAllText(Path.Combine(Root, "src/Modules/Protocol/Contracts/ProtocolContract.cs")), "JsonWebKeySetPath");
+        var management = ConstantIn(File.ReadAllText(Path.Combine(Root, "src/Modules/Management/Contracts/ISigningKeyManagement.cs")), "JwksPath");
+
+        Assert.NotNull(protocol);
+        Assert.Equal(protocol, management);
+    }
+
+    [Theory]
+    [InlineData("public const string JwksPath = \"/.well-known/jwks\";", "/.well-known/jwks")]
+    [InlineData("// public const string JwksPath = \"/old\";\npublic const string JwksPath = \"/.well-known/jwks.json\";", "/.well-known/jwks.json")]
+    [InlineData("public const string OtherPath = \"/.well-known/jwks\";", null)]
+    public void Jwks_path_constant_detection(string source, string? expected)
+    {
+        Assert.Equal(expected, ConstantIn(source, "JwksPath"));
+    }
+
+    private static string? ConstantIn(string source, string name) =>
+        Regex.Match(Code(source), $@"\bconst\s+string\s+{name}\s*=\s*""(?<value>[^""]*)""") is { Success: true } m ? m.Groups["value"].Value : null;
+
     private static List<string> FirstHandlers(IEnumerable<(string Path, string Source)> files) =>
         [.. files
             .SelectMany(f => ProcessRequestDescriptor.Matches(Code(f.Source)))
