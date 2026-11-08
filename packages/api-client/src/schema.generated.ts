@@ -308,6 +308,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/deployment/signin/enrolment": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Sign in with a gatekeep recover-admin enrolment, to a Session that reaches only credential registration.
+         * @description Sessionless: needs the exact Admin Origin only. No route issues an enrolment: only gatekeep recover-admin on the Docker host does, after its Security Alert and off-server record are confirmed. Each call is counted per client, then, while the client is within its limit, Deployment-wide, before the value is looked up: a client's 6th, or the 51st counted across the Deployment, in 15 minutes is 429. An unused enrolment within its 15 minutes is used up, with every other unused one of its Admin, every live Session of its Admin ends as revoked, a live Session this browser held is superseded, and a Session starts that reaches only the Session read, sign-out and credential registration: setup, needing two credentials, for an Admin below the credential floor, and recovery, needing one, otherwise; admin.enrolment.used is written. An unknown, used, expired or malformed value is the same 400 enrolment_refused. Before bootstrap completes it is the unknown-path 404.
+         */
+        post: operations["RedeemEnrolment"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/deployment/tenants": {
         parameters: {
             query?: never;
@@ -460,6 +480,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/tenants/{tenantId}/logs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Search the path Tenant's Log: newest first, 50 a page.
+         * @description Any Tenant Role in the path Tenant. Read only, in the Tenant's own scope: no other Tenant's event is ever listed, and the read isn't audited. Each event's evt_ ID, time, type code, the catalogue's outcome and summary, and its Actor and target as internal references; never its detail, so no IP address, User-Agent or email. Every parameter is optional, at most once, and they combine; each filters an indexed envelope column. nextCursor is the last event's ID when an older page follows, else null; pass it back as cursor with the same filters. A parameter sent twice or empty, an unknown outcome, a code that isn't three lower-case parts, a User that is neither a UUID nor an email, an Application that isn't a UUID, a time that isn't an instant, from not before to, or a malformed cursor is 400 invalid_request. An email no event names, like any search that matches nothing, is an empty list. A malformed, unknown or role-less Tenant is 403 access_denied, audited as every Tenant capability refusal is.
+         */
+        get: operations["SearchTenantLogs"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/tenants/{tenantId}/signing-keys": {
         parameters: {
             query?: never;
@@ -598,7 +638,7 @@ export interface components {
         };
         ApiProblem: {
             /** @enum {string} */
-            code: "bootstrap_refused" | "credential_refused" | "signin_refused" | "rate_limited" | "access_denied" | "fresh_assertion_required" | "assertion_refused" | "credentials_minimum" | "credentials_maximum" | "recovery_code_refused" | "recovery_code_superseded" | "tenant_invalid" | "subdomain_refused" | "operation_not_failed" | "tenant_mismatch" | "tenant_not_active" | "tenant_deleted" | "tenant_busy" | "confirmation_mismatch";
+            code: "bootstrap_refused" | "credential_refused" | "signin_refused" | "rate_limited" | "access_denied" | "fresh_assertion_required" | "assertion_refused" | "credentials_minimum" | "credentials_maximum" | "recovery_code_refused" | "recovery_code_superseded" | "enrolment_refused" | "tenant_invalid" | "subdomain_refused" | "operation_not_failed" | "tenant_mismatch" | "tenant_not_active" | "tenant_deleted" | "tenant_busy" | "confirmation_mismatch" | "invalid_request";
             traceId: string;
         };
         BootstrapClaimRequest: {
@@ -649,6 +689,9 @@ export interface components {
         DeleteTenantRequest: {
             confirmation: string;
         };
+        EnrolmentRedeemRequest: {
+            enrolment: string;
+        };
         FreshAssertionBeginRequest: {
             action: string;
             target?: null | string;
@@ -660,6 +703,11 @@ export interface components {
             kid: string;
             n: string;
             e: string;
+        };
+        LogReference: {
+            /** @enum {string} */
+            kind: "system" | "anonymous" | "admin" | "user" | "client" | "tenant";
+            id: null | string;
         };
         OperationResponse: {
             id: string;
@@ -762,6 +810,20 @@ export interface components {
         TenantListResponse: {
             tenantZone: string;
             tenants: components["schemas"]["TenantResponse"][];
+            nextCursor: null | string;
+        };
+        TenantLogEventResponse: {
+            id: string;
+            /** Format: date-time */
+            occurredAt: string;
+            type: string;
+            outcome: null | string;
+            summary: null | string;
+            actor: components["schemas"]["LogReference"];
+            target: null | components["schemas"]["LogReference"];
+        };
+        TenantLogsResponse: {
+            events: components["schemas"]["TenantLogEventResponse"][];
             nextCursor: null | string;
         };
         TenantResponse: {
@@ -1668,6 +1730,73 @@ export interface operations {
             };
         };
     };
+    RedeemEnrolment: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EnrolmentRedeemRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    /** @description The setup or recovery Admin Session: __Host-gk-admin={43 base64url characters}; Path=/; Secure; HttpOnly; SameSite=Strict, a browser session cookie with no Domain, Expires or Max-Age. */
+                    "Set-Cookie"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminSignInResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    /** @description Whole seconds until the rate-limit window allows another request. */
+                    "Retry-After": number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     ListTenants: {
         parameters: {
             query?: {
@@ -2214,6 +2343,76 @@ export interface operations {
             };
             /** @description tenant_mismatch, with the problem body, when X-Gatekeep-Tenant is missing, sent twice or isn't {tenantId}, and nothing ran; or another conflict the operation's description names. */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    SearchTenantLogs: {
+        parameters: {
+            query?: {
+                /** @description One event type code, {domain}.{object}.{action}, as docs/audit-events.md publishes it. */
+                type?: string;
+                /** @description A User: their UUID, or an email, which resolves first to the User references on this Tenant's events whose detail holds exactly it. Events whose Actor or target is that User. */
+                user?: string;
+                /** @description An Application's UUID: events whose Actor or target is that client. */
+                application?: string;
+                /** @description success or failure: the events whose type the catalogue gives that outcome. */
+                outcome?: string;
+                /** @description An ISO 8601 instant with Z or an offset: events at or after it. */
+                from?: string;
+                /** @description An ISO 8601 instant with Z or an offset: events before it. It must come after from. */
+                to?: string;
+                /** @description The previous page's nextCursor: an evt_ public ID. */
+                cursor?: string;
+            };
+            header?: never;
+            path: {
+                /** @description The Tenant's public ID: ten_ and the UUID's 16 bytes in lowercase RFC 4648 base32 with no padding, whose last character carries two zero bits. Only this canonical spelling, after URL decoding, names a Tenant, and the empty UUID's never does; anything else is refused like a Tenant the Admin holds no role in. */
+                tenantId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TenantLogsResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description access_denied, with the problem body, when the capability is refused. No body when an earlier check refuses first: a Session restricted to setup, or on a state-changing call a wrong Origin or CSRF token. */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };

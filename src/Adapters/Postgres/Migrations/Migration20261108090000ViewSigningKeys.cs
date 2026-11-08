@@ -12,8 +12,8 @@ namespace Gatekeep.Adapters.Postgres.Migrations;
 /// </list>
 /// </summary>
 [DbContext(typeof(MigrationsContext))]
-[Migration("20261106090000_ViewSigningKeys")]
-public sealed class Migration20261106090000ViewSigningKeys : Migration
+[Migration("20261108090000_ViewSigningKeys")]
+public sealed class Migration20261108090000ViewSigningKeys : Migration
 {
     protected override void Up(MigrationBuilder migrationBuilder)
     {

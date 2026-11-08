@@ -31,6 +31,17 @@ const string Usage = """
                                                   GATEKEEP_CUSTODY_SECRET_ID_FILE set;
                                                   the token directory defaults to /gatekeep/bootstrap)
            gatekeep rotate-transit-keys    (with the same settings as init: the last step of a Master Key rotation)
+           gatekeep recover-admin [--admin <public Admin ID>]
+                                   (with the settings init, alerts test and records test use: sends a Security
+                                    Alert and writes an off-server record, then prints a single-use 15-minute link
+                                    on the Admin hostname for registering new credentials; --admin is needed when
+                                    there is more than one Admin)
+           gatekeep alerts test    (with GATEKEEP_ALERT_URL, GATEKEEP_ALERT_TOKEN_FILE and GATEKEEP_ALERT_DEPLOYMENT set)
+           gatekeep records test    (with GATEKEEP_RECORDS_ENDPOINT, GATEKEEP_RECORDS_REGION, GATEKEEP_RECORDS_BUCKET,
+                                     GATEKEEP_RECORDS_ACCESS_KEY_ID_FILE, GATEKEEP_RECORDS_SECRET_ACCESS_KEY_FILE
+                                     and the custody settings init uses set)
+           gatekeep audit-ship [--once]    (with the GATEKEEP_RECORDS_* settings, GATEKEEP_AUDIT_LOG_FILE and
+                                            GATEKEEP_AUDIT_SHIP_STATE_DIR set)
     """;
 
 var defaultConnectionFile = Environment.GetEnvironmentVariable(ConnectionFileVariable);
@@ -52,6 +63,13 @@ return args switch
     ["init", "--token-dir", var tokenDirectory] when cliReady && tokenDirectory.Length > 0 =>
         await InitAsync(cliConnectionFile!, cliPasswordFile!, tokenDirectory, defaultDirectory: false),
     ["rotate-transit-keys"] when cliReady => await RotateTransitKeysAsync(cliConnectionFile!, cliPasswordFile!),
+    ["recover-admin"] when cliReady => await RecoverAdminAsync(cliConnectionFile!, cliPasswordFile!, admin: null),
+    ["recover-admin", "--admin", var admin] when cliReady && admin.Length > 0 =>
+        await RecoverAdminAsync(cliConnectionFile!, cliPasswordFile!, admin),
+    ["alerts", "test"] => await AlertsTestCommand.RunAsync(),
+    ["records", "test"] => await RecordsTestCommand.RunAsync(),
+    ["audit-ship"] => await AuditShipCommand.RunAsync(once: false),
+    ["audit-ship", "--once"] => await AuditShipCommand.RunAsync(once: true),
     _ => ShowUsage(),
 };
 
@@ -287,4 +305,13 @@ static async Task<int> RotateTransitKeysAsync(string path, string passwordPath)
     return connectionString is null
         ? Failure
         : await RotateTransitKeysCommand.RunAsync(connectionString);
+}
+
+/// <summary><c>gatekeep recover-admin</c> (Story 1.32), as <see cref="RecoverAdminCommand"/> runs it.</summary>
+static async Task<int> RecoverAdminAsync(string path, string passwordPath, string? admin)
+{
+    var connectionString = await ConnectionAsync(path, passwordPath);
+    return connectionString is null
+        ? Failure
+        : await RecoverAdminCommand.RunAsync(connectionString, admin);
 }

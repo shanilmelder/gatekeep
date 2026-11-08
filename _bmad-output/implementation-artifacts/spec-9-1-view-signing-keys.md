@@ -48,7 +48,7 @@ deferred: []
   - It never holds a private member (`d`, `p`, `q`, `dp`, `dq`, `qi`).
   - The response also carries `jwksUri` = the Tenant's issuer + `/.well-known/jwks` (the path `ProtocolContract` serves).
   - A custody failure, or a published row whose version custody doesn't return, gives the existing fixed 503 for the whole sample. The list route doesn't depend on custody.
-- **Schema:** new migration `Migration20261106090000ViewSigningKeys`, which runs `GRANT SELECT ON signing_key TO gk_admin`. In `TableRegistry`, `signing_key` gains `[Admin] = [Select]`. Row-level security applies unchanged, and no other privilege is granted.
+- **Schema:** new migration `Migration20261108090000ViewSigningKeys`, which runs `GRANT SELECT ON signing_key TO gk_admin`. In `TableRegistry`, `signing_key` gains `[Admin] = [Select]`. Row-level security applies unchanged, and no other privilege is granted.
 - **Custody policy:** `deploy/openbao/policies/host-admin.hcl` gives `transit/keys/sig-*` the capabilities `["update", "read"]`, keeping its parameter rules. Update the header comment ("it has no read …") to say it reads Signing Keys' public halves for the Signing keys page (Story 9.1). `mgmt-*` stays `update` only.
 - **Keys contract:** `KeysContract.ListSigningKeysAsync(CommandContext, CancellationToken)` returns `IReadOnlyList<ListedSigningKey(KeyName Key, int Version, SigningKeyState State, DateTimeOffset CreatedAt)>`.
   - New public enum `SigningKeyState` in `SigningKeys.cs` covers all five states.

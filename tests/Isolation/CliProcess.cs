@@ -20,6 +20,16 @@ internal static class CliProcess
         "GATEKEEP_CUSTODY_SOCKET",
         "GATEKEEP_CUSTODY_ROLE_ID_FILE",
         "GATEKEEP_CUSTODY_SECRET_ID_FILE",
+        "GATEKEEP_ALERT_URL",
+        "GATEKEEP_ALERT_TOKEN_FILE",
+        "GATEKEEP_ALERT_DEPLOYMENT",
+        "GATEKEEP_RECORDS_ENDPOINT",
+        "GATEKEEP_RECORDS_REGION",
+        "GATEKEEP_RECORDS_BUCKET",
+        "GATEKEEP_RECORDS_ACCESS_KEY_ID_FILE",
+        "GATEKEEP_RECORDS_SECRET_ACCESS_KEY_FILE",
+        "GATEKEEP_AUDIT_LOG_FILE",
+        "GATEKEEP_AUDIT_SHIP_STATE_DIR",
     ];
 
     public static Task<(int ExitCode, string Output)> RunAsync(params string[] arguments) =>

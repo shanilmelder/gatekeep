@@ -691,6 +691,8 @@ public sealed class SessionTablesTests(PostgresFixture postgres)
             $"""
             {TestTenants.InsertSql(TenantA, TenantB)};
             INSERT INTO "user" (tenant_id, id) VALUES ('{TenantA}', '{UserA}'), ('{TenantB}', '{UserB}');
+            {TestTenants.ApplicationSql(TenantA, Application)};
+            {TestTenants.ApplicationSql(TenantB, Application)};
             """);
 
         return database;

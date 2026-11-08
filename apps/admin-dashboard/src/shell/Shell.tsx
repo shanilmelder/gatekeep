@@ -28,6 +28,7 @@ import { isLost, lostName, refusedInPageTenant } from './lostTenant';
 import { createFreshAssertion } from './freshAssertion';
 import { ForbiddenPage } from './ForbiddenPage';
 import { LandingPage } from './LandingPage';
+import { LogsPage } from './LogsPage';
 import { NAV, visibleItems } from './nav';
 import { NotFoundPage } from './NotFoundPage';
 import { createRenewal, type Renewal, type RenewalState } from './renewal';
@@ -160,8 +161,8 @@ interface Mismatch {
   pageTenant: string | null;
 }
 
-/** A Tenant path's page (Story 1.28): the Tenant's landing, its settings, or its Signing keys (Story 9.1). */
-const TENANT_ROUTE = /^\/tenants\/[^/]+(\/settings|\/signing-keys)?$/;
+/** A Tenant path's page (Story 1.28): the Tenant's landing, its settings, its Logs (Story 7.4) or its Signing keys (Story 9.1). */
+const TENANT_ROUTE = /^\/tenants\/[^/]+(\/settings|\/logs|\/signing-keys)?$/;
 
 /** Replaces the URL with `to` once mounted, as a redirect does: /tenants/{tenantId} is its settings until Story 3.1. */
 function Redirect({ to }: { to: string }) {
@@ -508,6 +509,13 @@ function ShellFrame({ adminId }: { adminId: string }) {
     const tenant = pathTenant(answered.path);
     const tenantId = tenant !== null && tenant !== 'malformed' ? tenant.tenantId : null;
     if (tenantId === null) page = <NotFoundPage />;
+    // Logs (Story 7.4): with tenant.logs.read only, which the path Tenant's read has answered.
+    else if (answered.path.endsWith('/logs'))
+      page = capabilities.has('tenant.logs.read') ? (
+        <LogsPage key={tenantId} request={shellRequest} tenantId={tenantId} />
+      ) : (
+        <ForbiddenPage code="access_denied" traceId="" />
+      );
     else if (answered.path.endsWith('/signing-keys'))
       page = <SigningKeysPage key={tenantId} request={shellRequest} tenantId={tenantId} />;
     else if (!answered.path.endsWith('/settings'))

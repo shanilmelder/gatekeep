@@ -2,7 +2,8 @@
 // (admin-host.mjs) under its real CSP, from localhost. The Admin API is answered by route
 // interception: the Recovery Code entry on sign-in, the code's choice and one-time display at
 // credential setup, and credential setup in a recovery Session. The server's rules are the
-// Isolation tests' (tests/Isolation/Admins/AdminRecoveryCodeTests.cs).
+// Isolation tests' (tests/Isolation/Admins/AdminRecoveryCodeTests.cs). Story 1.32 adds the Recover page, which
+// gatekeep recover-admin's link opens (tests/Isolation/Admins/RecoverAdminTests.cs).
 
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type Page, type Request, type Route } from '@playwright/test';
@@ -10,6 +11,8 @@ import { watchCsp } from './csp-watch';
 
 const SESSION = '/api/v1/deployment/session';
 const REDEEM = '/api/v1/deployment/signin/recovery-code';
+const ENROLMENT = '/api/v1/deployment/signin/enrolment';
+const ENROLMENT_VALUE = 'r'.repeat(42) + 'A';
 const ISSUE = '/api/v1/deployment/credentials/recovery-code';
 const CSRF = 'Q'.repeat(43);
 const ADMIN_ID = '01900000-0000-7000-8000-000000000127';
@@ -56,6 +59,11 @@ async function answerApi(
         if (redeem) return redeem(route);
         Object.assign(session, { kind: 'recovery', setupComplete: false, recoveryCodeAllowed: false });
         return json(route, 200, { adminId: ADMIN_ID, csrfToken: CSRF, setupComplete: false });
+      }
+      if (pathname === ENROLMENT) {
+        if (redeem) return redeem(route);
+        Object.assign(session, { kind: 'recovery', setupComplete: true, recoveryCodeAllowed: false });
+        return json(route, 200, { adminId: ADMIN_ID, csrfToken: CSRF, setupComplete: true });
       }
       if (pathname === ISSUE) return json(route, 200, { code: CODE, issueId: ISSUE_ID });
       if (pathname === `${ISSUE}/confirm`) {
@@ -160,7 +168,7 @@ test.describe('Use a recovery code', () => {
 
     await expect(page).toHaveURL(/\/setup\/credentials$/);
     await expect(page.getByRole('heading', { level: 1, name: 'Set up a new passkey' })).toBeVisible();
-    await expect(page.getByText('Your recovery code has been used. Register a new passkey or security key to continue.')).toBeVisible();
+    await expect(page.getByText('Your recovery code or recovery link has been used. Register a new passkey or security key to continue.')).toBeVisible();
     await expect(page.getByTestId('credential-setup-step')).toHaveCount(0);
     await expect(page.getByRole('button')).toHaveText(['Register passkey', 'Sign out']);
     expect(api.count(`POST ${REDEEM}`)).toBe(1);
@@ -255,5 +263,97 @@ test.describe('An offline Recovery Code at credential setup', () => {
     await expect(page).toHaveURL(/\/signin$/);
     expect(api.count(`DELETE ${SESSION}`)).toBe(1);
     expect(await api.requests.find((r) => r.method() === 'DELETE')!.headerValue('x-gatekeep-csrf')).toBe(CSRF);
+  });
+});
+
+test.describe('Recover Admin access', () => {
+  test('reads the link once, clears it from the address bar, and Continue sends it and goes to credential setup', async ({ page }) => {
+    const api = await answerApi(page, { kind: 'full', credentials: 2, setupComplete: true, recoveryCodeAllowed: false });
+
+    await page.goto(`/recover#${ENROLMENT_VALUE}`);
+
+    await expect(page.getByRole('heading', { level: 1, name: 'Recover Admin access' })).toBeVisible();
+    await expect(page).toHaveURL(/\/recover$/);
+    expect(await page.evaluate(() => window.location.hash)).toBe('');
+    // Nothing is sent until the Admin presses Continue.
+    expect(api.count(`POST ${ENROLMENT}`)).toBe(0);
+    await expect(page.getByRole('link', { name: 'Sign in with a passkey instead' })).toHaveAttribute('href', '/signin');
+    await axeEverywhere(page);
+
+    await continueButton(page).click();
+
+    await expect(page).toHaveURL(/\/setup\/credentials$/);
+    await expect(page.getByRole('heading', { level: 1, name: 'Set up a new passkey' })).toBeVisible();
+    expect(api.requests.find((r) => new URL(r.url()).pathname === ENROLMENT)!.postDataJSON()).toEqual({ enrolment: ENROLMENT_VALUE });
+    expect(api.count(`POST ${ENROLMENT}`)).toBe(1);
+    // Back doesn't return to the link: both entries were replaced, so the fragment is gone from history.
+    expect(page.url()).not.toContain(ENROLMENT_VALUE);
+    await page.goBack();
+    expect(page.url()).not.toContain(ENROLMENT_VALUE);
+    expect(page.url()).not.toContain('/recover');
+  });
+
+  test('a refused link says so without saying why, and offers nothing to retry', async ({ page }) => {
+    const api = await answerApi(page, {}, (route) => problem(route, 400, 'enrolment_refused'));
+
+    await page.goto(`/recover#${ENROLMENT_VALUE}`);
+    await continueButton(page).click();
+
+    await expect(page.getByTestId('recover-refused')).toHaveText(
+      "This recovery link isn't valid. It may have been used or expired. Run gatekeep recover-admin again for a new one.",
+    );
+    await expect(continueButton(page)).toHaveCount(0);
+    await expect(page).toHaveURL(/\/recover$/);
+    expect(api.count(`POST ${ENROLMENT}`)).toBe(1);
+    await axeEverywhere(page);
+  });
+
+  test('a link with no enrolment is refused at once and sends nothing', async ({ page }) => {
+    const api = await answerApi(page);
+
+    await page.goto('/recover');
+
+    await expect(page.getByTestId('recover-refused')).toBeVisible();
+    await expect(continueButton(page)).toHaveCount(0);
+    expect(api.count(`POST ${ENROLMENT}`)).toBe(0);
+  });
+
+  test('a rate limit keeps the link to try again', async ({ page }) => {
+    let answer: (route: Route) => Promise<void> = (route) => problem(route, 429, 'rate_limited', { 'Retry-After': '30' });
+    const api = await answerApi(page, { kind: 'full', credentials: 2, setupComplete: true, recoveryCodeAllowed: false }, (route) => answer(route));
+
+    await page.goto(`/recover#${ENROLMENT_VALUE}`);
+    await continueButton(page).click();
+    await expect(page.getByTestId('recover-refused')).toHaveText('Too many attempts. Try again in 30 seconds.');
+
+    answer = (route) => {
+      Object.assign(api.session, { kind: 'recovery' });
+      return json(route, 200, { adminId: ADMIN_ID, csrfToken: CSRF, setupComplete: true });
+    };
+    await continueButton(page).click();
+    await expect(page).toHaveURL(/\/setup\/credentials$/);
+    expect(api.count(`POST ${ENROLMENT}`)).toBe(2);
+  });
+});
+
+test.describe('Recover Admin access, unavailable', () => {
+  test('an outage shows Generic error, whose action goes to sign-in', async ({ page }) => {
+    await answerApi(page, {}, (route) => route.fulfill({ status: 503 }));
+
+    await page.goto(`/recover#${ENROLMENT_VALUE}`);
+    await continueButton(page).click();
+
+    await expect(page.getByTestId('recover-error')).toBeVisible();
+    await expect(page.getByTestId('recover-error')).toContainText('unavailable');
+    await expect(page.getByRole('link', { name: /Gatekeep/ })).toHaveAttribute('href', '/signin');
+  });
+
+  test('a lost connection shows the same Generic error', async ({ page }) => {
+    await answerApi(page, {}, (route) => route.abort('connectionfailed'));
+
+    await page.goto(`/recover#${ENROLMENT_VALUE}`);
+    await continueButton(page).click();
+
+    await expect(page.getByTestId('recover-error')).toContainText('unavailable');
   });
 });

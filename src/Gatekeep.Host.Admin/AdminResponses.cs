@@ -52,6 +52,9 @@ internal static class AdminResponses
     /// <summary>Every refused Recovery Code (Story 1.26): wrong, unconfirmed, used or malformed alike.</summary>
     public const string RecoveryCodeRefused = "recovery_code_refused";
 
+    /// <summary>Every refused recover-admin enrolment (Story 1.32): unknown, used, expired or malformed alike.</summary>
+    public const string EnrolmentRefused = "enrolment_refused";
+
     /// <summary>A Recovery Code confirmation naming an issue that isn't the Admin's current unconfirmed code (Story 1.26).</summary>
     public const string RecoveryCodeSuperseded = "recovery_code_superseded";
 
@@ -84,6 +87,12 @@ internal static class AdminResponses
 
     /// <summary>A deletion whose typed confirmation isn't the Tenant's stored host, exactly (Story 1.29).</summary>
     public const string ConfirmationMismatch = "confirmation_mismatch";
+
+    /// <summary>
+    /// A Log search (Story 7.4) whose filter, cursor or range is malformed: an unknown parameter value,
+    /// one sent twice, or a range that ends before it starts. Nothing was read.
+    /// </summary>
+    public const string InvalidRequest = "invalid_request";
 
     /// <summary>The Tenancy guard's SQLSTATE for a status change outside a Tenant's lifecycle (Story 1.29).</summary>
     public const string StatusRefused = "GK007";
@@ -127,6 +136,7 @@ internal static class AdminResponses
         CredentialsMaximum,
         RecoveryCodeRefused,
         RecoveryCodeSuperseded,
+        EnrolmentRefused,
         TenantInvalid,
         SubdomainRefused,
         OperationNotFailed,
@@ -135,6 +145,7 @@ internal static class AdminResponses
         TenantDeleted,
         TenantBusy,
         ConfirmationMismatch,
+        InvalidRequest,
     ];
 
     /// <summary>The Session cookie, expired: sent with a sign-out and a 401 for a stale cookie.</summary>

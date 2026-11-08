@@ -43,6 +43,10 @@ export {
   type TenantCreatedResponse,
   type TenantDeletion,
   type TenantLabelResponse,
+  type LogReference,
+  type TenantLogEvent,
+  type TenantLogsQuery,
+  type TenantLogsResponse,
   type TenantListResponse,
   type TenantResponse,
 } from './client';

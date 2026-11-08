@@ -4,6 +4,7 @@ using Gatekeep.Adapters.OpenBao;
 using Gatekeep.Kernel.Persistence;
 using Gatekeep.Kernel.Secrets;
 using Gatekeep.Modules.Audit.Contracts;
+using Gatekeep.Modules.Directory.Contracts;
 using Gatekeep.Modules.Keys.Contracts;
 using Gatekeep.Modules.Protocol.Contracts;
 using Gatekeep.Modules.Tenancy.Contracts;
@@ -53,10 +54,20 @@ internal sealed class ProtocolHost : IAsyncDisposable
 
     public ITenantServerOptions TenantOptions => _app.Services.GetRequiredService<ITenantServerOptions>();
 
+    /// <summary>The header a test names a request's source address in, as Caddy's forwarding would set it.</summary>
+    public const string SourceHeader = "X-Test-Source";
+
+    /// <summary>
+    /// Starts the host. <paramref name="limits"/> replaces the token request limits, for a test that
+    /// can't send a thousand requests; <paramref name="logging"/> replaces the capturing logger, for a
+    /// test that needs the production scrubbing pipeline.
+    /// </summary>
     public static async Task<ProtocolHost> StartAsync(
         string hostedConnection,
         OpenBaoFixture bao,
-        TimeProvider? time = null)
+        TimeProvider? time = null,
+        TokenRequestLimits? limits = null,
+        Action<ILoggingBuilder>? logging = null)
     {
         var custody = new ControlledCustody(bao.Custody(OpenBaoFixture.Hosted));
         var logs = new CapturingLoggerProvider();
@@ -65,17 +76,42 @@ internal sealed class ProtocolHost : IAsyncDisposable
         builder.WebHost.UseTestServer();
         builder.Logging.ClearProviders();
         builder.Logging.SetMinimumLevel(LogLevel.Trace);
-        builder.Logging.AddProvider(logs);
+        if (logging is null)
+        {
+            builder.Logging.AddProvider(logs);
+        }
+        else
+        {
+            logging(builder.Logging);
+        }
 
         if (time is not null)
         {
             builder.Services.AddSingleton(time);
         }
 
+        if (limits is not null)
+        {
+            builder.Services.AddSingleton(limits);
+        }
+
         builder.Services.AddSingleton<IKeyCustody>(custody);
+        builder.Services.AddSingleton(AuditContract.CreateAppender());
         builder.Services.AddGatekeepProtocol(_ => hostedConnection);
 
         var app = builder.Build();
+
+        // TestServer has no remote address: a test names one, as Caddy's forwarded client would be.
+        app.Use((context, next) =>
+        {
+            if (context.Request.Headers.TryGetValue(SourceHeader, out var source) && System.Net.IPAddress.TryParse(source, out var address))
+            {
+                context.Connection.RemoteIpAddress = address;
+            }
+
+            return next(context);
+        });
+
         app.UseTenantResolution(() => hostedConnection);
         app.UseGatekeepProtocol();
         app.UseRouting();
@@ -119,6 +155,20 @@ internal sealed class ProtocolDatabase(PostgresFixture postgres, string name)
         }
 
         return new ResolvedTenant(id, issuer ?? $"https://{host}/", host, issuer ?? $"https://{host}/");
+    }
+
+    /// <summary>
+    /// A machine client in the Tenant, created the one Directory way, as <c>gk_admin</c> (Story 2.5),
+    /// with its secret as the caller got it, once.
+    /// </summary>
+    public async Task<(Guid ApplicationId, string ClientId, string Secret)> CreateClientAsync(Guid tenantId, string name = "Machine client")
+    {
+        await using var source = NpgsqlDataSource.Create(postgres.RoleConnection(TableRegistry.Admin, Name));
+        await using var scope = await TenantScope.BeginAsync(source, tenantId, TestContext.Current.CancellationToken);
+        var created = await DirectoryContract.CreateDirectory(AuditContract.CreateAppender(), TimeProvider.System)
+            .CreateMachineClientAsync(scope.CreateCommandContext(), name, TestContext.Current.CancellationToken);
+        await scope.CommitAsync(TestContext.Current.CancellationToken);
+        return (created.ApplicationId, created.ClientId, created.Secret.Use(static s => s));
     }
 
     /// <summary>Runs the one Keys provisioning path as <c>gk_worker</c>, with the Worker's custody login.</summary>

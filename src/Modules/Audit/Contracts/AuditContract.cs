@@ -18,6 +18,9 @@ public static class AuditContract
     /// <summary>The chain verifier (AD-16, FR-40). It only reads: <c>gk_cli</c> runs it.</summary>
     public static IAuditVerifier CreateVerifier() => new AuditVerifier();
 
+    /// <summary>A Tenant's Log search (Story 7.4). It only reads, in the caller's Tenant scope: <c>gk_admin</c> runs it.</summary>
+    public static ITenantLogSearch CreateLogSearch() => new TenantLogSearch();
+
     /// <summary>
     /// RFC 8785 JSON for one flat object of string, integer and null values.
     /// </summary>

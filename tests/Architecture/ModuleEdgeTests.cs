@@ -115,13 +115,25 @@ public class ModuleEdgeTests
         Assert.Equal(expected, DeclaresPublicTopLevelType(source));
     }
 
+    /// <summary>
+    /// Story 1.30 adds the one exception: <c>Adapters.Egress</c> shows its private-address permit to
+    /// the isolation tests alone, whose fixtures all sit on private addresses. Nothing else in
+    /// <c>src</c> may, so no other seam can relax the egress block.
+    /// </summary>
     [Fact]
-    public void Nothing_in_src_uses_InternalsVisibleTo()
+    public void Nothing_in_src_uses_InternalsVisibleTo_but_the_egress_permit_for_the_isolation_tests()
     {
-        var offenders = SourceFiles(Path.Combine(Root, "src"), "*")
-            .Where(f => File.ReadAllText(f).Contains("InternalsVisibleTo"));
+        const string Egress = "src/Adapters/Egress/Gatekeep.Adapters.Egress.csproj";
 
-        Assert.Empty(offenders);
+        var users = SourceFiles(Path.Combine(Root, "src"), "*")
+            .Where(f => File.ReadAllText(f).Contains("InternalsVisibleTo"))
+            .Select(f => Path.GetRelativePath(Root, f).Replace('\\', '/'))
+            .ToList();
+
+        Assert.Equal([Egress], users);
+        var granted = XDocument.Load(Path.Combine(Root, Egress)).Descendants("InternalsVisibleTo")
+            .Select(e => e.Attribute("Include")?.Value);
+        Assert.Equal(["Gatekeep.Tests.Isolation"], granted);
     }
 
     [Theory]

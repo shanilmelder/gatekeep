@@ -236,11 +236,25 @@ internal static class InitCommand
     /// </summary>
     internal static OpenBaoOptions? CustodyOptions(string consequence)
     {
-        var socket = Environment.GetEnvironmentVariable(SocketVariable);
-        var roleIdFile = Environment.GetEnvironmentVariable(RoleIdFileVariable);
-        var secretIdFile = Environment.GetEnvironmentVariable(SecretIdFileVariable);
-
         var refused = new List<string>();
+        var options = CustodyOptions(Environment.GetEnvironmentVariable, refused);
+        if (options is null)
+        {
+            Console.Error.WriteLine(
+                $"Key custody isn't configured: {string.Join(", ", refused)} must be set, and name a readable file holding no default value. {consequence}");
+        }
+
+        return options;
+    }
+
+    /// <summary>The same check, adding each refused setting to <paramref name="refused"/> rather than printing (Story 1.30).</summary>
+    internal static OpenBaoOptions? CustodyOptions(Func<string, string?> environment, List<string> refused)
+    {
+        var socket = environment(SocketVariable);
+        var roleIdFile = environment(RoleIdFileVariable);
+        var secretIdFile = environment(SecretIdFileVariable);
+
+        var before = refused.Count;
         if (string.IsNullOrWhiteSpace(socket))
         {
             refused.Add(SocketVariable);
@@ -249,14 +263,9 @@ internal static class InitCommand
         CheckSecretFile(roleIdFile, RoleIdFileVariable, refused);
         CheckSecretFile(secretIdFile, SecretIdFileVariable, refused);
 
-        if (refused.Count > 0)
-        {
-            Console.Error.WriteLine(
-                $"Key custody isn't configured: {string.Join(", ", refused)} must be set, and name a readable file holding no default value. {consequence}");
-            return null;
-        }
-
-        return new OpenBaoOptions { SocketPath = socket, RoleIdFile = roleIdFile!, SecretIdFile = secretIdFile! };
+        return refused.Count > before
+            ? null
+            : new OpenBaoOptions { SocketPath = socket, RoleIdFile = roleIdFile!, SecretIdFile = secretIdFile! };
     }
 
     /// <summary>The file must be readable and hold a value that isn't a default. Its contents aren't kept.</summary>

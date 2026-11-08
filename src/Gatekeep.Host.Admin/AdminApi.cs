@@ -378,6 +378,28 @@ internal static class AdminApi
             .Produces<ApiProblem>(StatusCodes.Status429TooManyRequests, AdminResponses.ProblemContentType)
             .Produces(StatusCodes.Status503ServiceUnavailable);
 
+        app.MapPost("/api/v1/deployment/signin/enrolment", static (HttpContext context, AdminApiServices services) => EnrolmentApi.RedeemAsync(context, services))
+            .WithMetadata(DeploymentApiEndpoint.Instance, SignInEndpoint.Instance, new JsonRequestBody(typeof(EnrolmentRedeemRequest)))
+            .WithName("RedeemEnrolment")
+            .WithTags(Tag)
+            .WithSummary("Sign in with a gatekeep recover-admin enrolment, to a Session that reaches only credential registration.")
+            .WithDescription(
+                "Sessionless: needs the exact Admin Origin only. No route issues an enrolment: only gatekeep recover-admin on the " +
+                "Docker host does, after its Security Alert and off-server record are confirmed. Each call is counted " +
+                "per client, then, while the client is within its limit, Deployment-wide, before the value is looked up: a " +
+                "client's 6th, or the 51st counted across the Deployment, in 15 minutes is 429. An unused enrolment within its " +
+                "15 minutes is used up, with every other unused one of its Admin, every live Session of its Admin " +
+                "ends as revoked, a live Session this browser held is superseded, and a Session starts that reaches only the " +
+                "Session read, sign-out and credential registration: setup, needing two credentials, for an Admin below the " +
+                "credential floor, and recovery, needing one, otherwise; admin.enrolment.used is written. An unknown, used, " +
+                "expired or malformed value is the same 400 enrolment_refused. Before bootstrap completes it is the unknown-path 404.")
+            .Produces<AdminSignInResponse>(StatusCodes.Status200OK)
+            .Produces<ApiProblem>(StatusCodes.Status400BadRequest, AdminResponses.ProblemContentType)
+            .Produces(StatusCodes.Status403Forbidden)
+            .Produces(StatusCodes.Status404NotFound)
+            .Produces<ApiProblem>(StatusCodes.Status429TooManyRequests, AdminResponses.ProblemContentType)
+            .Produces(StatusCodes.Status503ServiceUnavailable);
+
         app.MapGet("/api/v1/deployment/tenants", static (HttpContext context, AdminApiServices services) => TenantsApi.ListAsync(context, services))
             .WithMetadata(
                 DeploymentApiEndpoint.Instance,
@@ -542,6 +564,38 @@ internal static class AdminApi
                 "Any Tenant Role in the path Tenant, whatever the Tenant's status, which it returns too: only an active Tenant's label changes. It takes no lock, so it never waits behind a change. A malformed, unknown or role-less Tenant is 403 " +
                 "access_denied, audited as every Tenant capability refusal is.")
             .Produces<TenantLabelResponse>(StatusCodes.Status200OK)
+            .Produces(StatusCodes.Status401Unauthorized)
+            .Produces<ApiProblem>(StatusCodes.Status403Forbidden, AdminResponses.ProblemContentType)
+            .Produces(StatusCodes.Status503ServiceUnavailable);
+
+        app.MapGet("/api/v1/tenants/{tenantId}/logs", static (HttpContext context, AdminApiServices services) => TenantLogsApi.SearchAsync(context, services))
+            .WithMetadata(
+                TenantApiEndpoint.Instance,
+                new RequiresCapability(AdminCapabilities.TenantLogsRead),
+                new QueryParameter(TenantLogsApi.TypeQuery, "One event type code, {domain}.{object}.{action}, as docs/audit-events.md publishes it."),
+                new QueryParameter(
+                    TenantLogsApi.UserQuery,
+                    "A User: their UUID, or an email, which resolves first to the User references on this Tenant's events whose detail holds exactly it. Events whose Actor or target is that User."),
+                new QueryParameter(TenantLogsApi.ApplicationQuery, "An Application's UUID: events whose Actor or target is that client."),
+                new QueryParameter(TenantLogsApi.OutcomeQuery, "success or failure: the events whose type the catalogue gives that outcome."),
+                new QueryParameter(TenantLogsApi.FromQuery, "An ISO 8601 instant with Z or an offset: events at or after it."),
+                new QueryParameter(TenantLogsApi.ToQuery, "An ISO 8601 instant with Z or an offset: events before it. It must come after from."),
+                new QueryParameter(TenantLogsApi.CursorQuery, "The previous page's nextCursor: an evt_ public ID."))
+            .WithName("SearchTenantLogs")
+            .WithTags(TenantTag)
+            .WithSummary("Search the path Tenant's Log: newest first, 50 a page.")
+            .WithDescription(
+                "Any Tenant Role in the path Tenant. Read only, in the Tenant's own scope: no other Tenant's event is ever listed, and the " +
+                "read isn't audited. Each event's evt_ ID, time, type code, the catalogue's outcome and summary, and its Actor and " +
+                "target as internal references; never its detail, so no IP address, User-Agent or email. Every parameter is optional, " +
+                "at most once, and they combine; each filters an indexed envelope column. nextCursor is the last event's ID when an " +
+                "older page follows, else null; pass it back as cursor with the same filters. A parameter sent twice or empty, an " +
+                "unknown outcome, a code that isn't three lower-case parts, a User that is neither a UUID nor an email, an Application " +
+                "that isn't a UUID, a time that isn't an instant, from not before to, or a malformed cursor is 400 invalid_request. An " +
+                "email no event names, like any search that matches nothing, is an empty list. A malformed, unknown or role-less " +
+                "Tenant is 403 access_denied, audited as every Tenant capability refusal is.")
+            .Produces<TenantLogsResponse>(StatusCodes.Status200OK)
+            .Produces<ApiProblem>(StatusCodes.Status400BadRequest, AdminResponses.ProblemContentType)
             .Produces(StatusCodes.Status401Unauthorized)
             .Produces<ApiProblem>(StatusCodes.Status403Forbidden, AdminResponses.ProblemContentType)
             .Produces(StatusCodes.Status503ServiceUnavailable);

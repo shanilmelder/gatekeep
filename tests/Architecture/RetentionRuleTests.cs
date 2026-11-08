@@ -94,6 +94,9 @@ public class RetentionRuleTests
     {
         var hostLiterals = SettingSources
             .SelectMany(d => SourceFiles(Path.Combine(Root, d), "*.cs"))
+            // Host.Admin's generated copy of the module catalogues' summaries (Story 7.4): prose
+            // read from the contracts, which name no setting, never a setting or argument.
+            .Where(f => Relative(f) != AuditCatalogue.HostCataloguePath)
             .SelectMany(f => StringLiteral.Matches(File.ReadAllText(f)).Select(m => (File: f, Text: Unquote(m.Value))));
 
         var routesAndReads = SourceFiles(Path.Combine(Root, "src"), "*.cs")

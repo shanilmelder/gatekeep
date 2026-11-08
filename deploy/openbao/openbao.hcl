@@ -51,12 +51,17 @@ seal "static" {
 }
 
 # OpenBao 2.7.2 refuses to enable audit devices through the API, so it's declared here.
-# The openbao-audit volume. Off-server shipping and decrypt-rate alerts read this file
-# (later stories).
+# The openbao-audit volume. The openbao-audit-shipper service copies what is appended into
+# the Object Lock bucket (Story 1.30), reading it through the openbao-audit group, which
+# start-openbao.sh gives the file and its directory, so the mode lets that group read and
+# nobody else. Decrypt-rate alerts will read it too (Story 11.2).
+#
+# The device keeps its default HMAC of every request and response value: no log_raw, and
+# neither hmac_accessor nor elide_list_responses is turned off. A test fails if one appears.
 audit "file" "file" {
   description = "Every request, with secrets HMAC'd. Shipped off the server."
   options {
     file_path = "/var/log/openbao/audit.log"
-    mode      = "0600"
+    mode      = "0640"
   }
 }

@@ -3,7 +3,7 @@ using Gatekeep.Kernel.Persistence;
 namespace Gatekeep.Modules.Authentication.Core;
 
 /// <summary>
-/// Authentication's Tenant purge (Story 1.29): its pending sign-in transactions.
+/// Authentication's Tenant purge (Story 1.29): its pending sign-in transactions, and from Story 2.5 its attempt counters.
 /// It runs in the Tenant's own scope, so row-level security holds it to that Tenant too, and deletes nothing of any other module (AD-1). A second run deletes nothing.
 /// </summary>
 internal sealed class AuthenticationPurge : ITenantPurge
@@ -11,6 +11,7 @@ internal sealed class AuthenticationPurge : ITenantPurge
     private static readonly string[] Statements =
     [
         "DELETE FROM signin_transaction WHERE tenant_id = @tenant_id",
+        "DELETE FROM tenant_attempt WHERE tenant_id = @tenant_id",
     ];
 
     public async Task PurgeAsync(CommandContext context, CancellationToken cancellationToken)

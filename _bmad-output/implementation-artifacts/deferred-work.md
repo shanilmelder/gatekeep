@@ -57,7 +57,7 @@
   evidence: The unit drops CAP_IPC_LOCK and the config does not set disable_mlock; needs a Linux host (G-10).
 - source_spec: `_bmad-output/implementation-artifacts/spec-1-7-hold-keys-in-openbao-behind-ikeycustody.md`
   summary: Rotate the OpenBao audit log and decide on a second audit device.
-  evidence: A full disk under the only audit device blocks every request. Belongs with shipping the audit log off the server.
+  evidence: A full disk under the only audit device blocks every request. Story 1.30 ships the log off the server, so only rotation (with the shipper starting over when the file is replaced) and a second device remain.
 - source_spec: `_bmad-output/implementation-artifacts/spec-1-7-hold-keys-in-openbao-behind-ikeycustody.md`
   summary: Set a secret ID lifetime and write the replacement procedure for one leaked secret ID.
   evidence: Story 1.7 setup uses secret_id_ttl=0. Story 1.10 delivers secret IDs.
@@ -94,6 +94,7 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-2-6-add-session-and-transaction-tables.md`
   summary: Add `(tenant_id, application_id) REFERENCES application (tenant_id, id) ON DELETE RESTRICT` on `signin_transaction`, `authorization` and `token` in Story 2.5's migration.
   evidence: Story 2.6 created those columns with no foreign key, because the `application` table is Story 2.5's (user decision, 2026-11-02).
+  status: done in Story 2.5. `Migration20261106000000CreateDirectoryTables` adds all three, validating any existing rows; `ClientCredentialsTests` covers the 23503.
 - source_spec: `_bmad-output/implementation-artifacts/spec-2-6-add-session-and-transaction-tables.md`
   summary: Narrow `gk_hosted` UPDATE on `user_session`, `signin_transaction`, `authorization` and `token` to the columns that change, once Story 2.9's stores and Story 2.7's revocation define them.
   evidence: Story 2.6 grants table-wide UPDATE, so the Hosted path could rewrite `id_hash`, `binding_hash` or `user_id`.
@@ -182,11 +183,9 @@
   summary: Grant `UPDATE (role)` and `DELETE` on `tenant_role`, audit role changes, guard the last Tenant Owner, and show the "role removed mid-session" banner (Story 8.4).
   evidence: Story 1.24 reads roles on every request, so a removal counts at once, but nothing writes or audits role changes.
 - source_spec: `_bmad-output/implementation-artifacts/spec-1-24-enforce-capabilities-and-tenant-scoped-routes.md`
-  summary: Write rejected cross-Tenant attempts to the Tenant's own Log, the FR-40 `CrossTenantRejection` class (Story 7.4).
-  evidence: Story 1.24 writes `admin.access.denied` on the Deployment chain only, with no FR-40 class.
-- source_spec: `_bmad-output/implementation-artifacts/spec-1-24-enforce-capabilities-and-tenant-scoped-routes.md`
   summary: Have the cross-Tenant suite read the Tenant routes from `x-gatekeep-access` in the committed OpenAPI document (Story 1.31).
   evidence: Story 1.24 adds `x-gatekeep-access` to every operation; the suite isn't built.
+  resolution: Resolved by Story 1.31. The suite reads the live route set from the running hosts (`tests/Isolation/Hosting/RunningRoutes.cs`), which `AdminEndpointTests` already holds equal to the committed document's operations, so `x-gatekeep-access` adds nothing the registry check doesn't. Every live route has an entry in `tests/Isolation/CrossTenant/RouteRegistry.cs`, and each `{tenantId}` and `{targetTenantId}` entry runs its refusal case.
 - source_spec: `_bmad-output/implementation-artifacts/spec-1-24-enforce-capabilities-and-tenant-scoped-routes.md`
   summary: Catch `ARCHITECTURE-SPINE.md` up with Story 1.24: the AD-19 self-service exemption under `/api/v1/deployment`, the public ID alphabet (lowercase RFC 4648 base32, no padding, canonical only, never the empty UUID) in Conventions, the capability names in AD-20, and `tenant_role` in AD-27's Admins tables.
   evidence: Story 1.24 exempts the reviewed self-service and sessionless routes from the Deployment Owner gate and fixes the public ID encoding, which the spine doesn't yet state.
@@ -376,6 +375,7 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-2-3-publish-discovery-and-jwks-per-tenant.md`
   summary: A test that concurrent cold requests share one Tenant runtime build, alongside Story 2.5's token-endpoint load test.
   evidence: Story 2.3 review: every Protocol test sends requests one at a time.
+  status: done in Story 2.5. `ClientCredentialsTests.Fifty_concurrent_requests_on_a_cold_runtime_all_get_tokens_from_one_build`: 50 parallel token requests, each blocking on a Transit signature, all succeed from one runtime build (one public-key read per key, one unwrap).
 - source_spec: `_bmad-output/implementation-artifacts/spec-2-3-publish-discovery-and-jwks-per-tenant.md`
   summary: Rotation and revocation (Stories 2.4, 9.x) must never commit a Tenant with a `next` and no `current`, or `EnsureTenantKeysAsync` would create a `current` that was never published ahead.
   evidence: Story 2.3 review: the backfill creates whatever (purpose, state) is missing.
@@ -409,3 +409,48 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-12-7-rotate-the-master-key.md`
   summary: Make the root-token census in `MasterKeyRotationTests.Full_rotation_keeps_every_value_and_leaves_the_old_generation_unable_to_unseal` stable under load.
   evidence: While merging `main` into Story 1.29 on 2026-11-05, the census step (line 155) printed nothing in 2 of 5 local Docker runs alongside other classes, and passed alone and on rerun. Story 1.29 doesn't touch root tokens.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-30-connect-the-alert-channel-and-off-server-store.md`
+  summary: Stop the audit shipper re-shipping a chunk after a crash between the `PUT` and the save of its offset.
+  evidence: Story 1.30 saves the offset only after a successful `PUT`. A crash in between ships the same `{fileId}-{startOffset}` key again as a second locked version, or under the next day's path after midnight. A clean restart is tested. Fixing it needs a read-back or a conditional `PUT`, and the credential can't read.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-30-connect-the-alert-channel-and-off-server-store.md`
+  summary: Read the alert webhook URL from a secret file, so a provider whose URL path is the credential can be used safely.
+  evidence: Story 1.30 passes `GATEKEEP_ALERT_URL` as a plain environment variable, so it shows in `.env` and `docker inspect`. `install.md` requires a URL that carries no credential, with the token in `alerts/token`.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-30-connect-the-alert-channel-and-off-server-store.md`
+  summary: Bind a signed off-server record to its object key, or check its `id` and `writtenAt` against the key when verifying.
+  evidence: Story 1.30's `OffServerRecordWriter.VerifyAsync` checks only the signature. Someone holding the write-only credential could copy an old signed record to a new key. Belongs with Story 7.2's verifier.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-30-connect-the-alert-channel-and-off-server-store.md`
+  summary: Design a filtering egress proxy for the `egress` network, so the worker, cli and shipper can reach only the alert and bucket hosts.
+  evidence: Story 1.30's `egress` network is unrestricted, and threat-model T-59 accepts that until such a proxy is designed.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-30-connect-the-alert-channel-and-off-server-store.md`
+  summary: Tidy up the EgressHttp edge cases.
+  evidence: Story 1.30 has these open:
+    - an empty DNS answer is reported as "no public address";
+    - a bracketed literal with a named zone ends as Unavailable;
+    - secret file reads have no size cap;
+    - the handler that `EgressHttp.Create()` returns can still be changed afterwards;
+    - no test makes a connect hang.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-30-connect-the-alert-channel-and-off-server-store.md`
+  summary: Make the `openbao.audit.ship` canary flow ship real OpenBao audit lines and search both days' prefixes.
+  evidence: Story 1.30's `CanaryFlows.AuditShipAsync` ships synthetic HMAC lines and builds its prefix from `DateTime.UtcNow`, so it can flake at midnight UTC. `AuditShipTests` cover real Transit output. After an OpenBao crash, a partial last line is glued to the next line and shipped as is.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-5-issue-a-token-by-client-credentials.md`
+  summary: Keep unauthenticated token traffic from locking real machine clients out of a Tenant through the per-Tenant token limit.
+  evidence: Story 2.5 review. `LimitTokenRequests` counts the 1200/min per-Tenant limit before client authentication (as §5.2 asks), so about 20 sources at 60/min each make every token request at that Tenant answer 429, valid clients included. Needs a product decision, such as counting the Tenant limit after authentication or reserving capacity for authenticated clients.
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-5-issue-a-token-by-client-credentials.md`
+  summary: Prune expired access-token rows from `token`.
+  evidence: Story 2.5 review. Every Client Credentials token writes a `token` row and Story 2.5 excludes pruning; at the per-Tenant limit that is up to about 1.7 M rows per Tenant per day, with nothing removing expired ones.
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-5-issue-a-token-by-client-credentials.md`
+  summary: Sweep stale `tenant_attempt` (and `admin_attempt`) counter rows.
+  evidence: Story 2.5 review. Each distinct IPv4 address or IPv6 /64 leaves a lasting row per policy per Tenant; rows go only on a crash (UNLOGGED) or Tenant deletion. `admin_attempt` has the same gap.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-32-recover-admin-access-from-the-host.md`
+  summary: Let `gatekeep recover-admin` recover an Admin who already holds the 10-credential maximum, and retire the lost credentials during recovery.
+  evidence: Story 1.32 review. Lost credentials stay registered, so an Admin at the maximum uses up the enrolment and loses their Sessions but can't register a new one. This belongs with Story 8.3's credential retirement.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-32-recover-admin-access-from-the-host.md`
+  summary: Print the `recover-admin` link with the Admin site's HTTPS port when it isn't 443.
+  evidence: Story 1.32 review. The `cli` service doesn't get `GATEKEEP_HTTPS_PORT` or the Admin origin, so a non-443 setup (such as dev on 18443) must add `:{port}` by hand, as `docs/install.md` says.
+- source_spec: `_bmad-output/implementation-artifacts/spec-7-4-search-a-tenant-s-logs.md`
+  summary: Load-test refused cross-Tenant requests near the pool size. Each one holds the Deployment connection while the Tenant-Log write opens a second one.
+  evidence: Story 7.4 review: `CrossTenantRejection.WriteAsync` opens a `TenantScope` inside the open Deployment transaction. This is unverified; each Admin is capped at 30 refusals per 15 minutes.
+- source_spec: `_bmad-output/implementation-artifacts/spec-7-4-search-a-tenant-s-logs.md`
+  summary: Settle email search once Epics 3–5 write `audit_detail.email`. Decide whose email it is when actor and target differ, whether case is normalised, and what happens at the 100-reference cap.
+  evidence: Story 7.4 review: `ResolveEmail` collects both actor and target User references, matches exactly, and stops silently at 100. No writer stores an email yet.

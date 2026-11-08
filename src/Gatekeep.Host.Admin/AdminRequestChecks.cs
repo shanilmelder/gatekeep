@@ -622,6 +622,15 @@ internal static class AdminRequestChecks
                 {
                     refusal = Refusal.AccessDenied;
                     audited = await DenyAsync(command, services, principal, pathTenant, cancellationToken);
+
+                    // A cross-Tenant attempt also goes on the refused Tenant's own Log (Story 7.4,
+                    // AD-9): an Admin holding no role in a well-formed path Tenant, within the same
+                    // cap. Written and committed in its own Tenant scope before this one commits,
+                    // so a failure there is this transaction's 503 too. An unknown Tenant writes nothing.
+                    if (audited && pathTenant is { } rejected && grant is null)
+                    {
+                        await CrossTenantRejection.WriteAsync(services, principal, rejected, cancellationToken);
+                    }
                 }
                 else if (declaration.Tenant && stateChanging && !PageTenantMatches(context))
                 {

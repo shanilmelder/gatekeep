@@ -9,7 +9,8 @@ namespace Gatekeep.Tests.Architecture;
 /// the first <c>ProcessRequestContext</c> handler, at <see cref="int.MinValue"/>, and OpenIddict's
 /// own <c>ResolveRequestUri</c> stays removed; an OpenIddict upgrade that adds an earlier handler,
 /// or renames that one, breaks the design (Story 2.1 carry-over). Only the Protocol module and
-/// Host.Hosted reference OpenIddict, and neither names a Management key, which Host.Hosted's custody
+/// Host.Hosted reference OpenIddict's engine (the store owners, Directory and Sessions, only its
+/// abstractions, Story 2.5), and neither names a Management key, which Host.Hosted's custody
 /// policy can't use. Tests reference no module, so sources are read as text; the Isolation suite
 /// checks the built handler list itself. Each rule has a self-check that a violation is caught.
 /// </summary>
@@ -22,6 +23,10 @@ public class ProtocolRuleTests
     private static readonly string Root = EdgeList.FindRepositoryRoot(AppContext.BaseDirectory);
 
     private static readonly string[] SkippedDirectories = ["bin", "obj"];
+
+    private const string DirectoryProject = "src/Modules/Directory/Gatekeep.Modules.Directory.csproj";
+
+    private const string SessionsProject = "src/Modules/Sessions/Gatekeep.Modules.Sessions.csproj";
 
     private static readonly string[] OpenIddictProjects =
     [
@@ -69,13 +74,53 @@ public class ProtocolRuleTests
     [Fact]
     public void Only_Protocol_and_Host_Hosted_reference_OpenIddict()
     {
-        var referencing = SourceFiles("src", "*.csproj")
-            .Where(f => XDocument.Parse(f.Source).Descendants("PackageReference")
-                .Any(r => r.Attribute("Include")?.Value.StartsWith("OpenIddict", StringComparison.Ordinal) == true))
-            .Select(f => f.Path)
-            .Order(StringComparer.Ordinal);
+        var engine = OpenIddictReferences(SourceFiles("src", "*.csproj")).Where(r => r.Value.Any(p => p != "OpenIddict.Abstractions")).Select(r => r.Key);
 
-        Assert.Equal(OpenIddictProjects, referencing);
+        Assert.Equal(OpenIddictProjects, engine);
+    }
+
+    /// <summary>
+    /// Story 2.5 (AD-8): each store lives in its owner's adapters, so Directory and Sessions reference
+    /// OpenIddict too, but only <c>OpenIddict.Abstractions</c>, the store interfaces. The engine, the
+    /// server and the managers, stays in Protocol and Host.Hosted.
+    /// </summary>
+    [Fact]
+    public void Store_owners_reference_only_the_OpenIddict_abstractions()
+    {
+        var references = OpenIddictReferences(SourceFiles("src", "*.csproj"));
+
+        Assert.Equal(["OpenIddict.Abstractions"], references[DirectoryProject]);
+        Assert.Equal(["OpenIddict.Abstractions"], references[SessionsProject]);
+        Assert.Equal([DirectoryProject, SessionsProject], references.Keys.Except(OpenIddictProjects).Order(StringComparer.Ordinal));
+    }
+
+    [Fact]
+    public void A_store_owner_referencing_the_engine_is_reported()
+    {
+        const string engine = "<Project><ItemGroup><PackageReference Include=\"OpenIddict.Abstractions\" /><PackageReference Include=\"OpenIddict.Core\" /></ItemGroup></Project>";
+
+        var references = OpenIddictReferences([(DirectoryProject, engine)]);
+
+        Assert.NotEqual(["OpenIddict.Abstractions"], references[DirectoryProject]);
+    }
+
+    /// <summary>Each project referencing an OpenIddict package, by path, with the packages it references.</summary>
+    private static SortedDictionary<string, string[]> OpenIddictReferences(IEnumerable<(string Path, string Source)> projects)
+    {
+        var references = new SortedDictionary<string, string[]>(StringComparer.Ordinal);
+        foreach (var (path, source) in projects)
+        {
+            string[] packages = [.. XDocument.Parse(source).Descendants("PackageReference")
+                .Select(r => r.Attribute("Include")?.Value ?? string.Empty)
+                .Where(p => p.StartsWith("OpenIddict", StringComparison.Ordinal))
+                .Order(StringComparer.Ordinal)];
+            if (packages.Length > 0)
+            {
+                references[path] = packages;
+            }
+        }
+
+        return references;
     }
 
     [Fact]

@@ -4,7 +4,7 @@
 // in X-Gatekeep-CSRF, and a refusal's problem body is read into { code, traceId }. Each call's
 // request and response types come from the committed OpenAPI document, by path and method.
 
-import type { components, paths } from './schema.generated';
+import type { components, operations, paths } from './schema.generated';
 
 export type ApiProblem = components['schemas']['ApiProblem'];
 export type BootstrapClaimResponse = components['schemas']['BootstrapClaimResponse'];
@@ -33,6 +33,12 @@ export type TenantLabelResponse = components['schemas']['TenantLabelResponse'];
 export type SetTenantLabelRequest = components['schemas']['SetTenantLabelRequest'];
 export type DeleteTenantRequest = components['schemas']['DeleteTenantRequest'];
 export type TenantDeletion = components['schemas']['TenantDeletion'];
+export type TenantLogsResponse = components['schemas']['TenantLogsResponse'];
+export type TenantLogEvent = components['schemas']['TenantLogEventResponse'];
+export type LogReference = components['schemas']['LogReference'];
+
+/** A Log search's filters (Story 7.4), each optional and sent at most once, and the next page's cursor. */
+export type TenantLogsQuery = NonNullable<operations['SearchTenantLogs']['parameters']['query']>;
 export type SigningKeysResponse = components['schemas']['SigningKeysResponse'];
 export type SigningKey = components['schemas']['SigningKeyResponse'];
 export type SigningKeysJwksResponse = components['schemas']['SigningKeysJwksResponse'];
@@ -111,6 +117,9 @@ export interface ApiClientOptions {
 }
 
 const STATE_CHANGING: ReadonlySet<string> = new Set(['post', 'put', 'patch', 'delete']);
+
+/** A Log search's parameters, in the order the query string carries them. */
+const LOG_QUERY = ['type', 'user', 'application', 'outcome', 'from', 'to', 'cursor'] as const satisfies readonly (keyof TenantLogsQuery)[];
 
 /** `{ code, traceId }` from a problem body, or null for anything else. Nothing else in it is kept. */
 export function parseProblem(body: unknown): ApiProblem | null {
@@ -218,6 +227,11 @@ export function createApiClient(options: ApiClientOptions = {}) {
     /** Redeems a Recovery Code at sign-in, sessionless: a Session that reaches only credential registration. */
     redeemRecoveryCode: (code: string) => request('/api/v1/deployment/signin/recovery-code', 'post', { code }),
     /**
+     * Redeems a gatekeep recover-admin enrolment, the fragment of the link it printed, sessionless
+     * (Story 1.32): a Session that reaches only credential registration.
+     */
+    redeemEnrolment: (enrolment: string) => request('/api/v1/deployment/signin/enrolment', 'post', { enrolment }),
+    /**
      * The Deployment's Tenants, oldest first, 50 a page, with the Tenant zone (Story 1.27).
      * `cursor` is the previous page's `nextCursor`, which goes into the query encoded.
      */
@@ -241,6 +255,23 @@ export function createApiClient(options: ApiClientOptions = {}) {
     /** The Tenant's environment label. Its ID goes into the path encoded. */
     getTenantLabel: (tenantId: string) =>
       request(`/api/v1/tenants/${encodeURIComponent(tenantId)}/label` as '/api/v1/tenants/{tenantId}/label', 'get'),
+    /**
+     * One page of the Tenant's Log (Story 7.4), newest first, 50 a page. Each filter in `query`
+     * that is set, and the previous page's `nextCursor` as `cursor`, goes into the query string
+     * encoded, in a fixed order; the Tenant's ID goes into the path encoded.
+     */
+    searchTenantLogs: (tenantId: string, query: TenantLogsQuery = {}) => {
+      const search = new URLSearchParams();
+      for (const name of LOG_QUERY) {
+        const value = query[name];
+        if (typeof value === 'string' && value !== '') search.set(name, value);
+      }
+      const text = search.toString();
+      return request(
+        `/api/v1/tenants/${encodeURIComponent(tenantId)}/logs${text === '' ? '' : `?${text}`}` as '/api/v1/tenants/{tenantId}/logs',
+        'get',
+      );
+    },
     /** Changes the Tenant's environment label. Removing Prod needs a fresh assertion bound to this Tenant. */
     setTenantLabel: (tenantId: string, body: SetTenantLabelRequest) =>
       request(`/api/v1/tenants/${encodeURIComponent(tenantId)}/label` as '/api/v1/tenants/{tenantId}/label', 'put', body),

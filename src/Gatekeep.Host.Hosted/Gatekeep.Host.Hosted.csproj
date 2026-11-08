@@ -14,6 +14,7 @@
     <ProjectReference Include="../Adapters/Logging/Gatekeep.Adapters.Logging.csproj" />
     <ProjectReference Include="../Adapters/Hosting/Gatekeep.Adapters.Hosting.csproj" />
     <ProjectReference Include="../Modules/Protocol/Gatekeep.Modules.Protocol.csproj" />
+    <ProjectReference Include="../Modules/Audit/Gatekeep.Modules.Audit.csproj" />
     <ProjectReference Include="../Modules/Authentication/Gatekeep.Modules.Authentication.csproj" />
     <ProjectReference Include="../Modules/Identity/Gatekeep.Modules.Identity.csproj" />
     <ProjectReference Include="../Modules/Sessions/Gatekeep.Modules.Sessions.csproj" />

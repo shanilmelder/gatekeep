@@ -156,6 +156,19 @@ internal static class AdminOpenApi
                     Enumerate(schema, "status", TenantsApi.StepStatuses);
                     Bound(schema, "tenantId", TenantIdPattern, maxLength: null);
                 }
+                else if (type == typeof(TenantLogEventResponse))
+                {
+                    Bound(schema, "id", EventIdPattern, maxLength: null);
+                    Bound(schema, "type", TypeCodePattern, maxLength: 128);
+                }
+                else if (type == typeof(TenantLogsResponse))
+                {
+                    Bound(schema, "nextCursor", EventIdPattern, maxLength: null);
+                }
+                else if (type == typeof(LogReference))
+                {
+                    Enumerate(schema, "kind", TenantLogsApi.ReferenceKinds);
+                }
                 else if (type == typeof(ApiProblem))
                 {
                     Enumerate(schema, "code", AdminResponses.ProblemCodes);
@@ -381,6 +394,9 @@ internal static class AdminOpenApi
                             Description = context.Description.RelativePath?.EndsWith("recovery-code", StringComparison.Ordinal) == true
                                 ? "The recovery Admin Session: __Host-gk-admin={43 base64url characters}; Path=/; Secure; HttpOnly; " +
                                   "SameSite=Strict, a browser session cookie with no Domain, Expires or Max-Age."
+                                : context.Description.RelativePath?.EndsWith("enrolment", StringComparison.Ordinal) == true
+                                ? "The setup or recovery Admin Session: __Host-gk-admin={43 base64url characters}; Path=/; Secure; HttpOnly; " +
+                                  "SameSite=Strict, a browser session cookie with no Domain, Expires or Max-Age."
                                 : metadata.OfType<JsonRequestBody>().Any()
                                 ? "The Admin Session: __Host-gk-admin={43 base64url characters}; Path=/; Secure; HttpOnly; SameSite=Strict, a " +
                                   "browser session cookie with no Domain, Expires or Max-Age. And __Host-gk-admin-signin cleared with Max-Age=0, " +
@@ -422,6 +438,10 @@ internal static class AdminOpenApi
     private const string TenantIdPattern = "^ten_[a-z2-7]{25}[aeimquy4]$";
 
     private const string OperationIdPattern = "^opr_[a-z2-7]{25}[aeimquy4]$";
+
+    private const string EventIdPattern = "^evt_[a-z2-7]{25}[aeimquy4]$";
+
+    private const string TypeCodePattern = "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*$";
 
     /// <summary>The <c>x-gatekeep-access</c> value: the declaration, and a capability's flags as the table holds them.</summary>
     private static JsonObject Access(AccessDeclaration declaration) => declaration.Kind switch

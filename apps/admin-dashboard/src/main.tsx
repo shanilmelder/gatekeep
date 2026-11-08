@@ -3,6 +3,7 @@ import { StrictMode, useLayoutEffect, type ComponentType } from 'react';
 import { createRoot } from 'react-dom/client';
 import { BootstrapPage } from './BootstrapPage';
 import { CredentialSetupPage } from './CredentialSetupPage';
+import { RecoverPage } from './RecoverPage';
 import { RecoveryCodePage } from './RecoveryCodePage';
 import { usePath } from './navigation';
 import { Shell } from './shell/Shell';
@@ -14,6 +15,7 @@ const PRE_SESSION: Readonly<Record<string, ComponentType>> = {
   '/bootstrap': BootstrapPage,
   '/signin': SignInPage,
   '/signin/recovery': RecoveryCodePage,
+  '/recover': RecoverPage,
   '/setup/credentials': CredentialSetupPage,
 };
 

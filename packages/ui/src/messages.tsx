@@ -260,6 +260,11 @@ export interface Messages {
   recoveryCodeSuperseded: string;
   /** Shown when the code on screen can no longer be confirmed in this Session. */
   recoveryCodeNotConfirmable: string;
+  /** The Recover page's heading and subtitle (Story 1.32): the link gatekeep recover-admin prints. */
+  recoverTitle: string;
+  recoverSubtitle: string;
+  /** Shown when the link's enrolment is refused, or the link holds none. It never says why. */
+  recoverRefused: string;
   /** The Deployment group's Tenants item (Story 1.27), and the Tenants page's title and its table's caption. */
   navTenants: string;
   /** Create Tenant's heading and its description (Story 1.27). */
@@ -387,6 +392,44 @@ export interface Messages {
   unsavedKeep: string;
   /** Sign-in's Generic error before bootstrap (Story 1.23): the way on to setting up the Deployment. */
   signInSetUpDeployment: string;
+  /** The Monitoring group's Logs item (Story 7.4), and the Logs page's title and its table's caption. */
+  navLogs: string;
+  /** The field search's field select and value labels. */
+  logsField: string;
+  logsValue: string;
+  /** The fields a Log is searched by. */
+  logsFieldType: string;
+  logsFieldUser: string;
+  logsFieldApplication: string;
+  logsFieldOutcome: string;
+  logsFieldRange: string;
+  /** The value's helper for each typed field. */
+  logsTypeHelper: string;
+  logsUserHelper: string;
+  logsApplicationHelper: string;
+  /** The outcome choices. */
+  logsOutcomeSuccess: string;
+  logsOutcomeFailure: string;
+  /** The time range choices, each ending now. */
+  logsRangeHour: string;
+  logsRangeDay: string;
+  logsRangeWeek: string;
+  logsRangeMonth: string;
+  logsRangeQuarter: string;
+  /** The field search's one action. */
+  logsSearch: string;
+  /** The Logs table's columns. */
+  logsColumnTime: string;
+  logsColumnType: string;
+  logsColumnDescription: string;
+  logsColumnUser: string;
+  logsColumnApplication: string;
+  /** The Logs page's empty state (EXPERIENCE.md). */
+  logsEmpty: string;
+  /** The action that reads the next, older page of events. */
+  logsLoadMore: string;
+  /** The banner when the server refused the search as malformed: nothing was read. */
+  logsInvalid: string;
   /** The Security group's Signing keys item (Story 9.1), which opens the Signing keys page. */
   navSigningKeys: string;
   /** The Signing keys page's heading and description (design GEN.keys). */
@@ -543,7 +586,7 @@ export const defaultMessages: Readonly<Messages> = Object.freeze({
   recoveryPasskeyLink: 'Sign in with a passkey instead',
   recoveryRefused: "That code isn't valid.",
   setupRecoveryTitle: 'Set up a new passkey',
-  setupRecoverySubtitle: 'Your recovery code has been used. Register a new passkey or security key to continue.',
+  setupRecoverySubtitle: 'Your recovery code or recovery link has been used. Register a new passkey or security key to continue.',
   setupUseRecoveryCode: 'Use an offline recovery code instead',
   recoveryCodeWarning: "If you lose your device, this code works once. We won't show it again.",
   recoveryCodeWhat: 'recovery code',
@@ -551,6 +594,9 @@ export const defaultMessages: Readonly<Messages> = Object.freeze({
   recoveryCodeSavedRequired: "Confirm you've saved your code.",
   recoveryCodeSuperseded: 'A newer recovery code replaced this one, so it was not saved. Start again to get a new code.',
   recoveryCodeNotConfirmable: "This recovery code can no longer be confirmed. Start again.",
+  recoverTitle: 'Recover Admin access',
+  recoverSubtitle: 'Continue to end every session of this Admin and register a new passkey or security key. This link works once.',
+  recoverRefused: "This recovery link isn't valid. It may have been used or expired. Run gatekeep recover-admin again for a new one.",
   navTenants: 'Tenants',
   createTenantTitle: 'Create your Tenant',
   createTenantDescription: 'A Tenant is an isolated directory of Users, Applications and settings.',
@@ -627,6 +673,33 @@ export const defaultMessages: Readonly<Messages> = Object.freeze({
   unsavedLeave: 'Discard and leave',
   unsavedKeep: 'Keep editing',
   signInSetUpDeployment: 'Set up this Deployment',
+  navLogs: 'Logs',
+  logsField: 'Search by',
+  logsValue: 'Value',
+  logsFieldType: 'Event type',
+  logsFieldUser: 'User',
+  logsFieldApplication: 'Application',
+  logsFieldOutcome: 'Outcome',
+  logsFieldRange: 'Time range',
+  logsTypeHelper: 'An event code, such as admin.access.denied',
+  logsUserHelper: 'A User ID or an email address',
+  logsApplicationHelper: 'An Application ID',
+  logsOutcomeSuccess: 'Success',
+  logsOutcomeFailure: 'Failure',
+  logsRangeHour: 'Last 1 hour',
+  logsRangeDay: 'Last 24 hours',
+  logsRangeWeek: 'Last 7 days',
+  logsRangeMonth: 'Last 30 days',
+  logsRangeQuarter: 'Last 90 days',
+  logsSearch: 'Search',
+  logsColumnTime: 'Time (UTC)',
+  logsColumnType: 'Type',
+  logsColumnDescription: 'Description',
+  logsColumnUser: 'User',
+  logsColumnApplication: 'Application',
+  logsEmpty: 'No events in this range',
+  logsLoadMore: 'Load more',
+  logsInvalid: "That search isn't valid. Check the value and search again.",
   navSigningKeys: 'Signing keys',
   signingKeysTitle: 'Signing keys',
   signingKeysDescription: 'Keys used to sign ID and access tokens. Rotate regularly; revoke if compromised.',

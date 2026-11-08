@@ -327,6 +327,23 @@ describe('api-client', () => {
     assert.equal(TENANT_HEADER in calls[0].init.headers, false);
   });
 
+  it('searches a Tenant Log with only the set filters, encoded, in a fixed order, as a read', async () => {
+    const { calls, fetch } = fakeFetch(200, JSON.stringify({ events: [], nextCursor: null }));
+    const client = createApiClient({ fetch, csrfToken: () => 'csrf-1', pageTenant: () => 'ten_a' });
+
+    await client.searchTenantLogs('ten_a');
+    await client.searchTenantLogs('ten_a/b', { cursor: 'evt_c', user: 'a+b@example.test', type: '', outcome: undefined });
+    await client.searchTenantLogs('ten_a', { from: '2026-11-06T09:00:00.000Z', application: 'x&y=z' });
+
+    assert.equal(calls[0].input, '/api/v1/tenants/ten_a/logs');
+    assert.equal(calls[0].init.method, 'GET');
+    assert.equal(calls[1].input, '/api/v1/tenants/ten_a%2Fb/logs?user=a%2Bb%40example.test&cursor=evt_c');
+    assert.equal(calls[2].input, '/api/v1/tenants/ten_a/logs?application=x%26y%3Dz&from=2026-11-06T09%3A00%3A00.000Z');
+    // A read carries neither the CSRF token nor the page Tenant.
+    assert.equal(CSRF_HEADER in calls[1].init.headers, false);
+    assert.equal(TENANT_HEADER in calls[1].init.headers, false);
+  });
+
   it('parses only a string code, and a missing trace ID as empty', () => {
     assert.equal(parseProblem(null), null);
     assert.equal(parseProblem('x'), null);

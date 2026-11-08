@@ -21,9 +21,12 @@
     <Project Path="src/Modules/Operations/Gatekeep.Modules.Operations.csproj" />
   </Folder>
   <Folder Name="/src/Adapters/">
+    <Project Path="src/Adapters/AlertChannel/Gatekeep.Adapters.AlertChannel.csproj" />
+    <Project Path="src/Adapters/Egress/Gatekeep.Adapters.Egress.csproj" />
     <Project Path="src/Adapters/Fido2/Gatekeep.Adapters.Fido2.csproj" />
     <Project Path="src/Adapters/Hosting/Gatekeep.Adapters.Hosting.csproj" />
     <Project Path="src/Adapters/Logging/Gatekeep.Adapters.Logging.csproj" />
+    <Project Path="src/Adapters/ObjectLock/Gatekeep.Adapters.ObjectLock.csproj" />
     <Project Path="src/Adapters/OpenBao/Gatekeep.Adapters.OpenBao.csproj" />
     <Project Path="src/Adapters/Postgres/Gatekeep.Adapters.Postgres.csproj" />
   </Folder>
