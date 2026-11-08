@@ -6,12 +6,12 @@ How a Gatekeep release is built, signed and published, and how Esm runs the sign
 
 Every release image is built in CI, ships with an SPDX SBOM, is signed by an encrypted cosign key that only the `sign` job of a `v*` tag receives, and is deployed by digest. A Docker host checks each digest against the public key pinned in its own `deploy/trust/` directory before it runs anything. No transparency log is involved: the pinned key is the only root of trust, so checking needs no Sigstore service.
 
-The release workflow, `.github/workflows/release.yml`, runs on a pushed `v*` tag and has two jobs, both on the self-hosted runner `shanilmelder-vps`.
+The release workflow, `.github/workflows/release.yml`, runs on a pushed `v*` tag and has two jobs, each on its own fresh GitHub-hosted runner (`ubuntu-latest`), so the machine that signs never ran anything the build ran.
 
 | Job | Runs on | Holds | Does |
 | --- | --- | --- | --- |
-| `build` | `shanilmelder-vps` (`self-hosted`) | A read-only token. No secret, no environment, no registry login | Runs the gates (the tests container and the stack check), then `deploy/release/build.sh` in the `release-tools` image: each release image as an OCI archive, `<svc>.tar`, its SBOM, `<svc>.spdx.json`, and `digests.txt`. Uploads them as the `release-dist` workflow artifact |
-| `sign` | `shanilmelder-vps`, label `gatekeep-signing` | `contents: write` and `packages: write`, behind the `release-signing` environment, which only a `v*` tag can deploy to. No approval: it starts as soon as `build` passes. The environment's secrets `COSIGN_PRIVATE_KEY` and `COSIGN_PASSWORD`, in the signing step's environment only | Checks out the tag for `deploy/release/publish.sh` alone and downloads the artifact. Pushes each archive to GHCR, checks each pushed digest against `digests.txt`, signs each digest (bound to its service and the release tag) and attests its SBOM with the cosign key, writes `release.env`, and creates or updates the GitHub release with `release.env`, `digests.txt` and the SBOMs |
+| `build` | `ubuntu-latest` | A read-only token. No secret, no environment, no registry login | Runs the gates (the tests container and the stack check), then `deploy/release/build.sh` in the `release-tools` image: each release image as an OCI archive, `<svc>.tar`, its SBOM, `<svc>.spdx.json`, and `digests.txt`. Uploads them as the `release-dist` workflow artifact |
+| `sign` | `ubuntu-latest`, a fresh runner of its own | `contents: write` and `packages: write`, behind the `release-signing` environment, which only a `v*` tag can deploy to. No approval: it starts as soon as `build` passes. The environment's secrets `COSIGN_PRIVATE_KEY` and `COSIGN_PASSWORD`, in the signing step's environment only | Checks out the tag for `deploy/release/publish.sh` alone and downloads the artifact. Pushes each archive to GHCR, checks each pushed digest against `digests.txt`, signs each digest (bound to its service and the release tag) and attests its SBOM with the cosign key, writes `release.env`, and creates or updates the GitHub release with `release.env`, `digests.txt` and the SBOMs |
 
 The `build` job runs third-party code: the NuGet and pnpm restores, buildx and syft. That's why it gets nothing worth stealing, and why the `sign` job never runs anything it produced. The archives are only pushed byte for byte. Comparing each pushed digest with `digests.txt` is a transfer-integrity check: it catches a push that changed the bytes, not a tampered build, since the archives and `digests.txt` both come from the `build` job.
 
@@ -21,17 +21,15 @@ The release images are every service `deploy/compose.yaml` builds (`hosted`, `ad
 
 ## The signing machine
 
-The VPS `shanilmelder-vps`, which also runs CI. It holds no private key at rest: the key and its password are secrets of the `release-signing` environment, which GitHub hands only to the `sign` job of a `v*` tag, and only to its signing step, as environment variables. Nothing writes them to disk. It needs:
+A fresh GitHub-hosted runner for each `sign` job, discarded when the job ends. Nothing persists on it between releases, and it never ran the `build` job's third-party code. It holds no private key at rest: the key and its password are secrets of the `release-signing` environment, which GitHub hands only to the `sign` job of a `v*` tag, and only to its signing step, as environment variables. Nothing writes them to disk.
 
-- cosign **2.6.5** and crane **0.22.1** on the runner's `PATH`, each checked against its published checksum or signature before use. `publish.sh` refuses any other version;
-- the GitHub CLI (`gh`), Git, and Docker, for `docker login` and the final check with `release-verify`;
-- the GitHub Actions runner, registered to this repository only, with the extra label `gatekeep-signing`.
+The job installs cosign **2.6.5** and crane **0.22.1** itself, in the step "Install the pinned cosign and crane": it copies each binary out of the same upstream image, by the same digest, that `deploy/docker/release-tools.Dockerfile` builds from, so the release and the CI rehearsal sign with the same binaries. `publish.sh` refuses any other version, and `ReleaseConfigTests.Sign_job_installs_the_cosign_and_crane_the_release_tools_image_pins` fails if the workflow and the Dockerfile drift apart. The runner image already has the GitHub CLI (`gh`), Git and Docker, for `docker login` and the final check with `release-verify`.
 
-**What this gives up.** The VPS also runs every pull request's CI, which runs third-party code (the NuGet and pnpm restores, buildx, syft) with the Docker socket, that is root on the machine. Code that gets root there can stay on the machine and read the key and password from the `sign` job's environment during a later release. The `release-signing` environment's `v*` tag rule decides *when* the key is handed out, not what else runs on that machine. A YubiKey on a machine used for nothing else is the stronger setup: `publish.sh` still accepts `sk`.
+**What this relies on.** GitHub's hosted runner isolation, and the `release-signing` environment's `v*` tag rule, which decides when the key is handed out. A YubiKey on a machine used for nothing else is still the stronger setup: `publish.sh` still accepts `sk`.
 
 ### Generate the signing key
 
-Once, on a trusted machine, not the VPS. Choose a long random password and keep it, and a copy of `cosign.key`, offline with the other escrowed material (`docs/key-custody.md`).
+Once, on a trusted machine, never a CI runner. Choose a long random password and keep it, and a copy of `cosign.key`, offline with the other escrowed material (`docs/key-custody.md`).
 
 ```sh
 cosign generate-key-pair
@@ -52,15 +50,15 @@ cosign public-key --key cosign.key --outfile release-signing.pub
 
 Or rename `cosign.pub` to `release-signing.pub`. This file is public, but isn't committed: it travels to each Docker host by a channel other than the release itself (see "Pin the key on a Docker host").
 
-### Label the runner
+### Restrict outside contributors
 
-Add the label `gatekeep-signing` to `shanilmelder-vps` in **Settings, Actions, Runners**. A workflow from a pull request that names `gatekeep-signing` runs there too, but gets no key: the secrets belong to the `release-signing` environment, which only a `v*` tag can deploy to. Also set, in **Settings, Actions, General**: workflows from forks need approval for every outside contributor.
+In **Settings, Actions, General**: workflows from forks need approval for every outside contributor. A fork's pull request never gets the signing key either way, since the secrets belong to the `release-signing` environment, which only a `v*` tag can deploy to.
 
 ### Set up the environment
 
 - **Settings, Environments, `release-signing`**: deployment branches and tags limited to the tag rule `v*`, and the secrets `COSIGN_PRIVATE_KEY` and `COSIGN_PASSWORD`.
 
-There is no required reviewer: GitHub's plan for this private repository doesn't offer one, so Esm accepted that **pushing a `v*` tag is the approval**. The `sign` job signs and publishes as soon as `build` passes, with no step in between. Whoever can push a `v*` tag can publish a signed release, which is why the tag ruleset below matters.
+There is no required reviewer: Esm accepted that **pushing a `v*` tag is the approval**. GitHub offers required reviewers on public repositories, so one can be added on the environment if that changes. The `sign` job signs and publishes as soon as `build` passes, with no step in between. Whoever can push a `v*` tag can publish a signed release, which is why the tag ruleset below matters.
 
 - **Settings, Rules**: a tag ruleset on `v*` that only Esm can create, update or delete.
 
@@ -105,4 +103,4 @@ docker run --rm -v ./deploy/trust:/trust:ro busybox:1.37.0@sha256:a7dbc319b14381
 
 ## A lost or replaced key
 
-If the key or its password may have leaked (the VPS compromised, a secret exposed), treat every release since as suspect: generate a new key pair, replace both secrets, pin the new public key on every Docker host by hand, and cut a new release. Releases signed by the old key no longer verify on a host that pins the new one. Replace the pinned key on every Docker host at once, since whoever has the old key and password can sign until then. If only the secrets were lost, restore them from the escrowed copy.
+If the key or its password may have leaked (the repository or a runner compromised, a secret exposed), treat every release since as suspect: generate a new key pair, replace both secrets, pin the new public key on every Docker host by hand, and cut a new release. Releases signed by the old key no longer verify on a host that pins the new one. Replace the pinned key on every Docker host at once, since whoever has the old key and password can sign until then. If only the secrets were lost, restore them from the escrowed copy.

@@ -106,7 +106,7 @@ cleanup
 
 say "building images."
 # One service at a time: built together, the .NET publishes run side by side and exhaust the
-# memory of a small self-hosted runner, whose OOM killer then kills the whole check.
+# memory of a small runner, whose OOM killer then kills the whole check.
 for service in $($C --profile tools --profile setup config --services); do
     $C --profile tools --profile setup build --quiet "$service"
 done
