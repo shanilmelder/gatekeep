@@ -3,6 +3,7 @@ using Gatekeep.Adapters.Postgres.Schema;
 using Gatekeep.Kernel.Secrets;
 using Gatekeep.Modules.Admins.Contracts;
 using Gatekeep.Modules.Audit.Contracts;
+using Gatekeep.Modules.Directory.Contracts;
 using Gatekeep.Modules.Management.Contracts;
 using Gatekeep.Modules.Operations.Contracts;
 using Gatekeep.Tests.Isolation.Jobs;
@@ -48,6 +49,42 @@ public sealed class TenantCreationOperationTests(PostgresFixture postgres)
             await database.ScalarAsync<long>(
                 $"SELECT count(*) FROM audit_event WHERE tenant_id = '{tenant}' AND type_code = '{Activated}' AND actor_kind = 'system' AND target_id IS NULL"));
         Assert.Equal(0L, await database.ScalarAsync<long>($"SELECT count(*) FROM deployment_audit_event WHERE type_code = '{Activated}'"));
+
+        // Story 2.8: exactly one bare system Application, with no secret and no event of its own.
+        var system = await SystemApplicationAsync(database, tenant);
+        Assert.Equal(
+            1L,
+            await database.ScalarAsync<long>(
+                $"SELECT count(*) FROM application WHERE tenant_id = '{tenant}' AND id = '{system}' AND name = '{DirectoryContract.SystemApplicationName}' AND grant_types = '{{}}' AND audiences = '{{}}'"));
+        Assert.Equal(0L, await database.ScalarAsync<long>($"SELECT count(*) FROM client_secret WHERE tenant_id = '{tenant}'"));
+        Assert.Equal(0L, await database.ScalarAsync<long>($"SELECT count(*) FROM audit_event WHERE target_id = '{system}'"));
+    }
+
+    /// <summary>Story 2.8: the whole completion handler again, for the Tenant it already activated: still one system Application.</summary>
+    [Fact]
+    public async Task Completion_run_again_keeps_the_one_system_Application()
+    {
+        var (database, tenant, operation, _) = await CreatedAsync();
+        await DrainAsync(database, new RecordingCustody());
+        var system = await SystemApplicationAsync(database, tenant);
+
+        await RunCompletionAsync(database, operation, tenant);
+
+        Assert.Equal(system, await SystemApplicationAsync(database, tenant));
+        Assert.Equal(1L, await database.ScalarAsync<long>($"SELECT count(*) FROM audit_event WHERE tenant_id = '{tenant}' AND type_code = '{Activated}'"));
+    }
+
+    /// <summary>Story 2.8: a completion for a Tenant whose deletion started activates nothing, so no system Application is written.</summary>
+    [Fact]
+    public async Task Completion_for_a_deleting_Tenant_writes_no_system_Application()
+    {
+        var (database, tenant, operation, _) = await CreatedAsync();
+        await database.SuperuserAsync($"SET session_replication_role = replica; UPDATE tenant SET status = 'deleting' WHERE id = '{tenant}'; SET session_replication_role = DEFAULT");
+
+        await RunCompletionAsync(database, operation, tenant);
+
+        Assert.Equal("deleting", await StatusAsync(database, tenant));
+        Assert.Equal(0L, await database.ScalarAsync<long>($"SELECT count(*) FROM application WHERE tenant_id = '{tenant}'"));
     }
 
     [Fact]
@@ -157,6 +194,7 @@ public sealed class TenantCreationOperationTests(PostgresFixture postgres)
         Assert.Equal("failed", await database.ScalarAsync<string>($"SELECT status FROM operation WHERE id = '{operation}'"));
         Assert.Equal("deleting", await StatusAsync(database, tenant));
         Assert.Equal(0L, await database.ScalarAsync<long>($"SELECT count(*) FROM tenant_settings WHERE tenant_id = '{tenant}'"));
+        Assert.Equal(0L, await database.ScalarAsync<long>($"SELECT count(*) FROM application WHERE tenant_id = '{tenant}'"));
     }
 
     /// <summary>Story 1.29: activation locks the Tenant and does nothing, settings included, to one that isn't creating.</summary>
@@ -551,6 +589,30 @@ public sealed class TenantCreationOperationTests(PostgresFixture postgres)
 
     private static Task<string> StatusAsync(JobDatabase database, Guid tenant) =>
         database.ScalarAsync<string>($"SELECT status FROM tenant WHERE id = '{tenant}'");
+
+    /// <summary>The Tenant's one system Application (Story 2.8): fails unless there is exactly one.</summary>
+    private static async Task<Guid> SystemApplicationAsync(JobDatabase database, Guid tenant)
+    {
+        Assert.Equal(1L, await database.ScalarAsync<long>($"SELECT count(*) FROM application WHERE tenant_id = '{tenant}' AND kind = 'system'"));
+        return await database.ScalarAsync<Guid>($"SELECT id FROM application WHERE tenant_id = '{tenant}' AND kind = 'system'");
+    }
+
+    /// <summary>The production creation completion handler, called directly in the Tenant's own scope as <c>gk_worker</c>.</summary>
+    private static async Task RunCompletionAsync(JobDatabase database, Guid operation, Guid tenant)
+    {
+        var handler = OperationsContract.ProductionOperationRegistry.Find(OperationsContract.TenantCreationOperation)!.OnSucceeded!;
+        await database.InScopeAsync(TableRegistry.Worker, tenant, async context =>
+        {
+            var completion = (OperationCompletion)Activator.CreateInstance(
+                typeof(OperationCompletion),
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic,
+                binder: null,
+                args: [operation, tenant, context],
+                culture: null)!;
+            await handler(completion, Cancellation);
+            return 0;
+        });
+    }
 
     /// <summary>Each step's status and result code, in plan order, comma-separated.</summary>
     private static Task<string> StepAsync(JobDatabase database, Guid operation) =>

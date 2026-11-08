@@ -16,7 +16,9 @@ namespace Gatekeep.Modules.Directory.Adapters;
 /// writes Applications itself, never through OpenIddict's manager, so every write is refused, as are
 /// LINQ queries and listing, which nothing on the Hosted path calls. Every Application is a
 /// confidential client with no secret column: Gatekeep's client authentication calls
-/// <see cref="IDirectory.VerifyClientSecretAsync"/> in place of OpenIddict's secret check.
+/// <see cref="IDirectory.VerifyClientSecretAsync"/> in place of OpenIddict's secret check. Both lookups
+/// hide the Tenant's <c>system</c> Application (Story 2.8, AD-12): its ID and <c>client_id</c> find
+/// nothing, so OpenIddict refuses it as an unknown client and never issues a code or token for it.
 /// </summary>
 internal sealed class ApplicationStore(Func<CommandContext> context) : IOpenIddictApplicationStore<DirectoryApplication>
 {

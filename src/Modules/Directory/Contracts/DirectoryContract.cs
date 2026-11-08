@@ -9,6 +9,12 @@ namespace Gatekeep.Modules.Directory.Contracts;
 /// <summary>What a composition root uses to wire Directory.</summary>
 public static class DirectoryContract
 {
+    /// <summary>
+    /// The fixed name of each Tenant's hidden <c>system</c> Application (Story 2.8). The migration that
+    /// backfills existing Tenants writes the same text.
+    /// </summary>
+    public const string SystemApplicationName = "Account Portal";
+
     /// <summary>Applications and client secrets over the Kernel audit port. <paramref name="time"/> stamps each creation.</summary>
     public static IDirectory CreateDirectory(IAuditAppender audit, TimeProvider time) => new DirectoryService(audit, time);
 

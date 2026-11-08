@@ -35,6 +35,8 @@ public sealed class TenantDeletionOperationTests(PostgresFixture postgres)
         var (database, tenant, _) = await ActiveAsync(label);
         await TenantSeeds.SeedAsync(Superuser(database), tenant);
         var events = await database.ScalarAsync<long>($"SELECT count(*) FROM audit_event WHERE tenant_id = '{tenant}'");
+        // Story 2.8: its creation wrote its system Application, which only this purge may delete.
+        Assert.Equal(1L, await database.ScalarAsync<long>($"SELECT count(*) FROM application WHERE tenant_id = '{tenant}' AND kind = 'system'"));
         var (operation, _) = await DeleteAsync(database, tenant);
         var custody = new RecordingCustody();
 
@@ -44,6 +46,7 @@ public sealed class TenantDeletionOperationTests(PostgresFixture postgres)
         Assert.Equal("succeeded/succeeded", await StepsAsync(database, operation));
         Assert.Equal("deleted", await StatusAsync(database, tenant));
         Assert.Empty(await TenantSeeds.RowsLeftAsync(Superuser(database), tenant));
+        Assert.Equal(0L, await database.ScalarAsync<long>($"SELECT count(*) FROM application WHERE tenant_id = '{tenant}'"));
         // The six secret class keys first, then only this Tenant's Signing and Management keys (Story 2.3).
         Assert.Equal([.. SecretClassPrefixes.Select(p => $"{p}-{tenant:D}")], custody.Deleted.Take(6));
         Assert.All(custody.Deleted.Skip(6), name => Assert.True(KeyName.TryParseRowKey(name, out var key) && key.TenantId == tenant, name));

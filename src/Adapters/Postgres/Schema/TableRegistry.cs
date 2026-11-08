@@ -83,6 +83,12 @@ public static class TableRegistry
     /// </summary>
     public static readonly IReadOnlyList<string> RowGuard = ["tenant_row_guard"];
 
+    /// <summary>
+    /// Story 2.8: the row guard, and the guard that refuses a row naming its Tenant's <c>system</c>
+    /// Application, on each table that may never hold one: <c>client_secret</c>, <c>authorization</c>, <c>token</c>.
+    /// </summary>
+    private static readonly IReadOnlyList<string> SystemApplicationGuard = ["system_application_guard", "tenant_row_guard"];
+
     /// <summary>A Tenant purge's read (Story 1.29): the one column its <c>WHERE</c> names, never the content.</summary>
     private static readonly IReadOnlyDictionary<string, IReadOnlyList<ColumnGrant>> PurgeColumns =
         new Dictionary<string, IReadOnlyList<ColumnGrant>>
@@ -309,16 +315,17 @@ public static class TableRegistry
             [Hosted] = [Select, Insert, Update],
             [Worker] = [Delete],
         }, PurgeColumns, RowGuard),
+        // Story 2.8: neither ever names a Tenant's system Application.
         new("authorization", TableClass.Tenant, "Sessions", TableUse.Runtime, new Dictionary<string, IReadOnlyList<string>>
         {
             [Hosted] = [Select, Insert, Update],
             [Worker] = [Delete],
-        }, PurgeColumns, RowGuard),
+        }, PurgeColumns, SystemApplicationGuard),
         new("token", TableClass.Tenant, "Sessions", TableUse.Runtime, new Dictionary<string, IReadOnlyList<string>>
         {
             [Hosted] = [Select, Insert, Update],
             [Worker] = [Delete],
-        }, PurgeColumns, RowGuard),
+        }, PurgeColumns, SystemApplicationGuard),
         new("signin_transaction", TableClass.Tenant, "Authentication", TableUse.Runtime, new Dictionary<string, IReadOnlyList<string>>
         {
             [Hosted] = [Select, Insert, Update],
@@ -559,18 +566,31 @@ public static class TableRegistry
         // only as its SHA-256. Host.Admin creates them (Epic 3 adds the API, rotation and revocation);
         // Host.Hosted only reads them, to authenticate a client. No role updates one yet, and only a
         // Tenant's deletion deletes (Story 1.29): its Operation's purges, reading only tenant_id.
-        new("application", TableClass.Tenant, "Directory", TableUse.Configuration, new Dictionary<string, IReadOnlyList<string>>
-        {
-            [Hosted] = [Select],
-            [Admin] = [Select, Insert],
-            [Worker] = [Delete],
-        }, PurgeColumns, RowGuard),
+        // Story 2.8 (AD-12): each Tenant's one hidden system Application. Host.Worker writes it in Tenant
+        // creation's completion, finding it by its kind first; the triggers refuse any edit of it, its
+        // delete but with its Tenant's, and a secret naming it.
+        new(
+            "application",
+            TableClass.Tenant,
+            "Directory",
+            TableUse.Configuration,
+            new Dictionary<string, IReadOnlyList<string>>
+            {
+                [Hosted] = [Select],
+                [Admin] = [Select, Insert],
+                [Worker] = [Insert, Delete],
+            },
+            new Dictionary<string, IReadOnlyList<ColumnGrant>>
+            {
+                [Worker] = [new ColumnGrant(Select, ["tenant_id", "id", "kind"])],
+            },
+            ["application_guard_delete", "application_guard_update", "tenant_row_guard"]),
         new("client_secret", TableClass.Tenant, "Directory", TableUse.Configuration, new Dictionary<string, IReadOnlyList<string>>
         {
             [Hosted] = [Select],
             [Admin] = [Select, Insert],
             [Worker] = [Delete],
-        }, PurgeColumns, RowGuard),
+        }, PurgeColumns, SystemApplicationGuard),
 
         // Story 2.5 (AD-14): Tenant attempt counters, such as token requests per Tenant and per source,
         // and cross-Tenant mismatches per source. Host.Hosted counts; only a Tenant's deletion deletes.
