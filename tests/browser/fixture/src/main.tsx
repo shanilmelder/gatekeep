@@ -119,6 +119,7 @@ const ADMIN_ONLY = [
   'TopBar',
   'UsageBar',
   'useMediaQuery',
+  'useUrlParams',
   'useUrlTab',
 ];
 const expected = [...names, ...ADMIN_ONLY].sort();

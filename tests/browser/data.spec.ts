@@ -140,6 +140,8 @@ for (const surface of ['admin', 'hosted'] as const) {
           'StatTile',
           'Tabs',
           'UsageBar',
+          // The Logs field search's URL (Story 7.4).
+          'useUrlParams',
           'useUrlTab',
         ].sort(),
       );

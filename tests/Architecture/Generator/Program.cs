@@ -14,7 +14,8 @@ var cataloguePath = Path.Combine(root, AuditCatalogue.DocPath);
 var published = File.Exists(cataloguePath) ? File.ReadAllText(cataloguePath) : null;
 
 // A published code is a public contract: regenerating must not hide its removal.
-var (text, problems) = AuditCatalogue.Regenerate(published, AuditCatalogue.Load(root, Project));
+var events = AuditCatalogue.Load(root, Project);
+var (text, problems) = AuditCatalogue.Regenerate(published, events);
 if (text is null)
 {
     foreach (var problem in problems)
@@ -28,4 +29,8 @@ if (text is null)
 
 File.WriteAllText(cataloguePath, text);
 Console.WriteLine($"Wrote {AuditCatalogue.DocPath}");
+
+// Host.Admin's copy of each code's outcome and summary, for a Tenant's Log (Story 7.4).
+File.WriteAllText(Path.Combine(root, AuditCatalogue.HostCataloguePath), AuditCatalogue.RenderHostCatalogue(events));
+Console.WriteLine($"Wrote {AuditCatalogue.HostCataloguePath}");
 return 0;

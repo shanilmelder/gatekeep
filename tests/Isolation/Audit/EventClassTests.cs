@@ -1,6 +1,7 @@
 using System.Text.RegularExpressions;
 using Gatekeep.Adapters.Postgres.Schema;
 using Gatekeep.Kernel.Audit;
+using Gatekeep.Kernel.Identifiers;
 using Gatekeep.Kernel.Persistence;
 using Gatekeep.Modules.Audit.Contracts;
 using Gatekeep.Modules.Sessions.Contracts;
@@ -8,6 +9,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Npgsql;
 using Gatekeep.Tests.Architecture;
+using Gatekeep.Tests.Isolation.Admins;
 using Xunit;
 
 namespace Gatekeep.Tests.Isolation.Audit;
@@ -32,7 +34,7 @@ public sealed class EventClassTests(PostgresFixture postgres)
     private static readonly Dictionary<TenantLogClass, Func<PostgresFixture, Task<(string Database, Guid TenantId)>>> Proofs = new()
     {
         [TenantLogClass.SessionRevocation] = ProveSessionRevocationAsync,
-        [TenantLogClass.CrossTenantRejection] = ProveCrossTenantRejectionAsync,
+        [TenantLogClass.CrossTenantRejection] = ProveClientCrossTenantRejectionAsync,
     };
 
     [Fact]
@@ -73,6 +75,20 @@ public sealed class EventClassTests(PostgresFixture postgres)
         }
     }
 
+    /// <summary>
+    /// Story 7.4's writer of the same class, beside Story 2.5's token-endpoint proof above: a refused
+    /// Admin with no role in the path Tenant puts <c>admin.cross_tenant.rejected</c> on that Tenant's Log.
+    /// </summary>
+    [Fact]
+    public async Task A_refused_role_less_Admin_writes_the_cross_Tenant_class_to_the_Tenants_Log()
+    {
+        var (database, tenantId) = await ProveAdminCrossTenantRejectionAsync(postgres);
+        var written = await PostgresFixture.ScalarAsync<long>(
+            postgres.SuperuserConnection(database),
+            $"SELECT count(*) FROM audit_event WHERE tenant_id = '{tenantId}' AND type_code = '{Gatekeep.Modules.Admins.Contracts.AdminsEvents.CrossTenantRejected.Code.Value}'");
+        Assert.Equal(1L, written);
+    }
+
     [Fact]
     public void Pending_class_whose_story_is_done_is_reported()
     {
@@ -107,7 +123,7 @@ public sealed class EventClassTests(PostgresFixture postgres)
     public void Class_both_mapped_and_pending_or_mapped_with_no_proof_is_reported()
     {
         LogClass[] classes = [new("SignIn", "Sign-ins and failures", "4.9")];
-        CatalogueEvent[] events = [new("auth.signin.succeeded", "Authentication", "A User signed in.", "SignIn")];
+        CatalogueEvent[] events = [new("auth.signin.succeeded", "Authentication", "A User signed in.", "SignIn", "Success")];
 
         var problems = ClassProblems(classes, events, []);
 
@@ -205,6 +221,26 @@ public sealed class EventClassTests(PostgresFixture postgres)
             .Where(m => Regex.IsMatch(m.Groups["key"].Value, @"\A\d+-\d+-"))
             .ToDictionary(m => m.Groups["key"].Value, m => m.Groups["status"].Value, StringComparer.Ordinal);
 
+    /// <summary>
+    /// Story 7.4, over HTTP on the real Host.Admin: an Admin holding a role only in Tenant A calls a
+    /// Tenant B route, is refused, and B's own Log holds <c>admin.cross_tenant.rejected</c>.
+    /// </summary>
+    private static async Task<(string Database, Guid TenantId)> ProveAdminCrossTenantRejectionAsync(PostgresFixture postgres)
+    {
+        await using var host = await AdminHost.StartAsync(postgres);
+        var (cookie, _, session) = await host.InsertFullSessionAsync();
+        var admin = await host.AdminOfSessionAsync(session);
+        var a = await host.InsertTenantAsync();
+        var b = await host.InsertTenantAsync();
+        await host.GrantTenantRoleAsync(a, admin, "owner");
+
+        using var refused = await host.SendAsync(
+            HttpMethod.Get, $"/api/v1/tenants/{PublicId.Format(PublicIdType.Tenant, b)}/capabilities", cookie);
+        Assert.Equal(System.Net.HttpStatusCode.Forbidden, refused.StatusCode);
+
+        return (host.Database, b);
+    }
+
     /// <summary>Story 2.7: a Tenant-scope <c>RevokeAccessAsync</c> as <c>gk_hosted</c> writes <c>sessions.access.revoked</c>.</summary>
     private static async Task<(string Database, Guid TenantId)> ProveSessionRevocationAsync(PostgresFixture postgres)
     {
@@ -233,7 +269,7 @@ public sealed class EventClassTests(PostgresFixture postgres)
     /// real Protocol pipeline, writes <c>protocol.client.cross_tenant_rejected</c> to B's Log. Neither
     /// Tenant has keys: the attempt is refused before anything would sign.
     /// </summary>
-    private static async Task<(string Database, Guid TenantId)> ProveCrossTenantRejectionAsync(PostgresFixture postgres)
+    private static async Task<(string Database, Guid TenantId)> ProveClientCrossTenantRejectionAsync(PostgresFixture postgres)
     {
         var database = await postgres.NewMigratedDatabaseAsync();
         var a = Guid.CreateVersion7();

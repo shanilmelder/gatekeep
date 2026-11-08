@@ -28,6 +28,8 @@ public class AuditCatalogueTests
     // A regular or verbatim C# string literal. Raw strings hold SQL, never a whole code.
     private static readonly Regex StringLiteral = new(@"@?""(?:[^""\\\r\n]|\\.)*""", RegexOptions.Compiled);
 
+    private static readonly Regex FailureAction = new(@"(?:refused|denied|rejected|failed|regressed|dead)\z", RegexOptions.Compiled);
+
     private static IReadOnlyList<CatalogueEvent> Catalogue => AuditCatalogue.Load(Root, Project);
 
     [Fact]
@@ -100,6 +102,21 @@ public class AuditCatalogueTests
         Assert.Contains("Restore it from git first", Assert.Single(problems), StringComparison.OrdinalIgnoreCase);
     }
 
+    /// <summary>
+    /// Story 7.4: Host.Admin's generated table of every code's outcome and summary is what the
+    /// generator writes now, so a Log lists and searches every module's codes, Protocol's too.
+    /// </summary>
+    [Fact]
+    public void Host_Admin_log_catalogue_matches_its_generator()
+    {
+        var path = Path.Combine(Root, AuditCatalogue.HostCataloguePath);
+        var actual = File.Exists(path) ? File.ReadAllText(path).ReplaceLineEndings("\n") : string.Empty;
+
+        Assert.True(
+            actual == AuditCatalogue.RenderHostCatalogue(Catalogue),
+            $"{AuditCatalogue.HostCataloguePath} is stale. Build the solution, then regenerate it: {AuditCatalogue.RegenerateCommand}");
+    }
+
     [Fact]
     public void Regenerating_the_committed_document_writes_the_render()
     {
@@ -122,6 +139,23 @@ public class AuditCatalogueTests
         Assert.Contains(problems, p => p.Contains(".BareCode ", StringComparison.Ordinal));
         Assert.Contains(problems, p => p.Contains(".Made ", StringComparison.Ordinal));
         Assert.Empty(AuditCatalogue.MemberProblems(typeof(WellShapedEvents)));
+    }
+
+    /// <summary>
+    /// Story 7.4: an outcome search finds exactly the codes declared Failure, so the declaration
+    /// must agree with what the code says happened. An action ending in refused, denied, rejected,
+    /// failed, regressed or dead is a Failure, and no other is.
+    /// </summary>
+    [Fact]
+    public void Every_refused_denied_failed_or_dead_code_is_a_failure_and_no_other()
+    {
+        var disagreeing = Catalogue
+            .Where(e => FailureAction.IsMatch(e.Code) != (e.Outcome == "Failure"))
+            .Select(e => $"{e.Code} is declared {e.Outcome}.");
+
+        Assert.Empty(disagreeing);
+        Assert.Contains(Catalogue, e => e.Outcome == "Failure");
+        Assert.All(Catalogue, e => Assert.Contains(e.Outcome, new[] { "Success", "Failure" }));
     }
 
     [Fact]
@@ -300,19 +334,19 @@ public class AuditCatalogueTests
     /// <summary>A catalogue the loader can read in full.</summary>
     private static class WellShapedEvents
     {
-        public static readonly AuditEventDefinition Read = new(new AuditTypeCode("tests.catalogue.read"), "Read.");
+        public static readonly AuditEventDefinition Read = new(new AuditTypeCode("tests.catalogue.read"), "Read.", AuditOutcome.Success);
     }
 
     /// <summary>Every shape the loader would miss.</summary>
     private static class MisshapenEvents
     {
-        public static readonly AuditEventDefinition Read = new(new AuditTypeCode("tests.catalogue.read"), "Read.");
+        public static readonly AuditEventDefinition Read = new(new AuditTypeCode("tests.catalogue.read"), "Read.", AuditOutcome.Success);
 
-        public static AuditEventDefinition AsProperty { get; } = new(new AuditTypeCode("tests.catalogue.property"), "Property.");
+        public static AuditEventDefinition AsProperty { get; } = new(new AuditTypeCode("tests.catalogue.property"), "Property.", AuditOutcome.Success);
 
         public static readonly AuditTypeCode BareCode = new("tests.catalogue.bare");
 
-        internal static readonly AuditEventDefinition Hidden = new(new AuditTypeCode("tests.catalogue.hidden"), "Hidden.");
+        internal static readonly AuditEventDefinition Hidden = new(new AuditTypeCode("tests.catalogue.hidden"), "Hidden.", AuditOutcome.Success);
 
         public static AuditEventDefinition Made() => Read;
     }

@@ -2,51 +2,52 @@
 
 # Audit event catalogue
 
-Every audit type code Gatekeep writes, declared in its module's contract. Codes are `{domain}.{object}.{action}` and a public contract: removing or renaming a published code is a contract break, which the generator refuses and `AuditCatalogueTests` fails on.
+Every audit type code Gatekeep writes, declared in its module's contract. Codes are `{domain}.{object}.{action}` and a public contract: removing or renaming a published code is a contract break, which the generator refuses and `AuditCatalogueTests` fails on. Each code's outcome is declared with it and never stored: a Log search by outcome is a search by the codes that have it.
 
-| Code | Module | Summary | FR-40 class |
-| --- | --- | --- | --- |
-| `admin.access.denied` | Admins | An Admin was refused a capability. The target is the path's Tenant ID as sent, which may not exist. Past 30 per Admin in 15 minutes, only logged. Holds no capability name. | None |
-| `admin.credential.registered` | Admins | An Admin registered a WebAuthn credential. Holds no credential ID, public key, challenge or user handle. | None |
-| `admin.credential.removed` | Admins | An Admin removed one of their WebAuthn credentials. Holds no credential ID or public key. | None |
-| `admin.credential.sign_count_regressed` | Admins | A sign-in with an Admin's WebAuthn credential was refused because its signature counter went backwards: it may be cloned. | None |
-| `admin.enrolment.issued` | Admins | gatekeep recover-admin issued a single-use 15-minute enrolment for an Admin, after its Security Alert and off-server record. Holds no value or hash. | None |
-| `admin.enrolment.used` | Admins | An Admin's recover-admin enrolment was used to end their Sessions and start one that reaches only credential registration. Holds no value or hash. | None |
-| `admin.fresh_assertion.failed` | Admins | A fresh assertion whose signature verified over an Admin's own WebAuthn credential was refused. Holds no credential ID, challenge or binding. | None |
-| `admin.fresh_assertion.verified` | Admins | An Admin confirmed a sensitive action with a fresh WebAuthn assertion. Holds no credential ID, challenge, binding or Session ID. | None |
-| `admin.recovery_code.issued` | Admins | An Admin confirmed they saved an offline Recovery Code, which can now be used once. Holds no code or HMAC. | None |
-| `admin.recovery_code.used` | Admins | An Admin's offline Recovery Code was used to start a Session that reaches only credential registration. Holds no code or HMAC. | None |
-| `admin.session.revoked` | Admins | A credential removal, a Recovery Code or a recover-admin enrolment ended a live Admin Session as revoked. Holds no Session ID. | None |
-| `admin.session.signed_out` | Admins | An Admin signed out, which ended their Admin Session. Holds no Session ID. | None |
-| `admin.session.superseded` | Admins | A sign-in in the same browser ended a live Admin Session as superseded. Holds no Session ID. | None |
-| `admin.setup.completed` | Admins | An Admin came to hold two WebAuthn credentials, or one and an offline Recovery Code, which completed setup and made their Session full. | None |
-| `admin.signin.failed` | Admins | A sign-in whose signature verified over an Admin's WebAuthn credential was refused. Holds no credential ID, challenge or user handle. | None |
-| `admin.signin.succeeded` | Admins | An Admin signed in with a WebAuthn credential and a full Admin Session started. Holds no credential ID, challenge, user handle or Session ID. | None |
-| `audit.retention.checkpoint` | Audit | Retention deleted a chain's sealed prefix past the Log period. Names the last deleted row's epoch, seq and hash. | None |
-| `authentication.signin_transaction.started` | Authentication | A sign-in transaction began for an Application. The caller is anonymous, so no person is named. | None |
-| `bootstrap.admin.created` | Admins | The bootstrap token was claimed: the first Admin was created as Deployment Owner and bootstrap completed. Holds no token or hash. | None |
-| `bootstrap.token.issued` | Admins | gatekeep init issued the first one-time bootstrap token. It expires 15 minutes after issue. Holds no token or hash. | None |
-| `bootstrap.token.reissued` | Admins | gatekeep init reissued the bootstrap token, voiding the previous one. It expires 15 minutes after issue. Holds no token or hash. | None |
-| `directory.application.created` | Directory | An Application was created with its first client secret. Names the Application only: the secret is stored only as its hash. | None |
-| `keys.signing_key.created` | Keys | A Tenant's replacement next Signing or Management key was created in key custody. Names no key. | None |
-| `keys.signing_key.destroyed` | Keys | A Tenant's retired Signing or Management key was destroyed in key custody. Names no key. | None |
-| `keys.signing_key.destruction_failed` | Keys | Key custody failed to destroy a Tenant's retired Signing or Management key; the destruction retries. Names no key. | None |
-| `keys.signing_key.promoted` | Keys | A Tenant's next Signing or Management key became current. Names no key. | None |
-| `keys.signing_key.retired` | Keys | A Tenant's previous Signing or Management key retired and its destruction was queued. Names no key. | None |
-| `keys.signing_key.rotated` | Keys | A Tenant's current Signing or Management key reached its rotation age and became previous. Names no key. | None |
-| `keys.tenant_keys.provisioned` | Keys | A Tenant's missing Signing Keys, Management keys or token protection key were created in key custody. Names no key. | None |
-| `keys.transit_key.swept` | Keys | A Signing or Management key at least 24 hours old, named by no row when checked, was deleted from key custody. Names no key. | None |
-| `operations.job.dead` | Operations | A job used its last attempt and went dead. Only its fixed failure code is kept. | None |
-| `operations.operation.retried` | Operations | An Admin retried a failed Operation's failed steps. Names the Operation's Tenant only, when it has one. | None |
-| `protocol.client.cross_tenant_rejected` | Protocol | A client credential issued by another Tenant was refused at this Tenant's token endpoint. Names nothing of the other Tenant. | Rejected cross-Tenant attempts |
-| `sessions.access.revoked` | Sessions | Sessions in scope ended and their Token Families and tokens were revoked. User scope targets the User. | Session and token revocation |
-| `sessions.session.started` | Sessions | A User's Session started. Names the User only: the Session ID is stored only as its hash. | None |
-| `tenancy.tenant.activated` | Tenancy | A Tenant's creation Operation succeeded: its settings exist and its Tenant Subdomain now resolves. | None |
-| `tenancy.tenant.created` | Tenancy | A Deployment Owner created a Tenant and became its Tenant Owner, and its creation Operation started. Names the Tenant only. | None |
-| `tenancy.tenant.deleted` | Tenancy | A Tenant's deletion Operation succeeded: every module's Tenant data is purged and its keys are destroyed. Its Logs are kept until their retention ends. | None |
-| `tenancy.tenant.deletion_started` | Tenancy | A Deployment Owner deleted a Tenant after typing its Tenant Subdomain and a fresh WebAuthn assertion: its host stops resolving, its roles end, its deletion Operation starts. Names the Tenant only. | None |
-| `tenancy.tenant.label_changed` | Tenancy | A Tenant Owner changed a Tenant's environment label, other than removing Prod. Names the Tenant only. | None |
-| `tenancy.tenant.prod_label_removed` | Tenancy | A Tenant Owner removed a Tenant's Prod label after a fresh WebAuthn assertion. No setting changed with it. | None |
+| Code | Module | Outcome | Summary | FR-40 class |
+| --- | --- | --- | --- | --- |
+| `admin.access.denied` | Admins | Failure | An Admin was refused a capability. The target is the path's Tenant ID as sent, which may not exist. Past 30 per Admin in 15 minutes, only logged. Holds no capability name. | None |
+| `admin.credential.registered` | Admins | Success | An Admin registered a WebAuthn credential. Holds no credential ID, public key, challenge or user handle. | None |
+| `admin.credential.removed` | Admins | Success | An Admin removed one of their WebAuthn credentials. Holds no credential ID or public key. | None |
+| `admin.credential.sign_count_regressed` | Admins | Failure | A sign-in with an Admin's WebAuthn credential was refused because its signature counter went backwards: it may be cloned. | None |
+| `admin.cross_tenant.rejected` | Admins | Failure | An Admin holding no Tenant Role in this Tenant was refused a request in it. Past 30 refusals per Admin in 15 minutes, only logged. Holds no capability name. | Rejected cross-Tenant attempts |
+| `admin.enrolment.issued` | Admins | Success | gatekeep recover-admin issued a single-use 15-minute enrolment for an Admin, after its Security Alert and off-server record. Holds no value or hash. | None |
+| `admin.enrolment.used` | Admins | Success | An Admin's recover-admin enrolment was used to end their Sessions and start one that reaches only credential registration. Holds no value or hash. | None |
+| `admin.fresh_assertion.failed` | Admins | Failure | A fresh assertion whose signature verified over an Admin's own WebAuthn credential was refused. Holds no credential ID, challenge or binding. | None |
+| `admin.fresh_assertion.verified` | Admins | Success | An Admin confirmed a sensitive action with a fresh WebAuthn assertion. Holds no credential ID, challenge, binding or Session ID. | None |
+| `admin.recovery_code.issued` | Admins | Success | An Admin confirmed they saved an offline Recovery Code, which can now be used once. Holds no code or HMAC. | None |
+| `admin.recovery_code.used` | Admins | Success | An Admin's offline Recovery Code was used to start a Session that reaches only credential registration. Holds no code or HMAC. | None |
+| `admin.session.revoked` | Admins | Success | A credential removal, a Recovery Code or a recover-admin enrolment ended a live Admin Session as revoked. Holds no Session ID. | None |
+| `admin.session.signed_out` | Admins | Success | An Admin signed out, which ended their Admin Session. Holds no Session ID. | None |
+| `admin.session.superseded` | Admins | Success | A sign-in in the same browser ended a live Admin Session as superseded. Holds no Session ID. | None |
+| `admin.setup.completed` | Admins | Success | An Admin came to hold two WebAuthn credentials, or one and an offline Recovery Code, which completed setup and made their Session full. | None |
+| `admin.signin.failed` | Admins | Failure | A sign-in whose signature verified over an Admin's WebAuthn credential was refused. Holds no credential ID, challenge or user handle. | None |
+| `admin.signin.succeeded` | Admins | Success | An Admin signed in with a WebAuthn credential and a full Admin Session started. Holds no credential ID, challenge, user handle or Session ID. | None |
+| `audit.retention.checkpoint` | Audit | Success | Retention deleted a chain's sealed prefix past the Log period. Names the last deleted row's epoch, seq and hash. | None |
+| `authentication.signin_transaction.started` | Authentication | Success | A sign-in transaction began for an Application. The caller is anonymous, so no person is named. | None |
+| `bootstrap.admin.created` | Admins | Success | The bootstrap token was claimed: the first Admin was created as Deployment Owner and bootstrap completed. Holds no token or hash. | None |
+| `bootstrap.token.issued` | Admins | Success | gatekeep init issued the first one-time bootstrap token. It expires 15 minutes after issue. Holds no token or hash. | None |
+| `bootstrap.token.reissued` | Admins | Success | gatekeep init reissued the bootstrap token, voiding the previous one. It expires 15 minutes after issue. Holds no token or hash. | None |
+| `directory.application.created` | Directory | Success | An Application was created with its first client secret. Names the Application only: the secret is stored only as its hash. | None |
+| `keys.signing_key.created` | Keys | Success | A Tenant's replacement next Signing or Management key was created in key custody. Names no key. | None |
+| `keys.signing_key.destroyed` | Keys | Success | A Tenant's retired Signing or Management key was destroyed in key custody. Names no key. | None |
+| `keys.signing_key.destruction_failed` | Keys | Failure | Key custody failed to destroy a Tenant's retired Signing or Management key; the destruction retries. Names no key. | None |
+| `keys.signing_key.promoted` | Keys | Success | A Tenant's next Signing or Management key became current. Names no key. | None |
+| `keys.signing_key.retired` | Keys | Success | A Tenant's previous Signing or Management key retired and its destruction was queued. Names no key. | None |
+| `keys.signing_key.rotated` | Keys | Success | A Tenant's current Signing or Management key reached its rotation age and became previous. Names no key. | None |
+| `keys.tenant_keys.provisioned` | Keys | Success | A Tenant's missing Signing Keys, Management keys or token protection key were created in key custody. Names no key. | None |
+| `keys.transit_key.swept` | Keys | Success | A Signing or Management key at least 24 hours old, named by no row when checked, was deleted from key custody. Names no key. | None |
+| `operations.job.dead` | Operations | Failure | A job used its last attempt and went dead. Only its fixed failure code is kept. | None |
+| `operations.operation.retried` | Operations | Success | An Admin retried a failed Operation's failed steps. Names the Operation's Tenant only, when it has one. | None |
+| `protocol.client.cross_tenant_rejected` | Protocol | Failure | A client credential issued by another Tenant was refused at this Tenant's token endpoint. Names nothing of the other Tenant. | Rejected cross-Tenant attempts |
+| `sessions.access.revoked` | Sessions | Success | Sessions in scope ended and their Token Families and tokens were revoked. User scope targets the User. | Session and token revocation |
+| `sessions.session.started` | Sessions | Success | A User's Session started. Names the User only: the Session ID is stored only as its hash. | None |
+| `tenancy.tenant.activated` | Tenancy | Success | A Tenant's creation Operation succeeded: its settings exist and its Tenant Subdomain now resolves. | None |
+| `tenancy.tenant.created` | Tenancy | Success | A Deployment Owner created a Tenant and became its Tenant Owner, and its creation Operation started. Names the Tenant only. | None |
+| `tenancy.tenant.deleted` | Tenancy | Success | A Tenant's deletion Operation succeeded: every module's Tenant data is purged and its keys are destroyed. Its Logs are kept until their retention ends. | None |
+| `tenancy.tenant.deletion_started` | Tenancy | Success | A Deployment Owner deleted a Tenant after typing its Tenant Subdomain and a fresh WebAuthn assertion: its host stops resolving, its roles end, its deletion Operation starts. Names the Tenant only. | None |
+| `tenancy.tenant.label_changed` | Tenancy | Success | A Tenant Owner changed a Tenant's environment label, other than removing Prod. Names the Tenant only. | None |
+| `tenancy.tenant.prod_label_removed` | Tenancy | Success | A Tenant Owner removed a Tenant's Prod label after a fresh WebAuthn assertion. No setting changed with it. | None |
 
 ## FR-40 Tenant Log classes
 
@@ -64,4 +65,4 @@ Each class a Tenant's Log must cover, and the codes that prove it. A pending cla
 | Key operations | None yet | Pending: Story 9.2 |
 | Management API grants | None yet | Pending: Story 17.2 |
 | Token Family revocations | None yet | Pending: Story 2.10 |
-| Rejected cross-Tenant attempts | `protocol.client.cross_tenant_rejected` | Proved |
+| Rejected cross-Tenant attempts | `admin.cross_tenant.rejected`, `protocol.client.cross_tenant_rejected` | Proved |

@@ -183,9 +183,6 @@
   summary: Grant `UPDATE (role)` and `DELETE` on `tenant_role`, audit role changes, guard the last Tenant Owner, and show the "role removed mid-session" banner (Story 8.4).
   evidence: Story 1.24 reads roles on every request, so a removal counts at once, but nothing writes or audits role changes.
 - source_spec: `_bmad-output/implementation-artifacts/spec-1-24-enforce-capabilities-and-tenant-scoped-routes.md`
-  summary: Write rejected cross-Tenant attempts to the Tenant's own Log, the FR-40 `CrossTenantRejection` class (Story 7.4).
-  evidence: Story 1.24 writes `admin.access.denied` on the Deployment chain only, with no FR-40 class.
-- source_spec: `_bmad-output/implementation-artifacts/spec-1-24-enforce-capabilities-and-tenant-scoped-routes.md`
   summary: Have the cross-Tenant suite read the Tenant routes from `x-gatekeep-access` in the committed OpenAPI document (Story 1.31).
   evidence: Story 1.24 adds `x-gatekeep-access` to every operation; the suite isn't built.
   resolution: Resolved by Story 1.31. The suite reads the live route set from the running hosts (`tests/Isolation/Hosting/RunningRoutes.cs`), which `AdminEndpointTests` already holds equal to the committed document's operations, so `x-gatekeep-access` adds nothing the registry check doesn't. Every live route has an entry in `tests/Isolation/CrossTenant/RouteRegistry.cs`, and each `{tenantId}` and `{targetTenantId}` entry runs its refusal case.
@@ -451,3 +448,9 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-1-32-recover-admin-access-from-the-host.md`
   summary: Print the `recover-admin` link with the Admin site's HTTPS port when it isn't 443.
   evidence: Story 1.32 review. The `cli` service doesn't get `GATEKEEP_HTTPS_PORT` or the Admin origin, so a non-443 setup (such as dev on 18443) must add `:{port}` by hand, as `docs/install.md` says.
+- source_spec: `_bmad-output/implementation-artifacts/spec-7-4-search-a-tenant-s-logs.md`
+  summary: Load-test refused cross-Tenant requests near the pool size. Each one holds the Deployment connection while the Tenant-Log write opens a second one.
+  evidence: Story 7.4 review: `CrossTenantRejection.WriteAsync` opens a `TenantScope` inside the open Deployment transaction. This is unverified; each Admin is capped at 30 refusals per 15 minutes.
+- source_spec: `_bmad-output/implementation-artifacts/spec-7-4-search-a-tenant-s-logs.md`
+  summary: Settle email search once Epics 3–5 write `audit_detail.email`. Decide whose email it is when actor and target differ, whether case is normalised, and what happens at the 100-reference cap.
+  evidence: Story 7.4 review: `ResolveEmail` collects both actor and target User references, matches exactly, and stops silently at 100. No writer stores an email yet.

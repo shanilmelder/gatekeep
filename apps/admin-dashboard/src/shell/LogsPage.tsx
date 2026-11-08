@@ -1,0 +1,289 @@
+import type { TenantLogEvent, TenantLogsQuery, TenantLogsResponse } from '@gatekeep/api-client';
+import {
+  Banner,
+  Button,
+  CodeBadge,
+  DataTable,
+  EmptyState,
+  ErrorReference,
+  Field,
+  Input,
+  SectionPage,
+  Select,
+  SkeletonRows,
+  useMessages,
+  useUrlParams,
+  type DataTableColumn,
+} from '@gatekeep/ui/admin';
+import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
+import { api } from '../session';
+import type { ShellRequest } from './CredentialsPage';
+import styles from './LogsPage.module.css';
+import {
+  LOG_FIELDS,
+  OUTCOMES,
+  RANGES,
+  choices,
+  initialValue,
+  isChoice,
+  isField,
+  paramsOf,
+  queryOf,
+  referenceOf,
+  searchOf,
+  utcTime,
+  type LogField,
+  type LogSearch,
+} from './logs';
+
+type Messages = ReturnType<typeof useMessages>;
+
+/** The URL parameters the search is kept in. */
+const PARAMS = ['field', 'value'] as const;
+
+/** A read's failure: a 400 says the search itself is malformed; anything else may pass on Retry. */
+interface LogsFailure {
+  status: number | null;
+  code: string;
+  traceId: string;
+}
+
+type LogsRead = { kind: 'ready'; list: TenantLogsResponse } | { kind: 'failed'; failure: LogsFailure };
+
+/** One page of the Log for `query`, after `cursor` when given. A 2xx without the list's fields is a failure. */
+export async function readLogs(
+  request: ShellRequest,
+  tenantId: string,
+  query: TenantLogsQuery,
+  cursor?: string,
+  signal?: AbortSignal,
+): Promise<LogsRead> {
+  try {
+    const result = await request('get', () => api.searchTenantLogs(tenantId, cursor === undefined ? query : { ...query, cursor }), signal);
+    if (result.ok) {
+      const list = result.data;
+      if (list && Array.isArray(list.events)) return { kind: 'ready', list };
+      return { kind: 'failed', failure: { status: null, code: '', traceId: '' } };
+    }
+    return { kind: 'failed', failure: { status: result.status, code: result.problem?.code ?? '', traceId: result.problem?.traceId ?? '' } };
+  } catch {
+    // A lost connection, or a read abandoned with its page: the caller checks its signal.
+    return { kind: 'failed', failure: { status: null, code: '', traceId: '' } };
+  }
+}
+
+function fieldLabel(field: LogField, messages: Messages): string {
+  switch (field) {
+    case 'type':
+      return messages.logsFieldType;
+    case 'user':
+      return messages.logsFieldUser;
+    case 'application':
+      return messages.logsFieldApplication;
+    case 'outcome':
+      return messages.logsFieldOutcome;
+    case 'range':
+      return messages.logsFieldRange;
+  }
+}
+
+function choiceLabel(value: string, messages: Messages): string {
+  switch (value) {
+    case OUTCOMES[0]:
+      return messages.logsOutcomeSuccess;
+    case OUTCOMES[1]:
+      return messages.logsOutcomeFailure;
+    case RANGES[0].value:
+      return messages.logsRangeHour;
+    case RANGES[1].value:
+      return messages.logsRangeDay;
+    case RANGES[2].value:
+      return messages.logsRangeWeek;
+    case RANGES[3].value:
+      return messages.logsRangeMonth;
+    case RANGES[4].value:
+      return messages.logsRangeQuarter;
+    default:
+      return value;
+  }
+}
+
+function helper(field: LogField, messages: Messages): string | undefined {
+  if (field === 'type') return messages.logsTypeHelper;
+  if (field === 'user') return messages.logsUserHelper;
+  if (field === 'application') return messages.logsApplicationHelper;
+  return undefined;
+}
+
+/** The form's draft for a search: a choice field with no value shows, and so holds, its first choice. */
+function draftOf(search: LogSearch): LogSearch {
+  return isChoice(search.field) && search.value === '' ? { field: search.field, value: initialValue(search.field) } : search;
+}
+
+export interface LogsPageProps {
+  request: ShellRequest;
+  /** The path Tenant, as the shell decoded it. */
+  tenantId: string;
+}
+
+/**
+ * A Tenant's Logs (Story 7.4, FR-40, UX-DR12): one field select and a value, kept in the URL as
+ * `field` and `value`, so a reload, a shared link and Back restore the search, and Search runs
+ * it. The table lists the Log newest first, 50 at a time, with Load more for the next page:
+ * Time (UTC), the type as a code badge toned by its outcome, the catalogue's description, and the
+ * User and Application the event names. No Live view, Log streams, query bar, quick filters,
+ * Location column or event drawer. Each read has its own AbortController, abandoned when a newer
+ * one starts or the page leaves.
+ */
+export function LogsPage({ request, tenantId }: LogsPageProps) {
+  const messages = useMessages();
+  const [params, setParams] = useUrlParams(PARAMS);
+  const search = searchOf(params);
+  const [draft, setDraft] = useState<LogSearch>(() => draftOf(search));
+  const [read, setRead] = useState<LogsRead | null>(null);
+  const [query, setQuery] = useState<TenantLogsQuery>({});
+  const [attempt, setAttempt] = useState(0);
+  const [more, setMore] = useState<'idle' | 'loading' | 'failed'>('idle');
+  // The page's own life: a late Load more answer after a new search or unmount lands nowhere.
+  const alive = useRef(new AbortController());
+
+  // The URL is the search: on a reload, Back or Forward, the form shows what the URL holds.
+  useEffect(() => setDraft(draftOf(search)), [search.field, search.value]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    alive.current = controller;
+    // A time range ends now: its start is taken as this read is sent.
+    const sent = queryOf(search, Date.now());
+    setQuery(sent);
+    setRead(null);
+    setMore('idle');
+    void readLogs(request, tenantId, sent, undefined, controller.signal).then((result) => {
+      if (!controller.signal.aborted) setRead(result);
+    });
+    return () => controller.abort();
+  }, [request, tenantId, search.field, search.value, attempt]);
+
+  const loadMore = useCallback(async () => {
+    if (read?.kind !== 'ready' || read.list.nextCursor == null || more === 'loading') return;
+    const signal = alive.current.signal;
+    setMore('loading');
+    const next = await readLogs(request, tenantId, query, read.list.nextCursor, signal);
+    if (signal.aborted) return;
+    if (next.kind === 'failed') {
+      setMore('failed');
+      return;
+    }
+    setRead({ kind: 'ready', list: { events: [...read.list.events, ...next.list.events], nextCursor: next.list.nextCursor } });
+    setMore('idle');
+  }, [read, more, request, tenantId, query]);
+
+  function submit(event: FormEvent) {
+    event.preventDefault();
+    const wanted = paramsOf(draft);
+    const current = paramsOf(search);
+    // The same search again reads again: the Log may have grown since. The URL is normalised too.
+    if (wanted.field === current.field && wanted.value === current.value) setAttempt((n) => n + 1);
+    setParams(wanted);
+  }
+
+  function pickField(value: string) {
+    if (!isField(value)) return;
+    setDraft({ field: value, value: initialValue(value) });
+  }
+
+  const columns: DataTableColumn<TenantLogEvent>[] = [
+    { key: 'time', header: messages.logsColumnTime, cell: (row) => <span className={styles.time}>{utcTime(row.occurredAt)}</span> },
+    {
+      key: 'type',
+      header: messages.logsColumnType,
+      cell: (row) => <CodeBadge outcome={row.outcome === 'failure' ? 'failure' : 'success'}>{row.type}</CodeBadge>,
+    },
+    { key: 'description', header: messages.logsColumnDescription, rowHeader: true, cell: (row) => row.summary ?? row.type },
+    { key: 'user', header: messages.logsColumnUser, cell: (row) => <Reference id={referenceOf(row, 'user')} /> },
+    { key: 'application', header: messages.logsColumnApplication, cell: (row) => <Reference id={referenceOf(row, 'client')} /> },
+  ];
+
+  const invalid = read?.kind === 'failed' && read.failure.status === 400;
+
+  return (
+    <SectionPage eyebrow={messages.navMonitoring} title={messages.navLogs} data-testid="logs-page">
+      <div className={styles.page}>
+        <form className={styles.search} onSubmit={submit} role="search" data-testid="logs-search">
+          <Field label={messages.logsField} className={styles.field}>
+            <Select value={draft.field} onChange={(event) => pickField(event.target.value)} data-testid="logs-field">
+              {LOG_FIELDS.map((field) => (
+                <option key={field} value={field}>
+                  {fieldLabel(field, messages)}
+                </option>
+              ))}
+            </Select>
+          </Field>
+          <Field label={messages.logsValue} helper={helper(draft.field, messages)} className={styles.value}>
+            {isChoice(draft.field) ? (
+              <Select value={draft.value} onChange={(event) => setDraft({ ...draft, value: event.target.value })} data-testid="logs-value">
+                {choices(draft.field).map((choice) => (
+                  <option key={choice} value={choice}>
+                    {choiceLabel(choice, messages)}
+                  </option>
+                ))}
+              </Select>
+            ) : (
+              <Input
+                code
+                value={draft.value}
+                onChange={(event) => setDraft({ ...draft, value: event.target.value })}
+                autoComplete="off"
+                spellCheck={false}
+                data-testid="logs-value"
+              />
+            )}
+          </Field>
+          <Button type="submit" variant="primary" className={styles.submit} data-testid="logs-submit">
+            {messages.logsSearch}
+          </Button>
+        </form>
+        {read === null && <SkeletonRows rows={3} columns={5} caption={false} />}
+        {read?.kind === 'failed' && (
+          <Banner
+            tone="bad"
+            action={invalid ? undefined : { label: messages.retry, onClick: () => setAttempt((n) => n + 1) }}
+            data-testid={invalid ? 'logs-invalid' : 'logs-load-failed'}
+          >
+            <p>{invalid ? messages.logsInvalid : messages.loadFailed}</p>
+            <ErrorReference code={read.failure.code || 'unavailable'} traceId={read.failure.traceId} />
+          </Banner>
+        )}
+        {read?.kind === 'ready' && (
+          <div data-testid="logs">
+            <DataTable
+              caption={messages.navLogs}
+              hideCaption
+              columns={columns}
+              rows={read.list.events}
+              rowKey={(row) => row.id}
+              // Every loaded row on one page: Load more reads the next 50.
+              pageSize={Math.max(read.list.events.length, 1)}
+              empty={<EmptyState message={messages.logsEmpty} />}
+            />
+            {more === 'failed' && (
+              <Banner tone="bad" action={{ label: messages.retry, onClick: () => void loadMore() }} data-testid="logs-more-failed">
+                {messages.loadFailed}
+              </Banner>
+            )}
+            {read.list.nextCursor != null && more !== 'failed' && (
+              <Button variant="secondary" pending={more === 'loading'} onClick={() => void loadMore()} data-testid="logs-load-more">
+                {messages.logsLoadMore}
+              </Button>
+            )}
+          </div>
+        )}
+      </div>
+    </SectionPage>
+  );
+}
+
+/** A User or Application reference in the code type, or nothing when the event names none. */
+function Reference({ id }: { id: string | null }) {
+  return id === null ? null : <code className={styles.reference}>{id}</code>;
+}

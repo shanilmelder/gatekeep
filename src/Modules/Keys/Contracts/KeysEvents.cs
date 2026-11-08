@@ -16,7 +16,8 @@ public static class KeysEvents
     /// </summary>
     public static readonly AuditEventDefinition TenantKeysProvisioned = new(
         new AuditTypeCode("keys.tenant_keys.provisioned"),
-        "A Tenant's missing Signing Keys, Management keys or token protection key were created in key custody. Names no key.");
+        "A Tenant's missing Signing Keys, Management keys or token protection key were created in key custody. Names no key.",
+        AuditOutcome.Success);
 
     /// <summary>
     /// Written on the Tenant's chain, with a <c>system</c> Actor, by the daily rotation (Story 2.4) in the
@@ -24,17 +25,20 @@ public static class KeysEvents
     /// </summary>
     public static readonly AuditEventDefinition SigningKeyRotated = new(
         new AuditTypeCode("keys.signing_key.rotated"),
-        "A Tenant's current Signing or Management key reached its rotation age and became previous. Names no key.");
+        "A Tenant's current Signing or Management key reached its rotation age and became previous. Names no key.",
+        AuditOutcome.Success);
 
     /// <summary>Written by the daily rotation in the same transaction, as the <c>next</c> key becomes <c>current</c>.</summary>
     public static readonly AuditEventDefinition SigningKeyPromoted = new(
         new AuditTypeCode("keys.signing_key.promoted"),
-        "A Tenant's next Signing or Management key became current. Names no key.");
+        "A Tenant's next Signing or Management key became current. Names no key.",
+        AuditOutcome.Success);
 
     /// <summary>Written by the daily rotation in the same transaction, for the new <c>next</c> key it created.</summary>
     public static readonly AuditEventDefinition SigningKeyCreated = new(
         new AuditTypeCode("keys.signing_key.created"),
-        "A Tenant's replacement next Signing or Management key was created in key custody. Names no key.");
+        "A Tenant's replacement next Signing or Management key was created in key custody. Names no key.",
+        AuditOutcome.Success);
 
     /// <summary>
     /// Written by the daily rotation when a <c>previous</c> key's signed tokens have all expired: it
@@ -42,12 +46,14 @@ public static class KeysEvents
     /// </summary>
     public static readonly AuditEventDefinition SigningKeyRetired = new(
         new AuditTypeCode("keys.signing_key.retired"),
-        "A Tenant's previous Signing or Management key retired and its destruction was queued. Names no key.");
+        "A Tenant's previous Signing or Management key retired and its destruction was queued. Names no key.",
+        AuditOutcome.Success);
 
     /// <summary>Written by the destruction job once a retired key's Transit key is deleted.</summary>
     public static readonly AuditEventDefinition SigningKeyDestroyed = new(
         new AuditTypeCode("keys.signing_key.destroyed"),
-        "A Tenant's retired Signing or Management key was destroyed in key custody. Names no key.");
+        "A Tenant's retired Signing or Management key was destroyed in key custody. Names no key.",
+        AuditOutcome.Success);
 
     /// <summary>
     /// Kept by the destruction job, though its own changes are undone, when key custody failed to delete the key;
@@ -55,7 +61,8 @@ public static class KeysEvents
     /// </summary>
     public static readonly AuditEventDefinition SigningKeyDestructionFailed = new(
         new AuditTypeCode("keys.signing_key.destruction_failed"),
-        "Key custody failed to destroy a Tenant's retired Signing or Management key; the destruction retries. Names no key.");
+        "Key custody failed to destroy a Tenant's retired Signing or Management key; the destruction retries. Names no key.",
+        AuditOutcome.Failure);
 
     /// <summary>
     /// Written on the Deployment's chain, with a <c>system</c> Actor, by the daily orphan sweep for each
@@ -64,5 +71,6 @@ public static class KeysEvents
     /// </summary>
     public static readonly AuditEventDefinition OrphanKeySwept = new(
         new AuditTypeCode("keys.transit_key.swept"),
-        "A Signing or Management key at least 24 hours old, named by no row when checked, was deleted from key custody. Names no key.");
+        "A Signing or Management key at least 24 hours old, named by no row when checked, was deleted from key custody. Names no key.",
+        AuditOutcome.Success);
 }

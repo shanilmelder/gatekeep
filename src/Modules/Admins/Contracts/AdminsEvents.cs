@@ -15,7 +15,8 @@ public static class AdminsEvents
     /// </summary>
     public static readonly AuditEventDefinition BootstrapTokenIssued = new(
         new AuditTypeCode("bootstrap.token.issued"),
-        "gatekeep init issued the first one-time bootstrap token. It expires 15 minutes after issue. Holds no token or hash.");
+        "gatekeep init issued the first one-time bootstrap token. It expires 15 minutes after issue. Holds no token or hash.",
+        AuditOutcome.Success);
 
     /// <summary>
     /// Written instead of <see cref="BootstrapTokenIssued"/> when <c>gatekeep init</c> runs again
@@ -23,7 +24,8 @@ public static class AdminsEvents
     /// </summary>
     public static readonly AuditEventDefinition BootstrapTokenReissued = new(
         new AuditTypeCode("bootstrap.token.reissued"),
-        "gatekeep init reissued the bootstrap token, voiding the previous one. It expires 15 minutes after issue. Holds no token or hash.");
+        "gatekeep init reissued the bootstrap token, voiding the previous one. It expires 15 minutes after issue. Holds no token or hash.",
+        AuditOutcome.Success);
 
     /// <summary>
     /// Written on the Deployment chain when the bootstrap token is claimed (Story 1.21), in the
@@ -33,7 +35,8 @@ public static class AdminsEvents
     /// </summary>
     public static readonly AuditEventDefinition BootstrapAdminCreated = new(
         new AuditTypeCode("bootstrap.admin.created"),
-        "The bootstrap token was claimed: the first Admin was created as Deployment Owner and bootstrap completed. Holds no token or hash.");
+        "The bootstrap token was claimed: the first Admin was created as Deployment Owner and bootstrap completed. Holds no token or hash.",
+        AuditOutcome.Success);
 
     /// <summary>
     /// Written on the Deployment chain once per WebAuthn credential an Admin registers (Story 1.22),
@@ -42,7 +45,8 @@ public static class AdminsEvents
     /// </summary>
     public static readonly AuditEventDefinition CredentialRegistered = new(
         new AuditTypeCode("admin.credential.registered"),
-        "An Admin registered a WebAuthn credential. Holds no credential ID, public key, challenge or user handle.");
+        "An Admin registered a WebAuthn credential. Holds no credential ID, public key, challenge or user handle.",
+        AuditOutcome.Success);
 
     /// <summary>
     /// Written on the Deployment chain when an Admin comes to meet the credential floor (Story 1.22,
@@ -53,7 +57,8 @@ public static class AdminsEvents
     /// </summary>
     public static readonly AuditEventDefinition SetupCompleted = new(
         new AuditTypeCode("admin.setup.completed"),
-        "An Admin came to hold two WebAuthn credentials, or one and an offline Recovery Code, which completed setup and made their Session full.");
+        "An Admin came to hold two WebAuthn credentials, or one and an offline Recovery Code, which completed setup and made their Session full.",
+        AuditOutcome.Success);
 
     /// <summary>
     /// Written on the Deployment chain when an Admin signs in with WebAuthn (Story 1.23), in the
@@ -63,7 +68,8 @@ public static class AdminsEvents
     /// </summary>
     public static readonly AuditEventDefinition SignInSucceeded = new(
         new AuditTypeCode("admin.signin.succeeded"),
-        "An Admin signed in with a WebAuthn credential and a full Admin Session started. Holds no credential ID, challenge, user handle or Session ID.");
+        "An Admin signed in with a WebAuthn credential and a full Admin Session started. Holds no credential ID, challenge, user handle or Session ID.",
+        AuditOutcome.Success);
 
     /// <summary>
     /// Written on the Deployment chain when a sign-in is refused after its signature verified over
@@ -78,7 +84,8 @@ public static class AdminsEvents
     /// </summary>
     public static readonly AuditEventDefinition SignInFailed = new(
         new AuditTypeCode("admin.signin.failed"),
-        "A sign-in whose signature verified over an Admin's WebAuthn credential was refused. Holds no credential ID, challenge or user handle.");
+        "A sign-in whose signature verified over an Admin's WebAuthn credential was refused. Holds no credential ID, challenge or user handle.",
+        AuditOutcome.Failure);
 
     /// <summary>
     /// Written on the Deployment chain instead of <see cref="SignInFailed"/> when an assertion with
@@ -92,7 +99,8 @@ public static class AdminsEvents
     /// </summary>
     public static readonly AuditEventDefinition CredentialSignCountRegressed = new(
         new AuditTypeCode("admin.credential.sign_count_regressed"),
-        "A sign-in with an Admin's WebAuthn credential was refused because its signature counter went backwards: it may be cloned.");
+        "A sign-in with an Admin's WebAuthn credential was refused because its signature counter went backwards: it may be cloned.",
+        AuditOutcome.Failure);
 
     /// <summary>
     /// Written on the Deployment chain when an Admin signs out (Story 1.23), in the transaction
@@ -101,7 +109,8 @@ public static class AdminsEvents
     /// </summary>
     public static readonly AuditEventDefinition SessionSignedOut = new(
         new AuditTypeCode("admin.session.signed_out"),
-        "An Admin signed out, which ended their Admin Session. Holds no Session ID.");
+        "An Admin signed out, which ended their Admin Session. Holds no Session ID.",
+        AuditOutcome.Success);
 
     /// <summary>
     /// Written on the Deployment chain when a sign-in ends a live Admin Session the same browser
@@ -111,7 +120,8 @@ public static class AdminsEvents
     /// </summary>
     public static readonly AuditEventDefinition SessionSuperseded = new(
         new AuditTypeCode("admin.session.superseded"),
-        "A sign-in in the same browser ended a live Admin Session as superseded. Holds no Session ID.");
+        "A sign-in in the same browser ended a live Admin Session as superseded. Holds no Session ID.",
+        AuditOutcome.Success);
 
     /// <summary>
     /// Written on the Deployment chain when an authenticated Admin, past the Origin, Session, CSRF
@@ -126,7 +136,23 @@ public static class AdminsEvents
     /// </summary>
     public static readonly AuditEventDefinition AccessDenied = new(
         new AuditTypeCode("admin.access.denied"),
-        "An Admin was refused a capability. The target is the path's Tenant ID as sent, which may not exist. Past 30 per Admin in 15 minutes, only logged. Holds no capability name.");
+        "An Admin was refused a capability. The target is the path's Tenant ID as sent, which may not exist. Past 30 per Admin in 15 minutes, only logged. Holds no capability name.",
+        AuditOutcome.Failure);
+
+    /// <summary>
+    /// Written on the refused Tenant's own chain beside <see cref="AccessDenied"/> (Story 7.4, AD-9,
+    /// FR-40), so the attacked Tenant's Log shows the attempt: when an Admin who holds no Tenant Role
+    /// in the path Tenant is refused there, the Tenant exists, and the refusal was within
+    /// <see cref="AdminsContract.AccessDeniedAuditPolicy"/>'s cap, which this shares. It goes in its
+    /// own Tenant scope, committed before the Deployment write's. The Actor is the Admin; the target
+    /// the Tenant. Holds no capability name, Session ID or CSRF token. An unknown or malformed Tenant
+    /// has no chain to write to, so only the Deployment Log holds that refusal.
+    /// </summary>
+    public static readonly AuditEventDefinition CrossTenantRejected = new(
+        new AuditTypeCode("admin.cross_tenant.rejected"),
+        "An Admin holding no Tenant Role in this Tenant was refused a request in it. Past 30 refusals per Admin in 15 minutes, only logged. Holds no capability name.",
+        AuditOutcome.Failure,
+        TenantLogClass.CrossTenantRejection);
 
     /// <summary>
     /// Written on the Deployment chain when an Admin confirms a sensitive action with a fresh
@@ -136,7 +162,8 @@ public static class AdminsEvents
     /// </summary>
     public static readonly AuditEventDefinition FreshAssertionVerified = new(
         new AuditTypeCode("admin.fresh_assertion.verified"),
-        "An Admin confirmed a sensitive action with a fresh WebAuthn assertion. Holds no credential ID, challenge, binding or Session ID.");
+        "An Admin confirmed a sensitive action with a fresh WebAuthn assertion. Holds no credential ID, challenge, binding or Session ID.",
+        AuditOutcome.Success);
 
     /// <summary>
     /// Written on the Deployment chain when a fresh assertion whose signature verified over one of
@@ -148,7 +175,8 @@ public static class AdminsEvents
     /// </summary>
     public static readonly AuditEventDefinition FreshAssertionFailed = new(
         new AuditTypeCode("admin.fresh_assertion.failed"),
-        "A fresh assertion whose signature verified over an Admin's own WebAuthn credential was refused. Holds no credential ID, challenge or binding.");
+        "A fresh assertion whose signature verified over an Admin's own WebAuthn credential was refused. Holds no credential ID, challenge or binding.",
+        AuditOutcome.Failure);
 
     /// <summary>
     /// Written on the Deployment chain when an Admin removes one of their WebAuthn credentials in
@@ -157,7 +185,8 @@ public static class AdminsEvents
     /// </summary>
     public static readonly AuditEventDefinition CredentialRemoved = new(
         new AuditTypeCode("admin.credential.removed"),
-        "An Admin removed one of their WebAuthn credentials. Holds no credential ID or public key.");
+        "An Admin removed one of their WebAuthn credentials. Holds no credential ID or public key.",
+        AuditOutcome.Success);
 
     /// <summary>
     /// Written on the Deployment chain once for each live Admin Session another action ended as
@@ -168,7 +197,8 @@ public static class AdminsEvents
     /// </summary>
     public static readonly AuditEventDefinition SessionRevoked = new(
         new AuditTypeCode("admin.session.revoked"),
-        "A credential removal, a Recovery Code or a recover-admin enrolment ended a live Admin Session as revoked. Holds no Session ID.");
+        "A credential removal, a Recovery Code or a recover-admin enrolment ended a live Admin Session as revoked. Holds no Session ID.",
+        AuditOutcome.Success);
 
     /// <summary>
     /// Written on the Deployment chain when an Admin confirms they saved their offline Recovery
@@ -177,7 +207,8 @@ public static class AdminsEvents
     /// </summary>
     public static readonly AuditEventDefinition RecoveryCodeIssued = new(
         new AuditTypeCode("admin.recovery_code.issued"),
-        "An Admin confirmed they saved an offline Recovery Code, which can now be used once. Holds no code or HMAC.");
+        "An Admin confirmed they saved an offline Recovery Code, which can now be used once. Holds no code or HMAC.",
+        AuditOutcome.Success);
 
     /// <summary>
     /// Written on the Deployment chain when an Admin's Recovery Code is redeemed at sign-in (Story
@@ -187,7 +218,8 @@ public static class AdminsEvents
     /// </summary>
     public static readonly AuditEventDefinition RecoveryCodeUsed = new(
         new AuditTypeCode("admin.recovery_code.used"),
-        "An Admin's offline Recovery Code was used to start a Session that reaches only credential registration. Holds no code or HMAC.");
+        "An Admin's offline Recovery Code was used to start a Session that reaches only credential registration. Holds no code or HMAC.",
+        AuditOutcome.Success);
 
     /// <summary>
     /// Written on the Deployment chain by <c>gatekeep recover-admin</c> (Story 1.32, AD-31), in the
@@ -197,7 +229,8 @@ public static class AdminsEvents
     /// </summary>
     public static readonly AuditEventDefinition EnrolmentIssued = new(
         new AuditTypeCode("admin.enrolment.issued"),
-        "gatekeep recover-admin issued a single-use 15-minute enrolment for an Admin, after its Security Alert and off-server record. Holds no value or hash.");
+        "gatekeep recover-admin issued a single-use 15-minute enrolment for an Admin, after its Security Alert and off-server record. Holds no value or hash.",
+        AuditOutcome.Success);
 
     /// <summary>
     /// Written on the Deployment chain when a <c>recover-admin</c> enrolment is redeemed (Story
@@ -207,5 +240,6 @@ public static class AdminsEvents
     /// </summary>
     public static readonly AuditEventDefinition EnrolmentUsed = new(
         new AuditTypeCode("admin.enrolment.used"),
-        "An Admin's recover-admin enrolment was used to end their Sessions and start one that reaches only credential registration. Holds no value or hash.");
+        "An Admin's recover-admin enrolment was used to end their Sessions and start one that reaches only credential registration. Holds no value or hash.",
+        AuditOutcome.Success);
 }

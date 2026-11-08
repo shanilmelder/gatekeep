@@ -1,0 +1,45 @@
+/*
+ * Logs (Story 7.4): the field search, the field select beside its value and Search, wrapping on
+ * a narrow screen, over the table and Load more. Times and references in the code type. Tokens only.
+ */
+
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gk-space-16);
+  min-width: 0;
+}
+
+.search {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: var(--gk-space-12);
+}
+
+.field {
+  flex: 0 1 200px;
+  min-width: 160px;
+}
+
+.value {
+  flex: 1 1 280px;
+  min-width: 0;
+}
+
+/* Level with the controls, past the labels above them. */
+.submit {
+  margin-top: 22px;
+}
+
+.time,
+.reference {
+  font: var(--gk-font-code);
+  color: var(--gk-color-tx2);
+  white-space: nowrap;
+}
+
+.reference {
+  overflow-wrap: anywhere;
+  white-space: normal;
+}

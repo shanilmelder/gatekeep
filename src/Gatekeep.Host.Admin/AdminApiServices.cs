@@ -90,6 +90,9 @@ internal sealed class AdminApiServices : IAsyncDisposable
     /// <summary>Fresh WebAuthn assertions for sensitive actions (Story 1.26): the ceremony and the grants the checks use up.</summary>
     public IAdminFreshAssertions FreshAssertions { get; }
 
+    /// <summary>A Tenant's Log search (Story 7.4), run in the path Tenant's scope only.</summary>
+    public ITenantLogSearch LogSearch { get; } = AuditContract.CreateLogSearch();
+
     /// <summary>Your credentials (Story 1.26): the Admin's own list, and removal under the floor.</summary>
     public IAdminCredentials Credentials { get; }
 
@@ -115,6 +118,8 @@ internal sealed class AdminApiServices : IAsyncDisposable
     /// <summary>
     /// The <c>gk_admin</c> data source, for a Tenant scope on the path Tenant only (Story 1.28):
     /// <c>TenantScope.BeginAsync(services.Source, AdminRequestChecks.PathTenant(context), …)</c>.
+    /// The one exception is <see cref="CrossTenantRejection"/>, which writes a refusal to the
+    /// refused Tenant's own Log (Story 7.4).
     /// </summary>
     public NpgsqlDataSource Source => _dataSource.Value;
 

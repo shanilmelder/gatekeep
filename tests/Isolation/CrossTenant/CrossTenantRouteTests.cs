@@ -113,7 +113,14 @@ public sealed class CrossTenantRouteTests(PostgresFixture postgres, OpenBaoFixtu
                 : "none",
             target);
 
-        // Nothing reached Tenant B or its Log.
+        // A Tenant-path refusal also goes on Tenant B's own Log, once, with this Admin as Actor (Story
+        // 7.4, AD-9); a Deployment route has no path Tenant, so B's Log holds none from it.
+        Assert.Equal(
+            entry.Kind == CaseKind.TenantPath ? 1L : 0L,
+            await host.ScalarAsync<long>(
+                $"SELECT count(*) FROM audit_event WHERE tenant_id = '{admin.TenantB}' AND type_code = 'admin.cross_tenant.rejected' AND actor_id = '{adminId}'"));
+
+        // Nothing else reached Tenant B or its Log.
         Assert.Equal(before, await StateOfBAsync(adminId));
 
         if (entry.Kind == CaseKind.TargetTenant)
@@ -233,7 +240,8 @@ public sealed class CrossTenantRouteTests(PostgresFixture postgres, OpenBaoFixtu
     /// Everything of Tenant B's a leaked call could change, as one value to compare before and after:
     /// its row, settings, roles, Operations, jobs, keys, own Log and the Deployment events naming it.
     /// Each piece is coalesced, so a missing row reads as a value and never makes the whole NULL. The
-    /// caller's own refusal, asserted on its own, is left out of the Deployment events.
+    /// caller's own refusal, asserted on its own, is left out of the Deployment events and, as its
+    /// <c>admin.cross_tenant.rejected</c> (Story 7.4), of B's Log.
     /// </summary>
     private Task<string> StateOfBAsync(Guid caller) =>
         admin.Host.ScalarAsync<string>(
@@ -245,7 +253,7 @@ public sealed class CrossTenantRouteTests(PostgresFixture postgres, OpenBaoFixtu
                    || ' steps ' || coalesce((SELECT count(*) FROM operation_step WHERE tenant_id = '{admin.TenantB}'), 0)
                    || ' jobs ' || coalesce((SELECT count(*) FROM job WHERE tenant_id = '{admin.TenantB}'), 0)
                    || ' keys ' || coalesce((SELECT count(*) FROM signing_key WHERE tenant_id = '{admin.TenantB}'), 0)
-                   || ' events ' || coalesce((SELECT count(*) FROM audit_event WHERE tenant_id = '{admin.TenantB}'), 0)
+                   || ' events ' || coalesce((SELECT count(*) FROM audit_event WHERE tenant_id = '{admin.TenantB}' AND NOT (type_code = 'admin.cross_tenant.rejected' AND actor_id IS NOT DISTINCT FROM '{caller}'::uuid)), 0)
                    || ' deployment events ' || coalesce((SELECT count(*) FROM deployment_audit_event WHERE target_id = '{admin.TenantB}' AND coalesce(actor_id::text, '') <> '{caller}'), 0)
             """);
 }

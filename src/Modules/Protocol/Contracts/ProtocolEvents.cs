@@ -16,5 +16,6 @@ public static class ProtocolEvents
     public static readonly AuditEventDefinition ClientCrossTenantRejected = new(
         new AuditTypeCode("protocol.client.cross_tenant_rejected"),
         "A client credential issued by another Tenant was refused at this Tenant's token endpoint. Names nothing of the other Tenant.",
+        AuditOutcome.Failure,
         TenantLogClass.CrossTenantRejection);
 }

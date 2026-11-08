@@ -1839,6 +1839,136 @@
         }
       }
     },
+    "/api/v1/tenants/{tenantId}/logs": {
+      "get": {
+        "tags": [
+          "Tenants"
+        ],
+        "summary": "Search the path Tenant's Log: newest first, 50 a page.",
+        "description": "Any Tenant Role in the path Tenant. Read only, in the Tenant's own scope: no other Tenant's event is ever listed, and the read isn't audited. Each event's evt_ ID, time, type code, the catalogue's outcome and summary, and its Actor and target as internal references; never its detail, so no IP address, User-Agent or email. Every parameter is optional, at most once, and they combine; each filters an indexed envelope column. nextCursor is the last event's ID when an older page follows, else null; pass it back as cursor with the same filters. A parameter sent twice or empty, an unknown outcome, a code that isn't three lower-case parts, a User that is neither a UUID nor an email, an Application that isn't a UUID, a time that isn't an instant, from not before to, or a malformed cursor is 400 invalid_request. An email no event names, like any search that matches nothing, is an empty list. A malformed, unknown or role-less Tenant is 403 access_denied, audited as every Tenant capability refusal is.",
+        "operationId": "SearchTenantLogs",
+        "parameters": [
+          {
+            "name": "tenantId",
+            "in": "path",
+            "description": "The Tenant's public ID: ten_ and the UUID's 16 bytes in lowercase RFC 4648 base32 with no padding, whose last character carries two zero bits. Only this canonical spelling, after URL decoding, names a Tenant, and the empty UUID's never does; anything else is refused like a Tenant the Admin holds no role in.",
+            "required": true,
+            "schema": {
+              "pattern": "^ten_[a-z2-7]{25}[aeimquy4]$",
+              "type": "string"
+            }
+          },
+          {
+            "name": "type",
+            "in": "query",
+            "description": "One event type code, {domain}.{object}.{action}, as docs/audit-events.md publishes it.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "user",
+            "in": "query",
+            "description": "A User: their UUID, or an email, which resolves first to the User references on this Tenant's events whose detail holds exactly it. Events whose Actor or target is that User.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "application",
+            "in": "query",
+            "description": "An Application's UUID: events whose Actor or target is that client.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "outcome",
+            "in": "query",
+            "description": "success or failure: the events whose type the catalogue gives that outcome.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "description": "An ISO 8601 instant with Z or an offset: events at or after it.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "description": "An ISO 8601 instant with Z or an offset: events before it. It must come after from.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "The previous page's nextCursor: an evt_ public ID.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TenantLogsResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "access_denied, with the problem body, when the capability is refused. No body when an earlier check refuses first: a Session restricted to setup, or on a state-changing call a wrong Origin or CSRF token.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "adminSession": [ ]
+          }
+        ],
+        "x-gatekeep-setup-allowed": false,
+        "x-gatekeep-access": {
+          "kind": "capability",
+          "capability": "tenant.logs.read",
+          "scope": "tenant",
+          "machineAllowed": true,
+          "freshAssertion": "never"
+        },
+        "x-gatekeep-recovery-allowed": false
+      }
+    },
     "/api/v1/tenants/{tenantId}/assertions": {
       "post": {
         "tags": [
@@ -2268,7 +2398,8 @@
               "tenant_not_active",
               "tenant_deleted",
               "tenant_busy",
-              "confirmation_mismatch"
+              "confirmation_mismatch",
+              "invalid_request"
             ],
             "type": "string"
           },
@@ -2525,6 +2656,32 @@
             "type": "string"
           },
           "target": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        }
+      },
+      "LogReference": {
+        "required": [
+          "kind",
+          "id"
+        ],
+        "type": "object",
+        "properties": {
+          "kind": {
+            "enum": [
+              "system",
+              "anonymous",
+              "admin",
+              "user",
+              "client",
+              "tenant"
+            ],
+            "type": "string"
+          },
+          "id": {
             "type": [
               "null",
               "string"
@@ -2877,6 +3034,80 @@
           },
           "nextCursor": {
             "pattern": "^ten_[a-z2-7]{25}[aeimquy4]$",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        }
+      },
+      "TenantLogEventResponse": {
+        "required": [
+          "id",
+          "occurredAt",
+          "type",
+          "outcome",
+          "summary",
+          "actor",
+          "target"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "pattern": "^evt_[a-z2-7]{25}[aeimquy4]$",
+            "type": "string"
+          },
+          "occurredAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "type": {
+            "maxLength": 128,
+            "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*$",
+            "type": "string"
+          },
+          "outcome": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "summary": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "actor": {
+            "$ref": "#/components/schemas/LogReference"
+          },
+          "target": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/LogReference"
+              }
+            ]
+          }
+        }
+      },
+      "TenantLogsResponse": {
+        "required": [
+          "events",
+          "nextCursor"
+        ],
+        "type": "object",
+        "properties": {
+          "events": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TenantLogEventResponse"
+            }
+          },
+          "nextCursor": {
+            "pattern": "^evt_[a-z2-7]{25}[aeimquy4]$",
             "type": [
               "null",
               "string"
