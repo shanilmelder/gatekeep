@@ -32,14 +32,14 @@ public class DockerOnlyRuleTests
     private static readonly string[] AllowedCommands = ["docker", "git"];
 
     /// <summary>
-    /// The one exception, per file. The release signing runbook (Story 12.5) is for Esm's
-    /// signing machine, which holds the hardware key and runs no part of a Deployment: cosign
-    /// must reach the YubiKey, and the Actions runner, crane and gh run beside it. Nothing it
-    /// lists runs on a Docker host.
+    /// The one exception, per file. The release signing runbook (Story 12.5) is for the
+    /// machine that makes the signing key and stores it as the release-signing environment's
+    /// secrets, and for the signing runner, neither a Docker host: cosign makes and exports the
+    /// key, and gh stores it. Nothing it lists runs on a Docker host.
     /// </summary>
     private static readonly Dictionary<string, string[]> SigningMachineCommands = new()
     {
-        ["docs/release-signing.md"] = ["cosign", "crane", "gh", "./config.sh", "./run.sh"],
+        ["docs/release-signing.md"] = ["cosign", "gh"],
     };
 
     public static TheoryData<string> CheckedFiles =>

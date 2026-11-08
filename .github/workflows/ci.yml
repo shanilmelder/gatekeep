@@ -67,6 +67,7 @@ jobs:
       # deploy/ci/release-check.sh, run in the release container: the release scripts end
       # to end with a throwaway key and a local registry (build, publish, verify), then each
       # refusal: unsigned digest, another key, a tag reference, no pinned key, a software key
-      # outside the rehearsal and a drifted digest. Tears everything down.
+      # outside the rehearsal, an env:// key with no password or no key, and a drifted
+      # digest. Signs with an encrypted env:// key, as the sign job does. Tears everything down.
       - name: Rehearse the signed release path
         run: docker compose -f deploy/compose.dev.yaml run --rm --build release

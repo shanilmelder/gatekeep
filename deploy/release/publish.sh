@@ -1,17 +1,21 @@
 #!/bin/sh
 # Release publish (Story 12.5, docs/release-signing.md). Runs only in the CI sign job, on
-# the self-hosted signing runner that holds the hardware key, and in the rehearsal. It is
-# the only step that touches the signing key. It never builds anything: it pushes the OCI
-# archives the build job made, checks each pushed digest against the one the build job
-# recorded, signs each digest, attests its SBOM and writes release.env.
+# the self-hosted signing runner, and in the rehearsal. It is the only step that touches
+# the signing key. It never builds anything: it pushes the OCI archives the build job made,
+# checks each pushed digest against the one the build job recorded, signs each digest,
+# attests its SBOM and writes release.env.
 #
 #   GATEKEEP_REGISTRY=ghcr.io/<owner> GATEKEEP_RELEASE_TAG=v1.2.3 \
-#   GATEKEEP_SIGNING_KEY=sk sh deploy/release/publish.sh
+#   GATEKEEP_SIGNING_KEY=env://COSIGN_PRIVATE_KEY sh deploy/release/publish.sh
 #
-# GATEKEEP_SIGNING_KEY  the hardware key: "sk" (cosign --sk, a PIV token such as a
+# GATEKEEP_SIGNING_KEY  a reference to the key, never key material:
+#                       "env://COSIGN_PRIVATE_KEY", the encrypted cosign key the sign job
+#                       gets from the release-signing environment's secrets, with its
+#                       password in COSIGN_PASSWORD, which must not be empty;
+#                       or a hardware key: "sk" (cosign --sk, a PIV token such as a
 #                       YubiKey), "sk:<slot>" for another PIV slot, or a "pkcs11:" URI.
 #                       Anything else (a key file) is refused unless
-#                       GATEKEEP_RELEASE_REHEARSAL=1. It is a reference, never key material.
+#                       GATEKEEP_RELEASE_REHEARSAL=1.
 # GATEKEEP_RELEASE_DIST the build job's output (default: dist)
 # COSIGN, CRANE         the commands to run (default: cosign, crane)
 # GATEKEEP_REGISTRY_INSECURE=1  plain-HTTP registry, rehearsal only
@@ -41,22 +45,29 @@ CRANE_COMMIT=8a72a424fdecb4caa14f2d525e5d2503331442b5
 say() { echo "release-publish: $*"; }
 fail() { echo "release-publish: FAIL $*" >&2; exit 1; }
 
-# The hardware-key rule comes first, before anything is read or pushed.
+# The key rule comes first, before anything is read or pushed.
 case "$KEY" in
-    "") fail "set GATEKEEP_SIGNING_KEY to the hardware key (sk, sk:<slot> or a pkcs11: URI)." ;;
+    "") fail "set GATEKEEP_SIGNING_KEY to env://COSIGN_PRIVATE_KEY or a hardware key (sk, sk:<slot> or a pkcs11: URI)." ;;
+    env://COSIGN_PRIVATE_KEY)
+        [ -n "${COSIGN_PRIVATE_KEY:-}" ] || fail "COSIGN_PRIVATE_KEY is empty: the sign job has no key."
+        # An unencrypted key would sign for anyone who reads the job's environment once.
+        [ -n "${COSIGN_PASSWORD:-}" ] || fail "COSIGN_PASSWORD is empty: an unencrypted signing key is refused."
+        set -- --key "$KEY"
+        ;;
+    env://*) fail "GATEKEEP_SIGNING_KEY '$KEY' isn't env://COSIGN_PRIVATE_KEY." ;;
     pkcs11:*) set -- --key "$KEY" ;;
     sk) set -- --sk ;;
     sk:) fail "GATEKEEP_SIGNING_KEY 'sk:' names no slot." ;;
     sk:*) set -- --sk --slot "${KEY#sk:}" ;;
     *)
-        [ "$REHEARSAL" = 1 ] || fail "GATEKEEP_SIGNING_KEY isn't a hardware key (sk, sk:<slot> or pkcs11:). A key file is for the rehearsal only."
+        [ "$REHEARSAL" = 1 ] || fail "GATEKEEP_SIGNING_KEY isn't a hardware key (sk, sk:<slot> or pkcs11:) or env://COSIGN_PRIVATE_KEY. A key file is for the rehearsal only."
         [ -f "$KEY" ] || fail "no key file '$KEY'."
         say "REHEARSAL: signing with the software key $KEY."
         set -- --key "$KEY"
         ;;
 esac
 
-# The signing machine's tools, before anything is read or pushed. The rehearsal runs the
+# The signing runner's tools, before anything is read or pushed. The rehearsal runs the
 # release-tools image, whose tools are pinned by digest.
 if [ "$REHEARSAL" != 1 ]; then
     $COSIGN version 2>&1 | grep -Eq "^GitVersion:[[:space:]]+$COSIGN_VERSION\$" \

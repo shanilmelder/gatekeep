@@ -4,15 +4,17 @@
 #
 #   docker compose -f deploy/compose.dev.yaml run --rm --build release
 #
-# It runs the real release scripts end to end, with a throwaway software key in place of
-# the hardware key and a local registry in place of GHCR: build.sh for openbao and
+# It runs the real release scripts end to end, with throwaway keys in place of the release
+# key and a local registry in place of GHCR: build.sh for openbao and
 # release-tools, then publish.sh (GATEKEEP_RELEASE_REHEARSAL=1), then verify.sh, which must
 # pass, both directly and as release-verify runs it (non-root, read-only, the pinned key
 # mounted read-only, no GATEKEEP_TRUST_KEY). Then each refusal of the release path must
 # fail closed: an unsigned digest, a signed digest with no SBOM attestation, a different
 # key, a tag reference, a missing pinned key, another service's repository in a slot, a
 # signed image copied into another service's repository, images from two releases, a
-# software key outside the rehearsal, and a pushed digest that differs from the build's.
+# software key outside the rehearsal, an env:// key with no password or no key, and a
+# pushed digest that differs from the build's. The sign job's own key, an encrypted key in
+# COSIGN_PRIVATE_KEY (env://COSIGN_PRIVATE_KEY), signs a release that must verify too.
 #
 # After the build, the registry and this container share one internal network and this
 # container leaves every other network, so publishing and verifying are shown to need no
@@ -57,6 +59,11 @@ for pair in a b; do
     (cd "$WORK/keys-$pair" && COSIGN_PASSWORD="" cosign generate-key-pair > /dev/null 2>&1)
     [ -s "$WORK/keys-$pair/cosign.pub" ] || fail "no key pair $pair."
 done
+# Pair C as the sign job holds its key: encrypted, its password apart from it.
+ENV_KEY_PASSWORD="rehearsal-$$-password"
+mkdir -p "$WORK/keys-c"
+(cd "$WORK/keys-c" && COSIGN_PASSWORD="$ENV_KEY_PASSWORD" cosign generate-key-pair > /dev/null 2>&1)
+[ -s "$WORK/keys-c/cosign.pub" ] || fail "no key pair c."
 
 # publish.sh as the rehearsal runs it: $1 the build output, $2 the registry path, then
 # extra variables.
@@ -101,6 +108,7 @@ done
 [ "$(wc -l < "$WORK/dist/digests.txt")" -eq 2 ] || fail "digests.txt doesn't hold exactly two lines."
 cp -r "$WORK/dist" "$WORK/dist-drift"
 cp -r "$WORK/dist" "$WORK/dist-second"
+cp -r "$WORK/dist" "$WORK/dist-env"
 
 # The build needs egress (buildx fetches registry tokens for the base images). Nothing
 # after it does: leave every network but the registry's.
@@ -221,6 +229,24 @@ if crane --insecure ls registry:5000/soft/gatekeep-openbao > /dev/null 2>&1; the
     fail "the refused software-key run pushed an image."
 fi
 pass "the refused software-key run pushed nothing."
+
+say "publish.sh with an env:// key, as the sign job runs it."
+publish "$WORK/dist-env" registry:5000/envkey GATEKEEP_RELEASE_REHEARSAL=1     GATEKEEP_SIGNING_KEY=env://COSIGN_PRIVATE_KEY COSIGN_PRIVATE_KEY="$(cat "$WORK/keys-c/cosign.key")"     COSIGN_PASSWORD="$ENV_KEY_PASSWORD" > /dev/null
+mkdir -p "$WORK/trust-c"
+cp "$WORK/keys-c/cosign.pub" "$WORK/trust-c/release-signing.pub"
+out="$(verify "$WORK/dist-env/release.env" "$WORK/trust-c/release-signing.pub")"     || { echo "$out" >&2; fail "the env:// key's release didn't verify."; }
+echo "$out" | grep -qF "every image is signed by the pinned key" || fail "the env:// key's release didn't pass."
+pass "a release signed with the env:// key verifies against its pinned key."
+
+expect_refusal "an env:// key with no password" "an unencrypted signing key is refused"     publish "$WORK/dist" registry:5000/nopassword GATEKEEP_SIGNING_KEY=env://COSIGN_PRIVATE_KEY     COSIGN_PRIVATE_KEY="$(cat "$WORK/keys-c/cosign.key")"
+expect_refusal "an env:// key with no key" "the sign job has no key"     publish "$WORK/dist" registry:5000/nokey GATEKEEP_SIGNING_KEY=env://COSIGN_PRIVATE_KEY     COSIGN_PASSWORD="$ENV_KEY_PASSWORD"
+expect_refusal "another env:// variable" "isn't env://COSIGN_PRIVATE_KEY"     publish "$WORK/dist" registry:5000/othervar GATEKEEP_SIGNING_KEY=env://OTHER_KEY
+for repo in nopassword nokey othervar; do
+    if crane --insecure ls "registry:5000/$repo/gatekeep-openbao" > /dev/null 2>&1; then
+        fail "the refused $repo run pushed an image."
+    fi
+done
+pass "the refused env:// runs pushed nothing."
 
 sed -i "s/sha256:[0-9a-f]\{64\}/sha256:$(printf '0%.0s' $(seq 64))/" "$WORK/dist-drift/digests.txt"
 expect_refusal "a pushed digest that differs from the build's" "Nothing is signed" \

@@ -330,9 +330,18 @@ public sealed class ReleaseConfigTests
         Assert.Contains("    environment: release-signing", sign);
         Assert.Equal(["contents: write", "packages: write"], Permissions(sign).Order());
 
-        // The only secret is the job's own token. The key is a variable naming hardware.
-        Assert.All(Regex.Matches(text, @"secrets\.(?<name>[A-Za-z0-9_]+)"), m => Assert.Equal("GITHUB_TOKEN", m.Groups["name"].Value));
-        Assert.Contains("GATEKEEP_SIGNING_KEY: ${{ vars.GATEKEEP_SIGNING_KEY }}", text, StringComparison.Ordinal);
+        // The secrets are the job's own token and the encrypted key with its password. The key
+        // is named by reference, and reaches only the step that runs publish.sh.
+        Assert.All(
+            Regex.Matches(text, @"secrets\.(?<name>[A-Za-z0-9_]+)"),
+            m => Assert.Contains(m.Groups["name"].Value, new[] { "GITHUB_TOKEN", "COSIGN_PRIVATE_KEY", "COSIGN_PASSWORD" }));
+        Assert.Contains("      GATEKEEP_SIGNING_KEY: env://COSIGN_PRIVATE_KEY", sign);
+        var signing = Step(sign, "Push, sign and attest each image");
+        Assert.Contains("          COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}", signing);
+        Assert.Contains("          COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}", signing);
+        Assert.Contains("sh deploy/release/publish.sh", string.Join('\n', signing), StringComparison.Ordinal);
+        var outside = string.Join('\n', sign.Except(signing));
+        Assert.DoesNotContain("secrets.COSIGN_", outside, StringComparison.Ordinal);
 
         Assert.Contains("sh deploy/release/publish.sh", text, StringComparison.Ordinal);
         Assert.Contains("actions/download-artifact@", text, StringComparison.Ordinal);
@@ -426,6 +435,14 @@ public sealed class ReleaseConfigTests
             .TakeWhile(l => !Regex.IsMatch(l, @"^\s*- "))
             .Select(l => Regex.Match(l, @"^\s+name:\s*(?<name>\S+)\s*$"))
             .FirstOrDefault(m => m.Success)?.Groups["name"].Value;
+    }
+
+    /// <summary>The lines of the step named <paramref name="name"/>, from its <c>- name:</c> to the next step.</summary>
+    private static List<string> Step(List<string> job, string name)
+    {
+        var start = job.IndexOf($"      - name: {name}");
+        Assert.True(start >= 0, $"The job has no step named {name}.");
+        return [job[start], .. job.Skip(start + 1).TakeWhile(l => !l.StartsWith("      - ", StringComparison.Ordinal))];
     }
 
     /// <summary>The <c>permissions:</c> entries of a job, as "scope: level".</summary>
