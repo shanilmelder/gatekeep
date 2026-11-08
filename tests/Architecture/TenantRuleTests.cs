@@ -163,11 +163,20 @@ public class TenantRuleTests
     [InlineData("var app = builder.Build();\napp.UseRouting();\napp.UseTenantResolution(() => \"x\");\n", "app.UseRouting();")]
     [InlineData("var app = builder.Build();\napp.MapGet(\"/\", () => 1);\napp.UseTenantResolution(() => \"x\");\n", "app.MapGet(\"/\", () => 1);")]
     [InlineData("var app = builder.Build();\napp.UseForwardedHeaders();\napp.UseTenantResolution(() => \"x\");\n", "app.UseForwardedHeaders();")]
-    [InlineData("var app = builder.Build();\napp.UseTenantResolution(() => \"x\");\napp.UseGatekeepForwardedClient();\n", "app.UseGatekeepForwardedClient();")]
+    [InlineData("var app = builder.Build();\napp.UseGatekeepForwardedClient();\napp.UseTenantResolution(() => \"x\");\n", "app.UseGatekeepForwardedClient();")]
+    [InlineData("var app = builder.Build();\napp.UseGatekeepForwardedClient();\n", "app.UseGatekeepForwardedClient();")]
+    [InlineData("var app = builder.Build();\napp.UseTenantResolution(() => \"x\");\napp.UseForwardedHeaders();\n", "app.UseForwardedHeaders();")]
     [InlineData("var app = builder.Build();\n", "no app.UseTenantResolution")]
     public void Late_or_missing_resolution_is_reported(string program, string expected)
     {
         Assert.Contains(expected, ResolutionViolation(program));
+    }
+
+    /// <summary>Story 2.5: the forwarded client address, which token requests are counted by, once the Tenant is resolved.</summary>
+    [Fact]
+    public void Forwarded_client_after_resolution_is_allowed()
+    {
+        Assert.Null(ResolutionViolation("var app = builder.Build();\napp.UseTenantResolution(() => \"x\");\napp.UseGatekeepForwardedClient();\n"));
     }
 
     [Fact]
@@ -542,8 +551,10 @@ public class TenantRuleTests
             .Order(StringComparer.Ordinal)];
 
     /// <summary>
-    /// Null when the first <c>app.</c> call after the app is built is <c>UseTenantResolution</c> and
-    /// no forwarded-headers middleware is used; otherwise what came first or is wrong.
+    /// Null when the first <c>app.</c> call after the app is built is <c>UseTenantResolution</c>, no
+    /// forwarded-headers middleware is used, and <c>UseGatekeepForwardedClient</c>, which forwards the
+    /// client address only, comes after resolution (Story 2.5: token requests are counted by it);
+    /// otherwise what came first or is wrong.
     /// </summary>
     private static string? ResolutionViolation(string program)
     {
@@ -558,19 +569,25 @@ public class TenantRuleTests
             .Select(m => m.Groups["call"].Value.Trim())
             .ToList();
 
-        var forwarded = calls.FirstOrDefault(c => c.StartsWith("app.UseForwardedHeaders", StringComparison.Ordinal)
-            || c.StartsWith("app.UseGatekeepForwardedClient", StringComparison.Ordinal));
+        var forwarded = calls.FirstOrDefault(c => c.StartsWith("app.UseForwardedHeaders", StringComparison.Ordinal));
         if (forwarded is not null)
         {
             return forwarded;
         }
 
-        if (calls.Count == 0 || !calls.Any(c => c.StartsWith("app.UseTenantResolution(", StringComparison.Ordinal)))
+        var resolution = calls.FindIndex(c => c.StartsWith("app.UseTenantResolution(", StringComparison.Ordinal));
+        var client = calls.FindIndex(c => c.StartsWith("app.UseGatekeepForwardedClient", StringComparison.Ordinal));
+        if (client >= 0 && (resolution < 0 || client < resolution))
+        {
+            return calls[client];
+        }
+
+        if (resolution < 0)
         {
             return "no app.UseTenantResolution";
         }
 
-        return calls[0].StartsWith("app.UseTenantResolution(", StringComparison.Ordinal) ? null : calls[0];
+        return resolution == 0 ? null : calls[0];
     }
 
     private static List<string> TenantHostViolations(IEnumerable<(string Path, string Source)> files) =>

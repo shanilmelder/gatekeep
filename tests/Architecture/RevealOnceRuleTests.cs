@@ -24,10 +24,12 @@ public class RevealOnceRuleTests
     private static readonly (string File, string Type)[] Responses =
     [
         ("src/Gatekeep.Host.Admin/RecoveryCodeApi.cs", "AdminRecoveryCodeResponse"),
+        // Story 2.5: a machine client's secret, shown once to the caller that created it (AD-24).
+        ("src/Modules/Directory/Contracts/IDirectory.cs", "CreatedMachineClient"),
     ];
 
     /// <summary>Where one may be built: the handler that sends the reviewed response.</summary>
-    private static readonly string[] Builders = ["src/Gatekeep.Host.Admin/RecoveryCodeApi.cs"];
+    private static readonly string[] Builders = ["src/Gatekeep.Host.Admin/RecoveryCodeApi.cs", "src/Modules/Directory/Core/DirectoryService.cs"];
 
     /// <summary>Where it may be named for its schema only.</summary>
     private static readonly string[] SchemaNames = ["src/Gatekeep.Host.Admin/AdminOpenApi.cs"];

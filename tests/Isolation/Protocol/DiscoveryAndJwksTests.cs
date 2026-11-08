@@ -29,7 +29,7 @@ public sealed class DiscoveryAndJwksTests(PostgresFixture postgres, OpenBaoFixtu
     private static CancellationToken Cancellation => TestContext.Current.CancellationToken;
 
     [Fact]
-    public async Task Discovery_names_the_stored_issuer_and_advertises_no_token_endpoint_or_grant_type()
+    public async Task Discovery_names_the_stored_issuer_and_advertises_Client_Credentials_only()
     {
         var (database, a, _) = await TwoTenantsAsync();
         await using var host = await ProtocolHost.StartAsync(database.Hosted, bao);
@@ -39,9 +39,13 @@ public sealed class DiscoveryAndJwksTests(PostgresFixture postgres, OpenBaoFixtu
 
         Assert.Equal(a.Issuer, root.GetProperty("issuer").GetString());
         Assert.Equal($"{a.Issuer}.well-known/jwks", root.GetProperty("jwks_uri").GetString());
-        Assert.False(root.TryGetProperty("token_endpoint", out _));
-        Assert.False(root.TryGetProperty("grant_types_supported", out _));
-        Assert.False(root.TryGetProperty("token_endpoint_auth_methods_supported", out _));
+
+        // Story 2.5: the token endpoint, the one grant type and the two secret methods it accepts.
+        Assert.Equal($"{a.Issuer}connect/token", root.GetProperty("token_endpoint").GetString());
+        Assert.Equal(["client_credentials"], root.GetProperty("grant_types_supported").EnumerateArray().Select(e => e.GetString()));
+        Assert.Equal(
+            ["client_secret_basic", "client_secret_post"],
+            root.GetProperty("token_endpoint_auth_methods_supported").EnumerateArray().Select(e => e.GetString()).Order(StringComparer.Ordinal));
         Assert.False(root.TryGetProperty("authorization_endpoint", out _));
         Assert.Equal(["RS256"], root.GetProperty("id_token_signing_alg_values_supported").EnumerateArray().Select(e => e.GetString()));
         Assert.Equal(0, host.Custody.Calls(KeyOperation.Sign));
@@ -238,12 +242,13 @@ public sealed class DiscoveryAndJwksTests(PostgresFixture postgres, OpenBaoFixtu
         Assert.Empty(options.EncryptionCredentials);
     }
 
+    /// <summary>Story 2.5 replaced the 2.3 refusal: a request no client could make a token from writes and signs nothing.</summary>
     [Theory]
-    [InlineData("form")]
-    [InlineData("json")]
-    [InlineData("empty")]
-    [InlineData("get")]
-    public async Task Token_endpoint_refuses_every_request_with_unsupported_grant_type(string shape)
+    [InlineData("form", HttpStatusCode.Unauthorized, "invalid_client")]
+    [InlineData("json", HttpStatusCode.BadRequest, "invalid_request")]
+    [InlineData("empty", HttpStatusCode.BadRequest, "invalid_request")]
+    [InlineData("get", HttpStatusCode.BadRequest, "invalid_request")]
+    public async Task Token_endpoint_refuses_a_request_no_client_can_be_issued_for(string shape, HttpStatusCode status, string error)
     {
         var (database, _, _) = await TwoTenantsAsync();
         await using var host = await ProtocolHost.StartAsync(database.Hosted, bao);
@@ -266,9 +271,9 @@ public sealed class DiscoveryAndJwksTests(PostgresFixture postgres, OpenBaoFixtu
 
         using var response = await host.Http.SendAsync(request, Cancellation);
 
-        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal(status, response.StatusCode);
         using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync(Cancellation));
-        Assert.Equal("unsupported_grant_type", document.RootElement.GetProperty("error").GetString());
+        Assert.Equal(error, document.RootElement.GetProperty("error").GetString());
         Assert.False(document.RootElement.TryGetProperty("access_token", out _));
 
         // No store, no signature: nothing was read or written for it.
@@ -428,6 +433,16 @@ public sealed class DiscoveryAndJwksTests(PostgresFixture postgres, OpenBaoFixtu
         Assert.Equal("Gatekeep.Modules.Protocol.Core.SelectTenantOptions", first.ServiceDescriptor.ServiceType.FullName);
         Assert.Single(handlers, d => d.ContextType == typeof(ProcessRequestContext) && d.Order == int.MinValue);
         Assert.DoesNotContain(handlers, d => d.ServiceDescriptor.ServiceType == typeof(OpenIddictServerAspNetCoreHandlers.ResolveRequestUri));
+
+        // Story 2.5: OpenIddict's secret check is gone, and Gatekeep's runs before its client lookup.
+        Assert.DoesNotContain(handlers, d => d.ServiceDescriptor.ServiceType == typeof(OpenIddict.Server.OpenIddictServerHandlers.ValidateClientSecret));
+        var gatekeep = Assert.Single(handlers, d => d.ServiceDescriptor.ServiceType.FullName == "Gatekeep.Modules.Protocol.Core.AuthenticateGatekeepClient");
+        var lookup = Assert.Single(handlers, d => d.ServiceDescriptor.ServiceType == typeof(OpenIddict.Server.OpenIddictServerHandlers.ValidateClientId));
+        Assert.True(gatekeep.Order < lookup.Order);
+        Assert.False(host.GlobalOptions.EnableDegradedMode);
+        Assert.Equal(
+            ["client_secret_basic", "client_secret_post"],
+            host.GlobalOptions.ClientAuthenticationMethods.Order(StringComparer.Ordinal));
     }
 
     [Fact]

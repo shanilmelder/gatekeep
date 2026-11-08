@@ -13,6 +13,7 @@
 
 dependency Host.Hosted -> Protocol
 dependency Host.Hosted -> Authentication
+dependency Host.Hosted -> Audit
 dependency Host.Hosted -> Identity
 dependency Host.Hosted -> Sessions
 dependency Host.Hosted -> Tenancy
@@ -80,6 +81,7 @@ dependency Tests.Isolation -> Adapters.Postgres
 dependency Tests.Isolation -> Admins
 dependency Tests.Isolation -> Audit
 dependency Tests.Isolation -> Authentication
+dependency Tests.Isolation -> Directory
 dependency Tests.Isolation -> Cli
 dependency Tests.Isolation -> Keys
 dependency Tests.Isolation -> Management

@@ -1,5 +1,7 @@
 using Gatekeep.Adapters.Hosting;
 using Gatekeep.Adapters.Logging;
+using Gatekeep.Kernel.Audit;
+using Gatekeep.Modules.Audit.Contracts;
 using Gatekeep.Modules.Protocol.Contracts;
 using Gatekeep.Modules.Tenancy.Contracts;
 
@@ -11,9 +13,11 @@ if (HealthProbe.IsRequested(args))
 
 var builder = WebApplication.CreateBuilder(args);
 builder.Logging.AddGatekeepLogging();
-builder.AddGatekeepHost(new HostProfile("Host.Hosted", ["Hosted"], HasPublicEndpoint: true));
+builder.AddGatekeepHost(new HostProfile("Host.Hosted", ["Hosted"], HasPublicEndpoint: true, HasForwardingProxy: true));
 
-// Each Tenant's OpenID Provider (Story 2.3): discovery and JWKS so far, as gk_hosted.
+// Each Tenant's OpenID Provider (Stories 2.3 and 2.5): discovery, JWKS and Client Credentials, as
+// gk_hosted. Its audit events, such as a refused cross-Tenant credential, go to the Tenant's Log.
+builder.Services.AddSingleton<IAuditAppender>(AuditContract.CreateAppender());
 builder.Services.AddGatekeepProtocol(services => services.GetRequiredService<HostDatabases>()["Hosted"]);
 var app = builder.Build();
 
@@ -21,6 +25,10 @@ var app = builder.Build();
 // active Tenant's stored host, is the only Tenant source here (AD-4). Any other host gets the one
 // fixed 404 before any Tenant code runs. The private health port keeps its own branch.
 app.UseTenantResolution(() => app.Services.GetRequiredService<HostDatabases>()["Hosted"]);
+
+// The client Caddy forwarded, which token requests are counted by (Story 2.5), believed only from
+// Caddy's edge network (Gatekeep:ForwardedBy).
+app.UseGatekeepForwardedClient();
 
 // OpenIddict, on the resolved Tenant only: its first handler takes the Tenant from resolution.
 app.UseGatekeepProtocol();

@@ -42,6 +42,7 @@
     <ProjectReference Include="../../src/Modules/Admins/Gatekeep.Modules.Admins.csproj" />
     <ProjectReference Include="../../src/Modules/Audit/Gatekeep.Modules.Audit.csproj" />
     <ProjectReference Include="../../src/Modules/Authentication/Gatekeep.Modules.Authentication.csproj" />
+    <ProjectReference Include="../../src/Modules/Directory/Gatekeep.Modules.Directory.csproj" />
     <ProjectReference Include="../../src/Modules/Keys/Gatekeep.Modules.Keys.csproj" />
     <ProjectReference Include="../../src/Modules/Management/Gatekeep.Modules.Management.csproj" />
     <ProjectReference Include="../../src/Modules/Operations/Gatekeep.Modules.Operations.csproj" />

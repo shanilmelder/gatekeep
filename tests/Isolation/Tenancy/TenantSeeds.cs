@@ -23,6 +23,15 @@ internal static class TenantSeeds
         ("job_payload", (t, n) =>
             $"INSERT INTO job (id, type, tenant_id, deployment_wide, run_after) VALUES ('{n}', 'audit.retention.apply', '{t}', false, now() + interval '30 days'); " +
             $"INSERT INTO job_payload (tenant_id, job_id, ids) VALUES ('{t}', '{n}', '{{}}')"),
+        ("application", (t, n) =>
+            "INSERT INTO application (tenant_id, id, name, kind, grant_types, created_at) " +
+            $"VALUES ('{t}', '{n}', 'Seeded Application', 'machine', ARRAY['client_credentials'], now())"),
+        ("client_secret", (t, n) =>
+            "INSERT INTO client_secret (tenant_id, id, application_id, secret_hash, created_at) " +
+            $"VALUES ('{t}', '{n}', '{n}', sha256(convert_to('{t}{n}', 'UTF8')), now())"),
+        ("tenant_attempt", (t, _) =>
+            "INSERT INTO tenant_attempt (tenant_id, policy, subject_hash, window_start, attempts) " +
+            $"VALUES ('{t}', 'authentication.token_request.tenant', sha256(convert_to('{t}', 'UTF8')), now(), 1) ON CONFLICT DO NOTHING"),
         ("user", (t, n) => $"INSERT INTO \"user\" (tenant_id, id) VALUES ('{t}', '{n}')"),
         ("user_session", (t, n) =>
             "INSERT INTO user_session (tenant_id, id, user_id, id_hash, amr, auth_time, idle_expires_at, absolute_expires_at, created_at) " +
@@ -35,7 +44,7 @@ internal static class TenantSeeds
             $"VALUES ('{t}', '{n}', '{n}', 'refresh_token', 'valid', gen_random_uuid())"),
         ("signin_transaction", (t, n) =>
             "INSERT INTO signin_transaction (tenant_id, id, application_id, binding_hash, parameters, created_at, expires_at) " +
-            $"VALUES ('{t}', '{n}', gen_random_uuid(), sha256(convert_to('{t}{n}', 'UTF8')), '{{}}', now(), now() + interval '10 minutes')"),
+            $"VALUES ('{t}', '{n}', '{n}', sha256(convert_to('{t}{n}', 'UTF8')), '{{}}', now(), now() + interval '10 minutes')"),
         ("signing_key", (t, n) =>
             // Retired, so it never collides with the current and next keys a real creation makes.
             "INSERT INTO signing_key (id, tenant_id, purpose, state, transit_name, transit_version, published_at, promoted_at, rotated_at, retired_at) " +

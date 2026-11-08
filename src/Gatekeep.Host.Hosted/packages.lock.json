@@ -46,14 +46,6 @@
           "Microsoft.IdentityModel.Logging": "8.19.2"
         }
       },
-      "OpenIddict.Abstractions": {
-        "type": "Transitive",
-        "resolved": "7.7.2",
-        "contentHash": "rt5feUxOneeZ15jz2koGFVbLWA9gbDu4yPgr9nArFx6YpwP+iaNZHENTi44pTxCXo6wMBaeaApjn1ZMvCu3EEw==",
-        "dependencies": {
-          "Microsoft.IdentityModel.Tokens": "8.19.2"
-        }
-      },
       "OpenIddict.Server": {
         "type": "Transitive",
         "resolved": "7.7.2",
@@ -86,6 +78,12 @@
       "gatekeep.kernel": {
         "type": "Project"
       },
+      "gatekeep.modules.audit": {
+        "type": "Project",
+        "dependencies": {
+          "Gatekeep.Kernel": "[0.1.0, )"
+        }
+      },
       "gatekeep.modules.authentication": {
         "type": "Project",
         "dependencies": {
@@ -102,7 +100,8 @@
         "dependencies": {
           "Gatekeep.Kernel": "[0.1.0, )",
           "Gatekeep.Modules.Sessions": "[0.1.0, )",
-          "Gatekeep.Modules.Tenancy": "[0.1.0, )"
+          "Gatekeep.Modules.Tenancy": "[0.1.0, )",
+          "OpenIddict.Abstractions": "[7.7.2, )"
         }
       },
       "gatekeep.modules.identity": {
@@ -139,6 +138,7 @@
           "Gatekeep.Modules.Sessions": "[0.1.0, )",
           "Gatekeep.Modules.Tenancy": "[0.1.0, )",
           "Npgsql": "[10.0.3, )",
+          "OpenIddict.Core": "[7.7.2, )",
           "OpenIddict.Server.AspNetCore": "[7.7.2, )"
         }
       },
@@ -146,7 +146,8 @@
         "type": "Project",
         "dependencies": {
           "Gatekeep.Kernel": "[0.1.0, )",
-          "Gatekeep.Modules.Tenancy": "[0.1.0, )"
+          "Gatekeep.Modules.Tenancy": "[0.1.0, )",
+          "OpenIddict.Abstractions": "[7.7.2, )"
         }
       },
       "gatekeep.modules.tenancy": {
@@ -161,6 +162,24 @@
         "requested": "[10.0.3, )",
         "resolved": "10.0.3",
         "contentHash": "7nb5YzXuvWWJxB0J8DiyL3we+X4FOctZrt0fIBnucOIaIevFEEwGQVZKtiu9olXdlNAK1eNgqSral6r/jlhI4w=="
+      },
+      "OpenIddict.Abstractions": {
+        "type": "CentralTransitive",
+        "requested": "[7.7.2, )",
+        "resolved": "7.7.2",
+        "contentHash": "rt5feUxOneeZ15jz2koGFVbLWA9gbDu4yPgr9nArFx6YpwP+iaNZHENTi44pTxCXo6wMBaeaApjn1ZMvCu3EEw==",
+        "dependencies": {
+          "Microsoft.IdentityModel.Tokens": "8.19.2"
+        }
+      },
+      "OpenIddict.Core": {
+        "type": "CentralTransitive",
+        "requested": "[7.7.2, )",
+        "resolved": "7.7.2",
+        "contentHash": "VsPYuXWx1YtbKFyW/O2vV/egJtTXmAOUE7AJq+I/laT3WIroeiDqHT8jDnhjIhDjHcjfNupR/u5nhWD6t5ocqg==",
+        "dependencies": {
+          "OpenIddict.Abstractions": "7.7.2"
+        }
       }
     }
   }

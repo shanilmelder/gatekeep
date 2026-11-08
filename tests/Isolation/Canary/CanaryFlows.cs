@@ -2,6 +2,7 @@ using System.Net;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
+using Gatekeep.Adapters.Logging;
 using Gatekeep.Adapters.OpenBao;
 using Gatekeep.Adapters.Postgres.Schema;
 using Gatekeep.Kernel.Audit;
@@ -74,12 +75,15 @@ internal sealed class FlowRun
     }
 }
 
-/// <summary>What a flow can use: the database cluster, a scratch folder, and the test's cancellation.</summary>
-internal sealed class CanaryFlowContext(PostgresFixture postgres, string directory) : IDisposable
+/// <summary>What a flow can use: the database cluster, OpenBao, a scratch folder, and the test's cancellation.</summary>
+internal sealed class CanaryFlowContext(PostgresFixture postgres, string directory, Gatekeep.Tests.Isolation.Custody.OpenBaoFixture? bao = null) : IDisposable
 {
     private readonly List<IDisposable> _owned = [];
 
     public PostgresFixture Postgres => postgres;
+
+    /// <summary>The real OpenBao, for a flow that signs through Transit (Story 2.5).</summary>
+    public Gatekeep.Tests.Isolation.Custody.OpenBaoFixture Bao => bao ?? throw new InvalidOperationException("This run has no OpenBao.");
 
     public static CancellationToken Cancellation => TestContext.Current.CancellationToken;
 
@@ -251,6 +255,9 @@ internal static class CanaryFlows
         new("jobs.credential", [], CredentialJobAsync),
         new("custody.openbao", [], CustodyAsync),
         new("audit.appender", [], AppenderAsync),
+
+        // OpenIddict's routes are no Map… literal, so the token endpoint names no surface: it is covered here.
+        new("protocol.client_credentials", [], ClientCredentialsAsync),
     ];
 
     private static readonly DateOnly Reviewed = new(2026, 11, 2);
@@ -1233,6 +1240,67 @@ internal static class CanaryFlows
     }
 
     /// <summary>A response's status, every header and its body, as one text to scan.</summary>
+    /// <summary>
+    /// Story 2.5: Client Credentials on the real Protocol pipeline at Trace, through the hosts' scrubbing
+    /// logging, with a real machine client signing through the real Transit. Normally the client gets a
+    /// token by both secret methods; failing, a wrong secret is refused at its Tenant and its real one
+    /// at another Tenant. The client secret, its random part and every issued token must appear in no
+    /// log or table; a token response holds its token by design, so only its other fields are captured.
+    /// </summary>
+    private static async Task ClientCredentialsAsync(CanaryFlowContext context, FlowRun run, bool failing)
+    {
+        const string hostA = "canary-a.tokens.test";
+        const string hostB = "canary-b.tokens.test";
+
+        var database = await Protocol.ProtocolDatabase.CreateAsync(context.Postgres);
+        run.Database = database.Name;
+        run.Plant("role-password", PostgresFixture.Password);
+        var a = await database.AddTenantAsync(hostA);
+        var b = await database.AddTenantAsync(hostB);
+        Assert.True(await database.ProvisionAsync(context.Bao, a.TenantId));
+        Assert.True(await database.ProvisionAsync(context.Bao, b.TenantId));
+
+        var client = await database.CreateClientAsync(a.TenantId);
+        run.Plant("client-secret", client.Secret);
+        run.Plant("client-secret-random", client.Secret[(client.Secret.IndexOf('.', StringComparison.Ordinal) + 1)..]);
+
+        var captured = new CapturedConsole();
+        await using (var host = await Protocol.ProtocolHost.StartAsync(database.Hosted, context.Bao, logging: logging =>
+        {
+            logging.AddGatekeepLogging().SetMinimumLevel(LogLevel.Trace);
+            logging.Services.AddSingleton<Microsoft.Extensions.Logging.Console.ConsoleFormatter>(captured);
+            logging.Services.Configure<Microsoft.Extensions.Logging.Console.ConsoleLoggerOptions>(options => options.FormatterName = captured.Name);
+        }))
+        {
+            if (failing)
+            {
+                var wrong = run.Plant("client-secret-wrong", client.Secret[..(client.Secret.IndexOf('.', StringComparison.Ordinal) + 1)] + Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(24)));
+                using (var refused = await Protocol.ClientCredentialsTests.TokenAsync(host, hostA, client.ClientId, wrong.Value))
+                {
+                    run.Capture("wrong secret response", refused.Body.RootElement.GetRawText());
+                    Assert.Equal("invalid_client", refused.Error);
+                }
+
+                using var cross = await Protocol.ClientCredentialsTests.TokenAsync(host, hostB, client.ClientId, client.Secret, "post");
+                run.Capture("cross-Tenant response", cross.Body.RootElement.GetRawText());
+                Assert.Equal("invalid_client", cross.Error);
+            }
+            else
+            {
+                foreach (var method in new[] { "basic", "post" })
+                {
+                    using var issued = await Protocol.ClientCredentialsTests.TokenAsync(host, hostA, client.ClientId, client.Secret, method);
+                    Assert.Equal(HttpStatusCode.OK, issued.Status);
+                    run.Plant($"access-token-{method}", issued.AccessToken);
+                    run.Capture($"{method} token response", $"{issued.Body.RootElement.GetProperty("token_type").GetString()} {issued.Body.RootElement.GetProperty("expires_in").GetInt32()}");
+                }
+            }
+        }
+
+        run.Capture("Hosted log", captured.Text);
+        Assert.Contains("connect/token", captured.Text, StringComparison.Ordinal);
+    }
+
     private static async Task<string> ResponseTextAsync(HttpResponseMessage response)
     {
         var headers = response.Headers.Concat(response.Content.Headers).Select(h => $"{h.Key}: {string.Join(", ", h.Value)}");

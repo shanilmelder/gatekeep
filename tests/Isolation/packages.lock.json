@@ -304,14 +304,6 @@
           "libsodium": "[1.0.20.1, 1.0.21)"
         }
       },
-      "OpenIddict.Abstractions": {
-        "type": "Transitive",
-        "resolved": "7.7.2",
-        "contentHash": "rt5feUxOneeZ15jz2koGFVbLWA9gbDu4yPgr9nArFx6YpwP+iaNZHENTi44pTxCXo6wMBaeaApjn1ZMvCu3EEw==",
-        "dependencies": {
-          "Microsoft.IdentityModel.Tokens": "8.19.2"
-        }
-      },
       "OpenIddict.Server": {
         "type": "Transitive",
         "resolved": "7.7.2",
@@ -486,7 +478,8 @@
         "dependencies": {
           "Gatekeep.Kernel": "[0.1.0, )",
           "Gatekeep.Modules.Sessions": "[0.1.0, )",
-          "Gatekeep.Modules.Tenancy": "[0.1.0, )"
+          "Gatekeep.Modules.Tenancy": "[0.1.0, )",
+          "OpenIddict.Abstractions": "[7.7.2, )"
         }
       },
       "gatekeep.modules.identity": {
@@ -554,6 +547,7 @@
           "Gatekeep.Modules.Sessions": "[0.1.0, )",
           "Gatekeep.Modules.Tenancy": "[0.1.0, )",
           "Npgsql": "[10.0.3, )",
+          "OpenIddict.Core": "[7.7.2, )",
           "OpenIddict.Server.AspNetCore": "[7.7.2, )"
         }
       },
@@ -561,7 +555,8 @@
         "type": "Project",
         "dependencies": {
           "Gatekeep.Kernel": "[0.1.0, )",
-          "Gatekeep.Modules.Tenancy": "[0.1.0, )"
+          "Gatekeep.Modules.Tenancy": "[0.1.0, )",
+          "OpenIddict.Abstractions": "[7.7.2, )"
         }
       },
       "gatekeep.modules.tenancy": {
@@ -580,6 +575,15 @@
           "Fido2.Models": "4.3.2",
           "Microsoft.IdentityModel.JsonWebTokens": "8.2.0",
           "NSec.Cryptography": "25.4.0"
+        }
+      },
+      "OpenIddict.Abstractions": {
+        "type": "CentralTransitive",
+        "requested": "[7.7.2, )",
+        "resolved": "7.7.2",
+        "contentHash": "rt5feUxOneeZ15jz2koGFVbLWA9gbDu4yPgr9nArFx6YpwP+iaNZHENTi44pTxCXo6wMBaeaApjn1ZMvCu3EEw==",
+        "dependencies": {
+          "Microsoft.IdentityModel.Tokens": "8.19.2"
         }
       }
     }

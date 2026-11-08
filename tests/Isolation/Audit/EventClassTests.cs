@@ -4,6 +4,8 @@ using Gatekeep.Kernel.Audit;
 using Gatekeep.Kernel.Persistence;
 using Gatekeep.Modules.Audit.Contracts;
 using Gatekeep.Modules.Sessions.Contracts;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Npgsql;
 using Gatekeep.Tests.Architecture;
 using Xunit;
@@ -30,6 +32,7 @@ public sealed class EventClassTests(PostgresFixture postgres)
     private static readonly Dictionary<TenantLogClass, Func<PostgresFixture, Task<(string Database, Guid TenantId)>>> Proofs = new()
     {
         [TenantLogClass.SessionRevocation] = ProveSessionRevocationAsync,
+        [TenantLogClass.CrossTenantRejection] = ProveCrossTenantRejectionAsync,
     };
 
     [Fact]
@@ -223,5 +226,56 @@ public sealed class EventClassTests(PostgresFixture postgres)
         await scope.CommitAsync(CancellationToken.None);
 
         return (database, tenantId);
+    }
+
+    /// <summary>
+    /// Story 2.5: Tenant A's valid client credential, presented at Tenant B's token endpoint through the
+    /// real Protocol pipeline, writes <c>protocol.client.cross_tenant_rejected</c> to B's Log. Neither
+    /// Tenant has keys: the attempt is refused before anything would sign.
+    /// </summary>
+    private static async Task<(string Database, Guid TenantId)> ProveCrossTenantRejectionAsync(PostgresFixture postgres)
+    {
+        var database = await postgres.NewMigratedDatabaseAsync();
+        var a = Guid.CreateVersion7();
+        var b = Guid.CreateVersion7();
+        await TestTenants.InsertAsync(postgres.SuperuserConnection(database), a, "a.proof.test");
+        await TestTenants.InsertAsync(postgres.SuperuserConnection(database), b, "b.proof.test");
+
+        string clientId;
+        string secret;
+        await using (var admin = NpgsqlDataSource.Create(postgres.RoleConnection(TableRegistry.Admin, database)))
+        await using (var scope = await TenantScope.BeginAsync(admin, a, CancellationToken.None))
+        {
+            var created = await Gatekeep.Modules.Directory.Contracts.DirectoryContract.CreateDirectory(AuditContract.CreateAppender(), TimeProvider.System)
+                .CreateMachineClientAsync(scope.CreateCommandContext(), "Proof client", CancellationToken.None);
+            await scope.CommitAsync(CancellationToken.None);
+            clientId = created.ClientId;
+            secret = created.Secret.Use(static s => s);
+        }
+
+        var hosted = postgres.RoleConnection(TableRegistry.Hosted, database);
+        var builder = Microsoft.AspNetCore.Builder.WebApplication.CreateSlimBuilder();
+        Microsoft.AspNetCore.TestHost.WebHostBuilderExtensions.UseTestServer(builder.WebHost);
+        builder.Logging.ClearProviders();
+        builder.Services.AddSingleton(AuditContract.CreateAppender());
+        Gatekeep.Modules.Protocol.Contracts.ProtocolContract.AddGatekeepProtocol(builder.Services, _ => hosted);
+
+        await using var app = builder.Build();
+        Gatekeep.Modules.Tenancy.Contracts.TenancyContract.UseTenantResolution(app, () => hosted);
+        Gatekeep.Modules.Protocol.Contracts.ProtocolContract.UseGatekeepProtocol(app);
+        await app.StartAsync(CancellationToken.None);
+
+        using var http = Microsoft.AspNetCore.TestHost.HostBuilderTestServerExtensions.GetTestClient(app);
+        using var content = new FormUrlEncodedContent(new Dictionary<string, string>
+        {
+            ["grant_type"] = "client_credentials",
+            ["client_id"] = clientId,
+            ["client_secret"] = secret,
+        });
+        using var response = await http.PostAsync(new Uri("http://b.proof.test" + Gatekeep.Modules.Protocol.Contracts.ProtocolContract.TokenPath), content);
+        Assert.Equal(System.Net.HttpStatusCode.Unauthorized, response.StatusCode);
+        await app.StopAsync(CancellationToken.None);
+
+        return (database, b);
     }
 }

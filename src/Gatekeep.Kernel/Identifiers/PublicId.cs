@@ -17,6 +17,12 @@ public enum PublicIdType
     /// one is the unknown-path 404, like an unknown one.
     /// </summary>
     Operation,
+
+    /// <summary>
+    /// <c>app_</c>: an Application (AD-8, Story 2.5), as its OAuth <c>client_id</c>. A malformed one
+    /// is an unknown client, refused like a wrong secret.
+    /// </summary>
+    Application,
 }
 
 /// <summary>
@@ -41,6 +47,7 @@ public static class PublicId
         PublicIdType.Tenant => "ten",
         PublicIdType.AdminCredential => "acr",
         PublicIdType.Operation => "opr",
+        PublicIdType.Application => "app",
         _ => throw new ArgumentOutOfRangeException(nameof(type)),
     };
 

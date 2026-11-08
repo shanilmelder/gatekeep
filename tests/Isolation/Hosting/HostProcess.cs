@@ -68,7 +68,7 @@ internal sealed class HostProcess : IDisposable
         }
 
         // And to be told who forwards to it: no proxy, unless a test names a network, or empty.
-        if (host == "Admin" && !list.Any(a => a.StartsWith("--Gatekeep:ForwardedBy=", StringComparison.Ordinal)))
+        if (host is "Admin" or "Hosted" && !list.Any(a => a.StartsWith("--Gatekeep:ForwardedBy=", StringComparison.Ordinal)))
         {
             list.Add("--Gatekeep:ForwardedBy=none");
         }

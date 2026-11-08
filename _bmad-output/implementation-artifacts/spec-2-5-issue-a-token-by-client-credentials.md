@@ -2,7 +2,8 @@
 title: 'Story 2.5: Issue a token by Client Credentials'
 type: 'feature'
 created: '2026-11-06'
-status: 'ready-for-dev'
+status: 'in-progress'
+baseline_revision: '68883cf2b16fa025d8e8d7aa130bfb930ca9a129'
 review_loop_iteration: 0
 followup_review_recommended: false
 context:
