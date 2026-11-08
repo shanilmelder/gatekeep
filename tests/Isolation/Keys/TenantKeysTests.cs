@@ -188,6 +188,28 @@ public sealed class TenantKeysTests(PostgresFixture postgres, OpenBaoFixture bao
         Assert.Equal("done", await database.ScalarAsync<string>("SELECT status FROM job WHERE type = 'keys.tenant_keys.backfill'"));
     }
 
+    /// <summary>Story 2.8: an active Tenant with its keys but no system Application gets exactly one, and a rerun keeps it.</summary>
+    [Fact]
+    public async Task Backfill_gives_an_active_Tenant_with_keys_its_one_system_Application()
+    {
+        var database = await CreateAsync(postgres, registry: null);
+        var protocol = new ProtocolDatabase(postgres, database.Name);
+        Assert.True(await protocol.ProvisionAsync(bao, TenantA));
+        Assert.Equal(0L, await database.ScalarAsync<long>($"SELECT count(*) FROM application WHERE tenant_id = '{TenantA}'"));
+
+        using var worker = bao.Custody(OpenBaoFixture.Worker);
+        await RunBackfillAsync(database, worker, logger: null);
+
+        var system = await database.ScalarAsync<Guid>($"SELECT id FROM application WHERE tenant_id = '{TenantA}' AND kind = 'system'");
+        Assert.Equal(1L, await database.ScalarAsync<long>($"SELECT count(*) FROM application WHERE tenant_id = '{TenantA}'"));
+
+        await RunBackfillAsync(database, worker, logger: null);
+
+        Assert.Equal(1L, await database.ScalarAsync<long>($"SELECT count(*) FROM application WHERE tenant_id = '{TenantA}'"));
+        Assert.Equal(system, await database.ScalarAsync<Guid>($"SELECT id FROM application WHERE tenant_id = '{TenantA}' AND kind = 'system'"));
+        Assert.Equal(0L, await database.ScalarAsync<long>("SELECT count(*) FROM job WHERE type = 'keys.tenant_keys.backfill' AND status <> 'done'"));
+    }
+
     [Fact]
     public async Task Backfill_logs_one_Tenants_failure_and_still_provisions_the_others()
     {
