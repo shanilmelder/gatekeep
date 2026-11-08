@@ -546,6 +546,38 @@ internal static class AdminApi
             .Produces<ApiProblem>(StatusCodes.Status403Forbidden, AdminResponses.ProblemContentType)
             .Produces(StatusCodes.Status503ServiceUnavailable);
 
+        app.MapGet("/api/v1/tenants/{tenantId}/logs", static (HttpContext context, AdminApiServices services) => TenantLogsApi.SearchAsync(context, services))
+            .WithMetadata(
+                TenantApiEndpoint.Instance,
+                new RequiresCapability(AdminCapabilities.TenantLogsRead),
+                new QueryParameter(TenantLogsApi.TypeQuery, "One event type code, {domain}.{object}.{action}, as docs/audit-events.md publishes it."),
+                new QueryParameter(
+                    TenantLogsApi.UserQuery,
+                    "A User: their UUID, or an email, which resolves first to the User references on this Tenant's events whose detail holds exactly it. Events whose Actor or target is that User."),
+                new QueryParameter(TenantLogsApi.ApplicationQuery, "An Application's UUID: events whose Actor or target is that client."),
+                new QueryParameter(TenantLogsApi.OutcomeQuery, "success or failure: the events whose type the catalogue gives that outcome."),
+                new QueryParameter(TenantLogsApi.FromQuery, "An ISO 8601 instant with Z or an offset: events at or after it."),
+                new QueryParameter(TenantLogsApi.ToQuery, "An ISO 8601 instant with Z or an offset: events before it. It must come after from."),
+                new QueryParameter(TenantLogsApi.CursorQuery, "The previous page's nextCursor: an evt_ public ID."))
+            .WithName("SearchTenantLogs")
+            .WithTags(TenantTag)
+            .WithSummary("Search the path Tenant's Log: newest first, 50 a page.")
+            .WithDescription(
+                "Any Tenant Role in the path Tenant. Read only, in the Tenant's own scope: no other Tenant's event is ever listed, and the " +
+                "read isn't audited. Each event's evt_ ID, time, type code, the catalogue's outcome and summary, and its Actor and " +
+                "target as internal references; never its detail, so no IP address, User-Agent or email. Every parameter is optional, " +
+                "at most once, and they combine; each filters an indexed envelope column. nextCursor is the last event's ID when an " +
+                "older page follows, else null; pass it back as cursor with the same filters. A parameter sent twice or empty, an " +
+                "unknown outcome, a code that isn't three lower-case parts, a User that is neither a UUID nor an email, an Application " +
+                "that isn't a UUID, a time that isn't an instant, from not before to, or a malformed cursor is 400 invalid_request. An " +
+                "email no event names, like any search that matches nothing, is an empty list. A malformed, unknown or role-less " +
+                "Tenant is 403 access_denied, audited as every Tenant capability refusal is.")
+            .Produces<TenantLogsResponse>(StatusCodes.Status200OK)
+            .Produces<ApiProblem>(StatusCodes.Status400BadRequest, AdminResponses.ProblemContentType)
+            .Produces(StatusCodes.Status401Unauthorized)
+            .Produces<ApiProblem>(StatusCodes.Status403Forbidden, AdminResponses.ProblemContentType)
+            .Produces(StatusCodes.Status503ServiceUnavailable);
+
         app.MapPut("/api/v1/tenants/{tenantId}/label", static (HttpContext context, AdminApiServices services) => TenantLabelApi.SetAsync(context, services))
             .WithMetadata(
                 TenantApiEndpoint.Instance,

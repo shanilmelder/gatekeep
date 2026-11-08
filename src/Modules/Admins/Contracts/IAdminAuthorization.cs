@@ -66,4 +66,15 @@ public interface IAdminAuthorization
     /// <exception cref="ArgumentException"><paramref name="tenantId"/> is the empty UUID.</exception>
     [StateChanging]
     Task DenyAsync(CommandContext context, AdminPrincipal principal, Guid? tenantId, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Appends <see cref="AdminsEvents.CrossTenantRejected"/> on the chain of the Tenant scope
+    /// <paramref name="context"/> is in, in its transaction (Story 7.4, AD-9): the Actor is the
+    /// Admin, and the target that Tenant. The caller decides it is due: a refusal of an Admin who
+    /// holds no role there, within the denial cap. A Tenant with no <c>tenant</c> row fails the
+    /// insert's foreign key.
+    /// </summary>
+    /// <exception cref="InvalidOperationException"><paramref name="context"/> isn't in a Tenant scope.</exception>
+    [StateChanging]
+    Task RejectCrossTenantAsync(CommandContext context, AdminPrincipal principal, CancellationToken cancellationToken);
 }

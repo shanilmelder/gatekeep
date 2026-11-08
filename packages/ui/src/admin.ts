@@ -25,6 +25,7 @@ export {
 export { SKELETON_DELAY_MS, SkeletonRows, type SkeletonRowsProps } from './components/SkeletonRows';
 export { Tabs, type TabItem, type TabsProps } from './components/Tabs';
 export { useUrlTab } from './components/useUrlTab';
+export { useUrlParams, type UrlParams } from './components/useUrlParams';
 
 // The Admin shell (Story 1.25): the frame every signed-in page renders in, its top bar and
 // sidebar, the theme toggle and the Section page template.

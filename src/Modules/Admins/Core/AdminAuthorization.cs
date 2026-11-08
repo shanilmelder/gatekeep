@@ -17,6 +17,8 @@ internal sealed class AdminAuthorization(IAuditAppender appender) : IAdminAuthor
 
     private static readonly AuditTypeCode Denied = AdminsEvents.AccessDenied.Code;
 
+    private static readonly AuditTypeCode Rejected = AdminsEvents.CrossTenantRejected.Code;
+
     public async Task<CapabilityDecision> AuthorizeAsync(
         CommandContext context,
         Principal principal,
@@ -68,6 +70,22 @@ internal sealed class AdminAuthorization(IAuditAppender appender) : IAdminAuthor
         await appender.AppendAsync(
             context,
             new AuditEvent(Denied, Actor.Admin(principal.AdminId), tenantId is null ? null : AuditTargetKind.Tenant, tenantId),
+            detail: null,
+            cancellationToken);
+    }
+
+    public async Task RejectCrossTenantAsync(CommandContext context, AdminPrincipal principal, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        ArgumentNullException.ThrowIfNull(principal);
+        if (context.TenantId is not { } tenantId)
+        {
+            throw new InvalidOperationException("A cross-Tenant rejection goes on the refused Tenant's own chain, in its Tenant scope.");
+        }
+
+        await appender.AppendAsync(
+            context,
+            new AuditEvent(Rejected, Actor.Admin(principal.AdminId), AuditTargetKind.Tenant, tenantId),
             detail: null,
             cancellationToken);
     }

@@ -5,7 +5,7 @@ using System.Text.RegularExpressions;
 namespace Gatekeep.Tests.Architecture;
 
 /// <summary>One published audit event, read from its module's catalogue.</summary>
-internal sealed record CatalogueEvent(string Code, string Module, string Summary, string? TenantLogClass);
+internal sealed record CatalogueEvent(string Code, string Module, string Summary, string? TenantLogClass, string Outcome = "Success");
 
 /// <summary>
 /// One FR-40 Tenant Log class. <see cref="Name"/> is the Kernel <c>TenantLogClass</c> member.
@@ -29,8 +29,9 @@ internal static class AuditCatalogue
     private const string CodeType = "Gatekeep.Kernel.Audit.AuditTypeCode";
 
     /// <summary>
-    /// The 11 FR-40 Tenant classes, in the Kernel enum's order. Every one is pending today: the
-    /// epic order builds the flows that write them after Epic 7 (Story 7.8).
+    /// The 11 FR-40 Tenant classes, in the Kernel enum's order. A class is proved once its story
+    /// maps it to a catalogued code: Session and token revocation (Story 2.7) and rejected
+    /// cross-Tenant attempts (Story 7.4) so far. The rest are pending (Story 7.8).
     /// </summary>
     public static readonly IReadOnlyList<LogClass> TenantLogClasses =
     [
@@ -44,7 +45,7 @@ internal static class AuditCatalogue
         new("KeyOperation", "Key operations", "9.2"),
         new("ManagementApiGrant", "Management API grants", "17.2"),
         new("TokenFamilyRevocation", "Token Family revocations", "2.10"),
-        new("CrossTenantRejection", "Rejected cross-Tenant attempts", "7.4"),
+        new("CrossTenantRejection", "Rejected cross-Tenant attempts", null),
     ];
 
     private static readonly Regex DocCode = new(@"^\|\s*`(?<code>[^`]+)`\s*\|", RegexOptions.Multiline | RegexOptions.Compiled);
@@ -164,14 +165,15 @@ internal static class AuditCatalogue
         text.Append("# Audit event catalogue\n\n");
         text.Append("Every audit type code Gatekeep writes, declared in its module's contract. Codes are ");
         text.Append("`{domain}.{object}.{action}` and a public contract: removing or renaming a published code is a ");
-        text.Append("contract break, which the generator refuses and `AuditCatalogueTests` fails on.\n\n");
-        text.Append("| Code | Module | Summary | FR-40 class |\n");
-        text.Append("| --- | --- | --- | --- |\n");
+        text.Append("contract break, which the generator refuses and `AuditCatalogueTests` fails on. Each code's outcome is ");
+        text.Append("declared with it and never stored: a Log search by outcome is a search by the codes that have it.\n\n");
+        text.Append("| Code | Module | Outcome | Summary | FR-40 class |\n");
+        text.Append("| --- | --- | --- | --- | --- |\n");
 
         foreach (var item in events.OrderBy(e => e.Code, StringComparer.Ordinal))
         {
             var logClass = item.TenantLogClass is { } name ? titles.GetValueOrDefault(name, name) : "None";
-            text.Append($"| `{item.Code}` | {item.Module} | {item.Summary} | {logClass} |\n");
+            text.Append($"| `{item.Code}` | {item.Module} | {item.Outcome} | {item.Summary} | {logClass} |\n");
         }
 
         text.Append("\n## FR-40 Tenant Log classes\n\n");
@@ -225,7 +227,8 @@ internal static class AuditCatalogue
         var code = Get(Get(definition, "Code")!, "Value")!.ToString()!;
         var summary = (string)Get(definition, "Summary")!;
         var logClass = Get(definition, "TenantLogClass")?.ToString();
+        var outcome = Get(definition, "Outcome")!.ToString()!;
 
-        return new CatalogueEvent(code, module, summary, logClass);
+        return new CatalogueEvent(code, module, summary, logClass, outcome);
     }
 }

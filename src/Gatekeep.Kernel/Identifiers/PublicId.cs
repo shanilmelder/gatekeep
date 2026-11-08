@@ -17,6 +17,12 @@ public enum PublicIdType
     /// one is the unknown-path 404, like an unknown one.
     /// </summary>
     Operation,
+
+    /// <summary>
+    /// <c>evt_</c>: an audit event in a Tenant's Log (Story 7.4), as an event's <c>id</c> and the Log search's
+    /// <c>cursor</c>. A malformed one is 400 <c>invalid_request</c>.
+    /// </summary>
+    AuditEvent,
 }
 
 /// <summary>
@@ -41,6 +47,7 @@ public static class PublicId
         PublicIdType.Tenant => "ten",
         PublicIdType.AdminCredential => "acr",
         PublicIdType.Operation => "opr",
+        PublicIdType.AuditEvent => "evt",
         _ => throw new ArgumentOutOfRangeException(nameof(type)),
     };
 

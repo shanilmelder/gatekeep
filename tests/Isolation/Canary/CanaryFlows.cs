@@ -245,6 +245,12 @@ internal static class CanaryFlows
                 new(SurfaceKind.Route, "/api/v1/deployment/tenants/{targetTenantId}/deletion/retry"),
             ],
             TenantDeletionAsync),
+        new(
+            "admin.tenant-logs",
+            [
+                new(SurfaceKind.Route, "/api/v1/tenants/{tenantId}/logs"),
+            ],
+            TenantLogsAsync),
 
         // No production type carries a credential yet, so this flow takes the runner's credential
         // path with a test type: enqueue, decrypt, run, retry and dead, as every one will.
@@ -1151,6 +1157,50 @@ internal static class CanaryFlows
         foreach (var authenticator in authenticators)
         {
             authenticator.Dispose();
+        }
+
+        await host.StopAsync();
+        run.Capture("Admin output", host.Output);
+        Assert.Matches(@"""LogLevel"":""(?:Trace|Debug)""", host.Output);
+    }
+
+    /// <summary>
+    /// Story 7.4: a Viewer's Session reading the Tenant's Log by outcome; failing, a cross-Tenant read,
+    /// which writes the rejection to the other Tenant's Log, and malformed filters, cursor and range.
+    /// </summary>
+    private static async Task TenantLogsAsync(CanaryFlowContext context, FlowRun run, bool failing)
+    {
+        await using var host = await Admins.AdminHost.StartAsync(context.Postgres, null, DebugArguments);
+        run.Database = host.Database;
+        run.Plant("role-password", PostgresFixture.Password);
+        var tenant = await host.InsertTenantAsync();
+        var (cookie, csrf, _) = await Tenancy.TenantRequests.RoleSessionAsync(host, tenant, "viewer");
+        run.Plant("admin-session-id", cookie);
+        run.Plant("admin-csrf-token", csrf);
+        var path = $"/api/v1/tenants/{Tenancy.TenantRequests.Id(tenant)}/logs";
+
+        if (failing)
+        {
+            // A refused cross-Tenant read writes to the other Tenant's Log; malformed filters read nothing.
+            var other = await host.InsertTenantAsync();
+            using (var refused = await host.SendAsync(HttpMethod.Get, $"/api/v1/tenants/{Tenancy.TenantRequests.Id(other)}/logs", cookie))
+            {
+                run.Capture("cross-Tenant logs response", await ResponseTextAsync(refused));
+                Assert.Equal(HttpStatusCode.Forbidden, refused.StatusCode);
+            }
+
+            foreach (var query in new[] { "?outcome=maybe", "?cursor=evt_x", "?user=not%20an%20id", "?from=2026-01-01" })
+            {
+                using var malformed = await host.SendAsync(HttpMethod.Get, path + query, cookie);
+                run.Capture($"malformed logs response {query}", await ResponseTextAsync(malformed));
+                Assert.Equal(HttpStatusCode.BadRequest, malformed.StatusCode);
+            }
+        }
+        else
+        {
+            using var read = await host.SendAsync(HttpMethod.Get, path + "?outcome=failure", cookie);
+            run.Capture("logs response", await ResponseTextAsync(read));
+            Assert.Equal(HttpStatusCode.OK, read.StatusCode);
         }
 
         await host.StopAsync();

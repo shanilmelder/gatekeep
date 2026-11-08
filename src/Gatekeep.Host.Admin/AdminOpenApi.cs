@@ -156,6 +156,19 @@ internal static class AdminOpenApi
                     Enumerate(schema, "status", TenantsApi.StepStatuses);
                     Bound(schema, "tenantId", TenantIdPattern, maxLength: null);
                 }
+                else if (type == typeof(TenantLogEventResponse))
+                {
+                    Bound(schema, "id", EventIdPattern, maxLength: null);
+                    Bound(schema, "type", TypeCodePattern, maxLength: 128);
+                }
+                else if (type == typeof(TenantLogsResponse))
+                {
+                    Bound(schema, "nextCursor", EventIdPattern, maxLength: null);
+                }
+                else if (type == typeof(LogReference))
+                {
+                    Enumerate(schema, "kind", TenantLogsApi.ReferenceKinds);
+                }
                 else if (type == typeof(ApiProblem))
                 {
                     Enumerate(schema, "code", AdminResponses.ProblemCodes);
@@ -422,6 +435,10 @@ internal static class AdminOpenApi
     private const string TenantIdPattern = "^ten_[a-z2-7]{25}[aeimquy4]$";
 
     private const string OperationIdPattern = "^opr_[a-z2-7]{25}[aeimquy4]$";
+
+    private const string EventIdPattern = "^evt_[a-z2-7]{25}[aeimquy4]$";
+
+    private const string TypeCodePattern = "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*$";
 
     /// <summary>The <c>x-gatekeep-access</c> value: the declaration, and a capability's flags as the table holds them.</summary>
     private static JsonObject Access(AccessDeclaration declaration) => declaration.Kind switch

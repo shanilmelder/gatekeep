@@ -387,6 +387,44 @@ export interface Messages {
   unsavedKeep: string;
   /** Sign-in's Generic error before bootstrap (Story 1.23): the way on to setting up the Deployment. */
   signInSetUpDeployment: string;
+  /** The Monitoring group's Logs item (Story 7.4), and the Logs page's title and its table's caption. */
+  navLogs: string;
+  /** The field search's field select and value labels. */
+  logsField: string;
+  logsValue: string;
+  /** The fields a Log is searched by. */
+  logsFieldType: string;
+  logsFieldUser: string;
+  logsFieldApplication: string;
+  logsFieldOutcome: string;
+  logsFieldRange: string;
+  /** The value's helper for each typed field. */
+  logsTypeHelper: string;
+  logsUserHelper: string;
+  logsApplicationHelper: string;
+  /** The outcome choices. */
+  logsOutcomeSuccess: string;
+  logsOutcomeFailure: string;
+  /** The time range choices, each ending now. */
+  logsRangeHour: string;
+  logsRangeDay: string;
+  logsRangeWeek: string;
+  logsRangeMonth: string;
+  logsRangeQuarter: string;
+  /** The field search's one action. */
+  logsSearch: string;
+  /** The Logs table's columns. */
+  logsColumnTime: string;
+  logsColumnType: string;
+  logsColumnDescription: string;
+  logsColumnUser: string;
+  logsColumnApplication: string;
+  /** The Logs page's empty state (EXPERIENCE.md). */
+  logsEmpty: string;
+  /** The action that reads the next, older page of events. */
+  logsLoadMore: string;
+  /** The banner when the server refused the search as malformed: nothing was read. */
+  logsInvalid: string;
 }
 
 export const defaultMessages: Readonly<Messages> = Object.freeze({
@@ -605,6 +643,33 @@ export const defaultMessages: Readonly<Messages> = Object.freeze({
   unsavedLeave: 'Discard and leave',
   unsavedKeep: 'Keep editing',
   signInSetUpDeployment: 'Set up this Deployment',
+  navLogs: 'Logs',
+  logsField: 'Search by',
+  logsValue: 'Value',
+  logsFieldType: 'Event type',
+  logsFieldUser: 'User',
+  logsFieldApplication: 'Application',
+  logsFieldOutcome: 'Outcome',
+  logsFieldRange: 'Time range',
+  logsTypeHelper: 'An event code, such as admin.access.denied',
+  logsUserHelper: 'A User ID or an email address',
+  logsApplicationHelper: 'An Application ID',
+  logsOutcomeSuccess: 'Success',
+  logsOutcomeFailure: 'Failure',
+  logsRangeHour: 'Last 1 hour',
+  logsRangeDay: 'Last 24 hours',
+  logsRangeWeek: 'Last 7 days',
+  logsRangeMonth: 'Last 30 days',
+  logsRangeQuarter: 'Last 90 days',
+  logsSearch: 'Search',
+  logsColumnTime: 'Time (UTC)',
+  logsColumnType: 'Type',
+  logsColumnDescription: 'Description',
+  logsColumnUser: 'User',
+  logsColumnApplication: 'Application',
+  logsEmpty: 'No events in this range',
+  logsLoadMore: 'Load more',
+  logsInvalid: "That search isn't valid. Check the value and search again.",
 });
 
 /**

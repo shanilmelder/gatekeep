@@ -1,11 +1,13 @@
 using System.Text.RegularExpressions;
 using Gatekeep.Adapters.Postgres.Schema;
 using Gatekeep.Kernel.Audit;
+using Gatekeep.Kernel.Identifiers;
 using Gatekeep.Kernel.Persistence;
 using Gatekeep.Modules.Audit.Contracts;
 using Gatekeep.Modules.Sessions.Contracts;
 using Npgsql;
 using Gatekeep.Tests.Architecture;
+using Gatekeep.Tests.Isolation.Admins;
 using Xunit;
 
 namespace Gatekeep.Tests.Isolation.Audit;
@@ -30,6 +32,7 @@ public sealed class EventClassTests(PostgresFixture postgres)
     private static readonly Dictionary<TenantLogClass, Func<PostgresFixture, Task<(string Database, Guid TenantId)>>> Proofs = new()
     {
         [TenantLogClass.SessionRevocation] = ProveSessionRevocationAsync,
+        [TenantLogClass.CrossTenantRejection] = ProveCrossTenantRejectionAsync,
     };
 
     [Fact]
@@ -104,7 +107,7 @@ public sealed class EventClassTests(PostgresFixture postgres)
     public void Class_both_mapped_and_pending_or_mapped_with_no_proof_is_reported()
     {
         LogClass[] classes = [new("SignIn", "Sign-ins and failures", "4.9")];
-        CatalogueEvent[] events = [new("auth.signin.succeeded", "Authentication", "A User signed in.", "SignIn")];
+        CatalogueEvent[] events = [new("auth.signin.succeeded", "Authentication", "A User signed in.", "SignIn", "Success")];
 
         var problems = ClassProblems(classes, events, []);
 
@@ -201,6 +204,26 @@ public sealed class EventClassTests(PostgresFixture postgres)
         StatusLine.Matches(yaml.ReplaceLineEndings("\n"))
             .Where(m => Regex.IsMatch(m.Groups["key"].Value, @"\A\d+-\d+-"))
             .ToDictionary(m => m.Groups["key"].Value, m => m.Groups["status"].Value, StringComparer.Ordinal);
+
+    /// <summary>
+    /// Story 7.4, over HTTP on the real Host.Admin: an Admin holding a role only in Tenant A calls a
+    /// Tenant B route, is refused, and B's own Log holds <c>admin.cross_tenant.rejected</c>.
+    /// </summary>
+    private static async Task<(string Database, Guid TenantId)> ProveCrossTenantRejectionAsync(PostgresFixture postgres)
+    {
+        await using var host = await AdminHost.StartAsync(postgres);
+        var (cookie, _, session) = await host.InsertFullSessionAsync();
+        var admin = await host.AdminOfSessionAsync(session);
+        var a = await host.InsertTenantAsync();
+        var b = await host.InsertTenantAsync();
+        await host.GrantTenantRoleAsync(a, admin, "owner");
+
+        using var refused = await host.SendAsync(
+            HttpMethod.Get, $"/api/v1/tenants/{PublicId.Format(PublicIdType.Tenant, b)}/capabilities", cookie);
+        Assert.Equal(System.Net.HttpStatusCode.Forbidden, refused.StatusCode);
+
+        return (host.Database, b);
+    }
 
     /// <summary>Story 2.7: a Tenant-scope <c>RevokeAccessAsync</c> as <c>gk_hosted</c> writes <c>sessions.access.revoked</c>.</summary>
     private static async Task<(string Database, Guid TenantId)> ProveSessionRevocationAsync(PostgresFixture postgres)

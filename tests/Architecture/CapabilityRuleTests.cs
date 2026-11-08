@@ -15,7 +15,8 @@ namespace Gatekeep.Tests.Architecture;
 /// for <c>Always</c> and by a reviewed handler for a <c>When…</c> predicate, with its 403 problem,
 /// and a self-service route's names a self-service action. Around the document:
 /// no Host.Admin source hides an endpoint from it, every API route is mapped in <c>AdminApi.cs</c>,
-/// a Tenant scope there opens only on the path Tenant, nothing under <c>src/</c> builds a
+/// a Tenant scope there opens only on the path Tenant (but for Story 7.4's one named refusal
+/// writer), nothing under <c>src/</c> builds a
 /// <c>MachinePrincipal</c>, and no Admins table grants <c>gk_hosted</c> anything. Each rule has
 /// a self-check that it catches a violation. Tests reference no module or host: the table and
 /// the registry are read by reflection, and sources as text.
@@ -29,6 +30,16 @@ public class CapabilityRuleTests
     private const string DeploymentPrefix = "/api/v1/deployment/";
     private const string TenantPrefix = "/api/v1/tenants/{tenantId}/";
     private const string PathTenantArgument = "AdminRequestChecks.PathTenant(context)";
+
+    /// <summary>
+    /// The one reviewed Tenant scope on another Tenant than the path's (Story 7.4, AD-9): the
+    /// refusal writer, which only appends <c>admin.cross_tenant.rejected</c> to the Log of the Tenant
+    /// a refused request named, as no path Tenant was authorized. Its one call, on the
+    /// <c>gk_admin</c> source, in its own file; anywhere else, or a second call, is a problem.
+    /// </summary>
+    private static readonly (string File, string Argument) RefusalWriterExemption = ("CrossTenantRejection.cs", "rejectedTenant");
+
+    private const string RefusalWriterSource = "services.Source";
 
     private static readonly string Root = EdgeList.FindRepositoryRoot(AppContext.BaseDirectory);
 
@@ -348,6 +359,29 @@ public class CapabilityRuleTests
     }
 
     [Fact]
+    public void The_refusal_writer_is_the_one_exemption_and_is_used()
+    {
+        var (file, argument) = RefusalWriterExemption;
+        var source = File.ReadAllText(Path.Combine(Root, HostDirectory, file));
+
+        // The exempt call exists, exactly once, so the exemption isn't stale.
+        Assert.Single(TenantScopeBegin.Matches(StripComments(source)));
+        Assert.Empty(TenantScopeProblems(file, source));
+    }
+
+    [Theory]
+    [InlineData("CrossTenantRejection.cs", "await TenantScope.BeginAsync(services.Source, rejectedTenant, ct);", 0)]
+    [InlineData("CrossTenantRejection.cs", "await TenantScope.BeginAsync(services.Source, rejectedTenant, ct); await TenantScope.BeginAsync(services.Source, rejectedTenant, ct);", 1)]
+    [InlineData("CrossTenantRejection.cs", "await TenantScope.BeginAsync(services.Source, tenantId, ct);", 1)]
+    [InlineData("CrossTenantRejection.cs", "await TenantScope.BeginAsync(other.Source, rejectedTenant, ct);", 1)]
+    [InlineData("TenantLabelApi.cs", "await TenantScope.BeginAsync(services.Source, rejectedTenant, ct);", 1)]
+    [InlineData("Nested/CrossTenantRejection.cs", "await TenantScope.BeginAsync(services.Source, rejectedTenant, ct);", 1)]
+    public void Refusal_writer_exemption_covers_its_one_call_only(string file, string source, int expected)
+    {
+        Assert.Equal(expected, TenantScopeProblems(file, source).Count);
+    }
+
+    [Fact]
     public void No_Admins_table_grants_the_hosted_role_anything()
     {
         var registry = Registry();
@@ -593,14 +627,24 @@ public class CapabilityRuleTests
         return problems;
     }
 
-    /// <summary>Every <c>TenantScope.BeginAsync</c> call in <paramref name="source"/> whose Tenant isn't the path Tenant.</summary>
+    /// <summary>
+    /// Every <c>TenantScope.BeginAsync</c> call in <paramref name="source"/> whose Tenant isn't the
+    /// path Tenant, but for <see cref="RefusalWriterExemption"/>'s one call in its own file.
+    /// </summary>
     private static List<string> TenantScopeProblems(string name, string source)
     {
         var code = StripComments(source);
         var problems = new List<string>();
+        var exempted = 0;
         foreach (Match call in TenantScopeBegin.Matches(code))
         {
             var arguments = Arguments(code, call.Index + call.Length);
+            if (name == RefusalWriterExemption.File && arguments is { Count: >= 2 }
+                && arguments[0] == RefusalWriterSource && arguments[1] == RefusalWriterExemption.Argument && exempted++ == 0)
+            {
+                continue;
+            }
+
             if (arguments is null || arguments.Count < 2 || arguments[1] != PathTenantArgument)
             {
                 problems.Add($"{name}: a Tenant scope opens on something other than {PathTenantArgument}.");
