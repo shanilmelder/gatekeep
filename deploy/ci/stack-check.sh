@@ -105,7 +105,11 @@ find_key() {
 cleanup
 
 say "building images."
-$C --profile tools --profile setup build --quiet
+# One service at a time: built together, the .NET publishes run side by side and exhaust the
+# memory of a small self-hosted runner, whose OOM killer then kills the whole check.
+for service in $($C --profile tools --profile setup config --services); do
+    $C --profile tools --profile setup build --quiet "$service"
+done
 
 say "install, as docs/install.md has it."
 # The alert channel and the bucket (Story 1.30): placeholders under .invalid, which never resolve,

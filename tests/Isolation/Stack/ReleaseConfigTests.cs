@@ -302,7 +302,7 @@ public sealed class ReleaseConfigTests
         Assert.DoesNotMatch(@"\blogin\b", text);
         Assert.DoesNotContain("publish.sh", text, StringComparison.Ordinal);
         Assert.DoesNotContain("cosign", text, StringComparison.Ordinal);
-        Assert.Contains("runs-on: ubuntu-latest", text, StringComparison.Ordinal);
+        Assert.Matches(@"(?m)^    runs-on: self-hosted$", text);
 
         // It runs the gates, then build.sh, and hands over only an artifact.
         Assert.Contains("docker compose -f deploy/compose.dev.yaml run --rm --build tests", text, StringComparison.Ordinal);

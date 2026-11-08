@@ -279,7 +279,10 @@ public sealed class SigningKeysApiTests(PostgresFixture postgres)
     {
         private readonly ConcurrentDictionary<string, RSAParameters> _keys = new();
 
-        public PublicHalves(AdminHost host) =>
+        public PublicHalves(AdminHost host)
+        {
+            // Touched here, so the pool is built now and never inside a request's custody bound.
+            _ = Pool.Length;
             host.OpenBao.RespondToBody = (path, body) =>
             {
                 const string Keys = "/transit/keys/";
@@ -299,6 +302,7 @@ public sealed class SigningKeysApiTests(PostgresFixture postgres)
                 var version = Version.GetValueOrDefault(name, 1);
                 return (200, JsonSerializer.Serialize(new { data = new { type = "rsa-3072", keys = new Dictionary<string, object> { [$"{version}"] = new { public_key = pem } } } }));
             };
+        }
 
         public ConcurrentDictionary<string, int> Version { get; } = new();
 
@@ -308,13 +312,20 @@ public sealed class SigningKeysApiTests(PostgresFixture postgres)
         /// <summary>The public parameters behind a <c>kid</c>, as the stand-in gave them.</summary>
         public RSAParameters Parameters(string kid) => _keys[kid[..kid.LastIndexOf(".v", StringComparison.Ordinal)]];
 
+        // Made once, before any request: generated per read, RSA-3072 on a loaded runner can outlast
+        // the one custody bound a whole sample has (KeyCustodyCallTimeout), and the read is then 503.
+        private static readonly RSAParameters[] Pool = [.. Enumerable.Range(0, 8).Select(_ =>
+        {
+            using var rsa = RSA.Create(3072);
+            return rsa.ExportParameters(includePrivateParameters: false);
+        })];
+
+        private int _next = -1;
+
         private string Pem(string name)
         {
-            var parameters = _keys.GetOrAdd(name, _ =>
-            {
-                using var rsa = RSA.Create(3072);
-                return rsa.ExportParameters(includePrivateParameters: false);
-            });
+            // A distinct pooled key per name, so each kid still has its own public half.
+            var parameters = _keys.GetOrAdd(name, _ => Pool[Interlocked.Increment(ref _next) % Pool.Length]);
 
             using var key = RSA.Create(parameters);
             return key.ExportSubjectPublicKeyInfoPem();
