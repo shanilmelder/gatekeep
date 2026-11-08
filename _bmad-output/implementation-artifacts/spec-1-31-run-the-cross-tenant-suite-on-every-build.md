@@ -2,15 +2,30 @@
 title: 'Story 1.31: Run the cross-Tenant suite on every build'
 type: 'feature'
 created: '2026-11-08'
-status: 'ready-for-dev'
+status: 'done'
+baseline_revision: '391adc1e186281fbc52a0aa35cc6817be09dc08a'
 review_loop_iteration: 0
-followup_review_recommended: false
+followup_review_recommended: true
 context:
   - '{project-root}/_bmad-output/planning-artifacts/architecture/architecture-gatekeep-2026-11-02/ARCHITECTURE-SPINE.md'
   - '{project-root}/_bmad-output/implementation-artifacts/epic-1-context.md'
   - '{project-root}/_bmad-output/implementation-artifacts/spec-1-24-enforce-capabilities-and-tenant-scoped-routes.md'
 warnings: ['oversized']
-deferred: []
+deferred:
+  - summary: >-
+      Audit a refused Deployment route that names a Tenant against that Tenant
+    evidence: |-
+      On the /deployment/tenants/{targetTenantId}/* routes, admin.access.denied has no target, because AdminRequestChecks sets a path Tenant only from {tenantId}. The cross-Tenant case asserts the target is "none", and a Tenant A control shows the refusal is Owner gating. Writing cross-Tenant rejections to the Tenant's own Log is Story 7.4.
+    location: >-
+      src/Gatekeep.Host.Admin/AdminRequestChecks.cs:608
+    severity: medium
+  - summary: >-
+      Cache discovery can't see a Dictionary behind a lock, a ConditionalWeakTable or a Lazy singleton, and treats any Guid key as a Tenant ID
+    evidence: |-
+      TenantKeyedTypeTests finds caches by field type only. No such cache exists in src today (the verification layer's grep found none), but the check is structural, so a cache keyed by client ID or Admin ID passes as Tenant-keyed.
+    location: >-
+      tests/Architecture/TenantKeyedTypeTests.cs
+    severity: low
 ---
 
 <intent-contract>
@@ -121,6 +136,63 @@ Any drift between code and a registry fails `build` in CI.
 
 ## Review Triage Log
 
+### 2026-11-08 — Review pass
+- verdicts: 49 findings — high 0, medium 15, low 23, false 11, maybe-false 0
+- findings:
+  - **Blind Hunter**
+    - `[low]` `[patch]` T-1 repeats "An unscoped query raises an error." — removed the duplicate.
+    - `[low]` `[patch]` T-1 and T-53 don't name the new tests — added them by name.
+    - `[low]` `[patch]` T-4 not updated for the artifact registry — added ArtifactRegistryTests and the pending stories.
+    - `[medium]` `[patch]` `ArtifactRegistry.Required` is hand-written beside `Types` — pinned against FR-8's line in the committed PRD.
+    - `[medium]` `[patch]` `Covered("<test>")` only checks the name isn't blank — resolved by reflection to a Fact or Theory method.
+    - `[low]` `[patch]` `Every_src_assembly_is_scanned` is tautological — compared against `src/**/*.csproj`.
+    - `[low]` `[patch]` cache and policy discovery is too narrow — added a base-type walk, IDistributedCache/HybridCache, and policy properties and instance fields. The remaining limits are deferred.
+    - `[low]` `[patch]` Deployment-wide job reasons contradict their rule — reworded the rule and the three key jobs' reasons; fixed the garbled doc comment.
+    - `[medium]` `[defer]` `TargetTenant` cases prove Owner gating, not refusal at B — added a Tenant A control and documented it. Recording the target Tenant on the event is deferred to Story 7.4.
+    - `[false]` `[reject]` no positive control for `TenantPath` — the case asserts code `access_denied` plus an `admin.access.denied` row targeting B. That pair is written only by the capability refusal, never by a CSRF, body or handler failure.
+    - `[medium]` `[patch]` `StateOfBAsync` misses rows and can be NULL — added name, settings, operations, jobs, signing keys and Deployment events targeting B, each wrapped in coalesce.
+    - `[low]` `[patch]` the token case breaks silently at Story 2.5 — the assertion message now names Story 2.5's real client case.
+    - `[low]` `[patch]` `KindProblems`: the Hosted branch is untested, and HostResolved isn't checked against Tenant parameters — added the check and a self-test.
+    - `[medium]` `[patch]` `NotTenantBound` isn't checked against endpoint metadata — `TenantApiEndpoint` metadata must now match `TenantPath`.
+    - `[medium]` `[patch]` `RunAsync` leaks the host on timeout, and the delete masks the error — best-effort stop in `finally`, tolerant delete.
+    - `[low]` `[patch]` Host.Admin is started three times per run — now cached per host in a `Lazy<Task>`.
+    - `[low]` `[reject]` the grants test skips sequences, functions and unregistered tables — the AC is about table grants, and `CatalogueTests` already fails on any unregistered table or grant.
+  - **Verification Gap**
+    - `[low]` `[patch]` T-1 duplicate sentence — same fix as the Blind Hunter row.
+    - `[low]` `[patch]` T-1 and T-53 test names — same fix as the Blind Hunter row.
+  - **Edge Case Hunter**
+    - `[medium]` `[patch]` PUT label sends B's existing label `dev` — now sends `staging`.
+    - `[medium]` `[patch]` `StateOfBAsync` misses settings, signing keys and the name — patched with the Blind Hunter row.
+    - `[medium]` `[patch]` an entry-point failure before HostBuilt shows up as a 60 s timeout — now uses `WhenAny` with the entry and rethrows its error.
+    - `[medium]` `[patch]` a timeout leaves the host running, and the delete masks the error — patched with the Blind Hunter row.
+    - `[low]` `[reject]` two concurrent runs drawing the same free port — this needs two simultaneous ephemeral-port picks to collide, and the second bind would then fail loudly. With the Lazy cache each host also starts only once.
+    - `[low]` `[reject]` `Environment.ExitCode` save and restore can interleave — no test reads it, and with each host starting once per run nothing interleaves.
+    - `[low]` `[patch]` an empty `HttpMethods` list drops a route — empty is now treated as `*`.
+    - `[low]` `[patch]` an `api/` pattern with no leading slash escapes the AR-13 check — trimmed before comparing.
+    - `[medium]` `[patch]` a Tenant parameter with another name can hide behind `NotTenantBound` — closed by the metadata check (Blind Hunter row).
+    - `[low]` `[reject]` misleading message when both Tenant parameters are present — no route has both, and the fix adds a branch.
+    - `[low]` `[reject]` a `{tenantId:guid}` constraint isn't substituted — no route uses one, and the theory would fail loudly on the leftover `{` rather than pass.
+    - `[medium]` `[patch]` `Covered` names a test nobody checks — patched with the Blind Hunter row.
+    - `[false]` `[reject]` story keys matched outside `development_status` — `sprint-status.yaml` has no other indented `N-N-slug:` keys, and the regex requires that shape.
+    - `[low]` `[patch]` a Tenant rate-limit policy is accepted unchecked — now refused until Story 2.5 adds its key check.
+    - `[low]` `[patch]` cache subclasses and other cache types are missed — patched with the Blind Hunter row; the rest is deferred.
+    - `[low]` `[patch]` policies held in instance fields or properties are missed — patched with the Blind Hunter row.
+    - `[false]` `[reject]` an empty `Microsoft.AspNetCore.App` folder — the tests image always ships the shared framework version folder, and the scan's Architecture tests passed.
+  - **Intent Alignment**
+    - `[false]` `[reject]` Management API and Hosted Login surfaces are missing — both are served by the two hosts `RunningRoutes` starts, so their routes fail the drift check as soon as they're mapped.
+    - `[low]` `[patch]` the OAuth case presents no real Tenant A authority — the endpoint refuses every grant until Story 2.5, and the message now names that story.
+    - `[medium]` `[defer]` `TargetTenant` cases prove Owner gating — same as the Blind Hunter row.
+    - `[medium]` `[defer]` the Log event lands on the Deployment chain, not the Tenant's Log — writing to the Tenant's Log is Story 7.4, already in deferred-work.md.
+    - `[false]` `[reject]` no artifact is ever presented — the AC allows unbuilt types to be pending, and each pending entry fails once its story is done.
+    - `[medium]` `[patch]` the no-shrink guard lives in the same file — patched with the Blind Hunter PRD-pin row.
+    - `[false]` `[reject]` "each is keyed by Tenant" read literally — FR-8 allows a job "declared Deployment-wide and reviewed", and the Admin limits are Deployment-scoped by AD-14.
+    - `[low]` `[reject]` the checks are structural, not behavioural — behaviour is already tested by JobGuardTests' cross-Tenant enqueue, the job CHECK constraint, and AdminAttemptLimiter refusing a Tenant context.
+    - `[false]` `[reject]` the change defines its own configuration tables — AD-2 names configuration and Signing Key tables, and the marker records that list so every new table must choose.
+    - `[false]` `[reject]` the deferred x-gatekeep-access item is resolved by replacing it — live routes already equal the OpenAPI paths (AdminEndpointTests), and the new metadata check backs the access kinds.
+    - `[false]` `[reject]` the duplicate T-1 sentence — counted in the Blind Hunter row.
+    - `[false]` `[reject]` "on every build" isn't wired — run-tests.sh already runs both projects in CI's build job.
+    - `[false]` `[reject]` the registry is in tests, not production — the AC asks for registries that drive the suite, not production code.
+
 ## Design Notes
 
 - **Not-Tenant-bound routes.** Routes like `POST /deployment/signin` or `GET /deployment/session` can't be "presented at Tenant B", because no Tenant names them. The registry still holds them so a new route can't skip classification. A `NotTenantBound` entry can't hide a Tenant route, because the pattern check rejects any Tenant parameter.
@@ -138,3 +210,53 @@ new("POST", "/api/v1/deployment/signin", CaseKind.NotTenantBound, Reason: "pre-a
 **Commands:**
 - `docker compose -f deploy/compose.dev.yaml run --rm --build tests` -- expected: Architecture and Isolation pass, including the new `CrossTenant` and `TenantKeyedTypeTests`.
 - Inside the tests container, temporarily add an unregistered `MapGet` (or remove one registry entry) -- expected: `RouteRegistryTests` fails, naming the route. Revert afterwards.
+
+## Auto Run Result
+
+Status: done
+
+**Summary:** Code-owned registries now drive a cross-Tenant suite that runs in CI's `build` job.
+- **Routes.** Every live route of Host.Admin and Host.Hosted is read from the running host, including OpenIddict's endpoint URIs. Each must have exactly one registry entry with a case kind that fits its pattern. For Host.Admin, the `TenantApiEndpoint` metadata must match the `TenantPath` entries.
+- **Route cases.** `TenantPath` and `TargetTenant` entries run as one theory against a real Admin host with Tenants A and B: refused with `access_denied`, one `admin.access.denied` row, and B unchanged. `HostResolved` entries run against `ProtocolHost`.
+- **Artifacts.** The 8 FR-8 artifact types are pinned to the PRD line, and all are pending on stories that aren't done.
+- **Jobs, rate limits and caches.** Job types, rate-limit policies and in-process caches are found by reflection, and each must be registered Tenant-keyed (and verified) or Deployment-wide with a reason.
+- **Grants.** `gk_hosted`'s AD-2 grants are checked on the migrated database, against a new required `TableUse` marker in the table registry.
+
+**Files changed:**
+- `src/Adapters/Postgres/Schema/TableRegistry.cs` -- `TableUse` enum, and every table classified.
+- `tests/Isolation/Hosting/RunningRoutes.cs` -- reads live routes from Host.Admin and Host.Hosted, cached once per run.
+- `tests/Isolation/CrossTenant/RouteRegistry.cs`, `RouteRegistryTests.cs` -- the route registry, plus drift, kind and metadata checks.
+- `tests/Isolation/CrossTenant/CrossTenantRouteTests.cs` -- the registry-driven Admin and Hosted cases.
+- `tests/Isolation/CrossTenant/ArtifactRegistry.cs`, `ArtifactRegistryTests.cs` -- FR-8 artifact types, pending against sprint status.
+- `tests/Isolation/CrossTenant/HostedGrantsTests.cs` -- AD-2 grants for `gk_hosted`.
+- `tests/Architecture/TenantKeyedTypes.cs`, `TenantKeyedTypeTests.cs` -- the job, rate-limit and cache registries.
+- `tests/Isolation/Admins/AdminEndpointTests.cs`, `CatalogueTests.cs`, `Tenancy/TenantPurgeRegistryTests.cs`, `tests/Architecture/CapabilityRuleTests.cs` -- updated for the shared route reader and the new `TableEntry` parameter.
+- `docs/threat-model.md` -- T-1, T-4 and T-53 updated with the new tests.
+- `_bmad-output/implementation-artifacts/deferred-work.md` -- the Story 1.31 item resolved.
+
+**Review findings:** 49 findings: 0 high, 15 medium, 23 low, 11 false.
+- **Patched:** 34 rows, grouped into 23 fixes (11 medium, 23 low).
+- **Deferred:**
+  - the Deployment-route refusal's target Tenant and the Tenant Log (Story 7.4);
+  - cache discovery limits.
+- **Rejected:** 11 false rows and 4 low rows, each with its reason in the triage log.
+
+**Follow-up review:** recommended (`true`), because more than two medium entries were patched. The unverified risk is the reworked `RunningRoutes`, specifically:
+- the Lazy cache shared across test classes;
+- the `WhenAny` and stop-in-`finally` failure handling;
+- the endpoint metadata check matched by type name.
+
+No reviewer has looked at these since they were changed.
+
+**Verification:**
+- `docker compose -f deploy/compose.dev.yaml run --rm --build tests`:
+  - build passed;
+  - browser tests passed, 527;
+  - Architecture passed, 706/706;
+  - Isolation passed 2814 of 2820.
+- **The 6 Isolation failures:** 5 were load-related (Npgsql timeouts to `192.168.65.254`, and one host unhealthy on its database). A rerun of their classes passed, 275/275. The sixth is the known `MasterKeyRotationTests` flake, which is deferred from Story 12.7 and also fails locally on `main`.
+- **Drift probe:** the implementer added an unregistered route and removed one registry entry, and `RouteRegistryTests` failed, naming both. Both changes were reverted.
+
+**Residual risks:**
+- Starting the hosts in their own load context adds memory pressure to the Isolation run.
+- The structural cache check takes any `Guid` key to be a Tenant ID (deferred).
