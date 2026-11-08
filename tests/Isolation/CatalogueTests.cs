@@ -260,7 +260,7 @@ public sealed class CatalogueTests(PostgresFixture postgres)
     }
 
     private static TableEntry Entry(string name, TableClass tableClass) =>
-        new(name, tableClass, "Tenancy", new Dictionary<string, IReadOnlyList<string>>());
+        new(name, tableClass, "Tenancy", TableUse.Runtime, new Dictionary<string, IReadOnlyList<string>>());
 
     private static async Task<NpgsqlConnection> OpenAsync(string connectionString)
     {

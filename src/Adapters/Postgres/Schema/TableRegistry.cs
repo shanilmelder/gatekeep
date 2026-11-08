@@ -9,11 +9,24 @@ public enum TableClass
     Control,
 }
 
+/// <summary>
+/// What a table holds, for AD-2's grant limits (Story 1.31): <c>gk_hosted</c> may never write a
+/// <see cref="Configuration"/> table, at table or column level. Every table must choose.
+/// </summary>
+public enum TableUse
+{
+    /// <summary>Deployment or Tenant configuration, identity of Admins, or key material: the public path never writes it.</summary>
+    Configuration,
+
+    /// <summary>State the running hosts write as they work: events, jobs, Sessions, counters.</summary>
+    Runtime,
+}
+
 /// <summary>One privilege on named columns only.</summary>
 public sealed record ColumnGrant(string Privilege, IReadOnlyList<string> Columns);
 
 /// <summary>
-/// One table: its class, its one owning module, every privilege per role, on the table
+/// One table: its class, its one owning module, its use (AD-2), every privilege per role, on the table
 /// and per column, the triggers it must have, and whether it is <c>UNLOGGED</c>. Only
 /// counters a crash may reset (AD-14), pending sign-in challenges a crash may drop
 /// (Story 1.23), and fresh-assertion challenges and grants (Story 1.26) are unlogged; every other table must be logged.
@@ -22,6 +35,7 @@ public sealed record TableEntry(
     string Name,
     TableClass Class,
     string Owner,
+    TableUse Use,
     IReadOnlyDictionary<string, IReadOnlyList<string>> Grants,
     IReadOnlyDictionary<string, IReadOnlyList<ColumnGrant>>? ColumnGrants = null,
     IReadOnlyList<string>? Triggers = null,
@@ -90,6 +104,7 @@ public static class TableRegistry
             "tenant",
             TableClass.Control,
             "Tenancy",
+            TableUse.Configuration,
             new Dictionary<string, IReadOnlyList<string>>
             {
                 [Hosted] = [Select],
@@ -117,6 +132,7 @@ public static class TableRegistry
             "tenant_host",
             TableClass.Control,
             "Tenancy",
+            TableUse.Configuration,
             new Dictionary<string, IReadOnlyList<string>>
             {
                 [Hosted] = [Select],
@@ -128,6 +144,7 @@ public static class TableRegistry
             "tenant_settings",
             TableClass.Tenant,
             "Tenancy",
+            TableUse.Configuration,
             new Dictionary<string, IReadOnlyList<string>>
             {
                 [Hosted] = [Select],
@@ -138,11 +155,12 @@ public static class TableRegistry
                 [Worker] = [Select, Insert, Delete],
             },
             Triggers: ["tenant_row_guard", "tenant_settings_guard_delete", "tenant_settings_guard_update"]),
-        new("migration_history", TableClass.Control, "Operations", new Dictionary<string, IReadOnlyList<string>>()),
+        new("migration_history", TableClass.Control, "Operations", TableUse.Configuration, new Dictionary<string, IReadOnlyList<string>>()),
         new(
             "audit_event",
             TableClass.Tenant,
             "Audit",
+            TableUse.Runtime,
             new Dictionary<string, IReadOnlyList<string>>
             {
                 [Hosted] = [Insert],
@@ -158,6 +176,7 @@ public static class TableRegistry
             "audit_detail",
             TableClass.Tenant,
             "Audit",
+            TableUse.Runtime,
             new Dictionary<string, IReadOnlyList<string>>
             {
                 [Hosted] = [Insert],
@@ -171,6 +190,7 @@ public static class TableRegistry
             "deployment_audit_event",
             TableClass.Control,
             "Audit",
+            TableUse.Runtime,
             new Dictionary<string, IReadOnlyList<string>>
             {
                 [Admin] = [Select, Insert],
@@ -185,6 +205,7 @@ public static class TableRegistry
             "deployment_audit_detail",
             TableClass.Control,
             "Audit",
+            TableUse.Runtime,
             new Dictionary<string, IReadOnlyList<string>>
             {
                 [Admin] = [Select, Insert],
@@ -197,6 +218,7 @@ public static class TableRegistry
             "job",
             TableClass.Control,
             "Operations",
+            TableUse.Runtime,
             new Dictionary<string, IReadOnlyList<string>>
             {
                 [Hosted] = [Insert],
@@ -219,6 +241,7 @@ public static class TableRegistry
             "job_payload",
             TableClass.Tenant,
             "Operations",
+            TableUse.Runtime,
             new Dictionary<string, IReadOnlyList<string>>
             {
                 [Hosted] = [Insert],
@@ -238,6 +261,7 @@ public static class TableRegistry
             "operation",
             TableClass.Control,
             "Operations",
+            TableUse.Runtime,
             new Dictionary<string, IReadOnlyList<string>>
             {
                 [Admin] = [Select, Insert],
@@ -255,6 +279,7 @@ public static class TableRegistry
             "operation_step",
             TableClass.Control,
             "Operations",
+            TableUse.Runtime,
             new Dictionary<string, IReadOnlyList<string>>
             {
                 [Admin] = [Select, Insert],
@@ -274,27 +299,27 @@ public static class TableRegistry
         // and writes Sessions, transactions and OpenIddict's entities. Only a Tenant's deletion
         // deletes (Story 1.29): its Operation's purges, as gk_worker in the Tenant's own scope, which
         // read nothing but the tenant_id their WHERE names.
-        new("user", TableClass.Tenant, "Identity", new Dictionary<string, IReadOnlyList<string>>
+        new("user", TableClass.Tenant, "Identity", TableUse.Runtime, new Dictionary<string, IReadOnlyList<string>>
         {
             [Hosted] = [Select],
             [Worker] = [Delete],
         }, PurgeColumns, RowGuard),
-        new("user_session", TableClass.Tenant, "Sessions", new Dictionary<string, IReadOnlyList<string>>
+        new("user_session", TableClass.Tenant, "Sessions", TableUse.Runtime, new Dictionary<string, IReadOnlyList<string>>
         {
             [Hosted] = [Select, Insert, Update],
             [Worker] = [Delete],
         }, PurgeColumns, RowGuard),
-        new("authorization", TableClass.Tenant, "Sessions", new Dictionary<string, IReadOnlyList<string>>
+        new("authorization", TableClass.Tenant, "Sessions", TableUse.Runtime, new Dictionary<string, IReadOnlyList<string>>
         {
             [Hosted] = [Select, Insert, Update],
             [Worker] = [Delete],
         }, PurgeColumns, RowGuard),
-        new("token", TableClass.Tenant, "Sessions", new Dictionary<string, IReadOnlyList<string>>
+        new("token", TableClass.Tenant, "Sessions", TableUse.Runtime, new Dictionary<string, IReadOnlyList<string>>
         {
             [Hosted] = [Select, Insert, Update],
             [Worker] = [Delete],
         }, PurgeColumns, RowGuard),
-        new("signin_transaction", TableClass.Tenant, "Authentication", new Dictionary<string, IReadOnlyList<string>>
+        new("signin_transaction", TableClass.Tenant, "Authentication", TableUse.Runtime, new Dictionary<string, IReadOnlyList<string>>
         {
             [Hosted] = [Select, Insert, Update],
             [Worker] = [Delete],
@@ -303,6 +328,7 @@ public static class TableRegistry
             "admin_attempt",
             TableClass.Control,
             "Admins",
+            TableUse.Runtime,
             new Dictionary<string, IReadOnlyList<string>>
             {
                 [Admin] = [Select, Insert],
@@ -321,6 +347,7 @@ public static class TableRegistry
             "bootstrap_state",
             TableClass.Control,
             "Admins",
+            TableUse.Configuration,
             new Dictionary<string, IReadOnlyList<string>>
             {
                 [Admin] = [Select],
@@ -347,6 +374,7 @@ public static class TableRegistry
             "admin",
             TableClass.Control,
             "Admins",
+            TableUse.Configuration,
             new Dictionary<string, IReadOnlyList<string>>
             {
                 [Admin] = [Select, Insert],
@@ -364,6 +392,7 @@ public static class TableRegistry
             "admin_session",
             TableClass.Control,
             "Admins",
+            TableUse.Runtime,
             new Dictionary<string, IReadOnlyList<string>>
             {
                 [Admin] = [Select, Insert],
@@ -392,6 +421,7 @@ public static class TableRegistry
             "admin_credential",
             TableClass.Control,
             "Admins",
+            TableUse.Configuration,
             new Dictionary<string, IReadOnlyList<string>>
             {
                 [Admin] = [Select, Insert, Delete],
@@ -412,6 +442,7 @@ public static class TableRegistry
             "admin_signin_challenge",
             TableClass.Control,
             "Admins",
+            TableUse.Runtime,
             new Dictionary<string, IReadOnlyList<string>>
             {
                 [Admin] = [Select, Insert, Delete],
@@ -428,6 +459,7 @@ public static class TableRegistry
             "tenant_role",
             TableClass.Control,
             "Admins",
+            TableUse.Configuration,
             new Dictionary<string, IReadOnlyList<string>>
             {
                 [Admin] = [Select, Insert, Delete],
@@ -443,6 +475,7 @@ public static class TableRegistry
             "admin_fresh_assertion",
             TableClass.Control,
             "Admins",
+            TableUse.Runtime,
             new Dictionary<string, IReadOnlyList<string>>
             {
                 [Admin] = [Select, Insert, Delete],
@@ -457,6 +490,7 @@ public static class TableRegistry
             "admin_recovery_code",
             TableClass.Control,
             "Admins",
+            TableUse.Configuration,
             new Dictionary<string, IReadOnlyList<string>>
             {
                 [Admin] = [Select, Insert, Delete],
@@ -479,6 +513,7 @@ public static class TableRegistry
             "signing_key",
             TableClass.Tenant,
             "Keys",
+            TableUse.Configuration,
             new Dictionary<string, IReadOnlyList<string>>
             {
                 [Hosted] = [Select],
@@ -490,7 +525,7 @@ public static class TableRegistry
                 [Worker] = [new ColumnGrant(Update, ["state", "promoted_at", "rotated_at", "retired_at", "destroyed_at"])],
             },
             ["signing_key_guard_delete", "signing_key_guard_update", "tenant_row_guard"]),
-        new("protection_key_wrap", TableClass.Tenant, "Keys", new Dictionary<string, IReadOnlyList<string>>
+        new("protection_key_wrap", TableClass.Tenant, "Keys", TableUse.Configuration, new Dictionary<string, IReadOnlyList<string>>
         {
             [Hosted] = [Select],
             [Worker] = [Select, Insert, Delete],
