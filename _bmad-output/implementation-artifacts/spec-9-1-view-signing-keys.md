@@ -2,7 +2,7 @@
 title: 'Story 9.1: View Signing Keys'
 type: 'feature'
 created: '2026-11-06'
-status: 'blocked'
+status: 'done'
 baseline_revision: '80fcc409db449ea809f46ba229d548cfa4c6d71c'
 review_loop_iteration: 0
 followup_review_recommended: false
@@ -180,6 +180,12 @@ deferred: []
   - **Management returns its own row type.** Host.Admin may not reference Keys (module edges), so `ISigningKeyManagement.ListAsync` returns `SigningKeyListing(KeyId, State, CreatedAt)` built from `KeysContract.ListSigningKeysAsync`'s `ListedSigningKey`, with the state as stored.
   - **Hosted's JWKS members confirmed.** `SigningKeyManagementTests.The_sample_is_exactly_what_Host_Hosted_serves_for_the_Tenant` compares the sample with Host.Hosted's real JWKS: exactly `kty`, `use`, `alg`, `kid`, `n`, `e`, the same values and order.
 
+- 2026-11-08, merge of main (Stories 1.29 to 1.32, 2.5 and 7.4):
+  - **Migration renamed** to `20261108090000_ViewSigningKeys`, so it applies after main's newest (`20261108000000_CreateAdminEnrolment`); `MigrateCommandTests` now expects 24.
+  - **Cross-tenant route registry** (Story 1.31): both Signing keys routes are registered as `TenantPath` cases, so `CrossTenantRouteTests` probes them with a foreign Tenant.
+  - **Sidebar order**: Story 7.4's Monitoring group sits between Security and Settings; the browser spec expects `security`, `monitoring`, `settings`.
+  - The OpenAPI document and api-client schema were regenerated in Docker after the merge.
+
 ## Review Triage Log
 
 ### 2026-11-06 — Review pass
@@ -223,10 +229,9 @@ There are two routes rather than one, so the table (Postgres only) still renders
 
 ## Auto Run Result
 
-Status: blocked
-Blocking condition: patch verification failed — the shared Docker Desktop engine stopped answering (every call returns `500 Internal Server Error` on `dockerDesktopLinuxEngine`), so the full suite could not run after the review patches.
+Status: done
 
 - Implemented: the two read-only Signing keys routes, the `gk_admin` SELECT grant, `read` on `transit/keys/sig-*` for host-admin, the Keys list, the Tenancy issuer read, Management `ISigningKeyManagement`, the api-client methods, `KeyStateBadge`, and the Signing keys page under Security, with Isolation, Architecture and browser tests and the docs.
-- Verified before review (implementer, Docker): Browser 537/537 and Architecture 630/630 passed. Isolation passed except connection errors under shared-engine load (18 of 19 passed on rerun) and `MasterKeyRotationTests.Full_rotation_keeps_every_value_and_leaves_the_old_generation_unable_to_unseal`, which the implementer reports fails the same way at the baseline.
-- Review: 7 patch entries applied (2 medium, 5 low), none deferred, the rest rejected with reasons in the triage log. The patches are not yet built or run.
-- To resume: once Docker is back, rerun the Verification command. If it's green, set `status: done`, finish this section, and commit.
+- Review: 7 patch entries applied (2 medium, 5 low), none deferred, the rest rejected with reasons in the triage log.
+- Verified 2026-11-08 after merging main, in Docker under `gatekeep/tests:epic-9`: Browser 552/552, Architecture 752/752, the API contract check and its self-check. Isolation: 2990/3001 on the full run; the 10 load failures (`Failed to connect to 192.168.65.254`, 15 to 19 s timeouts from parallel sessions sharing the engine) passed on a rerun of their classes, with the cross-tenant, signing-key and migration classes (479/480).
+- Still failing locally: `MasterKeyRotationTests.Full_rotation_keeps_every_value_and_leaves_the_old_generation_unable_to_unseal` (root-token census reads "" for "1"). It touches no code this story changed, it failed the same way at the baseline, and main's CI passed it at 13:33 on 2026-11-08, so it is left to CI. The final verification is the PR's CI run, not a local one.
