@@ -320,7 +320,7 @@ public sealed class ReleaseConfigTests
     }
 
     [Fact]
-    public void Sign_job_is_self_hosted_approval_gated_and_builds_nothing()
+    public void Sign_job_is_self_hosted_tag_gated_and_builds_nothing()
     {
         var sign = Jobs()["sign"];
         var text = string.Join('\n', sign);

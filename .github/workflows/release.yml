@@ -7,8 +7,10 @@ name: Release
 #          restores, buildx, syft), so it gets nothing worth stealing: it runs the gates,
 #          then builds each release image to an OCI archive with its SBOM and digest, and
 #          hands those over only as a workflow artifact.
-#   sign   Behind the release-signing environment, which needs Esm's approval, and the only
-#          job that gets the signing key: an encrypted cosign key and its password, the
+#   sign   Behind the release-signing environment, which only a v* tag can deploy to, and
+#          has no required reviewer (the repository's plan doesn't offer one), so a pushed
+#          tag signs straight away: pushing the tag is the approval. The only job that gets
+#          the signing key: an encrypted cosign key and its password, the
 #          environment's secrets. It runs nothing the build job made and builds nothing: it
 #          pushes the archives, refuses any digest that differs from the build's, signs each
 #          digest and attests its SBOM, and publishes release.env.
