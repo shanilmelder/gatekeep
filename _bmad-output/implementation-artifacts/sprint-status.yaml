@@ -66,7 +66,7 @@ development_status:
   1-28-switch-tenants-and-set-the-environment-label: done
   1-29-delete-a-tenant-without-touching-others: done
   1-30-connect-the-alert-channel-and-off-server-store: done
-  1-31-run-the-cross-tenant-suite-on-every-build: backlog
+  1-31-run-the-cross-tenant-suite-on-every-build: in-progress
   1-32-recover-admin-access-from-the-host: backlog
   epic-1-retrospective: optional
 
