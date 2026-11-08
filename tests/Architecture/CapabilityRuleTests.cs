@@ -69,6 +69,7 @@ public class CapabilityRuleTests
         "post /api/v1/deployment/bootstrap",
         "post /api/v1/deployment/signin",
         "post /api/v1/deployment/signin/complete",
+        "post /api/v1/deployment/signin/enrolment",
         "post /api/v1/deployment/signin/recovery-code",
     ];
 

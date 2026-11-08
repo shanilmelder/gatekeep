@@ -102,6 +102,27 @@ public static class SecurityLimits
     public const int AdminRecoveryCodeDeploymentAttempts = 50;
 
     /// <summary>
+    /// How long a <c>gatekeep recover-admin</c> enrolment can be redeemed: 15 minutes from its issue
+    /// (Story 1.32, AD-31, PRD §5.2). It is single use, and <c>admin_enrolment</c> refuses any other expiry.
+    /// </summary>
+    public static readonly TimeSpan AdminEnrolmentLifetime = TimeSpan.FromMinutes(15);
+
+    /// <summary>
+    /// Enrolment redemptions one client may make in <see cref="AdminEnrolmentWindow"/>: 5 (Story 1.32).
+    /// Each is counted before the value is looked up, whatever its outcome.
+    /// </summary>
+    public const int AdminEnrolmentAttempts = 5;
+
+    /// <summary>
+    /// Enrolment redemptions the whole Deployment may take in <see cref="AdminEnrolmentWindow"/>: 50
+    /// (Story 1.32), whatever client sends them.
+    /// </summary>
+    public const int AdminEnrolmentDeploymentAttempts = 50;
+
+    /// <summary>The fixed window enrolment redemptions are counted in: 15 minutes (Story 1.32).</summary>
+    public static readonly TimeSpan AdminEnrolmentWindow = TimeSpan.FromMinutes(15);
+
+    /// <summary>
     /// The most WebAuthn credentials one Admin may hold: 10 (Story 1.26). It bounds the exclude list
     /// and Your credentials, and the database refuses an 11th.
     /// </summary>

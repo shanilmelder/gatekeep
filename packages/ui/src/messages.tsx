@@ -260,6 +260,11 @@ export interface Messages {
   recoveryCodeSuperseded: string;
   /** Shown when the code on screen can no longer be confirmed in this Session. */
   recoveryCodeNotConfirmable: string;
+  /** The Recover page's heading and subtitle (Story 1.32): the link gatekeep recover-admin prints. */
+  recoverTitle: string;
+  recoverSubtitle: string;
+  /** Shown when the link's enrolment is refused, or the link holds none. It never says why. */
+  recoverRefused: string;
   /** The Deployment group's Tenants item (Story 1.27), and the Tenants page's title and its table's caption. */
   navTenants: string;
   /** Create Tenant's heading and its description (Story 1.27). */
@@ -521,7 +526,7 @@ export const defaultMessages: Readonly<Messages> = Object.freeze({
   recoveryPasskeyLink: 'Sign in with a passkey instead',
   recoveryRefused: "That code isn't valid.",
   setupRecoveryTitle: 'Set up a new passkey',
-  setupRecoverySubtitle: 'Your recovery code has been used. Register a new passkey or security key to continue.',
+  setupRecoverySubtitle: 'Your recovery code or recovery link has been used. Register a new passkey or security key to continue.',
   setupUseRecoveryCode: 'Use an offline recovery code instead',
   recoveryCodeWarning: "If you lose your device, this code works once. We won't show it again.",
   recoveryCodeWhat: 'recovery code',
@@ -529,6 +534,9 @@ export const defaultMessages: Readonly<Messages> = Object.freeze({
   recoveryCodeSavedRequired: "Confirm you've saved your code.",
   recoveryCodeSuperseded: 'A newer recovery code replaced this one, so it was not saved. Start again to get a new code.',
   recoveryCodeNotConfirmable: "This recovery code can no longer be confirmed. Start again.",
+  recoverTitle: 'Recover Admin access',
+  recoverSubtitle: 'Continue to end every session of this Admin and register a new passkey or security key. This link works once.',
+  recoverRefused: "This recovery link isn't valid. It may have been used or expired. Run gatekeep recover-admin again for a new one.",
   navTenants: 'Tenants',
   createTenantTitle: 'Create your Tenant',
   createTenantDescription: 'A Tenant is an isolated directory of Users, Applications and settings.',

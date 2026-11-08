@@ -378,6 +378,28 @@ internal static class AdminApi
             .Produces<ApiProblem>(StatusCodes.Status429TooManyRequests, AdminResponses.ProblemContentType)
             .Produces(StatusCodes.Status503ServiceUnavailable);
 
+        app.MapPost("/api/v1/deployment/signin/enrolment", static (HttpContext context, AdminApiServices services) => EnrolmentApi.RedeemAsync(context, services))
+            .WithMetadata(DeploymentApiEndpoint.Instance, SignInEndpoint.Instance, new JsonRequestBody(typeof(EnrolmentRedeemRequest)))
+            .WithName("RedeemEnrolment")
+            .WithTags(Tag)
+            .WithSummary("Sign in with a gatekeep recover-admin enrolment, to a Session that reaches only credential registration.")
+            .WithDescription(
+                "Sessionless: needs the exact Admin Origin only. No route issues an enrolment: only gatekeep recover-admin on the " +
+                "Docker host does, after its Security Alert and off-server record are confirmed. Each call is counted " +
+                "per client, then, while the client is within its limit, Deployment-wide, before the value is looked up: a " +
+                "client's 6th, or the 51st counted across the Deployment, in 15 minutes is 429. An unused enrolment within its " +
+                "15 minutes is used up, with every other unused one of its Admin, every live Session of its Admin " +
+                "ends as revoked, a live Session this browser held is superseded, and a Session starts that reaches only the " +
+                "Session read, sign-out and credential registration: setup, needing two credentials, for an Admin below the " +
+                "credential floor, and recovery, needing one, otherwise; admin.enrolment.used is written. An unknown, used, " +
+                "expired or malformed value is the same 400 enrolment_refused. Before bootstrap completes it is the unknown-path 404.")
+            .Produces<AdminSignInResponse>(StatusCodes.Status200OK)
+            .Produces<ApiProblem>(StatusCodes.Status400BadRequest, AdminResponses.ProblemContentType)
+            .Produces(StatusCodes.Status403Forbidden)
+            .Produces(StatusCodes.Status404NotFound)
+            .Produces<ApiProblem>(StatusCodes.Status429TooManyRequests, AdminResponses.ProblemContentType)
+            .Produces(StatusCodes.Status503ServiceUnavailable);
+
         app.MapGet("/api/v1/deployment/tenants", static (HttpContext context, AdminApiServices services) => TenantsApi.ListAsync(context, services))
             .WithMetadata(
                 DeploymentApiEndpoint.Instance,

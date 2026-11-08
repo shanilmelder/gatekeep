@@ -190,6 +190,28 @@ public sealed class OffServerRecordTests
         Assert.Equal(["alertId", "code", "deployment", "raisedAt", "summary"], bare.Select(m => m.Key).Order(StringComparer.Ordinal));
     }
 
+    [Fact]
+    public void Recovery_alert_body_adds_only_the_enrolment_references()
+    {
+        var adminId = Guid.CreateVersion7();
+        var enrolmentId = Guid.CreateVersion7();
+        var enrolment = new AlertEnrolment(adminId, enrolmentId, Now, Now.AddMinutes(15));
+        var alert = SecurityAlert.Raise(SecurityAlertCode.AdminRecovery, new AlertDeployment("admin.example.com"), TimeProvider.System, enrolment: enrolment);
+
+        var body = JsonNode.Parse(WebhookAlertChannel.Body(alert))!.AsObject();
+
+        Assert.Equal(
+            ["adminId", "alertId", "code", "deployment", "enrolmentId", "expiresAt", "issuedAt", "raisedAt", "summary"],
+            body.Select(m => m.Key).Order(StringComparer.Ordinal));
+        Assert.Equal("admin.recovery.started", (string?)body["code"]);
+        Assert.Equal(adminId.ToString("D"), (string?)body["adminId"]);
+        Assert.Equal(enrolmentId.ToString("D"), (string?)body["enrolmentId"]);
+        Assert.Equal("2026-11-06T07:30:15.000000Z", (string?)body["issuedAt"]);
+        Assert.Equal("2026-11-06T07:45:15.000000Z", (string?)body["expiresAt"]);
+        Assert.Throws<ArgumentException>(() => new AlertEnrolment(adminId, enrolmentId, Now, Now));
+        Assert.Throws<ArgumentException>(() => new AlertEnrolment(Guid.Empty, enrolmentId, Now, Now.AddMinutes(15)));
+    }
+
     [Theory]
     [InlineData("admin.example.com", true)]
     [InlineData("admin.gatekeep-admin.localhost", true)]

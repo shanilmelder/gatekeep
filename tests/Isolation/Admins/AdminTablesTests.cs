@@ -393,9 +393,10 @@ public sealed class AdminTablesTests(PostgresFixture postgres)
     public static TheoryData<string> RolesWithoutNewAdminsGrants =>
         [.. TableRegistry.RuntimeRoles.Where(r => r != TableRegistry.Admin)];
 
+    // Story 1.32 took back the Cli's read of Recovery Codes, granted for recover-admin, which reads none.
     [Theory]
     [MemberData(nameof(RolesWithoutNewAdminsGrants))]
-    public async Task Other_roles_hold_nothing_on_the_Story_1_26_tables_but_the_Cli_reading_codes(string role)
+    public async Task Other_roles_hold_nothing_on_the_Story_1_26_tables(string role)
     {
         var database = await SeededAsync();
         var connection = postgres.RoleConnection(role, database);
@@ -404,17 +405,87 @@ public sealed class AdminTablesTests(PostgresFixture postgres)
         {
             "SELECT count(*) FROM admin_fresh_assertion",
             "DELETE FROM admin_fresh_assertion",
-            role == TableRegistry.Cli ? null : "SELECT count(*) FROM admin_recovery_code",
+            "SELECT count(*) FROM admin_recovery_code",
             "DELETE FROM admin_recovery_code",
             "UPDATE admin_recovery_code SET used_at = now()",
-        }.OfType<string>())
+        })
         {
             Assert.Equal(PermissionDenied, await StateAsync(connection, sql));
         }
+    }
 
-        if (role == TableRegistry.Cli)
+    private const string Enrolment =
+        "INSERT INTO admin_enrolment (id, admin_id, value_sha256, created_at, expires_at, used_at) VALUES (gen_random_uuid(), '01900000-0000-7000-8000-000000000a01', {0}, {1}, {2}, {3})";
+
+    private static string EnrolmentRow(string hash = "sha256('e')", string created = "now()", string expires = "now() + interval '15 minutes'", string used = "NULL") =>
+        string.Format(null, Enrolment, hash, created, expires, used);
+
+    public static TheoryData<string, string> EnrolmentViolations => new()
+    {
+        // A value's hash is 32 bytes, and the expiry exactly 15 minutes after the issue.
+        { EnrolmentRow(hash: "'\\x00'"), CheckViolation },
+        { EnrolmentRow(expires: "now() + interval '16 minutes'"), CheckViolation },
+        { EnrolmentRow(expires: "now() + interval '14 minutes'"), CheckViolation },
+        // Issued now: never in the future, never a lifetime ago, never already used.
+        { EnrolmentRow(created: "now() + interval '1 minute'", expires: "now() + interval '16 minutes'"), Raised },
+        { EnrolmentRow(created: "now() - interval '15 minutes'", expires: "now()"), Raised },
+        { EnrolmentRow(used: "now()"), Raised },
+    };
+
+    [Theory]
+    [MemberData(nameof(EnrolmentViolations))]
+    public async Task Enrolment_constraints_and_guard_refuse_a_violation_for_the_owner_too(string sql, string state)
+    {
+        var database = await SeededAsync();
+
+        Assert.Equal(state, await SqlStateAsync(database, sql));
+    }
+
+    [Fact]
+    public async Task Only_the_Cli_issues_an_enrolment_and_Host_Admin_only_uses_it_once()
+    {
+        var database = await SeededAsync();
+        var cli = postgres.RoleConnection(TableRegistry.Cli, database);
+        var admin = postgres.RoleConnection(TableRegistry.Admin, database);
+
+        await PostgresFixture.ExecuteAsync(cli, EnrolmentRow());
+        Assert.Equal(UniqueViolation, await StateAsync(cli, EnrolmentRow()));
+        Assert.Equal(1L, await PostgresFixture.ScalarAsync<long>(cli, "SELECT count(*) FROM admin_enrolment"));
+        Assert.Equal(PermissionDenied, await StateAsync(cli, "UPDATE admin_enrolment SET used_at = clock_timestamp()"));
+        Assert.Equal(PermissionDenied, await StateAsync(cli, "DELETE FROM admin_enrolment"));
+
+        // Host.Admin reads it and sets used_at, once, and nothing else.
+        Assert.Equal(PermissionDenied, await StateAsync(admin, EnrolmentRow(hash: "sha256('f')")));
+        Assert.Equal(PermissionDenied, await StateAsync(admin, "UPDATE admin_enrolment SET expires_at = expires_at"));
+        Assert.Equal(PermissionDenied, await StateAsync(admin, "DELETE FROM admin_enrolment"));
+        await PostgresFixture.ExecuteAsync(admin, "UPDATE admin_enrolment SET used_at = clock_timestamp()");
+        Assert.Equal(Raised, await StateAsync(admin, "UPDATE admin_enrolment SET used_at = clock_timestamp()"));
+        Assert.Equal(Raised, await StateAsync(admin, "UPDATE admin_enrolment SET used_at = NULL"));
+
+        // The owner can't move what was issued either.
+        Assert.Equal(Raised, await SqlStateAsync(database, "UPDATE admin_enrolment SET expires_at = expires_at + interval '1 hour', created_at = created_at + interval '1 hour'"));
+
+        // An Admin with an enrolment, and nothing else, can't be deleted from under it.
+        await PostgresFixture.ExecuteAsync(
+            postgres.SuperuserConnection(database),
+            "INSERT INTO admin (id, deployment_owner) VALUES ('01900000-0000-7000-8000-000000000a0c', false);" +
+            EnrolmentRow(hash: "sha256('g')").Replace("000000000a01", "000000000a0c", StringComparison.Ordinal));
+        Assert.Equal(RestrictViolation, await SqlStateAsync(database, "DELETE FROM admin WHERE id = '01900000-0000-7000-8000-000000000a0c'"));
+    }
+
+    public static TheoryData<string> RolesThatMayNotIssue =>
+        [.. TableRegistry.RuntimeRoles.Where(r => r != TableRegistry.Cli)];
+
+    [Theory]
+    [MemberData(nameof(RolesThatMayNotIssue))]
+    public async Task No_role_but_the_Cli_may_insert_an_enrolment(string role)
+    {
+        var database = await SeededAsync();
+
+        Assert.Equal(PermissionDenied, await StateAsync(postgres.RoleConnection(role, database), EnrolmentRow()));
+        if (role != TableRegistry.Admin)
         {
-            Assert.Equal(0L, await PostgresFixture.ScalarAsync<long>(connection, "SELECT count(*) FROM admin_recovery_code"));
+            Assert.Equal(PermissionDenied, await StateAsync(postgres.RoleConnection(role, database), "SELECT count(*) FROM admin_enrolment"));
         }
     }
 

@@ -38,7 +38,7 @@ public sealed class CanarySurfaceTests
         var program = File.ReadAllText(Path.Combine(BuildOutput.RepositoryRoot(), "src/Gatekeep.Cli/Program.cs"));
 
         Assert.Equal(
-            new[] { "alerts test", "audit verify", "audit-ship", "init", "migrate", "records test", "rotate-transit-keys" },
+            new[] { "alerts test", "audit verify", "audit-ship", "init", "migrate", "records test", "recover-admin", "rotate-transit-keys" },
             CanaryFlows.CliCommands(program));
     }
 
@@ -84,7 +84,7 @@ public sealed class CanarySurfaceTests
         var surfaces = CanaryFlows.Surfaces(
             OperationsContract.ProductionRegistry,
             OperationsContract.ProductionOperationRegistry,
-            ["alerts test", "audit verify", "audit-ship", "init", "migrate", "records test", "rekey", "rotate-transit-keys"],
+            ["alerts test", "audit verify", "audit-ship", "init", "migrate", "records test", "recover-admin", "rekey", "rotate-transit-keys"],
             Hosts,
             CanaryFlows.Routes(BuildOutput.RepositoryRoot()));
 
@@ -152,7 +152,7 @@ public sealed class CanarySurfaceTests
         var surfaces = CanaryFlows.Surfaces(
             OperationsContract.ProductionRegistry,
             OperationsContract.ProductionOperationRegistry,
-            ["alerts test", "audit verify", "audit-ship", "init", "migrate", "records test", "rotate-transit-keys"],
+            ["alerts test", "audit verify", "audit-ship", "init", "migrate", "records test", "recover-admin", "rotate-transit-keys"],
             Hosts,
             [.. CanaryFlows.Routes(BuildOutput.RepositoryRoot()), .. CanaryFlows.RoutesIn("app.MapPost(\"/connect/token\", Token);")]);
 

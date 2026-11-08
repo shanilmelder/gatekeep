@@ -41,6 +41,7 @@ public sealed class AdminEndpointTests
                 "/api/v1/deployment/session",
                 "/api/v1/deployment/signin",
                 "/api/v1/deployment/signin/complete",
+                "/api/v1/deployment/signin/enrolment",
                 "/api/v1/deployment/signin/recovery-code",
                 "/api/v1/deployment/tenants",
                 "/api/v1/deployment/tenants",

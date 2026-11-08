@@ -2,14 +2,33 @@
 title: 'Story 1.32: Recover Admin access from the host'
 type: 'feature'
 created: '2026-11-08'
-status: 'ready-for-dev'
+status: 'in-review'
+baseline_revision: '49ef4b3a246319af4313a70528eac78478c697e7'
 review_loop_iteration: 0
 followup_review_recommended: false
 context:
   - '{project-root}/_bmad-output/implementation-artifacts/epic-1-context.md'
   - '{project-root}/docs/threat-model.md'
 warnings: ['oversized']
-deferred: []
+deferred:
+  - summary: >-
+      A recovered Admin who already holds the 10-credential maximum uses up the enrolment and loses
+      their Sessions but can't register a new credential, because lost credentials stay registered.
+    evidence: |-
+      AdminEnrolments.RedeemAsync starts a Recovery Session without checking the credential count;
+      registration refuses an 11th credential. Already recorded in deferred-work.md (Story 8.3,
+      retire the lost credential during recovery). Fix belongs with credential retirement.
+    location: >-
+      src/Modules/Admins/Core/AdminEnrolments.cs
+    severity: medium
+  - summary: >-
+      The lost credentials stay registered after recovery; nothing retires them.
+    evidence: |-
+      Recovery adds a fresh credential next to the lost ones; deferred-work.md already assigns
+      retiring the lost credential to Story 8.3.
+    location: >-
+      src/Modules/Admins/Core/AdminEnrolments.cs
+    severity: medium
 ---
 
 <intent-contract>
@@ -143,6 +162,41 @@ deferred: []
 ## Spec Change Log
 
 ## Review Triage Log
+
+### 2026-11-08 — Review pass
+- verdicts: 31 findings — high 0, medium 8, low 21, false 2, maybe-false 0
+- findings:
+  - `[low]` `[reject]` (intent) The CLI success path is only run in-process, never through `docker compose run cli recover-admin`. Every Cli command in the repo is tested this way. The real wiring is covered by the process-level refusal test and CI's stack job, and a container-level run would need new stack fixtures.
+  - `[false]` `[reject]` (intent) "No route offers recovery" is proven only structurally, with no `RunningRoutes`. `RouteRegistryTests` (unchanged) already enumerates the running hosts' endpoints through `RunningRoutes` against `RouteRegistry`, which now lists the redeem route. Hosted is proven to have nothing under `/api`.
+  - `[low]` `[reject]` (intent) The printed link drops any non-443 port. Duplicate of the Blind Hunter port finding; see that row.
+  - `[low]` `[reject]` (intent) No end-to-end browser test from link to registration. Browser tests intercept the API by project convention, and isolation tests cover the server half.
+  - `[low]` `[reject]` (intent) The Setup/Recovery choice is tested only at its extremes (0 credentials vs an Owner). It reuses `MeetsFloor`, which existing Session tests already cover.
+  - `[medium]` `[defer]` (intent) The lost credentials stay registered after recovery. Story 8.3 is already assigned to retire them (deferred-work.md).
+  - `[low]` `[reject]` (intent) The migration revokes `gk_cli` SELECT on `admin_recovery_code`. That narrows a grant made only "for recover-admin later", which the command doesn't need. No harm, and the tests are updated.
+  - `[medium]` `[patch]` (blind) Earlier unused enrolments stay live, so a link left over from an earlier run can re-run recovery after it has completed. Patch: redemption sets `used_at` on all of that Admin's other unused enrolments, with a test.
+  - `[low]` `[reject]` (blind) The usable window shrinks by the alert and record latency. Output prints the exact UTC expiry, and the guard refuses a run that exceeds the lifetime. Warning about a thin window would add branches for a rare case.
+  - `[low]` `[patch]` (blind) A failure after the alert and record says only "No enrolment was issued". Patch: `FailureMessage` tracks the alert-sent and record-written phases.
+  - `[medium]` `[patch]` (blind) One client over its limit still spends the Deployment-wide budget. Patch: count per client first, and Deployment-wide only when the client is allowed.
+  - `[low]` `[reject]` (blind) The link drops the HTTPS port. The production default is 443, so the link works as printed. The fix needs a new compose setting in both compose files plus tests, which is more than a direct correction. install.md documents the non-443 case.
+  - `[low]` `[reject]` (blind) The audit events don't carry the enrolment ID. They are correlatable by Admin target and time, and adding a detail row needs new detail-table surface.
+  - `[low]` `[reject]` (blind) `SecurityAlert` doesn't require `Enrolment` for `AdminRecovery`. There's a single caller, and the guard would add branches.
+  - `[medium]` `[patch]` (blind) Missing server tests. Patch: the supersede of another Admin's Session (same as the VG row) and a second run whose link dies when the first is redeemed. Concurrency, cancellation and slow-run tests rejected as low: the `FOR UPDATE` + `used_at IS NULL` update is sound and the guard is a DB trigger.
+  - `[low]` `[patch]` (blind) Recover page paths untested. Patch: the 503 path (same as the VG row). The setup path rejected: the page navigates to `/setup/credentials` either way.
+  - `[low]` `[patch]` (blind) The browser comment claims Back can't return to the link but only checks `location.href`. Patch: `page.goBack()`, or drop the claim.
+  - `[low]` `[patch]` (blind) `AssertHolds`' `absent` parameter is always true. Patch: rename to `AssertAbsent` and drop the parameter.
+  - `[low]` `[patch]` (blind) `EnrolmentRedemption.Kind` is unused. Patch: removed.
+  - `[low]` `[reject]` (blind) No index on `admin_enrolment.admin_id`. The table holds a handful of rows per recovery.
+  - `[low]` `[reject]` (blind) No retention for used or expired rows. No role deletes by design (append-only evidence), and the rows are tiny.
+  - `[low]` `[reject]` (blind) The T-21 tests don't cover the concurrency or slow-run claims. Both are enforced by the database (row lock, trigger), and tests would add fixtures for little value.
+  - `[medium]` `[patch]` (verification-gap) No test ties the cli's `GATEKEEP_ALERT_DEPLOYMENT` to Caddy's `GATEKEEP_ADMIN_HOST`. Patch: a ComposeConfigTests fact for both compose files.
+  - `[medium]` `[patch]` (verification-gap) The supersede of a different Admin's presented Session isn't tested. Patch: a RecoverAdminTests fact covering `superseded`, the event and the 401.
+  - `[low]` `[patch]` (verification-gap) The Recover page's 503 path has no browser test. Patch: mirrors the Recovery Code 503 test.
+  - `[false]` `[reject]` (edge) The per-client key is Caddy's address. `GatekeepHosting.cs:120-130` applies `UseForwardedHeaders` trusting only Caddy, so `RemoteIpAddress` is the real client.
+  - `[medium]` `[patch]` (edge) Junk traffic exhausts the Deployment-wide count. Same root cause as the blind budget row; the same patch reorders the counts.
+  - `[medium]` `[defer]` (edge) An Admin at the 10-credential maximum can't register after redeeming. Pre-existing, already in deferred-work.md (Story 8.3).
+  - `[low]` `[patch]` (edge) The failure message after the alert or record omits that they were sent. Same as the blind row; same patch.
+  - `[low]` `[reject]` (edge) A slow run leaves a thin or zero window. Same as the blind window row: the expiry is printed and the trigger refuses past the lifetime.
+  - `[low]` `[patch]` (edge) The architecture rule excludes the whole Admins module. Patch: exclusion narrowed to the three defining files.
 
 ## Design Notes
 

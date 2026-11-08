@@ -59,6 +59,7 @@ internal sealed class AdminApiServices : IAsyncDisposable
         Authorization = AdminsContract.CreateAuthorization(AuditContract.CreateAppender());
         FreshAssertions = AdminsContract.CreateFreshAssertions(AuditContract.CreateAppender(), Fido2WebAuthn.Create());
         Credentials = AdminsContract.CreateCredentials(AuditContract.CreateAppender());
+        Enrolments = AdminsContract.CreateEnrolments(AuditContract.CreateAppender());
 
         // Built on first use: the OpenAPI document build has no Tenant zone.
         _tenants = new(() => ManagementContract.CreateTenants(
@@ -91,6 +92,12 @@ internal sealed class AdminApiServices : IAsyncDisposable
 
     /// <summary>Your credentials (Story 1.26): the Admin's own list, and removal under the floor.</summary>
     public IAdminCredentials Credentials { get; }
+
+    /// <summary>
+    /// <c>recover-admin</c> enrolment redemption (Story 1.32). This host only redeems: the issuer
+    /// is the Cli's alone, and no route here issues one.
+    /// </summary>
+    public IAdminEnrolments Enrolments { get; }
 
     /// <summary>
     /// Admin Recovery Codes (Story 1.26), over this host's key custody, which computes the

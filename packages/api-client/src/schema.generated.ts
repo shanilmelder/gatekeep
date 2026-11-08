@@ -308,6 +308,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/deployment/signin/enrolment": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Sign in with a gatekeep recover-admin enrolment, to a Session that reaches only credential registration.
+         * @description Sessionless: needs the exact Admin Origin only. No route issues an enrolment: only gatekeep recover-admin on the Docker host does, after its Security Alert and off-server record are confirmed. Each call is counted per client, then, while the client is within its limit, Deployment-wide, before the value is looked up: a client's 6th, or the 51st counted across the Deployment, in 15 minutes is 429. An unused enrolment within its 15 minutes is used up, with every other unused one of its Admin, every live Session of its Admin ends as revoked, a live Session this browser held is superseded, and a Session starts that reaches only the Session read, sign-out and credential registration: setup, needing two credentials, for an Admin below the credential floor, and recovery, needing one, otherwise; admin.enrolment.used is written. An unknown, used, expired or malformed value is the same 400 enrolment_refused. Before bootstrap completes it is the unknown-path 404.
+         */
+        post: operations["RedeemEnrolment"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/deployment/tenants": {
         parameters: {
             query?: never;
@@ -558,7 +578,7 @@ export interface components {
         };
         ApiProblem: {
             /** @enum {string} */
-            code: "bootstrap_refused" | "credential_refused" | "signin_refused" | "rate_limited" | "access_denied" | "fresh_assertion_required" | "assertion_refused" | "credentials_minimum" | "credentials_maximum" | "recovery_code_refused" | "recovery_code_superseded" | "tenant_invalid" | "subdomain_refused" | "operation_not_failed" | "tenant_mismatch" | "tenant_not_active" | "tenant_deleted" | "tenant_busy" | "confirmation_mismatch";
+            code: "bootstrap_refused" | "credential_refused" | "signin_refused" | "rate_limited" | "access_denied" | "fresh_assertion_required" | "assertion_refused" | "credentials_minimum" | "credentials_maximum" | "recovery_code_refused" | "recovery_code_superseded" | "enrolment_refused" | "tenant_invalid" | "subdomain_refused" | "operation_not_failed" | "tenant_mismatch" | "tenant_not_active" | "tenant_deleted" | "tenant_busy" | "confirmation_mismatch";
             traceId: string;
         };
         BootstrapClaimRequest: {
@@ -608,6 +628,9 @@ export interface components {
         };
         DeleteTenantRequest: {
             confirmation: string;
+        };
+        EnrolmentRedeemRequest: {
+            enrolment: string;
         };
         FreshAssertionBeginRequest: {
             action: string;
@@ -1557,6 +1580,73 @@ export interface operations {
             200: {
                 headers: {
                     /** @description The recovery Admin Session: __Host-gk-admin={43 base64url characters}; Path=/; Secure; HttpOnly; SameSite=Strict, a browser session cookie with no Domain, Expires or Max-Age. */
+                    "Set-Cookie"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminSignInResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    /** @description Whole seconds until the rate-limit window allows another request. */
+                    "Retry-After": number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    RedeemEnrolment: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EnrolmentRedeemRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    /** @description The setup or recovery Admin Session: __Host-gk-admin={43 base64url characters}; Path=/; Secure; HttpOnly; SameSite=Strict, a browser session cookie with no Domain, Expires or Max-Age. */
                     "Set-Cookie"?: string;
                     [name: string]: unknown;
                 };

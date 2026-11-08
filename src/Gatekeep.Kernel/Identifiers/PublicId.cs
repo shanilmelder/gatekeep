@@ -17,6 +17,12 @@ public enum PublicIdType
     /// one is the unknown-path 404, like an unknown one.
     /// </summary>
     Operation,
+
+    /// <summary>
+    /// <c>adm_</c>: an Admin (Story 1.32), as <c>gatekeep recover-admin --admin</c> takes it and lists
+    /// it. Never their WebAuthn user handle.
+    /// </summary>
+    Admin,
 }
 
 /// <summary>
@@ -41,6 +47,7 @@ public static class PublicId
         PublicIdType.Tenant => "ten",
         PublicIdType.AdminCredential => "acr",
         PublicIdType.Operation => "opr",
+        PublicIdType.Admin => "adm",
         _ => throw new ArgumentOutOfRangeException(nameof(type)),
     };
 

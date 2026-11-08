@@ -93,6 +93,27 @@ The secrets directory is `deploy/secrets` unless `GATEKEEP_SECRETS_DIR` says oth
 
     Finish bootstrap within 15 minutes. If the token expires first, run `init` again: each run replaces the token and voids the one before, until bootstrap is complete, after which `init` refuses and exits `1`. The token file is never copied into an image, a volume or a backup; keep the secrets directory out of backups as for every other secret. Bootstrap itself, which consumes the token, is Story 1.21 and isn't built yet.
 
+## Recover Admin access
+
+`gatekeep recover-admin` (Story 1.32) is the way back in for an Admin who lost every WebAuthn credential, or for the first Admin whose setup Session ended before they registered two. It runs only in the `cli` container, on the Docker host: no route in any host, and no job, issues what it issues. It needs the settings `init`, `alerts test` and `records test` use (see "Alert channel and off-server bucket"), and it is never quiet. In this order, it:
+
+1. finds the Admin. With one Admin, that one; with more, name one with `--admin` and its `adm_` public ID. Without `--admin` it refuses and lists every Admin's public ID. Before bootstrap there is no Admin, and it refuses and points to `gatekeep init`;
+2. sends an `admin.recovery.started` Security Alert through the alert channel and waits for a 2xx;
+3. signs an `admin_recovery` record with `dep-records` and writes it to the off-server bucket, at `records/admin_recovery/{yyyy}/{MM}/{dd}/{recordId}.json`, and waits for the bucket;
+4. only then stores a single-use enrolment, held only as its SHA-256 in `admin_enrolment`, with the `admin.enrolment.issued` audit event, and commits;
+5. prints a link, once: `https://{Admin hostname}/recover#{enrolment}`.
+
+```sh
+docker compose -f deploy/compose.yaml run --rm cli recover-admin
+docker compose -f deploy/compose.yaml run --rm cli recover-admin --admin adm_...
+```
+
+The alert and the record name the Admin, the enrolment and its issue and expiry times, never the enrolment itself. If the alert is refused or unreachable, it exits `1` having written nothing; if the record is refused, or can't be signed, it exits `1` with nothing stored, and the alert that already went out is a false alarm. Either way nothing is printed but the reason. Run it again once the channel or bucket is fixed.
+
+The link works once, for 15 minutes. It names the Admin hostname from `GATEKEEP_ADMIN_HOST`; on a machine where Caddy publishes HTTPS on another port (`GATEKEEP_HTTPS_PORT`), add `:{port}` after the hostname before opening it. The enrolment is in the link's fragment, which the browser never sends, so it reaches no request line or Caddy log; the Recover page reads it, clears it from the address bar and sends it when you press Continue. Using it uses up any other unused link for that Admin, ends every Session that Admin holds, as revoked, and starts one that reaches only credential registration: an Admin who never finished setup registers two credentials, and any other registers one, which makes the Session full and ends the others. WebAuthn stays the only way in. A used, expired or unknown link is refused the same way; run `recover-admin` again for a new one. The lost credentials stay registered: retiring them is Story 8.3.
+
+Anyone with Docker access to the host can run it, which is why it alerts before it issues anything: treat an alert nobody here expected as a compromised host (T-21).
+
 ## Verifying the audit chains
 
 `gatekeep audit verify` walks every audit chain, the Deployment's and each Tenant's, as `gk_cli`, which can only read them. It checks that no row is missing, that each row links to the one before and that each hash recomputes. It prints one line per problem, naming the chain (a Tenant ID or `deployment`), the epoch and the `seq`, never a row's content, then a count, and exits `1` on any problem and `0` when every chain verifies:
@@ -361,6 +382,6 @@ These steps install the stack, not a usable product. What they can't deliver yet
 - **Real client addresses.** No forwarded header is trusted yet, so the hosts see Caddy's address, not the client's (Story 1.20).
 - **IPv6.** The Compose networks are IPv4 only. Add no `AAAA` records.
 - **A real production certificate.** `cloudflare` mode has been validated offline only and has never obtained a real certificate. On the first production start, watch Caddy's log until both certificates are obtained.
-- **Alerts from events, and evidence in the bucket.** Only `alerts test` sends an alert yet: deriving Security Alerts from audit events is Story 11.1, decrypt-rate alerts Story 11.2 and the heartbeat Story 11.3. Only `records test` and the audit shipper write to the bucket: sealed events, revocations and chain heads follow in Story 7.2.
+- **Alerts from events, and evidence in the bucket.** Only `alerts test` and `recover-admin` send alerts yet: deriving Security Alerts from audit events is Story 11.1, decrypt-rate alerts Story 11.2 and the heartbeat Story 11.3. Only `records test`, `recover-admin` and the audit shipper write to the bucket: sealed events, revocations and chain heads follow in Story 7.2.
 - **Audit log rotation.** OpenBao's one audit file grows without bound, and OpenBao refuses every request when it can't write it. Watch the `openbao-audit` volume's size; rotation and a second audit device are deferred.
 - **Backups and upgrades.** No backup, restore or `gatekeep upgrade` yet. Backups must leave the secrets directory out (Epic 12). Signed releases can be installed ("Install a signed release" above), but `gatekeep upgrade`, which will check signatures itself, is Story 12.6.

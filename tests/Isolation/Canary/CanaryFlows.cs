@@ -233,6 +233,13 @@ internal static class CanaryFlows
             ],
             RecoveryCodeAsync),
         new(
+            "admin.enrolment",
+            [
+                new(SurfaceKind.CliCommand, "recover-admin"),
+                new(SurfaceKind.Route, "/api/v1/deployment/signin/enrolment"),
+            ],
+            EnrolmentAsync),
+        new(
             "admin.tenants",
             [
                 new(SurfaceKind.Route, "/api/v1/deployment/tenants"),
@@ -938,6 +945,100 @@ internal static class CanaryFlows
         foreach (var authenticator in authenticators)
         {
             authenticator.Dispose();
+        }
+
+        await host.StopAsync();
+        run.Capture("Admin output", host.Output);
+        Assert.Matches(@"""LogLevel"":""(?:Trace|Debug)""", host.Output);
+    }
+
+    /// <summary>
+    /// Story 1.32's <c>gatekeep recover-admin</c> through the Cli's core, with the alert token, the
+    /// bucket credential and the database password planted, to the AlertSink and the Object Lock
+    /// bucket, then its redemption on the real Host.Admin at Trace. The enrolment's value is planted:
+    /// it must appear in no table, log, alert, record, error or response. Only the Cli's standard
+    /// output holds it, by design, as the link, so it alone is left out. Normally the value is
+    /// redeemed for a recovery Session; failing, the alert is refused, so nothing is issued, and an
+    /// unknown value is refused at redemption.
+    /// </summary>
+    private static async Task EnrolmentAsync(CanaryFlowContext context, FlowRun run, bool failing)
+    {
+        await using var host = await Admins.AdminHost.StartAsync(context.Postgres, null, DebugArguments);
+        run.Database = host.Database;
+        run.Plant("role-password", PostgresFixture.Password);
+        var (cookie, csrf, _) = await host.ClaimedAsync();
+        run.Plant("admin-setup-session-id", cookie);
+        run.Plant("admin-setup-csrf-token", csrf);
+
+        var token = run.Plant("alert-token");
+        await using var sink = await AlertSinkFixture.StartAsync();
+        sink.Status = failing ? 500 : 204;
+        var bucket = context.Bucket;
+        run.Plant("bucket-access-key-id", bucket.AccessKeyId);
+        run.Plant("bucket-secret-key", bucket.SecretAccessKey);
+        using var store = bucket.Store();
+        var output = new StringWriter();
+        var error = new StringWriter();
+
+        var exit = await RecoverAdminCommand.RunAsync(
+            new RecoverAdminOptions
+            {
+                ConnectionString = context.Postgres.RoleConnection(TableRegistry.Cli, host.Database),
+                Alerts = new WebhookAlertOptions { Url = sink.Url, TokenFile = context.File(token.Value + "\n") },
+            },
+            new AlertDeployment("admin.gatekeep-admin.test"),
+            ObjectLockFixture.Permitted(),
+            new SigningCustody(),
+            store,
+            TimeProvider.System,
+            output,
+            error,
+            CanaryFlowContext.Cancellation);
+        run.Capture("recover-admin stderr", error.ToString());
+        var request = Assert.Single(sink.Requests);
+        Assert.Equal($"Bearer {token.Value}", request.Headers["Authorization"]);
+        run.Capture("alert body", Encoding.UTF8.GetString(request.Body));
+        run.Capture("alert headers", string.Join('\n', request.Headers.Where(h => h.Key != "Authorization").Select(h => $"{h.Key}: {h.Value}")));
+
+        if (failing)
+        {
+            Assert.Equal(1, exit);
+            Assert.Equal(RecoverAdminCommand.AlertRejected, error.ToString().Trim());
+            Assert.Empty(output.ToString());
+
+            using var refused = await host.RedeemEnrolmentAsync(run.Plant("unissued-enrolment", Admins.AdminHost.Unissued()).Value);
+            run.Capture("unknown enrolment response", await ResponseTextAsync(refused));
+            Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
+        }
+        else
+        {
+            Assert.Equal(0, exit);
+            // The link is the one place the value is meant to be: standard output, shown once.
+            var printed = output.ToString();
+            var value = Regex.Match(printed, @"/recover#(?<value>[A-Za-z0-9_-]{43})").Groups["value"].Value;
+            run.Plant("admin-enrolment", value);
+
+            var key = Regex.Match(printed, @"(?<key>records/admin_recovery/\S+\.json)").Groups["key"].Value;
+            foreach (var (name, text) in await bucket.DumpAsync(key))
+            {
+                run.Capture(name, text);
+            }
+
+            // The redeem's response holds the new Session by design, so it isn't captured; it mustn't hold the value.
+            using var redeemed = await host.RedeemEnrolmentAsync(value, session: cookie);
+            Assert.Equal(HttpStatusCode.OK, redeemed.StatusCode);
+            var body = await redeemed.Content.ReadAsStringAsync(CanaryFlowContext.Cancellation);
+            Assert.DoesNotContain(value, body, StringComparison.Ordinal);
+            using (var json = System.Text.Json.JsonDocument.Parse(body))
+            {
+                run.Plant("admin-enrolment-csrf-token", json.RootElement.GetProperty("csrfToken").GetString()!);
+            }
+
+            run.Plant("admin-enrolment-session-id", Admins.AdminHost.CookieValue(redeemed, Admins.AdminHost.Cookie)!);
+
+            using var again = await host.RedeemEnrolmentAsync(value);
+            run.Capture("used enrolment response", await ResponseTextAsync(again));
+            Assert.Equal(HttpStatusCode.BadRequest, again.StatusCode);
         }
 
         await host.StopAsync();

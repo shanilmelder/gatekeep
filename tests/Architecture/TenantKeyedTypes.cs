@@ -62,6 +62,8 @@ public static class TenantKeyedTypes
         ["Gatekeep.Modules.Admins.Contracts.AdminsContract.FreshAssertionPolicy"] = KeyScope.DeploymentWide("Fresh assertions per Admin Session; Admins are Deployment-scoped."),
         ["Gatekeep.Modules.Admins.Contracts.AdminsContract.RecoveryCodePolicy"] = KeyScope.DeploymentWide("Admin Recovery Code use per client; Admins are Deployment-scoped."),
         ["Gatekeep.Modules.Admins.Contracts.AdminsContract.RecoveryCodeDeploymentPolicy"] = KeyScope.DeploymentWide("One Deployment-wide cap on Admin Recovery Code use."),
+        ["Gatekeep.Modules.Admins.Contracts.AdminsContract.EnrolmentPolicy"] = KeyScope.DeploymentWide("recover-admin enrolment use per client (Story 1.32); Admins are Deployment-scoped."),
+        ["Gatekeep.Modules.Admins.Contracts.AdminsContract.EnrolmentDeploymentPolicy"] = KeyScope.DeploymentWide("One Deployment-wide cap on recover-admin enrolment use (Story 1.32)."),
     };
 
     /// <summary>
