@@ -131,6 +131,38 @@ public sealed class ClientCredentialsTests(PostgresFixture postgres, OpenBaoFixt
         Assert.Equal(0, host.Custody.Calls(Gatekeep.Kernel.Secrets.KeyOperation.Sign));
     }
 
+    /// <summary>
+    /// Story 2.8 (AD-12): the Tenant's system Application is an unknown client to the token endpoint, with
+    /// any secret, even another client's live one: the same <c>invalid_client</c>, no token row and no event.
+    /// </summary>
+    [Theory]
+    [InlineData("basic")]
+    [InlineData("post")]
+    public async Task System_Application_gets_the_same_invalid_client_as_an_unknown_one(string method)
+    {
+        var (database, a, _) = await TwoTenantsAsync();
+        var client = await database.CreateClientAsync(a.TenantId);
+        var system = PublicId.Format(PublicIdType.Application, await database.EnsureSystemApplicationAsync(a.TenantId));
+        await using var host = await ProtocolHost.StartAsync(database.Hosted, bao);
+        var events = await EventCountAsync(database, a.TenantId);
+
+        using var unknown = await TokenAsync(host, HostA, PublicId.Format(PublicIdType.Application, Guid.CreateVersion7()), client.Secret, method);
+        using var withAnotherSecret = await TokenAsync(host, HostA, system, client.Secret, method);
+        using var withRandomSecret = await TokenAsync(host, HostA, system, WithRandomPart(client.Secret), method);
+
+        foreach (var refused in new[] { unknown, withAnotherSecret, withRandomSecret })
+        {
+            Assert.Equal(HttpStatusCode.Unauthorized, refused.Status);
+            Assert.Equal("invalid_client", refused.Error);
+            Assert.False(refused.Body.RootElement.TryGetProperty("access_token", out _));
+            Assert.Equal(unknown.Body.RootElement.ToString(), refused.Body.RootElement.ToString());
+        }
+
+        Assert.Equal(events, await EventCountAsync(database, a.TenantId));
+        Assert.Equal(0L, await database.ScalarAsync<long>("SELECT count(*) FROM token"));
+        Assert.Equal(0, host.Custody.Calls(Gatekeep.Kernel.Secrets.KeyOperation.Sign));
+    }
+
     [Theory]
     [InlineData("post", null)]
     [InlineData("post", "")]

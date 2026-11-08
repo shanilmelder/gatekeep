@@ -24,6 +24,15 @@ internal sealed class DirectoryService(IAuditAppender audit, TimeProvider time) 
         VALUES (@tenant_id, @id, @name, 'machine', ARRAY['client_credentials']::text[], '{}', @created_at)
         """;
 
+    // grant_types and audiences take their empty defaults, which the system CHECK requires (Story 2.8).
+    // A concurrent insert that won leaves this one doing nothing, so the caller re-selects the winner.
+    private const string InsertSystemApplication =
+        """
+        INSERT INTO application (tenant_id, id, name, kind, created_at)
+        VALUES (@tenant_id, @id, @name, 'system', @created_at)
+        ON CONFLICT (tenant_id) WHERE kind = 'system' DO NOTHING
+        """;
+
     private const string InsertSecret =
         """
         INSERT INTO client_secret (tenant_id, id, application_id, secret_hash, created_at)
@@ -130,6 +139,44 @@ internal sealed class DirectoryService(IAuditAppender audit, TimeProvider time) 
         return matched;
     }
 
+    public async Task<Guid> EnsureSystemApplicationAsync(CommandContext context, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        var tenantId = context.TenantId
+            ?? throw new InvalidOperationException("The system Application is ensured only in a Tenant context.");
+
+        if (await ApplicationRows.FindSystemAsync(context, cancellationToken) is { } existing)
+        {
+            return existing;
+        }
+
+        var now = _time.GetUtcNow();
+        await using (var command = context.CreateCommand())
+        {
+            command.CommandText = InsertSystemApplication;
+            Add(command, "tenant_id", tenantId);
+            Add(command, "id", Guid.CreateVersion7(now));
+            Add(command, "name", DirectoryContract.SystemApplicationName);
+            Add(command, "created_at", now);
+            await command.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        return await ApplicationRows.FindSystemAsync(context, cancellationToken)
+            ?? throw new InvalidOperationException("The Tenant's system Application was neither inserted nor found.");
+    }
+
+    public Task<Guid?> FindSystemApplicationAsync(CommandContext context, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        return ApplicationRows.FindSystemAsync(context, cancellationToken);
+    }
+
+    public Task<IReadOnlyList<DirectoryApplication>> ListApplicationsAsync(CommandContext context, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        return ApplicationRows.ListAsync(context, cancellationToken);
+    }
+
     internal static void Add(DbCommand command, string name, object? value)
     {
         var parameter = command.CreateParameter();
@@ -159,32 +206,79 @@ internal static class ClientSecrets
     public static byte[] Hash(string secret) => SHA256.HashData(Encoding.UTF8.GetBytes(secret));
 }
 
-/// <summary>Reads Applications for OpenIddict (AD-8).</summary>
+/// <summary>
+/// Reads Applications (AD-8). Every query that hands Applications to a caller, OpenIddict's store
+/// included, holds to <see cref="Visible"/>, so the hidden <c>system</c> Application (AD-12, Story 2.8)
+/// is an unknown <c>client_id</c> to OpenIddict and is never listed. Only <see cref="FindSystemAsync"/>
+/// selects it, and returns only its ID.
+/// </summary>
 internal static class ApplicationRows
 {
+    /// <summary>The one predicate that hides the <c>system</c> Application from every caller-facing read.</summary>
+    public const string Visible = "kind <> 'system'";
+
+    private const string Columns = "id, name, grant_types, audiences";
+
     private const string Select =
-        "SELECT id, name, grant_types, audiences FROM application WHERE tenant_id = @tenant_id AND id = @id";
+        $"SELECT {Columns} FROM application WHERE tenant_id = @tenant_id AND id = @id AND {Visible}";
+
+    private const string List =
+        $"SELECT {Columns} FROM application WHERE tenant_id = @tenant_id AND {Visible} ORDER BY created_at, id";
+
+    private const string SelectSystem =
+        "SELECT id FROM application WHERE tenant_id = @tenant_id AND kind = 'system'";
 
     public static async Task<DirectoryApplication?> FindAsync(CommandContext context, Guid id, CancellationToken cancellationToken)
     {
-        var tenantId = context.TenantId
-            ?? throw new InvalidOperationException("Applications are read only in a Tenant context.");
+        var tenantId = TenantOf(context);
 
         await using var command = context.CreateCommand();
         command.CommandText = Select;
         DirectoryService.Add(command, "tenant_id", tenantId);
         DirectoryService.Add(command, "id", id);
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-        if (!await reader.ReadAsync(cancellationToken))
+        return await reader.ReadAsync(cancellationToken) ? Read(reader) : null;
+    }
+
+    public static async Task<IReadOnlyList<DirectoryApplication>> ListAsync(CommandContext context, CancellationToken cancellationToken)
+    {
+        var tenantId = TenantOf(context);
+
+        await using var command = context.CreateCommand();
+        command.CommandText = List;
+        DirectoryService.Add(command, "tenant_id", tenantId);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        var applications = new List<DirectoryApplication>();
+        while (await reader.ReadAsync(cancellationToken))
         {
-            return null;
+            applications.Add(Read(reader));
         }
 
-        return new DirectoryApplication(
+        return applications;
+    }
+
+    public static async Task<Guid?> FindSystemAsync(CommandContext context, CancellationToken cancellationToken)
+    {
+        var tenantId = TenantOf(context);
+
+        await using var command = context.CreateCommand();
+        command.CommandText = SelectSystem;
+        DirectoryService.Add(command, "tenant_id", tenantId);
+        return await command.ExecuteScalarAsync(cancellationToken) is Guid id ? id : null;
+    }
+
+    private static Guid TenantOf(CommandContext context)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        return context.TenantId
+            ?? throw new InvalidOperationException("Applications are read only in a Tenant context.");
+    }
+
+    private static DirectoryApplication Read(DbDataReader reader) =>
+        new(
             reader.GetGuid(0),
             PublicId.Format(PublicIdType.Application, reader.GetGuid(0)),
             reader.GetString(1),
             [.. reader.GetFieldValue<string[]>(2)],
             [.. reader.GetFieldValue<string[]>(3)]);
-    }
 }

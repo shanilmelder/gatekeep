@@ -40,4 +40,30 @@ public interface IDirectory
     /// </summary>
     /// <exception cref="InvalidOperationException">The context has no Tenant.</exception>
     Task<bool> VerifyClientSecretAsync(CommandContext context, string clientId, Secret<string> secret, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Makes sure the context's Tenant has its one hidden <c>system</c> Application (AD-12, AR-43, Story 2.8),
+    /// the one Portal sign-in binds its <c>signin_transaction</c> to: inserts it, named
+    /// <see cref="DirectoryContract.SystemApplicationName"/>, with no grant, audience or secret, only if the
+    /// Tenant has none, and returns its ID either way. It writes no audit event: the Tenant's
+    /// <c>tenancy.tenant.activated</c>, in the same transaction, records the creation, and a Log event naming
+    /// the hidden Application would expose it.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The context has no Tenant. Nothing is written.</exception>
+    [StateChanging]
+    Task<Guid> EnsureSystemApplicationAsync(CommandContext context, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// The ID of the context Tenant's <c>system</c> Application, or null when it has none (Story 2.8). It
+    /// only reads, and is the only query that selects that row: every other read hides it.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The context has no Tenant.</exception>
+    Task<Guid?> FindSystemApplicationAsync(CommandContext context, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// The context Tenant's Applications, ordered by creation time then ID. The <c>system</c> Application is
+    /// never among them (AD-12). It only reads.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The context has no Tenant.</exception>
+    Task<IReadOnlyList<DirectoryApplication>> ListApplicationsAsync(CommandContext context, CancellationToken cancellationToken);
 }

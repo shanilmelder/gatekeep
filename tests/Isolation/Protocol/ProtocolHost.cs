@@ -171,6 +171,17 @@ internal sealed class ProtocolDatabase(PostgresFixture postgres, string name)
         return (created.ApplicationId, created.ClientId, created.Secret.Use(static s => s));
     }
 
+    /// <summary>The Tenant's hidden system Application (Story 2.8), written the one Directory way, as <c>gk_worker</c> as Tenant creation does.</summary>
+    public async Task<Guid> EnsureSystemApplicationAsync(Guid tenantId)
+    {
+        await using var source = NpgsqlDataSource.Create(postgres.RoleConnection(TableRegistry.Worker, Name));
+        await using var scope = await TenantScope.BeginAsync(source, tenantId, TestContext.Current.CancellationToken);
+        var id = await DirectoryContract.CreateDirectory(AuditContract.CreateAppender(), TimeProvider.System)
+            .EnsureSystemApplicationAsync(scope.CreateCommandContext(), TestContext.Current.CancellationToken);
+        await scope.CommitAsync(TestContext.Current.CancellationToken);
+        return id;
+    }
+
     /// <summary>Runs the one Keys provisioning path as <c>gk_worker</c>, with the Worker's custody login.</summary>
     public async Task<bool> ProvisionAsync(OpenBaoFixture bao, Guid tenantId, IKeyCustody? custody = null)
     {

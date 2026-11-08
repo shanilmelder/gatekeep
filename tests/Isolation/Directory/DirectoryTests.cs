@@ -1,12 +1,15 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
+using Gatekeep.Adapters.Postgres.Migrations;
 using Gatekeep.Adapters.Postgres.Schema;
 using Gatekeep.Kernel.Identifiers;
 using Gatekeep.Kernel.Persistence;
 using Gatekeep.Kernel.Secrets;
 using Gatekeep.Modules.Audit.Contracts;
 using Gatekeep.Modules.Directory.Contracts;
+using Microsoft.EntityFrameworkCore.Migrations;
+using Microsoft.EntityFrameworkCore.Migrations.Operations;
 using Npgsql;
 using Xunit;
 
@@ -16,14 +19,23 @@ namespace Gatekeep.Tests.Isolation.Applications;
 /// Story 2.5 (AD-8, AD-9, AD-24, AD-27): Directory's Applications and client secrets. A machine client
 /// is created in one command with its event, its secret is <c>{tenantPublicId}.{random}</c> shown once
 /// and stored only as its SHA-256, and only a live secret of that Application, in that Tenant, verifies.
-/// The tables hold every role to its grants and every Tenant to its own rows.
+/// The tables hold every role to its grants and every Tenant to its own rows. Story 2.8 (AD-12, AR-43):
+/// each Tenant's one hidden <c>system</c> Application, which no read but its own lookup returns, nothing
+/// may name but a sign-in transaction, and nothing but its Tenant's deletion may change or delete.
 /// </summary>
 public sealed class DirectoryTests(PostgresFixture postgres)
 {
     private const string PermissionDenied = "42501";
 
+    /// <summary>Story 2.8's guards: a row naming the system Application, its edit, and its delete outside a Tenant deletion.</summary>
+    private const string SystemApplicationNamed = "GK011";
+    private const string SystemApplicationEdited = "GK012";
+    private const string SystemApplicationDeleted = "GK013";
+
     private static readonly Guid TenantA = Guid.Parse("01900000-0000-7000-8000-0000000025d1");
     private static readonly Guid TenantB = Guid.Parse("01900000-0000-7000-8000-0000000025d2");
+    private static readonly Guid TenantC = Guid.Parse("01900000-0000-7000-8000-0000000025d3");
+    private static readonly Guid TenantD = Guid.Parse("01900000-0000-7000-8000-0000000025d4");
 
     private static readonly Regex SecretShape = new(@"\Aten_[a-z2-7]{26}\.[A-Za-z0-9_-]{43}\z", RegexOptions.Compiled);
 
@@ -42,6 +54,8 @@ public sealed class DirectoryTests(PostgresFixture postgres)
         { TableRegistry.Admin, "UPDATE client_secret SET expires_at = NULL" },
         { TableRegistry.Admin, "DELETE FROM application" },
         { TableRegistry.Worker, "SELECT name FROM application" },
+        { TableRegistry.Worker, "SELECT grant_types FROM application" },
+        { TableRegistry.Worker, "UPDATE application SET name = 'x'" },
         { TableRegistry.Worker, "SELECT secret_hash FROM client_secret" },
         { TableRegistry.Dispatch, "SELECT count(*) FROM application" },
         { TableRegistry.Sealer, "SELECT count(*) FROM client_secret" },
@@ -170,6 +184,8 @@ public sealed class DirectoryTests(PostgresFixture postgres)
     [InlineData("INSERT INTO application (tenant_id, id, name, kind, grant_types, created_at) VALUES ('{0}', gen_random_uuid(), 'x', 'machine', ARRAY['password'], now())")]
     [InlineData("INSERT INTO application (tenant_id, id, name, kind, created_at) VALUES ('{0}', gen_random_uuid(), '', 'machine', now())")]
     [InlineData("INSERT INTO client_secret (tenant_id, id, application_id, secret_hash, created_at) VALUES ('{0}', gen_random_uuid(), '{1}', decode(repeat('00', 31), 'hex'), now())")]
+    [InlineData("INSERT INTO application (tenant_id, id, name, kind, grant_types, created_at) VALUES ('{0}', gen_random_uuid(), 'x', 'system', ARRAY['client_credentials'], now())")]
+    [InlineData("INSERT INTO application (tenant_id, id, name, kind, audiences, created_at) VALUES ('{0}', gen_random_uuid(), 'x', 'system', ARRAY['https://api.test'], now())")]
     public async Task Each_check_refuses_a_row_that_breaks_it(string statement)
     {
         var database = await DatabaseAsync();
@@ -189,6 +205,306 @@ public sealed class DirectoryTests(PostgresFixture postgres)
         var error = await Assert.ThrowsAsync<PostgresException>(() => PostgresFixture.ExecuteAsync(
             postgres.SuperuserConnection(database), $"DELETE FROM application WHERE id = '{created.ApplicationId}'"));
         Assert.Equal(PostgresErrorCodes.RestrictViolation, error.SqlState);
+    }
+
+    // Story 2.8 (AD-12, AR-43): each Tenant's one hidden system Application.
+
+    [Fact]
+    public async Task Ensuring_writes_one_bare_system_Application_and_returns_it_again()
+    {
+        var database = await DatabaseAsync();
+
+        var id = await EnsureAsync(database, TenantA);
+        var again = await EnsureAsync(database, TenantA);
+
+        Assert.Equal(id, again);
+        Assert.Equal(7, id.Version);
+        var superuser = postgres.SuperuserConnection(database);
+        Assert.Equal(1L, await PostgresFixture.ScalarAsync<long>(superuser, $"SELECT count(*) FROM application WHERE tenant_id = '{TenantA}'"));
+        Assert.Equal(1L, await CountAsync(
+            superuser,
+            "SELECT count(*) FROM application WHERE id = @id AND kind = 'system' AND name = @name AND grant_types = '{}' AND audiences = '{}'",
+            ("id", id),
+            ("name", DirectoryContract.SystemApplicationName)));
+        Assert.Equal(0L, await PostgresFixture.ScalarAsync<long>(superuser, "SELECT count(*) FROM client_secret"));
+
+        // No audit event: the Tenant's activation records it, and a Log event would expose it.
+        Assert.Equal(0L, await PostgresFixture.ScalarAsync<long>(superuser, "SELECT count(*) FROM audit_event"));
+        Assert.Equal(id, await InTenantAsync(database, TableRegistry.Hosted, TenantA, c => _directory.FindSystemApplicationAsync(c, Cancellation)));
+    }
+
+    [Fact]
+    public async Task Every_system_Application_method_needs_a_Tenant()
+    {
+        var database = await DatabaseAsync();
+        await using var source = NpgsqlDataSource.Create(postgres.RoleConnection(TableRegistry.Worker, database));
+        await using var scope = await DeploymentScope.BeginAsync(source, Cancellation);
+        var context = scope.CreateCommandContext();
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => _directory.EnsureSystemApplicationAsync(context, Cancellation));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => _directory.FindSystemApplicationAsync(context, Cancellation));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => _directory.ListApplicationsAsync(context, Cancellation));
+        await scope.CommitAsync(Cancellation);
+
+        Assert.Equal(0L, await PostgresFixture.ScalarAsync<long>(postgres.SuperuserConnection(database), "SELECT count(*) FROM application"));
+    }
+
+    [Fact]
+    public async Task Listing_returns_only_the_machine_Applications_in_creation_order()
+    {
+        var database = await DatabaseAsync();
+        var first = await CreateAsync(database, TenantA, "First");
+        await EnsureAsync(database, TenantA);
+        var second = await CreateAsync(database, TenantA, "Second");
+        await CreateAsync(database, TenantB, "Other Tenant's");
+
+        var listed = await InTenantAsync(database, TableRegistry.Hosted, TenantA, c => _directory.ListApplicationsAsync(c, Cancellation));
+
+        Assert.Equal([first.ApplicationId, second.ApplicationId], listed.Select(a => a.Id));
+        Assert.Equal(["First", "Second"], listed.Select(a => a.Name));
+        Assert.Equal([first.ClientId, second.ClientId], listed.Select(a => a.ClientId));
+    }
+
+    [Fact]
+    public async Task OpenIddicts_store_finds_no_system_Application()
+    {
+        var database = await DatabaseAsync();
+        var machine = await CreateAsync(database, TenantA);
+        var id = await EnsureAsync(database, TenantA);
+
+        await using var source = NpgsqlDataSource.Create(postgres.RoleConnection(TableRegistry.Hosted, database));
+        await using var scope = await TenantScope.BeginAsync(source, TenantA, Cancellation);
+        var context = scope.CreateCommandContext();
+        var store = DirectoryContract.CreateApplicationStore(() => context);
+
+        Assert.Null(await store.FindByIdAsync(id.ToString(), Cancellation));
+        Assert.Null(await store.FindByClientIdAsync(PublicId.Format(PublicIdType.Application, id), Cancellation));
+        Assert.Equal(machine.ApplicationId, (await store.FindByClientIdAsync(machine.ClientId, Cancellation))!.Id);
+        Assert.Equal(machine.ApplicationId, (await store.FindByIdAsync(machine.ApplicationId.ToString(), Cancellation))!.Id);
+    }
+
+    [Fact]
+    public async Task A_second_system_Application_is_refused()
+    {
+        var database = await DatabaseAsync();
+        await EnsureAsync(database, TenantA);
+
+        var error = await Assert.ThrowsAsync<PostgresException>(() => PostgresFixture.ExecuteAsync(
+            postgres.SuperuserConnection(database),
+            $"INSERT INTO application (tenant_id, id, name, kind, created_at) VALUES ('{TenantA}', gen_random_uuid(), 'Second', 'system', now())"));
+        Assert.Equal(PostgresErrorCodes.UniqueViolation, error.SqlState);
+        Assert.Equal("application_one_system", error.ConstraintName);
+    }
+
+    /// <summary>The User and Session an <c>"authorization"</c> row in Tenant <c>{0}</c> anchors to, so only its Application can fail.</summary>
+    private const string SessionIn =
+        """
+        INSERT INTO "user" (tenant_id, id) VALUES ('{0}', '01900000-0000-7000-8000-0000000028a1');
+        INSERT INTO user_session (tenant_id, id, user_id, id_hash, amr, auth_time, idle_expires_at, absolute_expires_at, created_at)
+          VALUES ('{0}', '01900000-0000-7000-8000-0000000028a2', '01900000-0000-7000-8000-0000000028a1', sha256('s'::bytea), '{{pwd}}', now(), now() + interval '1 hour', now() + interval '1 hour', now());
+        """;
+
+    [Theory]
+    [InlineData("client_secret", "", "INSERT INTO client_secret (tenant_id, id, application_id, secret_hash, created_at) VALUES ('{0}', gen_random_uuid(), '{1}', sha256('x'::bytea), now())")]
+    [InlineData("authorization", SessionIn, "INSERT INTO \"authorization\" (tenant_id, id, application_id, user_session_id, status, type, concurrency_token) VALUES ('{0}', gen_random_uuid(), '{1}', '01900000-0000-7000-8000-0000000028a2', 'valid', 'ad-hoc', gen_random_uuid())")]
+    [InlineData("token", "", "INSERT INTO token (tenant_id, id, application_id, type, status, concurrency_token) VALUES ('{0}', gen_random_uuid(), '{1}', 'access_token', 'valid', gen_random_uuid())")]
+    public async Task No_secret_authorization_or_token_may_name_the_system_Application(string table, string setup, string insert)
+    {
+        var database = await DatabaseAsync();
+        var id = await EnsureAsync(database, TenantA);
+        var superuser = postgres.SuperuserConnection(database);
+        if (setup.Length > 0)
+        {
+            await PostgresFixture.ExecuteAsync(superuser, string.Format(System.Globalization.CultureInfo.InvariantCulture, setup, TenantA));
+        }
+
+        var error = await Assert.ThrowsAsync<PostgresException>(() => PostgresFixture.ExecuteAsync(
+            superuser, string.Format(System.Globalization.CultureInfo.InvariantCulture, insert, TenantA, id)));
+
+        Assert.True(error.SqlState == SystemApplicationNamed, $"{table}: {error.SqlState}");
+        Assert.Equal(0L, await PostgresFixture.ScalarAsync<long>(superuser, $"SELECT count(*) FROM \"{table}\""));
+    }
+
+    /// <summary>Host.Hosted may update <c>"authorization"</c> and <c>token</c> rows: no update may point one at the system Application.</summary>
+    [Theory]
+    [InlineData("authorization", SessionIn, "INSERT INTO \"authorization\" (tenant_id, id, application_id, user_session_id, status, type, concurrency_token) VALUES ('{0}', '01900000-0000-7000-8000-0000000028b1', '{1}', '01900000-0000-7000-8000-0000000028a2', 'valid', 'ad-hoc', gen_random_uuid())")]
+    [InlineData("token", "", "INSERT INTO token (tenant_id, id, application_id, type, status, concurrency_token) VALUES ('{0}', '01900000-0000-7000-8000-0000000028b1', '{1}', 'access_token', 'valid', gen_random_uuid())")]
+    public async Task No_update_may_point_an_authorization_or_token_at_the_system_Application(string table, string setup, string insert)
+    {
+        var database = await DatabaseAsync();
+        var machine = await CreateAsync(database, TenantA);
+        var id = await EnsureAsync(database, TenantA);
+        var superuser = postgres.SuperuserConnection(database);
+        if (setup.Length > 0)
+        {
+            await PostgresFixture.ExecuteAsync(superuser, string.Format(System.Globalization.CultureInfo.InvariantCulture, setup, TenantA));
+        }
+
+        await PostgresFixture.ExecuteAsync(superuser, string.Format(System.Globalization.CultureInfo.InvariantCulture, insert, TenantA, machine.ApplicationId));
+
+        var error = await Assert.ThrowsAsync<PostgresException>(() => InTenantAsync(database, TableRegistry.Hosted, TenantA, async c =>
+        {
+            await using var command = c.CreateCommand();
+            command.CommandText = $"UPDATE \"{table}\" SET application_id = '{id}' WHERE id = '01900000-0000-7000-8000-0000000028b1'";
+            return await command.ExecuteNonQueryAsync(Cancellation);
+        }));
+
+        Assert.True(error.SqlState == SystemApplicationNamed, $"{table}: {error.SqlState}");
+        Assert.Equal(1L, await PostgresFixture.ScalarAsync<long>(
+            superuser, $"SELECT count(*) FROM \"{table}\" WHERE application_id = '{machine.ApplicationId}'"));
+    }
+
+    [Fact]
+    public async Task A_signin_transaction_binds_to_the_system_Application()
+    {
+        var database = await DatabaseAsync();
+        var id = await EnsureAsync(database, TenantA);
+
+        var inserted = await InTenantAsync(database, TableRegistry.Hosted, TenantA, async c =>
+        {
+            await using var command = c.CreateCommand();
+            command.CommandText =
+                "INSERT INTO signin_transaction (tenant_id, id, application_id, binding_hash, parameters, created_at, expires_at) " +
+                $"VALUES ('{TenantA}', gen_random_uuid(), '{id}', sha256(gen_random_uuid()::text::bytea), '{{}}', now(), now() + interval '1 minute')";
+            return await command.ExecuteNonQueryAsync(Cancellation);
+        });
+
+        Assert.Equal(1, inserted);
+        Assert.Equal(1L, await PostgresFixture.ScalarAsync<long>(
+            postgres.SuperuserConnection(database), $"SELECT count(*) FROM signin_transaction WHERE application_id = '{id}'"));
+    }
+
+    [Theory]
+    [InlineData("UPDATE application SET name = 'Renamed' WHERE kind = 'system'")]
+    [InlineData("UPDATE application SET created_at = now() WHERE kind = 'system'")]
+    [InlineData("UPDATE application SET kind = 'system' WHERE kind = 'machine'")]
+    public async Task The_system_Application_is_never_edited_even_by_the_owner(string statement)
+    {
+        var database = await DatabaseAsync();
+        await CreateAsync(database, TenantB);
+        await EnsureAsync(database, TenantA);
+        var superuser = postgres.SuperuserConnection(database);
+        const string Rows = "SELECT string_agg(to_jsonb(r)::text, ',' ORDER BY id) FROM application r";
+        var before = await PostgresFixture.ScalarAsync<string>(superuser, Rows);
+
+        var error = await Assert.ThrowsAsync<PostgresException>(() => PostgresFixture.ExecuteAsync(superuser, statement));
+
+        Assert.Equal(SystemApplicationEdited, error.SqlState);
+        Assert.Equal(before, await PostgresFixture.ScalarAsync<string>(superuser, Rows));
+    }
+
+    [Theory]
+    [InlineData(TableRegistry.Hosted)]
+    [InlineData(TableRegistry.Admin)]
+    [InlineData(TableRegistry.Worker)]
+    public async Task No_role_may_update_the_system_Application(string role)
+    {
+        var database = await DatabaseAsync();
+        await EnsureAsync(database, TenantA);
+        await using var source = NpgsqlDataSource.Create(postgres.RoleConnection(role, database));
+        await using var scope = await TenantScope.BeginAsync(source, TenantA, Cancellation);
+        await using var command = scope.CreateCommandContext().CreateCommand();
+        command.CommandText = "UPDATE application SET name = 'Renamed'";
+
+        var error = await Assert.ThrowsAsync<PostgresException>(() => command.ExecuteNonQueryAsync(Cancellation));
+        Assert.Equal(PermissionDenied, error.SqlState);
+    }
+
+    [Fact]
+    public async Task Only_its_Tenants_deletion_deletes_the_system_Application()
+    {
+        var database = await DatabaseAsync();
+        await EnsureAsync(database, TenantA);
+        var superuser = postgres.SuperuserConnection(database);
+
+        var error = await Assert.ThrowsAsync<PostgresException>(() => InTenantAsync(database, TableRegistry.Worker, TenantA, async c =>
+        {
+            await using var command = c.CreateCommand();
+            command.CommandText = $"DELETE FROM application WHERE tenant_id = '{TenantA}'";
+            return await command.ExecuteNonQueryAsync(Cancellation);
+        }));
+        Assert.Equal(SystemApplicationDeleted, error.SqlState);
+        Assert.Equal(1L, await PostgresFixture.ScalarAsync<long>(superuser, $"SELECT count(*) FROM application WHERE tenant_id = '{TenantA}'"));
+
+        // Once its deletion has started, Directory's purge deletes it.
+        await PostgresFixture.ExecuteAsync(
+            superuser,
+            $"SET session_replication_role = replica; UPDATE tenant SET status = 'deleting' WHERE id = '{TenantA}'; SET session_replication_role = DEFAULT");
+        await InTenantAsync(database, TableRegistry.Worker, TenantA, async c =>
+        {
+            await DirectoryContract.TenantPurge.PurgeAsync(c, Cancellation);
+            return 0;
+        });
+        Assert.Equal(0L, await PostgresFixture.ScalarAsync<long>(superuser, $"SELECT count(*) FROM application WHERE tenant_id = '{TenantA}'"));
+    }
+
+    [Fact]
+    public async Task Another_Tenant_can_neither_see_nor_find_the_system_Application()
+    {
+        var database = await DatabaseAsync();
+        var id = await EnsureAsync(database, TenantA);
+
+        Assert.Null(await InTenantAsync(database, TableRegistry.Hosted, TenantB, c => _directory.FindSystemApplicationAsync(c, Cancellation)));
+        Assert.Empty(await InTenantAsync(database, TableRegistry.Hosted, TenantB, c => _directory.ListApplicationsAsync(c, Cancellation)));
+        Assert.Equal(0L, await InTenantAsync(database, TableRegistry.Worker, TenantB, async c =>
+        {
+            await using var command = c.CreateCommand();
+            command.CommandText = $"SELECT count(*) FROM application WHERE id = '{id}' OR kind = 'system'";
+            return (long)(await command.ExecuteScalarAsync(Cancellation))!;
+        }));
+
+        // Tenant B's own is another row, and A's is unchanged.
+        var other = await EnsureAsync(database, TenantB);
+        Assert.NotEqual(id, other);
+        Assert.Equal(id, await EnsureAsync(database, TenantA));
+    }
+
+    /// <summary>
+    /// The migration's backfill, rendered through the same <c>ForEachTenant</c> the migration calls and run as
+    /// the migrator over Tenants seeded after migrating: no hook migrates only up to the migration before it.
+    /// </summary>
+    [Fact]
+    public async Task Backfill_gives_each_creating_or_active_Tenant_without_one_exactly_one_system_Application()
+    {
+        var database = await DatabaseAsync();
+        var superuser = postgres.SuperuserConnection(database);
+        await TestTenants.InsertAsync(superuser, TenantC, status: "deleting");
+        await TestTenants.InsertAsync(superuser, TenantD, status: "creating");
+        var existing = await EnsureAsync(database, TenantA);
+
+        var builder = new MigrationBuilder("Npgsql.EntityFrameworkCore.PostgreSQL");
+        builder.ForEachTenant(Migration20261109000000AddSystemApplication.Backfill);
+        var sql = Assert.IsType<SqlOperation>(Assert.Single(builder.Operations)).Sql;
+
+        // The migration's Up() runs exactly that statement, last.
+        var migration = new Migration20261109000000AddSystemApplication { ActiveProvider = "Npgsql.EntityFrameworkCore.PostgreSQL" };
+        Assert.Equal(sql, Assert.IsType<SqlOperation>(migration.UpOperations[^1]).Sql);
+
+        await PostgresFixture.ExecuteAsync(postgres.RoleConnection(TableRegistry.Migrator, database), sql);
+        await PostgresFixture.ExecuteAsync(postgres.RoleConnection(TableRegistry.Migrator, database), sql);
+
+        Assert.Equal(existing, await PostgresFixture.ScalarAsync<Guid>(superuser, $"SELECT id FROM application WHERE tenant_id = '{TenantA}' AND kind = 'system'"));
+        Assert.Equal(1L, await CountAsync(
+            superuser,
+            $"SELECT count(*) FROM application WHERE tenant_id = '{TenantB}' AND kind = 'system' AND name = @name AND grant_types = '{{}}' AND audiences = '{{}}'",
+            ("name", DirectoryContract.SystemApplicationName)));
+        Assert.Equal(7, (await PostgresFixture.ScalarAsync<Guid>(superuser, $"SELECT id FROM application WHERE tenant_id = '{TenantB}' AND kind = 'system'")).Version);
+        Assert.Equal(0L, await PostgresFixture.ScalarAsync<long>(superuser, $"SELECT count(*) FROM application WHERE tenant_id = '{TenantC}'"));
+        Assert.Equal(1L, await PostgresFixture.ScalarAsync<long>(superuser, $"SELECT count(*) FROM application WHERE tenant_id = '{TenantD}' AND kind = 'system'"));
+        Assert.Equal(3L, await PostgresFixture.ScalarAsync<long>(superuser, "SELECT count(*) FROM application"));
+        Assert.Equal(0L, await PostgresFixture.ScalarAsync<long>(superuser, "SELECT count(*) FROM audit_event"));
+    }
+
+    private async Task<Guid> EnsureAsync(string database, Guid tenantId) =>
+        await InTenantAsync(database, TableRegistry.Worker, tenantId, c => _directory.EnsureSystemApplicationAsync(c, Cancellation));
+
+    private async Task<T> InTenantAsync<T>(string database, string role, Guid tenantId, Func<CommandContext, Task<T>> body)
+    {
+        await using var source = NpgsqlDataSource.Create(postgres.RoleConnection(role, database));
+        await using var scope = await TenantScope.BeginAsync(source, tenantId, Cancellation);
+        var result = await body(scope.CreateCommandContext());
+        await scope.CommitAsync(Cancellation);
+        return result;
     }
 
     private async Task<string> DatabaseAsync()
