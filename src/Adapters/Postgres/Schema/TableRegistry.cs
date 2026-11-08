@@ -552,6 +552,44 @@ public static class TableRegistry
             [Hosted] = [Select],
             [Worker] = [Select, Insert, Delete],
         }, Triggers: ["protection_key_wrap_guard_delete", "tenant_row_guard"]),
+
+        // Story 2.5 (AD-8, AD-9, AD-24): each Tenant's Applications and their client secrets, a secret
+        // only as its SHA-256. Host.Admin creates them (Epic 3 adds the API, rotation and revocation);
+        // Host.Hosted only reads them, to authenticate a client. No role updates one yet, and only a
+        // Tenant's deletion deletes (Story 1.29): its Operation's purges, reading only tenant_id.
+        new("application", TableClass.Tenant, "Directory", TableUse.Configuration, new Dictionary<string, IReadOnlyList<string>>
+        {
+            [Hosted] = [Select],
+            [Admin] = [Select, Insert],
+            [Worker] = [Delete],
+        }, PurgeColumns, RowGuard),
+        new("client_secret", TableClass.Tenant, "Directory", TableUse.Configuration, new Dictionary<string, IReadOnlyList<string>>
+        {
+            [Hosted] = [Select],
+            [Admin] = [Select, Insert],
+            [Worker] = [Delete],
+        }, PurgeColumns, RowGuard),
+
+        // Story 2.5 (AD-14): Tenant attempt counters, such as token requests per Tenant and per source,
+        // and cross-Tenant mismatches per source. Host.Hosted counts; only a Tenant's deletion deletes.
+        new(
+            "tenant_attempt",
+            TableClass.Tenant,
+            "Authentication",
+            TableUse.Runtime,
+            new Dictionary<string, IReadOnlyList<string>>
+            {
+                [Hosted] = [Select, Insert],
+                [Worker] = [Delete],
+            },
+            new Dictionary<string, IReadOnlyList<ColumnGrant>>
+            {
+                // Counting: the window and the count. Never the Tenant, policy or subject.
+                [Hosted] = [new ColumnGrant(Update, ["window_start", "attempts"])],
+                [Worker] = [new ColumnGrant(Select, ["tenant_id"])],
+            },
+            RowGuard,
+            Unlogged: true),
     ];
 
     private static IReadOnlyList<string> EventTriggers(string table) =>

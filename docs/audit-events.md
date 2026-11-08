@@ -27,6 +27,7 @@ Every audit type code Gatekeep writes, declared in its module's contract. Codes 
 | `bootstrap.admin.created` | Admins | The bootstrap token was claimed: the first Admin was created as Deployment Owner and bootstrap completed. Holds no token or hash. | None |
 | `bootstrap.token.issued` | Admins | gatekeep init issued the first one-time bootstrap token. It expires 15 minutes after issue. Holds no token or hash. | None |
 | `bootstrap.token.reissued` | Admins | gatekeep init reissued the bootstrap token, voiding the previous one. It expires 15 minutes after issue. Holds no token or hash. | None |
+| `directory.application.created` | Directory | An Application was created with its first client secret. Names the Application only: the secret is stored only as its hash. | None |
 | `keys.signing_key.created` | Keys | A Tenant's replacement next Signing or Management key was created in key custody. Names no key. | None |
 | `keys.signing_key.destroyed` | Keys | A Tenant's retired Signing or Management key was destroyed in key custody. Names no key. | None |
 | `keys.signing_key.destruction_failed` | Keys | Key custody failed to destroy a Tenant's retired Signing or Management key; the destruction retries. Names no key. | None |
@@ -37,6 +38,7 @@ Every audit type code Gatekeep writes, declared in its module's contract. Codes 
 | `keys.transit_key.swept` | Keys | A Signing or Management key at least 24 hours old, named by no row when checked, was deleted from key custody. Names no key. | None |
 | `operations.job.dead` | Operations | A job used its last attempt and went dead. Only its fixed failure code is kept. | None |
 | `operations.operation.retried` | Operations | An Admin retried a failed Operation's failed steps. Names the Operation's Tenant only, when it has one. | None |
+| `protocol.client.cross_tenant_rejected` | Protocol | A client credential issued by another Tenant was refused at this Tenant's token endpoint. Names nothing of the other Tenant. | Rejected cross-Tenant attempts |
 | `sessions.access.revoked` | Sessions | Sessions in scope ended and their Token Families and tokens were revoked. User scope targets the User. | Session and token revocation |
 | `sessions.session.started` | Sessions | A User's Session started. Names the User only: the Session ID is stored only as its hash. | None |
 | `tenancy.tenant.activated` | Tenancy | A Tenant's creation Operation succeeded: its settings exist and its Tenant Subdomain now resolves. | None |
@@ -62,4 +64,4 @@ Each class a Tenant's Log must cover, and the codes that prove it. A pending cla
 | Key operations | None yet | Pending: Story 9.2 |
 | Management API grants | None yet | Pending: Story 17.2 |
 | Token Family revocations | None yet | Pending: Story 2.10 |
-| Rejected cross-Tenant attempts | None yet | Pending: Story 7.4 |
+| Rejected cross-Tenant attempts | `protocol.client.cross_tenant_rejected` | Proved |

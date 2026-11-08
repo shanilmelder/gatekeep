@@ -49,8 +49,9 @@ public static class TenantKeyedTypes
 
     /// <summary>
     /// Every static <c>RateLimitPolicy</c> field in <c>src</c>, as <c>{declaring type}.{field}</c>.
-    /// Every policy today counts Deployment-scoped Admin attempts in <c>admin_attempt</c>, and the
-    /// Admins limiter throws on a Tenant context. Story 2.5 adds the Tenant counters (AD-14), and Epic 10 builds sign-in backoff on them.
+    /// The Admins policies count Deployment-scoped Admin attempts in <c>admin_attempt</c>, and the
+    /// Admins limiter throws on a Tenant context. Story 2.5's Authentication policies count in each Tenant's own
+    /// <c>tenant_attempt</c> rows (AD-14), and Epic 10 builds sign-in backoff on them.
     /// </summary>
     public static readonly IReadOnlyDictionary<string, KeyScope> RateLimitPolicies = new Dictionary<string, KeyScope>(StringComparer.Ordinal)
     {
@@ -62,6 +63,12 @@ public static class TenantKeyedTypes
         ["Gatekeep.Modules.Admins.Contracts.AdminsContract.FreshAssertionPolicy"] = KeyScope.DeploymentWide("Fresh assertions per Admin Session; Admins are Deployment-scoped."),
         ["Gatekeep.Modules.Admins.Contracts.AdminsContract.RecoveryCodePolicy"] = KeyScope.DeploymentWide("Admin Recovery Code use per client; Admins are Deployment-scoped."),
         ["Gatekeep.Modules.Admins.Contracts.AdminsContract.RecoveryCodeDeploymentPolicy"] = KeyScope.DeploymentWide("One Deployment-wide cap on Admin Recovery Code use."),
+        ["Gatekeep.Modules.Authentication.Contracts.AuthenticationContract.TokenRequestTenantPolicy"] = KeyScope.Tenant,
+        ["Gatekeep.Modules.Authentication.Contracts.AuthenticationContract.TokenRequestSourcePolicy"] = KeyScope.Tenant,
+        ["Gatekeep.Modules.Authentication.Contracts.AuthenticationContract.CrossTenantMismatchPolicy"] = KeyScope.Tenant,
+        ["Gatekeep.Modules.Authentication.Contracts.AuthenticationContract.CrossTenantMismatchLogPolicy"] = KeyScope.Tenant,
+        ["Gatekeep.Modules.Protocol.Contracts.TokenRequestLimits.Tenant"] = KeyScope.Tenant,
+        ["Gatekeep.Modules.Protocol.Contracts.TokenRequestLimits.Source"] = KeyScope.Tenant,
         ["Gatekeep.Modules.Admins.Contracts.AdminsContract.EnrolmentPolicy"] = KeyScope.DeploymentWide("recover-admin enrolment use per client (Story 1.32); Admins are Deployment-scoped."),
         ["Gatekeep.Modules.Admins.Contracts.AdminsContract.EnrolmentDeploymentPolicy"] = KeyScope.DeploymentWide("One Deployment-wide cap on recover-admin enrolment use (Story 1.32)."),
     };

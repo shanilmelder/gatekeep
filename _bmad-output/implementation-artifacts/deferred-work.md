@@ -94,6 +94,7 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-2-6-add-session-and-transaction-tables.md`
   summary: Add `(tenant_id, application_id) REFERENCES application (tenant_id, id) ON DELETE RESTRICT` on `signin_transaction`, `authorization` and `token` in Story 2.5's migration.
   evidence: Story 2.6 created those columns with no foreign key, because the `application` table is Story 2.5's (user decision, 2026-11-02).
+  status: done in Story 2.5. `Migration20261106000000CreateDirectoryTables` adds all three, validating any existing rows; `ClientCredentialsTests` covers the 23503.
 - source_spec: `_bmad-output/implementation-artifacts/spec-2-6-add-session-and-transaction-tables.md`
   summary: Narrow `gk_hosted` UPDATE on `user_session`, `signin_transaction`, `authorization` and `token` to the columns that change, once Story 2.9's stores and Story 2.7's revocation define them.
   evidence: Story 2.6 grants table-wide UPDATE, so the Hosted path could rewrite `id_hash`, `binding_hash` or `user_id`.
@@ -377,6 +378,7 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-2-3-publish-discovery-and-jwks-per-tenant.md`
   summary: A test that concurrent cold requests share one Tenant runtime build, alongside Story 2.5's token-endpoint load test.
   evidence: Story 2.3 review: every Protocol test sends requests one at a time.
+  status: done in Story 2.5. `ClientCredentialsTests.Fifty_concurrent_requests_on_a_cold_runtime_all_get_tokens_from_one_build`: 50 parallel token requests, each blocking on a Transit signature, all succeed from one runtime build (one public-key read per key, one unwrap).
 - source_spec: `_bmad-output/implementation-artifacts/spec-2-3-publish-discovery-and-jwks-per-tenant.md`
   summary: Rotation and revocation (Stories 2.4, 9.x) must never commit a Tenant with a `next` and no `current`, or `EnsureTenantKeysAsync` would create a `current` that was never published ahead.
   evidence: Story 2.3 review: the backfill creates whatever (purpose, state) is missing.
@@ -433,3 +435,13 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-1-30-connect-the-alert-channel-and-off-server-store.md`
   summary: Make the `openbao.audit.ship` canary flow ship real OpenBao audit lines and search both days' prefixes.
   evidence: Story 1.30's `CanaryFlows.AuditShipAsync` ships synthetic HMAC lines and builds its prefix from `DateTime.UtcNow`, so it can flake at midnight UTC. `AuditShipTests` cover real Transit output. After an OpenBao crash, a partial last line is glued to the next line and shipped as is.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-5-issue-a-token-by-client-credentials.md`
+  summary: Keep unauthenticated token traffic from locking real machine clients out of a Tenant through the per-Tenant token limit.
+  evidence: Story 2.5 review. `LimitTokenRequests` counts the 1200/min per-Tenant limit before client authentication (as §5.2 asks), so about 20 sources at 60/min each make every token request at that Tenant answer 429, valid clients included. Needs a product decision, such as counting the Tenant limit after authentication or reserving capacity for authenticated clients.
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-5-issue-a-token-by-client-credentials.md`
+  summary: Prune expired access-token rows from `token`.
+  evidence: Story 2.5 review. Every Client Credentials token writes a `token` row and Story 2.5 excludes pruning; at the per-Tenant limit that is up to about 1.7 M rows per Tenant per day, with nothing removing expired ones.
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-5-issue-a-token-by-client-credentials.md`
+  summary: Sweep stale `tenant_attempt` (and `admin_attempt`) counter rows.
+  evidence: Story 2.5 review. Each distinct IPv4 address or IPv6 /64 leaves a lasting row per policy per Tenant; rows go only on a crash (UNLOGGED) or Tenant deletion. `admin_attempt` has the same gap.

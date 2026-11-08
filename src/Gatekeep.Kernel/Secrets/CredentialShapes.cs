@@ -37,6 +37,10 @@ public static class CredentialShapes
         @"\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*(?:\.[A-Za-z0-9_-]*)*",
         Options);
 
+    // An opaque Tenant artifact (AD-9): a client secret now, codes and refresh tokens later, as
+    // `{tenantPublicId}.{base64url random}`. The whole value goes, Tenant prefix included.
+    private static readonly Regex TenantArtifact = new(@"\bten_[a-z2-7]{26}\.[A-Za-z0-9_-]{16,}", Options);
+
     private static readonly Regex UrlUserInfo = new(@"\b([a-z][a-z0-9+.-]*://)[^/?#\s]+@", Options);
 
     private static readonly Regex CookieHeader = new(@"(\b(?:Set-)?Cookie[ \t]*:[ \t]*)[^\r\n]+", Options);
@@ -67,7 +71,7 @@ public static class CredentialShapes
 
     /// <summary>
     /// Replaces every known shape in <paramref name="text"/> with <see cref="Mask"/>: PEM private
-    /// keys, three-part <c>eyJ</c> tokens, URL userinfo, cookie headers, <c>Bearer</c> and
+    /// keys, three-part <c>eyJ</c> tokens, <c>{tenantPublicId}.{random}</c> artifacts, URL userinfo, cookie headers, <c>Bearer</c> and
     /// <c>Basic</c> credentials, <c>name=value</c> for sensitive names, and <c>code=</c> in a query.
     /// </summary>
     public static string MaskShapes(string text)
@@ -76,6 +80,7 @@ public static class CredentialShapes
 
         text = PemPrivateKey.Replace(text, Mask);
         text = Jwt.Replace(text, Mask);
+        text = TenantArtifact.Replace(text, Mask);
         text = UrlUserInfo.Replace(text, $"$1{Mask}@");
         text = CookieHeader.Replace(text, $"$1{Mask}");
         text = SchemeCredential.Replace(text, $"$1 {Mask}");

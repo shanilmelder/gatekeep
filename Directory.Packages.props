@@ -17,7 +17,9 @@
     <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.11.0" />
     <PackageVersion Include="Npgsql" Version="10.0.3" />
     <PackageVersion Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.3" />
-    <!-- Test only, until Story 2.5's stores: the Story 2.2 spike (tests/Isolation/Spikes/OpenIddict). -->
+    <!-- Story 2.5 (AD-8): the store interfaces, the only OpenIddict package Directory and Sessions reference. -->
+    <PackageVersion Include="OpenIddict.Abstractions" Version="7.7.2" />
+    <!-- The managers behind the stores: Protocol and Host.Hosted (through the server), and the Story 2.2 spike. -->
     <PackageVersion Include="OpenIddict.Core" Version="7.7.2" />
     <!-- Story 2.3: each Tenant's OpenID Provider, referenced only by the Protocol module and Host.Hosted. -->
     <PackageVersion Include="OpenIddict.Server.AspNetCore" Version="7.7.2" />

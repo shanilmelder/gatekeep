@@ -503,6 +503,7 @@ public sealed class RevokeAccessTests(PostgresFixture postgres)
             $"""
             {TestTenants.InsertSql(tenant)};
             INSERT INTO "user" (tenant_id, id) VALUES ('{tenant}', '{UserU}'), ('{tenant}', '{UserV}');
+            {TestTenants.ApplicationSql(tenant, A1, A2)};
 
             """;
 

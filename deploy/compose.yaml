@@ -194,6 +194,9 @@ services:
     user: "10001:10001"
     environment:
       ConnectionStrings__Hosted: Host=postgres;Port=5432;Database=gatekeep;Username=gk_hosted;Gss Encryption Mode=Disable
+      # Caddy's hosted-edge subnet: the X-Forwarded-For it sets is believed from there only, so
+      # token requests are counted by the client's address (Story 2.5).
+      Gatekeep__ForwardedBy: 10.201.1.0/24
       Custody__SocketPath: /run/openbao/openbao.sock
       Custody__RoleIdFile: /run/secrets/openbao_role_id
       Custody__SecretIdFile: /run/secrets/openbao_secret_id

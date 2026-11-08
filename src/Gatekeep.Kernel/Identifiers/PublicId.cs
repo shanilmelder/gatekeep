@@ -19,6 +19,10 @@ public enum PublicIdType
     Operation,
 
     /// <summary>
+    /// <c>app_</c>: an Application (AD-8, Story 2.5), as its OAuth <c>client_id</c>. A malformed one
+    /// is an unknown client, refused like a wrong secret.
+    /// </summary>
+    Application,
     /// <c>adm_</c>: an Admin (Story 1.32), as <c>gatekeep recover-admin --admin</c> takes it and lists
     /// it. Never their WebAuthn user handle.
     /// </summary>
@@ -47,6 +51,7 @@ public static class PublicId
         PublicIdType.Tenant => "ten",
         PublicIdType.AdminCredential => "acr",
         PublicIdType.Operation => "opr",
+        PublicIdType.Application => "app",
         PublicIdType.Admin => "adm",
         _ => throw new ArgumentOutOfRangeException(nameof(type)),
     };

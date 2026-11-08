@@ -42,6 +42,15 @@ internal static class TestTenants
         await PostgresFixture.ExecuteAsync(connection, statement);
     }
 
+    /// <summary>
+    /// SQL inserting a <c>machine</c> Application (Story 2.5) for each of <paramref name="ids"/> in
+    /// <paramref name="tenant"/>, with no secret and no trailing semicolon, for a test that needs a row
+    /// to reference: <c>signin_transaction</c>, <c>authorization</c> and <c>token</c> reference one.
+    /// </summary>
+    public static string ApplicationSql(Guid tenant, params Guid[] ids) =>
+        "INSERT INTO application (tenant_id, id, name, kind, grant_types, created_at) VALUES "
+        + string.Join(", ", ids.Select(id => $"('{tenant}', '{id}', 'Test Application', 'machine', ARRAY['client_credentials'], now())"));
+
     private const string Replica = "SET session_replication_role = replica";
 
     private const string Origin = "SET session_replication_role = DEFAULT";
