@@ -47,6 +47,11 @@ services:
     <<: *release-image
     image: ${GATEKEEP_CLI_IMAGE:?missing, pass --env-file deploy/release.env}
 
+  # The audit shipper runs the cli image (Story 1.30), so it takes its digest.
+  openbao-audit-shipper:
+    <<: *release-image
+    image: ${GATEKEEP_CLI_IMAGE:?missing, pass --env-file deploy/release.env}
+
   # The setup tools run from the OpenBao image, so they take its digest too.
   keygen:
     pull_policy: missing

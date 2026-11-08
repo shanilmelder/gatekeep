@@ -73,6 +73,19 @@ internal sealed class HostProcess : IDisposable
             list.Add("--Gatekeep:ForwardedBy=none");
         }
 
+        // Host.Worker needs the alert channel and the bucket (Story 1.30): valid settings, unless a
+        // test names one, even empty. Nothing is sent to them at startup.
+        if (host == "Worker")
+        {
+            foreach (var (name, value) in OffServerDefaults.Value)
+            {
+                if (!list.Any(a => a.StartsWith($"--{name}=", StringComparison.Ordinal)))
+                {
+                    list.Add($"--{name}={value}");
+                }
+            }
+        }
+
         foreach (var argument in list)
         {
             start.ArgumentList.Add(argument);
@@ -223,4 +236,31 @@ internal sealed class HostProcess : IDisposable
     }
 
     private static readonly Lazy<string> EmptyDirectory = new(() => Directory.CreateTempSubdirectory("gatekeep-no-secrets-").FullName);
+
+    /// <summary>
+    /// Valid alert and bucket settings for Host.Worker (Story 1.30), under <c>.invalid</c> names that
+    /// never resolve, with secret files of random values made once for the run.
+    /// </summary>
+    public static readonly Lazy<IReadOnlyList<(string Name, string Value)>> OffServerDefaults = new(() =>
+    {
+        var directory = Directory.CreateTempSubdirectory("gatekeep-offserver-").FullName;
+        string Secret(string name)
+        {
+            var path = Path.Combine(directory, name);
+            File.WriteAllText(path, Convert.ToHexStringLower(System.Security.Cryptography.RandomNumberGenerator.GetBytes(16)) + "\n");
+            return path;
+        }
+
+        return
+        [
+            ("Alerts:Url", "https://alerts.invalid/gatekeep"),
+            ("Alerts:TokenFile", Secret("alert-token")),
+            ("Alerts:Deployment", "admin.gatekeep-admin.test"),
+            ("Records:Endpoint", "https://objects.invalid"),
+            ("Records:Region", "us-east-1"),
+            ("Records:Bucket", "gatekeep-records"),
+            ("Records:AccessKeyIdFile", Secret("access-key-id")),
+            ("Records:SecretAccessKeyFile", Secret("secret-access-key")),
+        ];
+    });
 }

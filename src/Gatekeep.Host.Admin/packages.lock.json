@@ -95,6 +95,19 @@
           "libsodium": "[1.0.20.1, 1.0.21)"
         }
       },
+      "gatekeep.adapters.alertchannel": {
+        "type": "Project",
+        "dependencies": {
+          "Gatekeep.Adapters.Egress": "[0.1.0, )",
+          "Gatekeep.Kernel": "[0.1.0, )"
+        }
+      },
+      "gatekeep.adapters.egress": {
+        "type": "Project",
+        "dependencies": {
+          "Gatekeep.Kernel": "[0.1.0, )"
+        }
+      },
       "gatekeep.adapters.fido2": {
         "type": "Project",
         "dependencies": {
@@ -105,6 +118,9 @@
       "gatekeep.adapters.hosting": {
         "type": "Project",
         "dependencies": {
+          "Gatekeep.Adapters.AlertChannel": "[0.1.0, )",
+          "Gatekeep.Adapters.Egress": "[0.1.0, )",
+          "Gatekeep.Adapters.ObjectLock": "[0.1.0, )",
           "Gatekeep.Adapters.OpenBao": "[0.1.0, )",
           "Gatekeep.Kernel": "[0.1.0, )",
           "Npgsql": "[10.0.3, )"
@@ -113,6 +129,13 @@
       "gatekeep.adapters.logging": {
         "type": "Project",
         "dependencies": {
+          "Gatekeep.Kernel": "[0.1.0, )"
+        }
+      },
+      "gatekeep.adapters.objectlock": {
+        "type": "Project",
+        "dependencies": {
+          "Gatekeep.Adapters.Egress": "[0.1.0, )",
           "Gatekeep.Kernel": "[0.1.0, )"
         }
       },

@@ -231,6 +231,12 @@ public class AuditCatalogueTests
             }
         }
 
+        // Security Alert codes share the shape (Story 1.30): each one the Kernel defines is allowed.
+        allowed.UnionWith(typeof(Gatekeep.Kernel.Alerts.SecurityAlertCode)
+            .GetProperties(BindingFlags.Public | BindingFlags.Static)
+            .Where(p => p.PropertyType == typeof(Gatekeep.Kernel.Alerts.SecurityAlertCode))
+            .Select(p => ((Gatekeep.Kernel.Alerts.SecurityAlertCode)p.GetValue(null)!).Code.Value));
+
         // Rate limit policy codes share the shape (AD-14): each one a contract publishes is allowed.
         foreach (var module in Directory.EnumerateDirectories(Path.Combine(Root, "src", "Modules")).Select(Path.GetFileName))
         {

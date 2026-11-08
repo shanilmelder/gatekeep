@@ -34,6 +34,9 @@ dependency Cli -> Audit
 dependency Cli -> Keys
 dependency Cli -> Adapters.OpenBao
 dependency Cli -> Adapters.Postgres
+dependency Cli -> Adapters.Egress
+dependency Cli -> Adapters.AlertChannel
+dependency Cli -> Adapters.ObjectLock
 dependency Protocol -> Authentication
 dependency Protocol -> Directory
 dependency Protocol -> Identity
@@ -73,9 +76,17 @@ dependency Sessions -> Tenancy
 dependency Notifications -> Tenancy
 dependency Admins -> Notifications
 dependency Adapters.Hosting -> Adapters.OpenBao
+dependency Adapters.Hosting -> Adapters.Egress
+dependency Adapters.Hosting -> Adapters.AlertChannel
+dependency Adapters.Hosting -> Adapters.ObjectLock
+dependency Adapters.AlertChannel -> Adapters.Egress
+dependency Adapters.ObjectLock -> Adapters.Egress
+dependency Tests.Isolation -> Adapters.AlertChannel
+dependency Tests.Isolation -> Adapters.Egress
 dependency Tests.Isolation -> Adapters.Fido2
 dependency Tests.Isolation -> Adapters.Hosting
 dependency Tests.Isolation -> Adapters.Logging
+dependency Tests.Isolation -> Adapters.ObjectLock
 dependency Tests.Isolation -> Adapters.OpenBao
 dependency Tests.Isolation -> Adapters.Postgres
 dependency Tests.Isolation -> Admins

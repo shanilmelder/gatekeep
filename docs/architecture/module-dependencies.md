@@ -25,6 +25,9 @@ flowchart TD
   Keys[Keys]
   AdaptersOpenBao[Adapters.OpenBao]
   AdaptersPostgres[Adapters.Postgres]
+  AdaptersEgress[Adapters.Egress]
+  AdaptersAlertChannel[Adapters.AlertChannel]
+  AdaptersObjectLock[Adapters.ObjectLock]
   Directory[Directory]
   Notifications[Notifications]
   TestsIsolation[Tests.Isolation]
@@ -51,6 +54,9 @@ flowchart TD
   Cli --> Keys
   Cli --> AdaptersOpenBao
   Cli --> AdaptersPostgres
+  Cli --> AdaptersEgress
+  Cli --> AdaptersAlertChannel
+  Cli --> AdaptersObjectLock
   Protocol --> Authentication
   Protocol --> Directory
   Protocol --> Identity
@@ -90,9 +96,17 @@ flowchart TD
   Notifications --> Tenancy
   Admins --> Notifications
   AdaptersHosting --> AdaptersOpenBao
+  AdaptersHosting --> AdaptersEgress
+  AdaptersHosting --> AdaptersAlertChannel
+  AdaptersHosting --> AdaptersObjectLock
+  AdaptersAlertChannel --> AdaptersEgress
+  AdaptersObjectLock --> AdaptersEgress
+  TestsIsolation --> AdaptersAlertChannel
+  TestsIsolation --> AdaptersEgress
   TestsIsolation --> AdaptersFido2
   TestsIsolation --> AdaptersHosting
   TestsIsolation --> AdaptersLogging
+  TestsIsolation --> AdaptersObjectLock
   TestsIsolation --> AdaptersOpenBao
   TestsIsolation --> AdaptersPostgres
   TestsIsolation --> Admins

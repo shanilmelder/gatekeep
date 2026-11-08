@@ -86,4 +86,21 @@ else
     echo "start-openbao: generation $current."
 fi
 
+# The audit log (Story 1.30): readable by the openbao-audit group, which only the audit shipper
+# has besides OpenBao, and by nobody else. OpenBao would create the file with its own group, so
+# it's made here first, and the directory is setgid, so a file OpenBao makes again later gets
+# the group too. An install from before Story 1.30 has a 0700 directory and a 0600 file, which
+# this corrects. Any failure, making the file included, leaves them closed, never wider, so it
+# only warns and never stops OpenBao. touch, not a redirect: a failed redirect on the : builtin
+# would end the shell.
+AUDIT_DIR="${GATEKEEP_OPENBAO_AUDIT_DIR:-/var/log/openbao}"
+AUDIT_GROUP=openbao-audit
+if [ -d "$AUDIT_DIR" ]; then
+    if ! { touch "$AUDIT_DIR/audit.log" \
+        && chgrp "$AUDIT_GROUP" "$AUDIT_DIR" "$AUDIT_DIR/audit.log" \
+        && chmod 2750 "$AUDIT_DIR" && chmod 0640 "$AUDIT_DIR/audit.log"; }; then
+        echo "start-openbao: WARNING: couldn't give the audit log to the $AUDIT_GROUP group, so the audit shipper can't read it." >&2
+    fi
+fi
+
 exec bao server -config="$CONFIG" "$@"

@@ -286,6 +286,112 @@ public sealed class HostStartupTests(PostgresFixture postgres) : IDisposable
         Assert.DoesNotContain("Custody:RoleIdFile", output);
     }
 
+    /// <summary>Story 1.30: every alert and bucket setting Host.Worker requires.</summary>
+    private static readonly string[] OffServerSettings =
+    [
+        "Alerts:Url", "Alerts:TokenFile", "Alerts:Deployment",
+        "Records:Endpoint", "Records:Region", "Records:Bucket", "Records:AccessKeyIdFile", "Records:SecretAccessKeyFile",
+    ];
+
+    public static TheoryData<string, string> UnsafeOffServerSettings => new()
+    {
+        { "Alerts:Url", $"http://alerts.example.com/{Canary}" },
+        { "Alerts:Url", $"https://{Canary}:x@alerts.example.com/hook" },
+        { "Alerts:Url", $"/hooks/{Canary}" },
+        { "Alerts:TokenFile", "file:" },
+        { "Alerts:TokenFile", "file:changeme\n" },
+        { "Alerts:TokenFile", "missing" },
+        { "Alerts:Deployment", $"https://{Canary}.example.com" },
+        { "Records:Endpoint", $"http://{Canary}.example.com" },
+        { "Records:Endpoint", $"https://{Canary}:x@s3.example.com" },
+        { "Records:Endpoint", $"https://s3.example.com/{Canary}" },
+        { "Records:Region", $"EU_{Canary}" },
+        { "Records:Bucket", $"Bad_{Canary}" },
+        { "Records:Bucket", "a" },
+        { "Records:Bucket", "10.0.0.1" },
+        { "Records:AccessKeyIdFile", "file:  \n" },
+        { "Records:SecretAccessKeyFile", "file:password" },
+        { "Records:SecretAccessKeyFile", "missing" },
+        // Startup refuses by the rule the adapters do, so a file that starts the Worker is never refused at the first send.
+        { "Alerts:TokenFile", "file:alert token" },
+        { "Alerts:TokenFile", "file:alert\u0007token" },
+        { "Records:AccessKeyIdFile", "file:ak\u00e9123" },
+        // Each setting blank on its own.
+        { "Alerts:Url", "" },
+        { "Alerts:TokenFile", "" },
+        { "Alerts:Deployment", "" },
+        { "Records:Endpoint", "" },
+        { "Records:Region", "" },
+        { "Records:Bucket", "" },
+        { "Records:AccessKeyIdFile", "" },
+        { "Records:SecretAccessKeyFile", "" },
+    };
+
+    [Fact]
+    public async Task Worker_without_its_alert_and_bucket_settings_refuses_naming_each_and_only_those()
+    {
+        var database = await postgres.NewMigratedDatabaseAsync();
+
+        using var process = HostProcess.Start(
+            "Worker",
+            Connections(Databases("Worker"), database)
+                .Concat(Custody())
+                .Concat(OffServerSettings.Select(s => $"--{s}="))
+                .Append($"--Gatekeep:HealthPort={HostProcess.FreePort()}"));
+        var output = await process.WaitForExitAsync(Timeout, Cancellation);
+
+        Assert.Equal(1, process.ExitCode);
+        Assert.Contains("Host.Worker refuses to start", output);
+        Assert.All(OffServerSettings, s => Assert.Contains(s, output, StringComparison.Ordinal));
+        Assert.DoesNotContain("ConnectionStrings:", output);
+        Assert.DoesNotContain("Custody:", output);
+    }
+
+    [Theory]
+    [MemberData(nameof(UnsafeOffServerSettings))]
+    public async Task Worker_with_one_unsafe_alert_or_bucket_setting_refuses_naming_only_it_and_never_its_value(string setting, string value)
+    {
+        var database = await postgres.NewMigratedDatabaseAsync();
+        var resolved = value switch
+        {
+            "missing" => Path.Combine(_directory, "missing-" + Guid.NewGuid().ToString("N")),
+            _ when value.StartsWith("file:", StringComparison.Ordinal) => SecretFile("off-server", value["file:".Length..]),
+            _ => value,
+        };
+
+        using var process = HostProcess.Start(
+            "Worker",
+            Connections(Databases("Worker"), database)
+                .Concat(Custody())
+                .Append($"--{setting}={resolved}")
+                .Append($"--Gatekeep:HealthPort={HostProcess.FreePort()}"));
+        var output = await process.WaitForExitAsync(Timeout, Cancellation);
+
+        Assert.Equal(1, process.ExitCode);
+        Assert.Contains($"Missing or unsafe settings: {setting}.", output, StringComparison.Ordinal);
+        Assert.DoesNotContain(Canary, output, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("Hosted")]
+    [InlineData("Admin")]
+    public async Task Hosted_and_Admin_need_no_alert_or_bucket_setting(string host)
+    {
+        var database = await postgres.NewMigratedDatabaseAsync();
+        var health = HostProcess.FreePort();
+
+        using var process = HostProcess.Start(
+            host,
+            Connections(Databases(host), database)
+                .Concat(Custody())
+                .Append($"--Gatekeep:HealthPort={health}")
+                .Append($"--Gatekeep:PublicPort={HostProcess.FreePort()}"));
+        var (status, _) = await process.GetAsync(health, HealthEndpoint, Timeout, Cancellation);
+
+        Assert.Equal(HttpStatusCode.OK, status);
+        Assert.All(OffServerSettings, s => Assert.DoesNotContain(s, process.Output, StringComparison.Ordinal));
+    }
+
     [Theory]
     [MemberData(nameof(Hosts))]
     public async Task Host_reads_passwords_from_secret_files_and_reports_healthy(string host)

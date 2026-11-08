@@ -218,6 +218,20 @@ public sealed class CustodyTests(OpenBaoFixture bao)
             canaries.Add(new CanaryValue("role-id", roleId, string.Empty));
         }
 
+        // Story 1.30: the audit file goes off the server, so a Transit plaintext, its base64 and the
+        // result it decrypts to must reach it only as HMACs.
+        var plaintext = "cnry-transit-" + Convert.ToHexStringLower(System.Security.Cryptography.RandomNumberGenerator.GetBytes(12));
+        var social = KeyName.ForTenant(TenantKeyClass.Social, bao.TenantA);
+        using (var cli = bao.Custody(OpenBaoFixture.Cli))
+        using (var worker = bao.Custody(OpenBaoFixture.Worker))
+        {
+            var ciphertext = await cli.EncryptAsync(social, bao.TenantA, new Secret<byte[]>(System.Text.Encoding.UTF8.GetBytes(plaintext)), Cancellation);
+            await worker.DecryptAsync(social, bao.TenantA, ciphertext, Cancellation);
+        }
+
+        canaries.Add(new CanaryValue("transit-plaintext", plaintext, plaintext));
+        canaries.Add(new CanaryValue("transit-plaintext-base64", Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(plaintext)), string.Empty));
+
         var (logOut, logErr) = await bao.Container.GetLogsAsync(ct: Cancellation);
         CanarySource[] sources =
         [

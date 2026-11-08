@@ -14,7 +14,7 @@ namespace Gatekeep.Tests.Isolation.Canary;
 /// on, leaves none of its canaries in any table, log, output stream or response (NFR-3, T-42).
 /// </summary>
 [Collection(Gatekeep.Tests.Isolation.Custody.OpenBaoCollection.Name)]
-public sealed class CanaryFlowTests(PostgresFixture postgres, Gatekeep.Tests.Isolation.Custody.OpenBaoFixture bao) : IDisposable
+public sealed class CanaryFlowTests(PostgresFixture postgres, OffServer.ObjectLockFixture bucket, Gatekeep.Tests.Isolation.Custody.OpenBaoFixture bao) : IDisposable
 {
     private static readonly Guid TenantA = Guid.Parse("01900000-0000-7000-8000-0000000007b8");
 
@@ -30,7 +30,7 @@ public sealed class CanaryFlowTests(PostgresFixture postgres, Gatekeep.Tests.Iso
     public async Task Flow_leaves_no_canary_anywhere(string flow, bool failing)
     {
         var run = new FlowRun();
-        using (var context = new CanaryFlowContext(postgres, _directory, bao))
+        using (var context = new CanaryFlowContext(postgres, _directory, bucket, bao))
         {
             await CanaryFlows.All.Single(f => f.Name == flow).RunAsync(context, run, failing);
         }

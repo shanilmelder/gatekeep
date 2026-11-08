@@ -113,6 +113,26 @@
           "Microsoft.IdentityModel.Logging": "8.19.2"
         }
       },
+      "gatekeep.adapters.alertchannel": {
+        "type": "Project",
+        "dependencies": {
+          "Gatekeep.Adapters.Egress": "[0.1.0, )",
+          "Gatekeep.Kernel": "[0.1.0, )"
+        }
+      },
+      "gatekeep.adapters.egress": {
+        "type": "Project",
+        "dependencies": {
+          "Gatekeep.Kernel": "[0.1.0, )"
+        }
+      },
+      "gatekeep.adapters.objectlock": {
+        "type": "Project",
+        "dependencies": {
+          "Gatekeep.Adapters.Egress": "[0.1.0, )",
+          "Gatekeep.Kernel": "[0.1.0, )"
+        }
+      },
       "gatekeep.adapters.openbao": {
         "type": "Project",
         "dependencies": {

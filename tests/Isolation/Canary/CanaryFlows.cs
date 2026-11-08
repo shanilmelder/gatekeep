@@ -2,9 +2,12 @@ using System.Net;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
+using Gatekeep.Adapters.AlertChannel;
 using Gatekeep.Adapters.Logging;
 using Gatekeep.Adapters.OpenBao;
 using Gatekeep.Adapters.Postgres.Schema;
+using Gatekeep.Cli;
+using Gatekeep.Kernel.Alerts;
 using Gatekeep.Kernel.Audit;
 using Gatekeep.Kernel.Jobs;
 using Gatekeep.Kernel.Persistence;
@@ -14,6 +17,7 @@ using Gatekeep.Modules.Operations.Contracts;
 using Gatekeep.Tests.Isolation.Audit;
 using Gatekeep.Tests.Isolation.Hosting;
 using Gatekeep.Tests.Isolation.Jobs;
+using Gatekeep.Tests.Isolation.OffServer;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Npgsql;
@@ -75,12 +79,15 @@ internal sealed class FlowRun
     }
 }
 
-/// <summary>What a flow can use: the database cluster, OpenBao, a scratch folder, and the test's cancellation.</summary>
-internal sealed class CanaryFlowContext(PostgresFixture postgres, string directory, Gatekeep.Tests.Isolation.Custody.OpenBaoFixture? bao = null) : IDisposable
+/// <summary>What a flow can use: the database cluster, the Object Lock bucket, OpenBao, a scratch folder, and the test's cancellation.</summary>
+internal sealed class CanaryFlowContext(PostgresFixture postgres, string directory, OffServer.ObjectLockFixture bucket, Gatekeep.Tests.Isolation.Custody.OpenBaoFixture? bao = null) : IDisposable
 {
     private readonly List<IDisposable> _owned = [];
 
     public PostgresFixture Postgres => postgres;
+
+    /// <summary>The Object Lock bucket (Story 1.30), whose objects a flow scans with their metadata.</summary>
+    public OffServer.ObjectLockFixture Bucket => bucket;
 
     /// <summary>The real OpenBao, for a flow that signs through Transit (Story 2.5).</summary>
     public Gatekeep.Tests.Isolation.Custody.OpenBaoFixture Bao => bao ?? throw new InvalidOperationException("This run has no OpenBao.");
@@ -183,6 +190,9 @@ internal static class CanaryFlows
         new("cli.audit-verify", [new(SurfaceKind.CliCommand, "audit verify")], AuditVerifyAsync),
         new("cli.init", [new(SurfaceKind.CliCommand, "init")], InitAsync),
         new("cli.rotate-transit-keys", [new(SurfaceKind.CliCommand, "rotate-transit-keys")], RotateTransitKeysAsync),
+        new("alerts.channel", [new(SurfaceKind.CliCommand, "alerts test")], AlertsChannelAsync),
+        new("records.objectlock", [new(SurfaceKind.CliCommand, "records test")], RecordsObjectLockAsync),
+        new("openbao.audit.ship", [new(SurfaceKind.CliCommand, "audit-ship")], AuditShipAsync),
         new("host.hosted", [new(SurfaceKind.HostStartup, "Hosted"), new(SurfaceKind.Route, HealthEndpoint)], HostAsync("Hosted")),
         new("host.admin", [new(SurfaceKind.HostStartup, "Admin"), new(SurfaceKind.Route, HealthEndpoint)], HostAsync("Admin")),
         new("host.worker", [new(SurfaceKind.HostStartup, "Worker"), new(SurfaceKind.Route, HealthEndpoint)], HostAsync("Worker")),
@@ -1305,6 +1315,122 @@ internal static class CanaryFlows
     {
         var headers = response.Headers.Concat(response.Content.Headers).Select(h => $"{h.Key}: {string.Join(", ", h.Value)}");
         return $"{(int)response.StatusCode}\n{string.Join("\n", headers)}\n{await response.Content.ReadAsStringAsync(CanaryFlowContext.Cancellation)}";
+    }
+
+    /// <summary>
+    /// Story 1.30: <c>gatekeep alerts test</c> through the webhook adapter to a sink, with a canary
+    /// bearer token and a canary in the hook's path, as webhook services put a secret there. What
+    /// left the process is scanned: the body and every header but <c>Authorization</c>, which must be
+    /// exactly the token, plus the Cli's output. Failing, the sink answers 500 with a body.
+    /// </summary>
+    private static async Task AlertsChannelAsync(CanaryFlowContext context, FlowRun run, bool failing)
+    {
+        var token = run.Plant("alert-token");
+        var hook = run.Plant("webhook-path");
+        await using var sink = await AlertSinkFixture.StartAsync();
+        sink.Status = failing ? 500 : 204;
+        var options = new WebhookAlertOptions { Url = new Uri(sink.Url, $"/hooks/{hook.Value}"), TokenFile = context.File(token.Value + "\n") };
+        var output = new StringWriter();
+        var error = new StringWriter();
+
+        var exit = await AlertsTestCommand.SendAsync(
+            options, new AlertDeployment("admin.gatekeep-admin.test"), ObjectLockFixture.Permitted(), TimeProvider.System, output, error, CanaryFlowContext.Cancellation);
+        run.Capture("alerts test stdout", output.ToString());
+        run.Capture("alerts test stderr", error.ToString());
+
+        var request = Assert.Single(sink.Requests);
+        Assert.Equal($"Bearer {token.Value}", request.Headers["Authorization"]);
+        run.Capture("webhook body", Encoding.UTF8.GetString(request.Body));
+        run.Capture(
+            "webhook headers",
+            string.Join('\n', request.Headers.Where(h => h.Key != "Authorization").Select(h => $"{h.Key}: {h.Value}")));
+
+        Assert.Equal(failing ? 1 : 0, exit);
+        Assert.Equal(failing ? AlertsTestCommand.Rejected : string.Empty, error.ToString().Trim());
+    }
+
+    /// <summary>
+    /// Story 1.30: <c>gatekeep records test</c> through the record writer and the Object Lock adapter
+    /// to the bucket, with the server credential planted as canaries. The objects it wrote are
+    /// scanned with their metadata, beside the Cli's output. Failing, the secret key is a wrong
+    /// canary value, so the bucket refuses the write.
+    /// </summary>
+    private static async Task RecordsObjectLockAsync(CanaryFlowContext context, FlowRun run, bool failing)
+    {
+        var bucket = context.Bucket;
+        run.Plant("bucket-access-key-id", bucket.AccessKeyId);
+        var secretKeyFile = failing
+            ? context.File(run.Plant("wrong-bucket-secret-key").Value + "\n")
+            : bucket.SecretAccessKeyFile;
+        if (!failing)
+        {
+            run.Plant("bucket-secret-key", bucket.SecretAccessKey);
+        }
+
+        var output = new StringWriter();
+        var error = new StringWriter();
+        var exit = await RecordsTestCommand.WriteAsync(
+            bucket.Options(secretAccessKeyFile: secretKeyFile), new SigningCustody(), ObjectLockFixture.Permitted(), TimeProvider.System,
+            output, error, CanaryFlowContext.Cancellation);
+        run.Capture("records test stdout", output.ToString());
+        run.Capture("records test stderr", error.ToString());
+
+        Assert.Equal(failing ? 1 : 0, exit);
+        if (failing)
+        {
+            Assert.Equal(RecordsTestCommand.Rejected, error.ToString().Trim());
+            return;
+        }
+
+        var key = output.ToString().Trim()[(RecordsTestCommand.Written.Length + 1)..];
+        var dumped = await bucket.DumpAsync(key);
+        Assert.Equal(2, dumped.Count);
+        foreach (var (name, text) in dumped)
+        {
+            run.Capture(name, text);
+        }
+    }
+
+    /// <summary>
+    /// Story 1.30: <c>gatekeep audit-ship --once</c> over an audit file of HMAC'd entries, as OpenBao
+    /// writes them, to the bucket, with the server credential planted as canaries. The chunks it wrote
+    /// are scanned with their metadata, beside the shipper's output. Failing, the secret key is a
+    /// wrong canary value, so the bucket refuses each chunk and nothing ships.
+    /// </summary>
+    private static async Task AuditShipAsync(CanaryFlowContext context, FlowRun run, bool failing)
+    {
+        var bucket = context.Bucket;
+        run.Plant("bucket-access-key-id", bucket.AccessKeyId);
+        var secretKeyFile = failing
+            ? context.File(run.Plant("wrong-bucket-secret-key").Value + "\n")
+            : bucket.SecretAccessKeyFile;
+        if (!failing)
+        {
+            run.Plant("bucket-secret-key", bucket.SecretAccessKey);
+        }
+
+        static string Hmac() => "hmac-sha256:" + Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(32));
+        var auditFile = context.File(string.Concat(Enumerable.Range(0, 3).Select(i =>
+            "{\"type\":\"request\",\"auth\":{\"client_token\":\"" + Hmac() + "\"},\"request\":{\"path\":\"transit/encrypt/social-" + i
+            + "\",\"data\":{\"plaintext\":\"" + Hmac() + "\"}}}\n")));
+        var state = context.NewDirectory();
+        var output = new StringWriter();
+        var error = new StringWriter();
+
+        var exit = await AuditShipCommand.ShipAsync(
+            bucket.Options(secretAccessKeyFile: secretKeyFile), auditFile, state, ObjectLockFixture.Permitted(), TimeProvider.System,
+            output, error, once: true, AuditShipCommand.Interval, CanaryFlowContext.Cancellation);
+        run.Capture("audit-ship stdout", output.ToString());
+        run.Capture("audit-ship stderr", error.ToString());
+
+        Assert.Equal(failing ? 1 : 0, exit);
+        var fileId = File.ReadAllLines(Path.Combine(state, "state"))[0];
+        var dumped = await bucket.DumpAsync($"openbao-audit/{DateTime.UtcNow:yyyy/MM/dd}/{fileId}-");
+        Assert.Equal(failing ? 0 : 2, dumped.Count);
+        foreach (var (name, text) in dumped)
+        {
+            run.Capture(name, text);
+        }
     }
 
     /// <summary>

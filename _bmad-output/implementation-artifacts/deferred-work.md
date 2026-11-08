@@ -57,7 +57,7 @@
   evidence: The unit drops CAP_IPC_LOCK and the config does not set disable_mlock; needs a Linux host (G-10).
 - source_spec: `_bmad-output/implementation-artifacts/spec-1-7-hold-keys-in-openbao-behind-ikeycustody.md`
   summary: Rotate the OpenBao audit log and decide on a second audit device.
-  evidence: A full disk under the only audit device blocks every request. Belongs with shipping the audit log off the server.
+  evidence: A full disk under the only audit device blocks every request. Story 1.30 ships the log off the server, so only rotation (with the shipper starting over when the file is replaced) and a second device remain.
 - source_spec: `_bmad-output/implementation-artifacts/spec-1-7-hold-keys-in-openbao-behind-ikeycustody.md`
   summary: Set a secret ID lifetime and write the replacement procedure for one leaked secret ID.
   evidence: Story 1.7 setup uses secret_id_ttl=0. Story 1.10 delivers secret IDs.
@@ -411,3 +411,26 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-12-7-rotate-the-master-key.md`
   summary: Make the root-token census in `MasterKeyRotationTests.Full_rotation_keeps_every_value_and_leaves_the_old_generation_unable_to_unseal` stable under load.
   evidence: While merging `main` into Story 1.29 on 2026-11-05, the census step (line 155) printed nothing in 2 of 5 local Docker runs alongside other classes, and passed alone and on rerun. Story 1.29 doesn't touch root tokens.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-30-connect-the-alert-channel-and-off-server-store.md`
+  summary: Stop the audit shipper re-shipping a chunk after a crash between the `PUT` and the save of its offset.
+  evidence: Story 1.30 saves the offset only after a successful `PUT`. A crash in between ships the same `{fileId}-{startOffset}` key again as a second locked version, or under the next day's path after midnight. A clean restart is tested. Fixing it needs a read-back or a conditional `PUT`, and the credential can't read.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-30-connect-the-alert-channel-and-off-server-store.md`
+  summary: Read the alert webhook URL from a secret file, so a provider whose URL path is the credential can be used safely.
+  evidence: Story 1.30 passes `GATEKEEP_ALERT_URL` as a plain environment variable, so it shows in `.env` and `docker inspect`. `install.md` requires a URL that carries no credential, with the token in `alerts/token`.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-30-connect-the-alert-channel-and-off-server-store.md`
+  summary: Bind a signed off-server record to its object key, or check its `id` and `writtenAt` against the key when verifying.
+  evidence: Story 1.30's `OffServerRecordWriter.VerifyAsync` checks only the signature. Someone holding the write-only credential could copy an old signed record to a new key. Belongs with Story 7.2's verifier.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-30-connect-the-alert-channel-and-off-server-store.md`
+  summary: Design a filtering egress proxy for the `egress` network, so the worker, cli and shipper can reach only the alert and bucket hosts.
+  evidence: Story 1.30's `egress` network is unrestricted, and threat-model T-59 accepts that until such a proxy is designed.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-30-connect-the-alert-channel-and-off-server-store.md`
+  summary: Tidy up the EgressHttp edge cases.
+  evidence: Story 1.30 has these open:
+    - an empty DNS answer is reported as "no public address";
+    - a bracketed literal with a named zone ends as Unavailable;
+    - secret file reads have no size cap;
+    - the handler that `EgressHttp.Create()` returns can still be changed afterwards;
+    - no test makes a connect hang.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-30-connect-the-alert-channel-and-off-server-store.md`
+  summary: Make the `openbao.audit.ship` canary flow ship real OpenBao audit lines and search both days' prefixes.
+  evidence: Story 1.30's `CanaryFlows.AuditShipAsync` ships synthetic HMAC lines and builds its prefix from `DateTime.UtcNow`, so it can flake at midnight UTC. `AuditShipTests` cover real Transit output. After an OpenBao crash, a partial last line is glued to the next line and shipped as is.
