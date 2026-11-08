@@ -1050,6 +1050,91 @@
         "x-gatekeep-recovery-allowed": false
       }
     },
+    "/api/v1/deployment/signin/enrolment": {
+      "post": {
+        "tags": [
+          "Deployment"
+        ],
+        "summary": "Sign in with a gatekeep recover-admin enrolment, to a Session that reaches only credential registration.",
+        "description": "Sessionless: needs the exact Admin Origin only. No route issues an enrolment: only gatekeep recover-admin on the Docker host does, after its Security Alert and off-server record are confirmed. Each call is counted per client, then, while the client is within its limit, Deployment-wide, before the value is looked up: a client's 6th, or the 51st counted across the Deployment, in 15 minutes is 429. An unused enrolment within its 15 minutes is used up, with every other unused one of its Admin, every live Session of its Admin ends as revoked, a live Session this browser held is superseded, and a Session starts that reaches only the Session read, sign-out and credential registration: setup, needing two credentials, for an Admin below the credential floor, and recovery, needing one, otherwise; admin.enrolment.used is written. An unknown, used, expired or malformed value is the same 400 enrolment_refused. Before bootstrap completes it is the unknown-path 404.",
+        "operationId": "RedeemEnrolment",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EnrolmentRedeemRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "headers": {
+              "Set-Cookie": {
+                "description": "The setup or recovery Admin Session: __Host-gk-admin={43 base64url characters}; Path=/; Secure; HttpOnly; SameSite=Strict, a browser session cookie with no Domain, Expires or Max-Age.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminSignInResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "404": {
+            "description": "Not Found"
+          },
+          "429": {
+            "description": "Too Many Requests",
+            "headers": {
+              "Retry-After": {
+                "description": "Whole seconds until the rate-limit window allows another request.",
+                "required": true,
+                "schema": {
+                  "minimum": 1,
+                  "type": "integer"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [ ],
+        "x-gatekeep-setup-allowed": false,
+        "x-gatekeep-access": {
+          "kind": "sessionless"
+        },
+        "x-gatekeep-recovery-allowed": false
+      }
+    },
     "/api/v1/deployment/tenants": {
       "get": {
         "tags": [
@@ -2175,6 +2260,7 @@
               "credentials_maximum",
               "recovery_code_refused",
               "recovery_code_superseded",
+              "enrolment_refused",
               "tenant_invalid",
               "subdomain_refused",
               "operation_not_failed",
@@ -2414,6 +2500,17 @@
         "type": "object",
         "properties": {
           "confirmation": {
+            "type": "string"
+          }
+        }
+      },
+      "EnrolmentRedeemRequest": {
+        "required": [
+          "enrolment"
+        ],
+        "type": "object",
+        "properties": {
+          "enrolment": {
             "type": "string"
           }
         }

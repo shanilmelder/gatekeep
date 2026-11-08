@@ -367,7 +367,8 @@ public static class TableRegistry
             ["bootstrap_state_guard_update"]),
 
         // Story 1.21: the Admins and their Sessions. Host.Admin creates the first Admin at
-        // bootstrap and every Admin Session; the Cli reads Admins for recover-admin later. No
+        // bootstrap and every Admin Session; the Cli reads Admins so recover-admin (Story 1.32)
+        // can find the one it recovers and list them by public ID, and reads no Session. No
         // role deletes either. A Session stores only its ID's hash; its CSRF token is derived
         // from the ID, so nothing about the token is stored.
         new(
@@ -485,7 +486,7 @@ public static class TableRegistry
         // Story 1.26: an Admin's offline Recovery Code, as an HMAC under the Deployment hmac key and
         // its key version only. Host.Admin issues, confirms and redeems it, and deletes an unconfirmed
         // one it replaces; the trigger writes confirmation and use once and keeps a confirmed one.
-        // The Cli reads it, for recover-admin later.
+        // Story 1.32 took back the Cli's read, granted for recover-admin, which reads no code.
         new(
             "admin_recovery_code",
             TableClass.Control,
@@ -494,7 +495,6 @@ public static class TableRegistry
             new Dictionary<string, IReadOnlyList<string>>
             {
                 [Admin] = [Select, Insert, Delete],
-                [Cli] = [Select],
             },
             new Dictionary<string, IReadOnlyList<ColumnGrant>>
             {
@@ -502,6 +502,28 @@ public static class TableRegistry
                 [Admin] = [new ColumnGrant(Update, ["confirmed_at", "used_at"])],
             },
             ["admin_recovery_code_guard"]),
+
+        // Story 1.32 (AD-31): gatekeep recover-admin's single-use enrolments, as the SHA-256 of the
+        // value only, with their Admin, issue time, 15-minute expiry and use. Only the Cli inserts
+        // one, after its Security Alert and off-server record are confirmed; Host.Admin reads it and
+        // marks it used at redemption. No role deletes; the trigger writes the use once and
+        // refuses an issue time other than now.
+        new(
+            "admin_enrolment",
+            TableClass.Control,
+            "Admins",
+            TableUse.Configuration,
+            new Dictionary<string, IReadOnlyList<string>>
+            {
+                [Admin] = [Select],
+                [Cli] = [Select, Insert],
+            },
+            new Dictionary<string, IReadOnlyList<ColumnGrant>>
+            {
+                // Redeeming. Never the hash, its Admin or its times.
+                [Admin] = [new ColumnGrant(Update, ["used_at"])],
+            },
+            ["admin_enrolment_guard"]),
 
         // Story 2.3 (AD-10, AD-11): each Tenant's Signing and Management key rows, and its token
         // protection key, only as the Transit wrap. Host.Worker creates them at Tenant creation and in

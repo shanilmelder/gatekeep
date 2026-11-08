@@ -445,3 +445,9 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-2-5-issue-a-token-by-client-credentials.md`
   summary: Sweep stale `tenant_attempt` (and `admin_attempt`) counter rows.
   evidence: Story 2.5 review. Each distinct IPv4 address or IPv6 /64 leaves a lasting row per policy per Tenant; rows go only on a crash (UNLOGGED) or Tenant deletion. `admin_attempt` has the same gap.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-32-recover-admin-access-from-the-host.md`
+  summary: Let `gatekeep recover-admin` recover an Admin who already holds the 10-credential maximum, and retire the lost credentials during recovery.
+  evidence: Story 1.32 review. Lost credentials stay registered, so an Admin at the maximum uses up the enrolment and loses their Sessions but can't register a new one. This belongs with Story 8.3's credential retirement.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-32-recover-admin-access-from-the-host.md`
+  summary: Print the `recover-admin` link with the Admin site's HTTPS port when it isn't 443.
+  evidence: Story 1.32 review. The `cli` service doesn't get `GATEKEEP_HTTPS_PORT` or the Admin origin, so a non-443 setup (such as dev on 18443) must add `:{port}` by hand, as `docs/install.md` says.

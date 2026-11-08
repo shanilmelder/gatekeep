@@ -485,6 +485,17 @@ internal sealed class AdminHost : IAsyncDisposable
             body: JsonSerializer.Serialize(new { code }),
             headers: Cookies(null, session).Concat(headers ?? []));
 
+    public const string EnrolmentPath = "/api/v1/deployment/signin/enrolment";
+
+    /// <summary>Redeems a <c>recover-admin</c> enrolment at sign-in (Story 1.32), sessionless, with any Session cookie the browser holds.</summary>
+    public Task<HttpResponseMessage> RedeemEnrolmentAsync(string enrolment, string? session = null, IEnumerable<(string, string)>? headers = null) =>
+        SendAsync(
+            HttpMethod.Post,
+            EnrolmentPath,
+            origin: Origin,
+            body: JsonSerializer.Serialize(new { enrolment }),
+            headers: Cookies(null, session).Concat(headers ?? []));
+
     /// <summary>
     /// A seeded non-Owner Admin with one credential and a confirmed Recovery Code: their setup
     /// Session is then full. Returns it, the code as shown and the authenticator.

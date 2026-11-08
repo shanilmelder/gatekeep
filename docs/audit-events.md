@@ -10,11 +10,13 @@ Every audit type code Gatekeep writes, declared in its module's contract. Codes 
 | `admin.credential.registered` | Admins | An Admin registered a WebAuthn credential. Holds no credential ID, public key, challenge or user handle. | None |
 | `admin.credential.removed` | Admins | An Admin removed one of their WebAuthn credentials. Holds no credential ID or public key. | None |
 | `admin.credential.sign_count_regressed` | Admins | A sign-in with an Admin's WebAuthn credential was refused because its signature counter went backwards: it may be cloned. | None |
+| `admin.enrolment.issued` | Admins | gatekeep recover-admin issued a single-use 15-minute enrolment for an Admin, after its Security Alert and off-server record. Holds no value or hash. | None |
+| `admin.enrolment.used` | Admins | An Admin's recover-admin enrolment was used to end their Sessions and start one that reaches only credential registration. Holds no value or hash. | None |
 | `admin.fresh_assertion.failed` | Admins | A fresh assertion whose signature verified over an Admin's own WebAuthn credential was refused. Holds no credential ID, challenge or binding. | None |
 | `admin.fresh_assertion.verified` | Admins | An Admin confirmed a sensitive action with a fresh WebAuthn assertion. Holds no credential ID, challenge, binding or Session ID. | None |
 | `admin.recovery_code.issued` | Admins | An Admin confirmed they saved an offline Recovery Code, which can now be used once. Holds no code or HMAC. | None |
 | `admin.recovery_code.used` | Admins | An Admin's offline Recovery Code was used to start a Session that reaches only credential registration. Holds no code or HMAC. | None |
-| `admin.session.revoked` | Admins | A credential removal or a Recovery Code ended a live Admin Session as revoked. Holds no Session ID. | None |
+| `admin.session.revoked` | Admins | A credential removal, a Recovery Code or a recover-admin enrolment ended a live Admin Session as revoked. Holds no Session ID. | None |
 | `admin.session.signed_out` | Admins | An Admin signed out, which ended their Admin Session. Holds no Session ID. | None |
 | `admin.session.superseded` | Admins | A sign-in in the same browser ended a live Admin Session as superseded. Holds no Session ID. | None |
 | `admin.setup.completed` | Admins | An Admin came to hold two WebAuthn credentials, or one and an offline Recovery Code, which completed setup and made their Session full. | None |

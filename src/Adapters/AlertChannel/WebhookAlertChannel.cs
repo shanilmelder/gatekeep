@@ -65,7 +65,9 @@ public sealed class WebhookAlertChannel : IAlertChannel, IDisposable
 
     /// <summary>
     /// The JSON body: exactly <c>alertId</c>, <c>code</c>, <c>deployment</c>, <c>raisedAt</c> and
-    /// <c>summary</c>, plus <c>tenantId</c> and <c>eventId</c> when the alert has them, in canonical form.
+    /// <c>summary</c>, plus <c>tenantId</c> and <c>eventId</c> when the alert has them, and
+    /// <c>adminId</c>, <c>enrolmentId</c>, <c>issuedAt</c> and <c>expiresAt</c> when it names an
+    /// enrolment (Story 1.32), in canonical form.
     /// </summary>
     public static byte[] Body(SecurityAlert alert)
     {
@@ -76,7 +78,7 @@ public sealed class WebhookAlertChannel : IAlertChannel, IDisposable
             ["alertId"] = alert.AlertId.ToString("D"),
             ["code"] = alert.Code.Code.Value,
             ["deployment"] = alert.Deployment.Name,
-            ["raisedAt"] = alert.RaisedAt.UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss.ffffff'Z'", System.Globalization.CultureInfo.InvariantCulture),
+            ["raisedAt"] = Timestamp(alert.RaisedAt),
             ["summary"] = alert.Summary,
         };
 
@@ -90,8 +92,20 @@ public sealed class WebhookAlertChannel : IAlertChannel, IDisposable
             body["eventId"] = eventId.ToString("D");
         }
 
+        if (alert.Enrolment is { } enrolment)
+        {
+            body["adminId"] = enrolment.AdminId.ToString("D");
+            body["enrolmentId"] = enrolment.EnrolmentId.ToString("D");
+            body["issuedAt"] = Timestamp(enrolment.IssuedAt);
+            body["expiresAt"] = Timestamp(enrolment.ExpiresAt);
+        }
+
         return CanonicalJson.Utf8(body);
     }
+
+    /// <summary>RFC 3339 in UTC to the microsecond, as audit events and records are.</summary>
+    private static string Timestamp(DateTimeOffset value) =>
+        value.UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss.ffffff'Z'", System.Globalization.CultureInfo.InvariantCulture);
 
     public async Task SendAsync(SecurityAlert alert, CancellationToken cancellationToken)
     {

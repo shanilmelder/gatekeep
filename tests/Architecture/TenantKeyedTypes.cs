@@ -69,6 +69,8 @@ public static class TenantKeyedTypes
         ["Gatekeep.Modules.Authentication.Contracts.AuthenticationContract.CrossTenantMismatchLogPolicy"] = KeyScope.Tenant,
         ["Gatekeep.Modules.Protocol.Contracts.TokenRequestLimits.Tenant"] = KeyScope.Tenant,
         ["Gatekeep.Modules.Protocol.Contracts.TokenRequestLimits.Source"] = KeyScope.Tenant,
+        ["Gatekeep.Modules.Admins.Contracts.AdminsContract.EnrolmentPolicy"] = KeyScope.DeploymentWide("recover-admin enrolment use per client (Story 1.32); Admins are Deployment-scoped."),
+        ["Gatekeep.Modules.Admins.Contracts.AdminsContract.EnrolmentDeploymentPolicy"] = KeyScope.DeploymentWide("One Deployment-wide cap on recover-admin enrolment use (Story 1.32)."),
     };
 
     /// <summary>

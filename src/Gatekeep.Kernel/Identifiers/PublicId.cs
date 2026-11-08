@@ -23,6 +23,10 @@ public enum PublicIdType
     /// is an unknown client, refused like a wrong secret.
     /// </summary>
     Application,
+    /// <c>adm_</c>: an Admin (Story 1.32), as <c>gatekeep recover-admin --admin</c> takes it and lists
+    /// it. Never their WebAuthn user handle.
+    /// </summary>
+    Admin,
 }
 
 /// <summary>
@@ -48,6 +52,7 @@ public static class PublicId
         PublicIdType.AdminCredential => "acr",
         PublicIdType.Operation => "opr",
         PublicIdType.Application => "app",
+        PublicIdType.Admin => "adm",
         _ => throw new ArgumentOutOfRangeException(nameof(type)),
     };
 

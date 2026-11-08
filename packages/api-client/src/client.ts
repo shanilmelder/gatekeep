@@ -214,6 +214,11 @@ export function createApiClient(options: ApiClientOptions = {}) {
     /** Redeems a Recovery Code at sign-in, sessionless: a Session that reaches only credential registration. */
     redeemRecoveryCode: (code: string) => request('/api/v1/deployment/signin/recovery-code', 'post', { code }),
     /**
+     * Redeems a gatekeep recover-admin enrolment, the fragment of the link it printed, sessionless
+     * (Story 1.32): a Session that reaches only credential registration.
+     */
+    redeemEnrolment: (enrolment: string) => request('/api/v1/deployment/signin/enrolment', 'post', { enrolment }),
+    /**
      * The Deployment's Tenants, oldest first, 50 a page, with the Tenant zone (Story 1.27).
      * `cursor` is the previous page's `nextCursor`, which goes into the query encoded.
      */

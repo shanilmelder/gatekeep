@@ -600,6 +600,31 @@ public sealed class ComposeConfigTests
     }
 
     /// <summary>
+    /// Story 1.32: <c>recover-admin</c> prints its link on the cli's <c>GATEKEEP_ALERT_DEPLOYMENT</c>,
+    /// so it must be the Admin hostname Caddy serves, by default and when the Operator sets one.
+    /// </summary>
+    [Theory]
+    [InlineData("deploy/compose.yaml", null)]
+    [InlineData("deploy/compose.yaml", "admin.recover.invalid")]
+    [InlineData("deploy/compose.dev.yaml", null)]
+    [InlineData("deploy/compose.dev.yaml", "admin.recover.invalid")]
+    public void The_cli_names_the_Deployment_by_Caddys_Admin_hostname(string file, string? adminHost)
+    {
+        var environment = adminHost is null ? new Dictionary<string, string>() : new Dictionary<string, string> { ["GATEKEEP_ADMIN_HOST"] = adminHost };
+        var services = Config([file], environment, "--profile", "tools").GetProperty("services");
+
+        var caddy = services.GetProperty("caddy").GetProperty("environment").GetProperty("GATEKEEP_ADMIN_HOST").GetString();
+        var cli = services.GetProperty("cli").GetProperty("environment").GetProperty("GATEKEEP_ALERT_DEPLOYMENT").GetString();
+
+        Assert.False(string.IsNullOrEmpty(caddy));
+        Assert.Equal(caddy, cli);
+        if (adminHost is not null)
+        {
+            Assert.Equal(adminHost, cli);
+        }
+    }
+
+    /// <summary>
     /// Story 1.30: the audit shipper runs the cli image's <c>audit-ship</c> as a uid of its own. Only it
     /// and OpenBao mount the audit volume, the shipper read-only, and only they hold the openbao-audit
     /// group (gid 4501) that may read the file. Its state volume is its own, and it has no OpenBao socket.

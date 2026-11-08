@@ -62,6 +62,7 @@ public static class RouteRegistry
         new("POST", "/api/v1/deployment/signin", CaseKind.NotTenantBound, Reason: "pre-auth Admin sign-in; Admins are Deployment-scoped"),
         new("POST", "/api/v1/deployment/signin/complete", CaseKind.NotTenantBound, Reason: "pre-auth Admin sign-in; Admins are Deployment-scoped"),
         new("POST", "/api/v1/deployment/signin/recovery-code", CaseKind.NotTenantBound, Reason: "pre-auth Admin Recovery Code sign-in; Admins are Deployment-scoped"),
+        new("POST", "/api/v1/deployment/signin/enrolment", CaseKind.NotTenantBound, Reason: "pre-auth recover-admin enrolment sign-in; Admins are Deployment-scoped"),
 
         // Self-service.
         new("GET", "/api/v1/deployment/session", CaseKind.NotTenantBound, Reason: SelfService),
