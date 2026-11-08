@@ -187,6 +187,7 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-1-24-enforce-capabilities-and-tenant-scoped-routes.md`
   summary: Have the cross-Tenant suite read the Tenant routes from `x-gatekeep-access` in the committed OpenAPI document (Story 1.31).
   evidence: Story 1.24 adds `x-gatekeep-access` to every operation; the suite isn't built.
+  resolution: Resolved by Story 1.31. The suite reads the live route set from the running hosts (`tests/Isolation/Hosting/RunningRoutes.cs`), which `AdminEndpointTests` already holds equal to the committed document's operations, so `x-gatekeep-access` adds nothing the registry check doesn't. Every live route has an entry in `tests/Isolation/CrossTenant/RouteRegistry.cs`, and each `{tenantId}` and `{targetTenantId}` entry runs its refusal case.
 - source_spec: `_bmad-output/implementation-artifacts/spec-1-24-enforce-capabilities-and-tenant-scoped-routes.md`
   summary: Catch `ARCHITECTURE-SPINE.md` up with Story 1.24: the AD-19 self-service exemption under `/api/v1/deployment`, the public ID alphabet (lowercase RFC 4648 base32, no padding, canonical only, never the empty UUID) in Conventions, the capability names in AD-20, and `tenant_role` in AD-27's Admins tables.
   evidence: Story 1.24 exempts the reviewed self-service and sessionless routes from the Deployment Owner gate and fixes the public ID encoding, which the spine doesn't yet state.

@@ -30,8 +30,8 @@ public sealed class TenantPurgeRegistryTests(PostgresFixture postgres)
     [Fact]
     public void A_registry_table_with_no_seed_is_reported()
     {
-        var widget = new TableEntry("widget", TableClass.Tenant, "Widgets", new Dictionary<string, IReadOnlyList<string>>());
-        var kept = new TableEntry("audit_widget", TableClass.Tenant, TenantSeeds.KeptOwner, new Dictionary<string, IReadOnlyList<string>>());
+        var widget = new TableEntry("widget", TableClass.Tenant, "Widgets", TableUse.Runtime, new Dictionary<string, IReadOnlyList<string>>());
+        var kept = new TableEntry("audit_widget", TableClass.Tenant, TenantSeeds.KeptOwner, TableUse.Runtime, new Dictionary<string, IReadOnlyList<string>>());
 
         Assert.Equal(["widget"], TenantSeeds.Unseeded([.. TableRegistry.Tables, widget, kept]));
     }
@@ -46,8 +46,8 @@ public sealed class TenantPurgeRegistryTests(PostgresFixture postgres)
     [Fact]
     public void A_purged_table_with_no_row_guard_is_reported()
     {
-        var widget = new TableEntry("widget", TableClass.Tenant, "Widgets", new Dictionary<string, IReadOnlyList<string>>());
-        var kept = new TableEntry("audit_widget", TableClass.Tenant, TenantSeeds.KeptOwner, new Dictionary<string, IReadOnlyList<string>>());
+        var widget = new TableEntry("widget", TableClass.Tenant, "Widgets", TableUse.Runtime, new Dictionary<string, IReadOnlyList<string>>());
+        var kept = new TableEntry("audit_widget", TableClass.Tenant, TenantSeeds.KeptOwner, TableUse.Runtime, new Dictionary<string, IReadOnlyList<string>>());
 
         Assert.Equal(["widget"], Unguarded([.. TableRegistry.Tables, widget, kept]));
     }
