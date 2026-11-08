@@ -1,6 +1,11 @@
 using System.Globalization;
+using Gatekeep.Kernel.Audit;
 using Gatekeep.Kernel.Limits;
+using Gatekeep.Modules.Authentication.Contracts;
+using Gatekeep.Modules.Directory.Contracts;
+using Gatekeep.Modules.Protocol.Adapters;
 using Gatekeep.Modules.Protocol.Contracts;
+using Gatekeep.Modules.Sessions.Contracts;
 using Gatekeep.Modules.Tenancy.Contracts;
 using Microsoft.AspNetCore;
 using Microsoft.AspNetCore.Http;
@@ -16,32 +21,76 @@ using static OpenIddict.Server.OpenIddictServerEvents;
 namespace Gatekeep.Modules.Protocol.Core;
 
 /// <summary>
-/// The OpenIddict server registration (Story 2.3, AD-8). Degraded mode is off, and no store is
-/// registered yet: discovery and JWKS need none, and the token endpoint is refused before any
-/// handler that would.
+/// The OpenIddict server registration (Stories 2.3 and 2.5, AD-8). Degraded mode is off. The stores
+/// live in their owners (Directory's application store, Sessions' token and authorization stores), and
+/// every store call runs in the token request's one transaction; entity caching is off, no scope store
+/// is registered, and nothing prunes. The token endpoint serves Client Credentials only, authenticated
+/// by Gatekeep's handler against Directory, with <c>client_secret_basic</c> and <c>client_secret_post</c>.
 /// </summary>
 internal static class ProtocolServer
 {
-    public static void Add(IServiceCollection services)
+    public static void Add(IServiceCollection services, Func<IServiceProvider, string> hostedConnectionString)
     {
         services.TryAddSingleton(TimeProvider.System);
         services.AddSingleton<TenantRuntimes>();
         services.AddSingleton<ITenantServerOptions>(provider => provider.GetRequiredService<TenantRuntimes>());
 
+        services.AddSingleton(provider => new HostedDataSource(() => hostedConnectionString(provider)));
+        services.TryAddSingleton(new TokenRequestLimits(
+            AuthenticationContract.TokenRequestTenantPolicy, AuthenticationContract.TokenRequestSourcePolicy));
+        services.AddSingleton(provider => new TokenEndpointServices(
+            provider.GetRequiredService<HostedDataSource>(),
+            AuthenticationContract.CreateAttemptLimiter(),
+            DirectoryContract.CreateDirectory(provider.GetRequiredService<IAuditAppender>(), provider.GetRequiredService<TimeProvider>()),
+            provider.GetRequiredService<IAuditAppender>(),
+            provider.GetRequiredService<TokenRequestLimits>(),
+            provider.GetService<ILoggerFactory>()));
+        services.AddScoped<TokenRequestTransaction>();
+
         var inert = new InertCredentials();
 
-        services.AddOpenIddict().AddServer(options =>
+        var openIddict = services.AddOpenIddict();
+
+        // AD-8: each store in its owner's adapters, on the request's own transaction. No scope store:
+        // no scope is known yet, and RefuseTokenTargets refuses any.
+        openIddict.AddCore(core =>
+        {
+            core.SetDefaultApplicationEntity<DirectoryApplication>()
+                .SetDefaultAuthorizationEntity<SessionsAuthorization>()
+                .SetDefaultTokenEntity<SessionsToken>()
+                .DisableEntityCaching();
+
+            core.Services.Replace(ServiceDescriptor.Scoped(provider =>
+                DirectoryContract.CreateApplicationStore(() => provider.GetRequiredService<TokenRequestTransaction>().Context)));
+            core.Services.Replace(ServiceDescriptor.Scoped(provider =>
+                SessionsContract.CreateTokenStore(() => provider.GetRequiredService<TokenRequestTransaction>().Context)));
+            core.Services.Replace(ServiceDescriptor.Scoped(_ => SessionsContract.CreateAuthorizationStore()));
+        });
+
+        openIddict.AddServer(options =>
         {
             options.SetConfigurationEndpointUris(ProtocolContract.ConfigurationPath[1..])
                 .SetJsonWebKeySetEndpointUris(ProtocolContract.JsonWebKeySetPath[1..])
                 .SetTokenEndpointUris(ProtocolContract.TokenPath[1..]);
 
-            // OpenIddict refuses to start without a flow (ID0076/ID0079), and the flow needs the
-            // token endpoint. RefuseTokenRequests keeps both inert until Story 2.5.
+            // The one grant type (Story 2.5): any other is unsupported_grant_type.
             options.AllowClientCredentialsFlow();
 
-            // Access tokens are JWS, unencrypted (AD-8).
+            // Access tokens are JWS, unencrypted (AD-8), for the §5.2 default lifetime.
             options.DisableAccessTokenEncryption();
+            options.SetAccessTokenLifetime(SecurityLimits.DefaultAccessTokenLifetime);
+
+            // No scope store, so OpenIddict's own scope check, which needs one, is off.
+            options.DisableScopeValidation();
+
+            // client_secret_basic (which the ASP.NET Core host adds) and client_secret_post only, so
+            // discovery advertises exactly those; no client assertion is accepted.
+            options.Configure(server =>
+            {
+                server.ClientAuthenticationMethods.Remove(ClientAuthenticationMethods.PrivateKeyJwt);
+                server.ClientAuthenticationMethods.Remove(ClientAuthenticationMethods.ClientSecretJwt);
+                server.ClientAssertionTypes.Clear();
+            });
 
             options.AddSigningCredentials(inert.Signing);
             options.AddEncryptionCredentials(inert.Encrypting);
@@ -50,9 +99,21 @@ internal static class ProtocolServer
             options.RemoveEventHandler(OpenIddictServerAspNetCoreHandlers.ResolveRequestUri.Descriptor);
             options.AddEventHandler(SelectTenantOptions.Descriptor);
             options.AddEventHandler(RequireTenantOptions.Descriptor);
-            options.AddEventHandler(RefuseTokenRequests.Descriptor);
-            options.AddEventHandler(TrimDiscovery.Descriptor);
             options.AddEventHandler(CacheJsonWebKeySet.Descriptor);
+
+            // The token endpoint (Story 2.5): counted, then one transaction, ended before the response.
+            options.AddEventHandler(LimitTokenRequests.Descriptor);
+            options.AddEventHandler(BeginTokenTransaction.Descriptor);
+            options.AddEventHandler(RefuseTokenTargets.Descriptor);
+            options.AddEventHandler(SignInClient.Descriptor);
+            options.AddEventHandler(ReportAccessTokenLifetime.Descriptor);
+            options.AddEventHandler(EndTokenTransaction.Descriptor);
+            options.AddEventHandler(AnswerRateLimited.Descriptor);
+
+            // Client authentication is Gatekeep's, against Directory (AD-8); OpenIddict's check, which
+            // reads a secret column Gatekeep keeps empty, is gone.
+            options.RemoveEventHandler(OpenIddictServerHandlers.ValidateClientSecret.Descriptor);
+            options.AddEventHandler(AuthenticateGatekeepClient.Descriptor);
 
             // TLS ends at Caddy, so every request reaches Host.Hosted over plain HTTP, and no
             // forwarded scheme is believed (AD-6): the stored https issuer is what clients see.
@@ -99,7 +160,8 @@ internal static class ProtocolServer
 /// set, the only Tenant source on Host.Hosted (AD-4), sets <c>BaseUri</c> and the request URI from
 /// that Tenant's stored issuer (OpenIddict's <c>ResolveRequestUri</c> is removed, so no
 /// <c>Host</c>, forwarded header, scheme or port changes them), and swaps in the Tenant's options.
-/// It opens no transaction: discovery and JWKS only read, in the runtime's own short scope. A
+/// It opens no transaction: discovery and JWKS only read, in the runtime's own short scope, and only
+/// the token endpoint opens one, once it has counted the request (Story 2.5). A
 /// runtime that can't be built answers the one fixed 503, logging only the error's type.
 /// </summary>
 internal sealed class SelectTenantOptions(TenantRuntimes runtimes, ILoggerFactory? loggers = null)
@@ -163,6 +225,7 @@ internal sealed class SelectTenantOptions(TenantRuntimes runtimes, ILoggerFactor
         }
 
         context.Transaction.Options = runtime.Options;
+        context.Transaction.SetProperty(TenantRuntime.Property, runtime);
     }
 
     private void Unavailable(ProcessRequestContext context, HttpRequest request, Exception e)
@@ -205,53 +268,6 @@ internal sealed class RequireTenantOptions : IOpenIddictServerHandler<ProcessReq
             context.HandleRequest();
         }
 
-        return ValueTask.CompletedTask;
-    }
-}
-
-/// <summary>
-/// Refuses every token request with <c>unsupported_grant_type</c> until Story 2.5 replaces it. It
-/// runs first on extraction, before OpenIddict reads the request, validates it or reaches any
-/// store or key, so the endpoint is inert whatever the request holds.
-/// </summary>
-internal sealed class RefuseTokenRequests : IOpenIddictServerHandler<ExtractTokenRequestContext>
-{
-    public static OpenIddictServerHandlerDescriptor Descriptor { get; } =
-        OpenIddictServerHandlerDescriptor.CreateBuilder<ExtractTokenRequestContext>()
-            .UseSingletonHandler<RefuseTokenRequests>()
-            .SetOrder(int.MinValue)
-            .SetType(OpenIddictServerHandlerType.Custom)
-            .Build();
-
-    public ValueTask HandleAsync(ExtractTokenRequestContext context)
-    {
-        ArgumentNullException.ThrowIfNull(context);
-        context.Reject(Errors.UnsupportedGrantType, "No grant type is enabled on this server yet.");
-        return ValueTask.CompletedTask;
-    }
-}
-
-/// <summary>
-/// Takes the token endpoint and every grant type out of discovery until Story 2.5 enables one,
-/// so no client tries the refused endpoint. It runs after every built-in discovery handler.
-/// </summary>
-internal sealed class TrimDiscovery : IOpenIddictServerHandler<HandleConfigurationRequestContext>
-{
-    public static OpenIddictServerHandlerDescriptor Descriptor { get; } =
-        OpenIddictServerHandlerDescriptor.CreateBuilder<HandleConfigurationRequestContext>()
-            .UseSingletonHandler<TrimDiscovery>()
-            .SetOrder(int.MaxValue)
-            .SetType(OpenIddictServerHandlerType.Custom)
-            .Build();
-
-    public ValueTask HandleAsync(HandleConfigurationRequestContext context)
-    {
-        ArgumentNullException.ThrowIfNull(context);
-
-        context.TokenEndpoint = null;
-        context.MtlsTokenEndpointAlias = null;
-        context.GrantTypes.Clear();
-        context.TokenEndpointAuthenticationMethods.Clear();
         return ValueTask.CompletedTask;
     }
 }

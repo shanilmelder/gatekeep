@@ -44,7 +44,7 @@ internal static class AuditCatalogue
         new("KeyOperation", "Key operations", "9.2"),
         new("ManagementApiGrant", "Management API grants", "17.2"),
         new("TokenFamilyRevocation", "Token Family revocations", "2.10"),
-        new("CrossTenantRejection", "Rejected cross-Tenant attempts", "7.4"),
+        new("CrossTenantRejection", "Rejected cross-Tenant attempts", null),
     ];
 
     private static readonly Regex DocCode = new(@"^\|\s*`(?<code>[^`]+)`\s*\|", RegexOptions.Multiline | RegexOptions.Compiled);

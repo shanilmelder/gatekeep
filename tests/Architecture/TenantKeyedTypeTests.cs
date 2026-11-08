@@ -69,11 +69,29 @@ public sealed class TenantKeyedTypeTests
     }
 
     [Fact]
-    public void A_Tenant_rate_limit_policy_is_refused_until_its_key_check_exists()
+    public void A_Tenant_rate_limit_policy_is_refused_outside_the_Tenant_limiter()
     {
         Assert.Equal(
-            ["rate-limit policy Gatekeep.Widgets.WidgetsContract.SignInPolicy is registered Tenant, which nothing checks yet: the story that adds Tenant counters (Story 2.5) must add its key check here first."],
+            ["rate-limit policy Gatekeep.Widgets.WidgetsContract.SignInPolicy is registered Tenant but isn't declared where the Tenant limiter counts it: declare it on Gatekeep.Modules.Authentication.Contracts.AuthenticationContract, whose limiter keys every row by Tenant, or register it DeploymentWide with a reason."],
             PolicyScopeProblems(new Dictionary<string, KeyScope> { ["Gatekeep.Widgets.WidgetsContract.SignInPolicy"] = KeyScope.Tenant }));
+    }
+
+    [Fact]
+    public void A_Deployment_wide_rate_limit_policy_is_refused_on_the_Tenant_limiter()
+    {
+        Assert.Equal(
+            ["rate-limit policy Gatekeep.Modules.Authentication.Contracts.AuthenticationContract.SignInPolicy is registered DeploymentWide but is declared where only the Tenant limiter counts it, which refuses a Deployment scope: register it Tenant, or declare it on the module that counts it Deployment-wide."],
+            PolicyScopeProblems(new Dictionary<string, KeyScope> { ["Gatekeep.Modules.Authentication.Contracts.AuthenticationContract.SignInPolicy"] = KeyScope.DeploymentWide("for the test") }));
+    }
+
+    [Fact]
+    public void A_Tenant_rate_limit_policy_on_the_Tenant_limiter_passes()
+    {
+        Assert.Empty(PolicyScopeProblems(new Dictionary<string, KeyScope>
+        {
+            ["Gatekeep.Modules.Authentication.Contracts.AuthenticationContract.SignInPolicy"] = KeyScope.Tenant,
+            ["Gatekeep.Modules.Protocol.Contracts.TokenRequestLimits.Source"] = KeyScope.Tenant,
+        }));
     }
 
     [Fact]
@@ -154,10 +172,26 @@ public sealed class TenantKeyedTypeTests
         ];
     }
 
+    /// <summary>
+    /// Where the Tenant limiter's policies are declared (Story 2.5, AD-14): Authentication's, whose
+    /// limiter counts only in a Tenant scope, in <c>tenant_attempt</c> keyed by <c>tenant_id</c>, and
+    /// Protocol's <c>TokenRequestLimits</c>, which carries those same policies to the token endpoint.
+    /// </summary>
+    private static readonly string[] TenantLimiterTypes =
+    [
+        "Gatekeep.Modules.Authentication.Contracts.AuthenticationContract",
+        "Gatekeep.Modules.Protocol.Contracts.TokenRequestLimits",
+    ];
+
+    private static bool OnTenantLimiter(string policy) =>
+        TenantLimiterTypes.Any(t => policy.StartsWith(t + ".", StringComparison.Ordinal) && policy.IndexOf('.', t.Length + 1) < 0);
+
     private static List<string> PolicyScopeProblems(IReadOnlyDictionary<string, KeyScope> registry) =>
     [
-        .. registry.Where(p => p.Value is KeyScope.TenantKeyed).Select(p => p.Key).Order(StringComparer.Ordinal)
-            .Select(n => $"rate-limit policy {n} is registered Tenant, which nothing checks yet: the story that adds Tenant counters (Story 2.5) must add its key check here first."),
+        .. registry.Where(p => p.Value is KeyScope.TenantKeyed && !OnTenantLimiter(p.Key)).Select(p => p.Key).Order(StringComparer.Ordinal)
+            .Select(n => $"rate-limit policy {n} is registered Tenant but isn't declared where the Tenant limiter counts it: declare it on {TenantLimiterTypes[0]}, whose limiter keys every row by Tenant, or register it DeploymentWide with a reason."),
+        .. registry.Where(p => p.Value is KeyScope.DeploymentWideScope && OnTenantLimiter(p.Key)).Select(p => p.Key).Order(StringComparer.Ordinal)
+            .Select(n => $"rate-limit policy {n} is registered DeploymentWide but is declared where only the Tenant limiter counts it, which refuses a Deployment scope: register it Tenant, or declare it on the module that counts it Deployment-wide."),
     ];
 
     private static List<string> JobScopeProblems(IReadOnlyDictionary<string, string> jobs, IReadOnlyDictionary<string, KeyScope> registry) =>

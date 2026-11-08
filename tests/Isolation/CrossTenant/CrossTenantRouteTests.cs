@@ -1,5 +1,4 @@
 using System.Net;
-using System.Security.Cryptography;
 using System.Text.Json;
 using Gatekeep.Kernel.Identifiers;
 using Gatekeep.Modules.Protocol.Contracts;
@@ -180,24 +179,22 @@ public sealed class CrossTenantRouteTests(PostgresFixture postgres, OpenBaoFixtu
 
             case ProtocolContract.TokenPath:
             {
-                // Refused on B's host, whatever it carries, until Story 2.5 opens the endpoint.
-                using var request = new HttpRequestMessage(HttpMethod.Post, new Uri($"http://{HostB}{entry.Pattern}"))
+                // Tenant A's real machine client, presented at B's host by Basic and by post: refused
+                // with invalid_client, nothing issued, and the rejection logged in B's Log only, naming
+                // nothing of A (Story 2.5).
+                var client = await database.CreateClientAsync(a.TenantId);
+                var eventsA = await database.ScalarAsync<long>($"SELECT count(*) FROM audit_event WHERE tenant_id = '{a.TenantId}'");
+                foreach (var how in new[] { "basic", "post" })
                 {
-                    Content = new FormUrlEncodedContent(new Dictionary<string, string>
-                    {
-                        ["grant_type"] = "client_credentials",
-                        ["client_id"] = "tenant-a-client",
-                        ["client_secret"] = Convert.ToHexString(RandomNumberGenerator.GetBytes(16)),
-                    }),
-                };
-                using var response = await host.Http.SendAsync(request, Cancellation);
-                const string Replace = "Story 2.5 opens the token endpoint: replace this case with a real Tenant A client presented at Tenant B's host, refused.";
-                Assert.True(response.StatusCode == HttpStatusCode.BadRequest, $"{(int)response.StatusCode}. {Replace}");
-                using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync(Cancellation));
-                var error = document.RootElement.TryGetProperty("error", out var e) ? e.GetString() : null;
-                Assert.True(error == "unsupported_grant_type", $"error {error}. {Replace}");
-                Assert.False(document.RootElement.TryGetProperty("access_token", out _));
+                    using var refused = await ClientCredentialsTests.TokenAsync(host, HostB, client.ClientId, client.Secret, how);
+                    Assert.Equal(HttpStatusCode.Unauthorized, refused.Status);
+                    Assert.Equal("invalid_client", refused.Error);
+                }
+
                 Assert.Equal(0L, await database.ScalarAsync<long>("SELECT count(*) FROM token"));
+                Assert.Equal(2L, await database.ScalarAsync<long>(
+                    $"SELECT count(*) FROM audit_event WHERE tenant_id = '{b.TenantId}' AND type_code = 'protocol.client.cross_tenant_rejected' AND actor_kind = 'anonymous' AND target_id IS NULL"));
+                Assert.Equal(eventsA, await database.ScalarAsync<long>($"SELECT count(*) FROM audit_event WHERE tenant_id = '{a.TenantId}'"));
                 break;
             }
 

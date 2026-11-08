@@ -3,6 +3,7 @@ using Gatekeep.Kernel.Persistence;
 using Gatekeep.Kernel.Secrets;
 using Gatekeep.Modules.Audit.Contracts;
 using Gatekeep.Modules.Authentication.Contracts;
+using Gatekeep.Modules.Directory.Contracts;
 using Gatekeep.Modules.Identity.Contracts;
 using Gatekeep.Modules.Keys.Contracts;
 using Gatekeep.Modules.Operations.Contracts;
@@ -48,13 +49,16 @@ internal static class TenantDeletion
 
     /// <summary>
     /// The module purges the purge stage calls, in this order, in one transaction: Sessions before
-    /// Identity, because <c>user_session</c> references <c>user</c> with <c>ON DELETE RESTRICT</c>.
+    /// Identity, because <c>user_session</c> references <c>user</c> with <c>ON DELETE RESTRICT</c>, and Sessions and
+    /// Authentication before Directory, because <c>token</c>, <c>authorization</c> and <c>signin_transaction</c>
+    /// reference <c>application</c> the same way (Story 2.5).
     /// Operations' own purge runs in the completion, because the stage jobs' own payloads live there.
     /// </summary>
     public static readonly IReadOnlyList<(string Module, ITenantPurge Purge)> StagePurges =
     [
         ("Sessions", SessionsContract.TenantPurge),
         ("Authentication", AuthenticationContract.TenantPurge),
+        ("Directory", DirectoryContract.TenantPurge),
         ("Identity", IdentityContract.TenantPurge),
         ("Keys", KeysContract.TenantPurge),
         ("Tenancy", TenancyContract.TenantPurge),

@@ -9,6 +9,7 @@ flowchart TD
   HostHosted[Host.Hosted]
   Protocol[Protocol]
   Authentication[Authentication]
+  Audit[Audit]
   Identity[Identity]
   Sessions[Sessions]
   Tenancy[Tenancy]
@@ -17,7 +18,6 @@ flowchart TD
   HostAdmin[Host.Admin]
   Management[Management]
   Admins[Admins]
-  Audit[Audit]
   AdaptersFido2[Adapters.Fido2]
   HostWorker[Host.Worker]
   Operations[Operations]
@@ -33,6 +33,7 @@ flowchart TD
   TestsIsolation[Tests.Isolation]
   HostHosted --> Protocol
   HostHosted --> Authentication
+  HostHosted --> Audit
   HostHosted --> Identity
   HostHosted --> Sessions
   HostHosted --> Tenancy
@@ -111,6 +112,7 @@ flowchart TD
   TestsIsolation --> Admins
   TestsIsolation --> Audit
   TestsIsolation --> Authentication
+  TestsIsolation --> Directory
   TestsIsolation --> Cli
   TestsIsolation --> Keys
   TestsIsolation --> Management

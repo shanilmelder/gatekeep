@@ -40,7 +40,11 @@ internal interface ITenantKeyChanges
 }
 
 /// <summary>A Tenant's OpenIddict options and the keys behind them.</summary>
-internal sealed record TenantRuntime(Guid TenantId, Uri Issuer, OpenIddictServerOptions Options, IReadOnlyList<TransitSigningKey> SigningKeys);
+internal sealed record TenantRuntime(Guid TenantId, Uri Issuer, OpenIddictServerOptions Options, IReadOnlyList<TransitSigningKey> SigningKeys)
+{
+    /// <summary>The OpenIddict transaction property <see cref="SelectTenantOptions"/> leaves the request's runtime in.</summary>
+    public const string Property = ".gatekeep_tenant_runtime";
+}
 
 /// <summary>
 /// Builds and keeps each Tenant's runtime (Story 2.3, AD-8, AD-11). A copy of the options comes
