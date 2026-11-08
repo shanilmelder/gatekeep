@@ -67,6 +67,7 @@ internal static class RunningRoutes
                 $"--Custody:SocketPath={socket}",
                 $"--Custody:RoleIdFile={SecretFile(directory, "role-id")}",
                 $"--Custody:SecretIdFile={SecretFile(directory, "secret-id")}",
+                "--Gatekeep:ForwardedBy=none",
             ],
             ProtocolEndpointUris);
         return [.. Routes(endpoints), .. protocol.Select(p => new LiveRoute("*", p))];

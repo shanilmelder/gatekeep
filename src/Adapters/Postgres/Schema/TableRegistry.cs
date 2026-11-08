@@ -535,13 +535,13 @@ public static class TableRegistry
         // only as its SHA-256. Host.Admin creates them (Epic 3 adds the API, rotation and revocation);
         // Host.Hosted only reads them, to authenticate a client. No role updates one yet, and only a
         // Tenant's deletion deletes (Story 1.29): its Operation's purges, reading only tenant_id.
-        new("application", TableClass.Tenant, "Directory", new Dictionary<string, IReadOnlyList<string>>
+        new("application", TableClass.Tenant, "Directory", TableUse.Configuration, new Dictionary<string, IReadOnlyList<string>>
         {
             [Hosted] = [Select],
             [Admin] = [Select, Insert],
             [Worker] = [Delete],
         }, PurgeColumns, RowGuard),
-        new("client_secret", TableClass.Tenant, "Directory", new Dictionary<string, IReadOnlyList<string>>
+        new("client_secret", TableClass.Tenant, "Directory", TableUse.Configuration, new Dictionary<string, IReadOnlyList<string>>
         {
             [Hosted] = [Select],
             [Admin] = [Select, Insert],
@@ -554,6 +554,7 @@ public static class TableRegistry
             "tenant_attempt",
             TableClass.Tenant,
             "Authentication",
+            TableUse.Runtime,
             new Dictionary<string, IReadOnlyList<string>>
             {
                 [Hosted] = [Select, Insert],
