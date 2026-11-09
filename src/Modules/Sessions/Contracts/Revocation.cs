@@ -73,6 +73,12 @@ public sealed record RevocationReason
     public static readonly RevocationReason ApplicationDeleted = new("application_deleted");
     public static readonly RevocationReason TenantDeleted = new("tenant_deleted");
 
+    /// <summary>
+    /// A client ended its own refresh token's Token Family at the revocation endpoint (Story 2.11, RFC 7009).
+    /// No Session ends.
+    /// </summary>
+    public static readonly RevocationReason ClientRevoke = new("client_revoke");
+
     /// <summary>Every reason, in declaration order.</summary>
     public static readonly IReadOnlyList<RevocationReason> All =
     [
@@ -85,6 +91,7 @@ public sealed record RevocationReason
         CodeReplay,
         ApplicationDeleted,
         TenantDeleted,
+        ClientRevoke,
     ];
 
     private RevocationReason(string code) => Code = code;

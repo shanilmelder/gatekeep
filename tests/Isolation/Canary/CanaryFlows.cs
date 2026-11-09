@@ -283,6 +283,7 @@ internal static class CanaryFlows
         new("protocol.client_credentials", [], ClientCredentialsAsync),
         new("protocol.authorization_code", [], AuthorizationCodeAsync),
         new("protocol.refresh_token", [], RefreshTokenAsync),
+        new("protocol.userinfo_and_revocation", [], UserinfoAndRevocationAsync),
     ];
 
     private static readonly DateOnly Reviewed = new(2026, 11, 2);
@@ -1622,6 +1623,116 @@ internal static class CanaryFlows
 
         run.Capture("Hosted log", captured.Text);
         Assert.Contains("connect/token", captured.Text, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Story 2.11: the userinfo and revocation endpoints on the real Protocol registration, through the hosts'
+    /// scrubbing logging at Trace, with a real web client, the test-only sign-in and the real Transit. A code flow
+    /// with <c>offline_access</c> is exchanged; its access token is sent to userinfo as a bearer, and its refresh
+    /// token is revoked by its client. Failing, userinfo is sent the ID token and a garbage bearer, the access
+    /// token is presented for revocation, the refresh token is revoked with a wrong secret and at another Tenant,
+    /// and then refreshed after its revocation. The client secret, the code, the verifier, the refresh token and its
+    /// random part and every issued token must appear in no log or table; userinfo's and revocation's responses
+    /// hold none of them, so they are captured whole.
+    /// </summary>
+    private static async Task UserinfoAndRevocationAsync(CanaryFlowContext context, FlowRun run, bool failing)
+    {
+        const string hostA = "canary-a.revoke.test";
+        const string hostB = "canary-b.revoke.test";
+
+        var flow = await Protocol.CodeFlowSetup.CreateAsync(context.Postgres, context.Bao, hostA, hostB);
+        run.Database = flow.Database.Name;
+        run.Plant("role-password", PostgresFixture.Password);
+        run.Plant("client-secret", flow.ClientA.Secret);
+        run.Plant("client-secret-random", flow.ClientA.Secret[(flow.ClientA.Secret.IndexOf('.', StringComparison.Ordinal) + 1)..]);
+        var clientB = await flow.Database.CreateWebClientAsync(flow.B.TenantId, [Protocol.CodeFlowSetup.Callback]);
+        run.Plant("client-b-secret", clientB.Secret);
+
+        var pkce = Protocol.Pkce.New();
+        run.Plant("code-verifier", pkce.Verifier);
+
+        var captured = new CapturedConsole();
+        await using (var host = await flow.StartHostAsync(logging: logging =>
+        {
+            logging.AddGatekeepLogging().SetMinimumLevel(LogLevel.Trace);
+            logging.Services.AddSingleton<Microsoft.Extensions.Logging.Console.ConsoleFormatter>(captured);
+            logging.Services.Configure<Microsoft.Extensions.Logging.Console.ConsoleLoggerOptions>(options => options.FormatterName = captured.Name);
+        }))
+        {
+            var code = await Protocol.CodeFlow.CodeAsync(
+                host, hostA, flow.ClientA.ClientId, Protocol.CodeFlowSetup.Callback, pkce, flow.UserA, scope: "openid offline_access");
+            run.Plant("authorization-code", code);
+            run.Plant("authorization-code-random", code[(code.IndexOf('.', StringComparison.Ordinal) + 1)..]);
+
+            string access;
+            string id;
+            string refresh;
+            using (var issued = await Protocol.CodeFlow.ExchangeAsync(
+                host, hostA, flow.ClientA.ClientId, flow.ClientA.Secret, code, Protocol.CodeFlowSetup.Callback, pkce.Verifier))
+            {
+                Assert.Equal(HttpStatusCode.OK, issued.Status);
+                access = issued.AccessToken;
+                id = issued.Body.RootElement.GetProperty("id_token").GetString()!;
+                refresh = issued.RefreshToken;
+                run.Plant("userinfo-bearer-access-token", access);
+                run.Plant("id-token", id);
+                run.Plant("revoked-refresh-token", refresh);
+                run.Plant("revoked-refresh-token-random", refresh[(refresh.IndexOf('.', StringComparison.Ordinal) + 1)..]);
+                run.Capture("token response", $"{issued.Body.RootElement.GetProperty("token_type").GetString()} {issued.Body.RootElement.GetProperty("expires_in").GetInt32()}");
+            }
+
+            using (var userinfo = await Protocol.UserinfoAndRevocationTests.UserinfoAsync(host, hostA, access))
+            {
+                Assert.Equal(HttpStatusCode.OK, userinfo.Status);
+                run.Capture("userinfo response", $"{(int)userinfo.Status} {userinfo.Body}");
+            }
+
+            if (failing)
+            {
+                foreach (var (name, bearer) in new[] { ("ID token", id), ("garbage", run.Plant("userinfo-garbage-bearer").Value) })
+                {
+                    using var refused = await Protocol.UserinfoAndRevocationTests.UserinfoAsync(host, hostA, bearer);
+                    Assert.Equal(HttpStatusCode.Unauthorized, refused.Status);
+                    run.Capture($"userinfo {name} response", $"{(int)refused.Status} {refused.WwwAuthenticate} {refused.Body}");
+                }
+
+                using (var unsupported = await Protocol.UserinfoAndRevocationTests.RevokeAsync(host, hostA, flow.ClientA.ClientId, flow.ClientA.Secret, access))
+                {
+                    Assert.Equal("unsupported_token_type", unsupported.Error);
+                    run.Capture("access token revocation response", $"{(int)unsupported.Status} {unsupported.Body}");
+                }
+
+                var wrong = run.Plant("client-secret-wrong", flow.ClientA.Secret[..(flow.ClientA.Secret.IndexOf('.', StringComparison.Ordinal) + 1)] + Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(24)));
+                using (var badClient = await Protocol.UserinfoAndRevocationTests.RevokeAsync(host, hostA, flow.ClientA.ClientId, wrong.Value, refresh))
+                {
+                    Assert.Equal("invalid_client", badClient.Error);
+                    run.Capture("wrong secret revocation response", $"{(int)badClient.Status} {badClient.Body}");
+                }
+
+                using (var cross = await Protocol.UserinfoAndRevocationTests.RevokeAsync(host, hostB, clientB.ClientId, clientB.Secret, refresh))
+                {
+                    Assert.Equal(HttpStatusCode.OK, cross.Status);
+                    run.Capture("cross-Tenant revocation response", $"{(int)cross.Status} {cross.Body}");
+                }
+            }
+
+            using (var revoked = await Protocol.UserinfoAndRevocationTests.RevokeAsync(host, hostA, flow.ClientA.ClientId, flow.ClientA.Secret, refresh))
+            {
+                Assert.Equal(HttpStatusCode.OK, revoked.Status);
+                run.Capture("revocation response", $"{(int)revoked.Status} {revoked.Body}");
+            }
+
+            if (failing)
+            {
+                using var afterRevocation = await Protocol.CodeFlow.RefreshAsync(host, hostA, flow.ClientA.ClientId, flow.ClientA.Secret, refresh);
+                Assert.Equal("invalid_grant", afterRevocation.Error);
+                run.Capture("refresh after revocation response", afterRevocation.Body.RootElement.GetRawText());
+            }
+        }
+
+        run.Capture("Hosted log", captured.Text);
+        Assert.Contains("connect/userinfo", captured.Text, StringComparison.Ordinal);
+        Assert.Contains("connect/revoke", captured.Text, StringComparison.Ordinal);
     }
 
     /// <summary>A response's status, every header and its body, as one text to scan.</summary>

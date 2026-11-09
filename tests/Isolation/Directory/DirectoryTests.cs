@@ -125,7 +125,7 @@ public sealed class DirectoryTests(PostgresFixture postgres)
             postgres.SuperuserConnection(database), "SELECT id FROM application WHERE kind = 'web'")), Cancellation))!;
         Assert.Equal(uris, await store.GetRedirectUrisAsync(found, Cancellation));
         Assert.Equal(
-            ["ept:authorization", "ept:token", "gt:authorization_code", "gt:refresh_token", "rst:code"],
+            ["ept:authorization", "ept:revocation", "ept:token", "gt:authorization_code", "gt:refresh_token", "rst:code"],
             (await store.GetPermissionsAsync(found, Cancellation)).Order(StringComparer.Ordinal));
         Assert.Equal(["ft:pkce"], await store.GetRequirementsAsync(found, Cancellation));
         Assert.Equal("confidential", await store.GetClientTypeAsync(found, Cancellation));
@@ -146,7 +146,7 @@ public sealed class DirectoryTests(PostgresFixture postgres)
 
         Assert.Empty(await store.GetRedirectUrisAsync(found, Cancellation));
         Assert.Empty(await store.GetRequirementsAsync(found, Cancellation));
-        Assert.Equal(["ept:token", "gt:client_credentials"], (await store.GetPermissionsAsync(found, Cancellation)).Order(StringComparer.Ordinal));
+        Assert.Equal(["ept:revocation", "ept:token", "gt:client_credentials"], (await store.GetPermissionsAsync(found, Cancellation)).Order(StringComparer.Ordinal));
     }
 
     public static TheoryData<string[]> BadRedirectUris => new()

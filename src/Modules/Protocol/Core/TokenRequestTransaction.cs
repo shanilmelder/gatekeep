@@ -7,9 +7,9 @@ namespace Gatekeep.Modules.Protocol.Core;
 /// <summary>
 /// The one transaction of a request to an endpoint that writes (AD-5, AD-8, AD-13): the token endpoint
 /// (Story 2.5) and the authorization endpoint (Story 2.9). A <see cref="TenantScope"/> for the request's
-/// Tenant, opened after Tenant selection by <see cref="BeginTokenTransaction"/> or
+/// Tenant, opened after Tenant selection by <see cref="BeginTokenTransaction{TContext}"/> or
 /// <see cref="BeginAuthorizeTransaction"/>, and ended before the response is written by
-/// <see cref="EndTokenTransaction"/> or <see cref="EndAuthorizeTransaction"/>. Scoped to the HTTP request,
+/// <see cref="EndTokenTransaction{TContext}"/> or <see cref="EndAuthorizeTransaction"/>. Scoped to the HTTP request,
 /// so the request's service scope disposes it. Discovery and JWKS never open one. Every store call goes
 /// through <see cref="Context"/>, so none can fall back to autocommit.
 /// <para>

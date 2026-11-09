@@ -13,16 +13,26 @@ namespace Gatekeep.Tests.Isolation.Protocol;
 /// <see cref="IAuthorizationSignIn"/> port. It trusts the User ID a request names in
 /// <see cref="UserHeader"/> and starts a Session for them, in the authorization request's own
 /// transaction; a request naming none completes nothing, as the release build's sign-in does. Test only:
-/// no <c>src</c> type implements the port but <see cref="UnavailableSignIn"/>.
+/// no <c>src</c> type implements the port but <see cref="UnavailableSignIn"/>. From Story 2.11 a request may
+/// also name, in <see cref="AuthTimeHeader"/>, when the User authenticated, so a test can return an older
+/// authentication than <c>prompt=login</c> or <c>max_age</c> allows; with none, it is now. It ignores the
+/// freshness the request demands, as a sign-in that reuses an older authentication would.
 /// </summary>
 internal sealed class TestAuthorizationSignIn(TimeProvider time) : IAuthorizationSignIn
 {
     /// <summary>The header a test names the signing-in User in.</summary>
     public const string UserHeader = "X-Test-User";
 
+    /// <summary>The header a test names the sign-in's authentication time in, as ISO 8601 (round-trip, <c>O</c>).</summary>
+    public const string AuthTimeHeader = "X-Test-Auth-Time";
+
+    /// <summary>The freshness the last completed sign-in was asked for.</summary>
+    public DateTimeOffset? LastAuthenticatedSince { get; private set; }
+
     public async ValueTask<AuthenticationResult?> CompleteAsync(
         CommandContext context,
         StartedSignIn signIn,
+        DateTimeOffset? authenticatedSince,
         HttpContext http,
         CancellationToken cancellationToken)
     {
@@ -31,8 +41,17 @@ internal sealed class TestAuthorizationSignIn(TimeProvider time) : IAuthorizatio
             return null;
         }
 
+        LastAuthenticatedSince = authenticatedSince;
+        var authTime = DateTimeOffset.TryParse(
+            http.Request.Headers[AuthTimeHeader].ToString(),
+            System.Globalization.CultureInfo.InvariantCulture,
+            System.Globalization.DateTimeStyles.RoundtripKind,
+            out var named)
+            ? named
+            : time.GetUtcNow();
+
         var authenticator = new TestOnlyAuthenticator(SessionsContract.CreateSessions(AuditContract.CreateAppender(), time), time);
-        var (result, _) = await authenticator.AuthenticateAsync(context, signIn.TransactionId, userId, time.GetUtcNow(), cancellationToken);
+        var (result, _) = await authenticator.AuthenticateAsync(context, signIn.TransactionId, userId, authTime, cancellationToken);
         return result;
     }
 }

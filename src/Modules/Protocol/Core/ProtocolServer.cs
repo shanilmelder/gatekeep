@@ -21,13 +21,15 @@ using static OpenIddict.Server.OpenIddictServerEvents;
 namespace Gatekeep.Modules.Protocol.Core;
 
 /// <summary>
-/// The OpenIddict server registration (Stories 2.3, 2.5, 2.9 and 2.10, AD-8). Degraded mode is off. The
+/// The OpenIddict server registration (Stories 2.3, 2.5, 2.9, 2.10 and 2.11, AD-8). Degraded mode is off. The
 /// stores live in their owners (Directory's application store, Sessions' token and authorization
 /// stores), and every store call runs in the request's one transaction; entity caching is off, no scope
 /// store is registered, and nothing prunes. The token endpoint serves Client Credentials, the
 /// authorization code grant and the refresh grant, its clients authenticated by Gatekeep's handler against Directory, with
 /// <c>client_secret_basic</c> and <c>client_secret_post</c>. The authorization endpoint serves the code
-/// flow only, with S256 PKCE, <c>iss</c> in every response, and its sign-in through the passthrough.
+/// flow only, with S256 PKCE, <c>iss</c> in every response, and its sign-in through the passthrough. Userinfo
+/// (Story 2.11) reads its bearer access token alone and answers <c>sub</c> only; revocation authenticates its
+/// client the token endpoint's way and revokes only a refresh token's family, through the one revocation path.
 /// </summary>
 internal static class ProtocolServer
 {
@@ -80,7 +82,9 @@ internal static class ProtocolServer
             options.SetConfigurationEndpointUris(ProtocolContract.ConfigurationPath[1..])
                 .SetJsonWebKeySetEndpointUris(ProtocolContract.JsonWebKeySetPath[1..])
                 .SetTokenEndpointUris(ProtocolContract.TokenPath[1..])
-                .SetAuthorizationEndpointUris(ProtocolContract.AuthorizePath[1..]);
+                .SetAuthorizationEndpointUris(ProtocolContract.AuthorizePath[1..])
+                .SetUserInfoEndpointUris(ProtocolContract.UserinfoPath[1..])
+                .SetRevocationEndpointUris(ProtocolContract.RevocationPath[1..]);
 
             // Client Credentials (Story 2.5), the code flow with PKCE (Story 2.9) and its refresh tokens
             // (Story 2.10): any other grant is unsupported_grant_type, and implicit, hybrid and the password
@@ -134,8 +138,8 @@ internal static class ProtocolServer
             options.AddEventHandler(CacheJsonWebKeySet.Descriptor);
 
             // The token endpoint (Story 2.5): counted, then one transaction, ended before the response.
-            options.AddEventHandler(LimitTokenRequests.Descriptor);
-            options.AddEventHandler(BeginTokenTransaction.Descriptor);
+            options.AddEventHandler(LimitTokenRequests<ExtractTokenRequestContext>.Descriptor);
+            options.AddEventHandler(BeginTokenTransaction<ExtractTokenRequestContext>.Descriptor);
             options.AddEventHandler(RefuseTokenTargets.Descriptor);
             options.AddEventHandler(SignInClient.Descriptor);
 
@@ -146,13 +150,40 @@ internal static class ProtocolServer
             options.AddEventHandler(RefuseLateRefreshes.Descriptor);
             options.AddEventHandler(CapRefreshTokenLifetime.Descriptor);
             options.AddEventHandler(ReportAccessTokenLifetime.Descriptor);
-            options.AddEventHandler(EndTokenTransaction.Descriptor);
-            options.AddEventHandler(AnswerRateLimited.Descriptor);
+            options.AddEventHandler(EndTokenTransaction<ApplyTokenResponseContext>.Descriptor);
+            options.AddEventHandler(AnswerRateLimited<ApplyTokenResponseContext>.Descriptor);
 
             // Client authentication is Gatekeep's, against Directory (AD-8); OpenIddict's check, which
             // reads a secret column Gatekeep keeps empty, is gone.
             options.RemoveEventHandler(OpenIddictServerHandlers.ValidateClientSecret.Descriptor);
             options.AddEventHandler(AuthenticateGatekeepClient.Descriptor);
+
+            // The revocation endpoint (Story 2.11, RFC 7009): counted under the token endpoint's limits, one
+            // transaction, the token endpoint's client authentication before anything else, and Gatekeep's
+            // revocation in place of OpenIddict's: OpenIddict validates no revoked token itself, so a rotated
+            // refresh token or a used code presented here is never taken for reuse, and only a refresh
+            // token's family is revoked, through ISessions.RevokeAccessAsync.
+            options.AddEventHandler(LimitTokenRequests<ExtractRevocationRequestContext>.Descriptor);
+            options.AddEventHandler(BeginTokenTransaction<ExtractRevocationRequestContext>.Descriptor);
+            options.AddEventHandler(AuthenticateGatekeepRevocationClient.Descriptor);
+            options.AddEventHandler(LeaveRevokedTokenToGatekeep.Descriptor);
+            options.RemoveEventHandler(OpenIddictServerHandlers.Revocation.ValidateTokenType.Descriptor);
+            options.RemoveEventHandler(OpenIddictServerHandlers.Revocation.ValidateAuthorizedParty.Descriptor);
+            options.RemoveEventHandler(OpenIddictServerHandlers.Revocation.RevokeToken.Descriptor);
+            options.AddEventHandler(RevokeRefreshTokenFamily.Descriptor);
+            options.AddEventHandler(EndTokenTransaction<ApplyRevocationResponseContext>.Descriptor);
+            options.AddEventHandler(AnswerRateLimited<ApplyRevocationResponseContext>.Descriptor);
+            options.AddEventHandler(AnswerRevocationWithNoBody.Descriptor);
+
+            // The userinfo endpoint (Story 2.11): the bearer from the header only, read from the token alone
+            // with no transaction, for a User with openid, answering sub and nothing else.
+            options.AddEventHandler(TakeUserinfoBearerFromHeaderOnly.Descriptor);
+            options.AddEventHandler(RefuseUserinfoReferenceTokens.Descriptor);
+            options.AddEventHandler(ReadUserinfoTokensStatelessly.Descriptor);
+            options.AddEventHandler(RequireUserinfoUserAndOpenId.Descriptor);
+            options.RemoveEventHandler(OpenIddictServerHandlers.UserInfo.AttachAudiences.Descriptor);
+            options.RemoveEventHandler(OpenIddictServerHandlers.UserInfo.AttachClaims.Descriptor);
+            options.AddEventHandler(AttachUserinfoSubject.Descriptor);
 
             // The authorization endpoint (Story 2.9): one transaction, a redirect target trusted only
             // once the client and its exact redirect URI are known, Gatekeep's scope and prompt rules,

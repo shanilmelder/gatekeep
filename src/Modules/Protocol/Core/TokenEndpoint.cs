@@ -71,7 +71,7 @@ internal sealed class TokenEndpointServices(
 /// <summary>The token endpoint's shared pieces: the request's Tenant and source, and the one refusal every bad client gets.</summary>
 internal static class TokenEndpoint
 {
-    /// <summary>Where <see cref="LimitTokenRequests"/> leaves a refusal's wait, for <see cref="AnswerRateLimited"/>.</summary>
+    /// <summary>Where <see cref="LimitTokenRequests{TContext}"/> leaves a refusal's wait, for <see cref="AnswerRateLimited{TContext}"/>.</summary>
     public const string RetryAfterProperty = ".gatekeep_retry_after";
 
     /// <summary>The subject a request with no remote address is counted under: all such requests share it.</summary>
@@ -144,18 +144,20 @@ internal static class TokenEndpoint
 /// Counts every token request, per Tenant and per source, in its own short committed scope, before
 /// OpenIddict reads the request or authenticates its client (AD-14, the Admin sign-in pattern). Past
 /// either limit the request is refused here, and answered 429 with <c>Retry-After</c> by
-/// <see cref="AnswerRateLimited"/>; no request transaction is opened for it.
+/// <see cref="AnswerRateLimited{TContext}"/>; no request transaction is opened for it. The revocation
+/// endpoint's requests (Story 2.11) are counted under the same limits, on extraction too.
 /// </summary>
-internal sealed class LimitTokenRequests(TokenEndpointServices services) : IOpenIddictServerHandler<ExtractTokenRequestContext>
+internal sealed class LimitTokenRequests<TContext>(TokenEndpointServices services) : IOpenIddictServerHandler<TContext>
+    where TContext : BaseValidatingContext
 {
     public static OpenIddictServerHandlerDescriptor Descriptor { get; } =
-        OpenIddictServerHandlerDescriptor.CreateBuilder<ExtractTokenRequestContext>()
-            .UseSingletonHandler<LimitTokenRequests>()
+        OpenIddictServerHandlerDescriptor.CreateBuilder<TContext>()
+            .UseSingletonHandler<LimitTokenRequests<TContext>>()
             .SetOrder(int.MinValue)
             .SetType(OpenIddictServerHandlerType.Custom)
             .Build();
 
-    public async ValueTask HandleAsync(ExtractTokenRequestContext context)
+    public async ValueTask HandleAsync(TContext context)
     {
         ArgumentNullException.ThrowIfNull(context);
 
@@ -188,24 +190,26 @@ internal sealed class LimitTokenRequests(TokenEndpointServices services) : IOpen
 
 /// <summary>
 /// Opens the token request's one transaction, once it is counted and after Tenant selection (AD-8,
-/// AD-13). Discovery and JWKS never reach it.
+/// AD-13), and from Story 2.11 the revocation request's the same way. Discovery, JWKS and userinfo never
+/// reach it.
 /// </summary>
-internal sealed class BeginTokenTransaction(TokenRequestTransaction transaction, TokenEndpointServices services)
-    : IOpenIddictServerHandler<ExtractTokenRequestContext>
+internal sealed class BeginTokenTransaction<TContext>(TokenRequestTransaction transaction, TokenEndpointServices services)
+    : IOpenIddictServerHandler<TContext>
+    where TContext : BaseRequestContext
 {
     public static OpenIddictServerHandlerDescriptor Descriptor { get; } =
-        OpenIddictServerHandlerDescriptor.CreateBuilder<ExtractTokenRequestContext>()
-            .UseScopedHandler<BeginTokenTransaction>()
+        OpenIddictServerHandlerDescriptor.CreateBuilder<TContext>()
+            .UseScopedHandler<BeginTokenTransaction<TContext>>()
             .SetOrder(int.MinValue + 1)
             .SetType(OpenIddictServerHandlerType.Custom)
             .Build();
 
-    public async ValueTask HandleAsync(ExtractTokenRequestContext context)
+    public async ValueTask HandleAsync(TContext context)
     {
         ArgumentNullException.ThrowIfNull(context);
 
         var runtime = context.Transaction.GetProperty<TenantRuntime>(TenantRuntime.Property)
-            ?? throw new InvalidOperationException("The token endpoint runs only on a Tenant runtime.");
+            ?? throw new InvalidOperationException("The token and revocation endpoints run only on a Tenant runtime.");
 
         await transaction.BeginAsync(services.Database.Source, runtime.TenantId, context.CancellationToken);
     }
@@ -279,14 +283,29 @@ internal sealed class AuthenticateGatekeepClient(TokenRequestTransaction transac
             .SetType(OpenIddictServerHandlerType.Custom)
             .Build();
 
-    public async ValueTask HandleAsync(ValidateTokenRequestContext context)
+    public ValueTask HandleAsync(ValidateTokenRequestContext context)
     {
         ArgumentNullException.ThrowIfNull(context);
 
-        // The token endpoint's only. Every endpoint that authenticates clients must be covered by a
-        // handler like this one before it is enabled (Story 2.2).
-        var clientId = context.Request.ClientId;
-        var clientSecret = context.Request.ClientSecret;
+        // Every endpoint that authenticates clients must be covered by a handler like this one before it is
+        // enabled (Story 2.2): the token endpoint here, the revocation endpoint by
+        // AuthenticateGatekeepRevocationClient (Story 2.11), both through AuthenticateAsync.
+        return AuthenticateAsync(context, transaction, services);
+    }
+
+    /// <summary>
+    /// The one client authentication, for any endpoint's validation context that authenticates clients:
+    /// the same <c>invalid_client</c>, the same cross-Tenant classification and the same events wherever
+    /// it runs.
+    /// </summary>
+    public static async ValueTask AuthenticateAsync(
+        BaseValidatingClientContext context, TokenRequestTransaction transaction, TokenEndpointServices services)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+
+        var request = context.Transaction.Request ?? throw new InvalidOperationException("No request to authenticate.");
+        var clientId = request.ClientId;
+        var clientSecret = request.ClientSecret;
         if (string.IsNullOrEmpty(clientId) || string.IsNullOrEmpty(clientSecret))
         {
             TokenEndpoint.RejectClient(context);
@@ -310,7 +329,7 @@ internal sealed class AuthenticateGatekeepClient(TokenRequestTransaction transac
 
         // Another Tenant's, or no Tenant's at all: refused before any lookup in this Tenant.
         var other = PublicId.TryParse(PublicIdType.Tenant, prefix, out var otherId) && otherId != tenant.TenantId ? otherId : (Guid?)null;
-        var authenticated = other is { } id && await VerifiesAtAsync(id, clientId, secret, context.CancellationToken);
+        var authenticated = other is { } id && await VerifiesAtAsync(services, id, clientId, secret, context.CancellationToken);
         var rejected = new AuditEvent(ProtocolEvents.ClientCrossTenantRejected.Code, Actor.Anonymous);
 
         if (authenticated)
@@ -335,7 +354,8 @@ internal sealed class AuthenticateGatekeepClient(TokenRequestTransaction transac
     /// while waiting for another: over <see cref="TokenEndpointServices.MaxConcurrentClassifications"/>,
     /// the attempt is unclassified, so counted as unauthenticated.
     /// </summary>
-    private async Task<bool> VerifiesAtAsync(Guid tenantId, string clientId, Secret<string> secret, CancellationToken cancellationToken)
+    private static async Task<bool> VerifiesAtAsync(
+        TokenEndpointServices services, Guid tenantId, string clientId, Secret<string> secret, CancellationToken cancellationToken)
     {
         if (!TokenEndpointServices.Classifications.Wait(0, CancellationToken.None))
         {
@@ -422,18 +442,21 @@ internal sealed class SignInClient(IOpenIddictApplicationManager applications, T
 /// response is written; any error rolls it back, committing what a refused request keeps, such as a
 /// cross-Tenant event or a replayed code's revocation, through <see cref="FailureContext"/>. A request
 /// refused before its transaction opened, such as a rate-limited one, has nothing to end. A transaction
-/// a store marked failed never commits: its response becomes <c>server_error</c> (Story 2.9).
+/// a store marked failed never commits: its response becomes <c>server_error</c> (Story 2.9). A revocation
+/// response (Story 2.11) ends the same way, before OpenIddict turns an <c>invalid_token</c> into its 200,
+/// so a revocation that revoked nothing rolls back and keeps only what a refused request keeps.
 /// </summary>
-internal sealed class EndTokenTransaction(TokenRequestTransaction transaction, TokenEndpointServices services) : IOpenIddictServerHandler<ApplyTokenResponseContext>
+internal sealed class EndTokenTransaction<TContext>(TokenRequestTransaction transaction, TokenEndpointServices services) : IOpenIddictServerHandler<TContext>
+    where TContext : BaseRequestContext
 {
     public static OpenIddictServerHandlerDescriptor Descriptor { get; } =
-        OpenIddictServerHandlerDescriptor.CreateBuilder<ApplyTokenResponseContext>()
-            .UseScopedHandler<EndTokenTransaction>()
+        OpenIddictServerHandlerDescriptor.CreateBuilder<TContext>()
+            .UseScopedHandler<EndTokenTransaction<TContext>>()
             .SetOrder(int.MinValue)
             .SetType(OpenIddictServerHandlerType.Custom)
             .Build();
 
-    public async ValueTask HandleAsync(ApplyTokenResponseContext context)
+    public async ValueTask HandleAsync(TContext context)
     {
         ArgumentNullException.ThrowIfNull(context);
 
@@ -479,17 +502,18 @@ internal static class RequestEnd
     }
 }
 
-/// <summary>A rate-limited token request is answered 429 with <c>Retry-After</c>, its OAuth error body unchanged.</summary>
-internal sealed class AnswerRateLimited : IOpenIddictServerHandler<ApplyTokenResponseContext>
+/// <summary>A rate-limited token or revocation request is answered 429 with <c>Retry-After</c>, its OAuth error body unchanged.</summary>
+internal sealed class AnswerRateLimited<TContext> : IOpenIddictServerHandler<TContext>
+    where TContext : BaseRequestContext
 {
     public static OpenIddictServerHandlerDescriptor Descriptor { get; } =
-        OpenIddictServerHandlerDescriptor.CreateBuilder<ApplyTokenResponseContext>()
-            .UseSingletonHandler<AnswerRateLimited>()
-            .SetOrder(OpenIddictServerAspNetCoreHandlers.AttachHttpResponseCode<ApplyTokenResponseContext>.Descriptor.Order + 500)
+        OpenIddictServerHandlerDescriptor.CreateBuilder<TContext>()
+            .UseSingletonHandler<AnswerRateLimited<TContext>>()
+            .SetOrder(OpenIddictServerAspNetCoreHandlers.AttachHttpResponseCode<TContext>.Descriptor.Order + 500)
             .SetType(OpenIddictServerHandlerType.Custom)
             .Build();
 
-    public ValueTask HandleAsync(ApplyTokenResponseContext context)
+    public ValueTask HandleAsync(TContext context)
     {
         ArgumentNullException.ThrowIfNull(context);
 

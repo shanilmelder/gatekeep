@@ -215,7 +215,7 @@ public sealed class DiscoveryAndJwksTests(PostgresFixture postgres, OpenBaoFixtu
         var (database, _, _) = await TwoTenantsAsync();
         await using var host = await ProtocolHost.StartAsync(database.Hosted, bao);
 
-        foreach (var path in new[] { "/", "/connect/userinfo", "/.well-known/other", "/favicon.ico" })
+        foreach (var path in new[] { "/", "/connect/introspect", "/connect/endsession", "/.well-known/other", "/favicon.ico" })
         {
             using var response = await GetAsync(host, HostA, path);
             Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
@@ -452,6 +452,15 @@ public sealed class DiscoveryAndJwksTests(PostgresFixture postgres, OpenBaoFixtu
         Assert.True(gatekeep.Order > OpenIddict.Server.OpenIddictServerHandlers.Exchange.ValidateGrantType.Descriptor.Order);
         Assert.True(gatekeep.Order < OpenIddict.Server.OpenIddictServerHandlers.Exchange.ValidateClientIdParameter.Descriptor.Order);
         Assert.True(gatekeep.Order < OpenIddict.Server.OpenIddictServerHandlers.Exchange.ValidateAuthentication.Descriptor.Order);
+
+        // Story 2.11: the revocation endpoint authenticates its clients the same way, before anything else
+        // in the request is validated, and OpenIddict's own revocation is replaced by Gatekeep's.
+        var revocation = Assert.Single(handlers, d => d.ServiceDescriptor.ServiceType.FullName == "Gatekeep.Modules.Protocol.Core.AuthenticateGatekeepRevocationClient");
+        Assert.Equal(typeof(ValidateRevocationRequestContext), revocation.ContextType);
+        Assert.True(revocation.Order < OpenIddict.Server.OpenIddictServerHandlers.Revocation.ValidateTokenParameter.Descriptor.Order);
+        Assert.True(revocation.Order < OpenIddict.Server.OpenIddictServerHandlers.Revocation.ValidateAuthentication.Descriptor.Order);
+        Assert.DoesNotContain(handlers, d => d.ServiceDescriptor.ServiceType == typeof(OpenIddict.Server.OpenIddictServerHandlers.Revocation.RevokeToken));
+        Assert.Single(handlers, d => d.ServiceDescriptor.ServiceType.FullName == "Gatekeep.Modules.Protocol.Core.RevokeRefreshTokenFamily");
         Assert.False(host.GlobalOptions.EnableDegradedMode);
         Assert.Equal(
             ["client_secret_basic", "client_secret_post"],

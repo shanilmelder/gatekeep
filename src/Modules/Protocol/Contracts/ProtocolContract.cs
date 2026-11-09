@@ -12,10 +12,10 @@ using OpenIddict.Server;
 namespace Gatekeep.Modules.Protocol.Contracts;
 
 /// <summary>
-/// Each Tenant's own OpenID Provider on Host.Hosted (Stories 2.3, 2.5, 2.9 and 2.10, AD-8, AD-9): OpenIddict
+/// Each Tenant's own OpenID Provider on Host.Hosted (Stories 2.3, 2.5, 2.9, 2.10 and 2.11, AD-8, AD-9): OpenIddict
 /// 7.7.2, wrapped per Tenant. It serves discovery, JWKS, the authorization endpoint (the code flow with
-/// S256 PKCE only) and the token endpoint (Client Credentials, the authorization code grant and its
-/// rotating refresh tokens).
+/// S256 PKCE only), the token endpoint (Client Credentials, the authorization code grant and its
+/// rotating refresh tokens), userinfo and revocation.
 /// </summary>
 public static class ProtocolContract
 {
@@ -27,6 +27,18 @@ public static class ProtocolContract
 
     /// <summary>The authorization endpoint (Story 2.9): the code flow with S256 PKCE, and nothing else.</summary>
     public const string AuthorizePath = "/connect/authorize";
+
+    /// <summary>
+    /// The userinfo endpoint (Story 2.11, OIDC Core §5.3): GET or POST with this Tenant's access token as a
+    /// bearer in the <c>Authorization</c> header only. It answers exactly <c>{"sub": "usr_…"}</c>.
+    /// </summary>
+    public const string UserinfoPath = "/connect/userinfo";
+
+    /// <summary>
+    /// The revocation endpoint (Story 2.11, RFC 7009): a client ends its own refresh token's Token Family.
+    /// Access and ID tokens aren't revocable (AD-13) and get <c>unsupported_token_type</c>.
+    /// </summary>
+    public const string RevocationPath = "/connect/revoke";
 
     /// <summary>
     /// The one audience a token carries while its Application has none (Story 2.5): a Client Credentials
@@ -105,11 +117,17 @@ public interface IAuthorizationSignIn
     /// <summary>
     /// Completes <paramref name="signIn"/>, begun for the validated authorization request on
     /// <paramref name="http"/>, in the request's own Tenant <paramref name="context"/>, whose transaction
-    /// commits only if a code is issued.
+    /// commits only if a code is issued. <paramref name="authenticatedSince"/> is the freshness the request
+    /// demands (Story 2.11, OIDC Core §3.1.2.1): from <c>prompt=login</c>, the time the request started; from
+    /// <c>max_age</c>, that many seconds before now; the later of the two when both are given; null when
+    /// neither is. A result whose <see cref="AuthenticationResult.AuthTime"/> is before it, to the second,
+    /// is refused with <c>login_required</c> and no code, so a sign-in should authenticate the User again
+    /// rather than reuse an older authentication (Story 4.2).
     /// </summary>
     ValueTask<AuthenticationResult?> CompleteAsync(
         CommandContext context,
         StartedSignIn signIn,
+        DateTimeOffset? authenticatedSince,
         HttpContext http,
         CancellationToken cancellationToken);
 }
@@ -124,6 +142,7 @@ public sealed class UnavailableSignIn : IAuthorizationSignIn
     public ValueTask<AuthenticationResult?> CompleteAsync(
         CommandContext context,
         StartedSignIn signIn,
+        DateTimeOffset? authenticatedSince,
         HttpContext http,
         CancellationToken cancellationToken) =>
         ValueTask.FromResult<AuthenticationResult?>(null);
