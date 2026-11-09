@@ -823,14 +823,18 @@ public sealed class UserinfoAndRevocationTests(PostgresFixture postgres, OpenBao
         Assert.Equal(0L, await RevocationEventsAsync(flow));
     }
 
-    /// <summary>A code flow with <paramref name="scope"/> for the setup's User and web client in Tenant A, exchanged.</summary>
+    /// <summary>
+    /// A code flow with <paramref name="scope"/> for the setup's User and web client in Tenant A, exchanged.
+    /// <c>Refresh</c> is empty unless <paramref name="scope"/> includes <c>offline_access</c>.
+    /// </summary>
     internal static async Task<(string Access, string Id, string Refresh)> TokensAsync(ProtocolHost host, CodeFlowSetup flow, string tenantHost = HostA, string scope = Offline)
     {
         var pkce = Pkce.New();
         var code = await CodeFlow.CodeAsync(host, tenantHost, flow.ClientA.ClientId, Callback, pkce, flow.UserA, scope: scope);
         using var issued = await CodeFlow.ExchangeAsync(host, tenantHost, flow.ClientA.ClientId, flow.ClientA.Secret, code, Callback, pkce.Verifier);
         Assert.Equal(HttpStatusCode.OK, issued.Status);
-        return (issued.AccessToken, issued.Body.RootElement.GetProperty("id_token").GetString()!, issued.RefreshToken);
+        var refresh = issued.Body.RootElement.TryGetProperty("refresh_token", out var value) ? value.GetString() ?? string.Empty : string.Empty;
+        return (issued.AccessToken, issued.Body.RootElement.GetProperty("id_token").GetString()!, refresh);
     }
 
     /// <summary>
