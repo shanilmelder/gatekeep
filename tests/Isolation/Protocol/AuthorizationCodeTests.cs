@@ -554,7 +554,7 @@ public sealed class AuthorizationCodeTests(PostgresFixture postgres, OpenBaoFixt
     }
 
     [Fact]
-    public async Task Discovery_advertises_the_code_flow_with_S256_and_iss_and_the_two_grants_only()
+    public async Task Discovery_advertises_the_code_flow_with_S256_and_iss_and_the_three_grants_only()
     {
         var flow = await CodeFlowSetup.CreateAsync(postgres, bao, HostA, HostB);
         await using var host = await flow.StartHostAsync();
@@ -563,7 +563,7 @@ public sealed class AuthorizationCodeTests(PostgresFixture postgres, OpenBaoFixt
         var root = document.RootElement;
 
         Assert.Equal($"{flow.A.Issuer}connect/authorize", root.GetProperty("authorization_endpoint").GetString());
-        Assert.Equal(["authorization_code", "client_credentials"], Strings(root.GetProperty("grant_types_supported")).Order(StringComparer.Ordinal));
+        Assert.Equal(["authorization_code", "client_credentials", "refresh_token"], Strings(root.GetProperty("grant_types_supported")).Order(StringComparer.Ordinal));
         Assert.Equal(["code"], Strings(root.GetProperty("response_types_supported")));
         Assert.Equal(["S256"], Strings(root.GetProperty("code_challenge_methods_supported")));
         Assert.Equal(["form_post", "query"], Strings(root.GetProperty("response_modes_supported")).Order(StringComparer.Ordinal));
@@ -737,9 +737,10 @@ internal static class CodeFlow
     }
 
     /// <summary>A code, from a successful authorization request.</summary>
-    public static async Task<string> CodeAsync(ProtocolHost host, string tenantHost, string clientId, string redirectUri, Pkce pkce, Guid user)
+    public static async Task<string> CodeAsync(
+        ProtocolHost host, string tenantHost, string clientId, string redirectUri, Pkce pkce, Guid user, string scope = "openid")
     {
-        using var response = await AuthorizeAsync(host, tenantHost, clientId, redirectUri, pkce, user);
+        using var response = await AuthorizeAsync(host, tenantHost, clientId, redirectUri, pkce, user, scope: scope);
         Assert.Equal(HttpStatusCode.Found, response.StatusCode);
         var query = QueryHelpers.ParseQuery(response.Headers.Location!.Query);
         Assert.False(query.TryGetValue("error", out var error), $"The authorization request failed: {error}.");
@@ -768,6 +769,39 @@ internal static class CodeFlow
         };
         request.Headers.Authorization = new AuthenticationHeaderValue(
             "Basic", Convert.ToBase64String(Encoding.UTF8.GetBytes($"{Uri.EscapeDataString(clientId)}:{Uri.EscapeDataString(secret)}")));
+
+        var response = await host.Http.SendAsync(request, Cancellation);
+        var body = await response.Content.ReadAsStringAsync(Cancellation);
+        return new TokenResponse(response, System.Text.Json.JsonDocument.Parse(body));
+    }
+
+    /// <summary>
+    /// Refreshes with <paramref name="refreshToken"/> at the token endpoint (Story 2.10), authenticating the
+    /// client by Basic, from <paramref name="source"/> when one is named.
+    /// </summary>
+    public static async Task<TokenResponse> RefreshAsync(
+        ProtocolHost host, string tenantHost, string clientId, string secret, string refreshToken, string? scope = null, string? source = null)
+    {
+        var form = new Dictionary<string, string>
+        {
+            ["grant_type"] = "refresh_token",
+            ["refresh_token"] = refreshToken,
+        };
+        if (scope is not null)
+        {
+            form["scope"] = scope;
+        }
+
+        using var request = new HttpRequestMessage(HttpMethod.Post, new Uri($"http://{tenantHost}{ProtocolContract.TokenPath}"))
+        {
+            Content = new FormUrlEncodedContent(form),
+        };
+        request.Headers.Authorization = new AuthenticationHeaderValue(
+            "Basic", Convert.ToBase64String(Encoding.UTF8.GetBytes($"{Uri.EscapeDataString(clientId)}:{Uri.EscapeDataString(secret)}")));
+        if (source is not null)
+        {
+            request.Headers.TryAddWithoutValidation(ProtocolHost.SourceHeader, source);
+        }
 
         var response = await host.Http.SendAsync(request, Cancellation);
         var body = await response.Content.ReadAsStringAsync(Cancellation);

@@ -12,7 +12,7 @@ namespace Gatekeep.Modules.Protocol.Core;
 
 /// <summary>
 /// In place of OpenIddict's <c>AttachTokenPayload</c> (Story 2.9, AD-9, the Story 2.2 spike): the same
-/// steps, but a reference token, a code, is <c>{tenantPublicId}.{base64url of 32 random bytes}</c>. The
+/// steps, but a reference token, a code or a refresh token, is <c>{tenantPublicId}.{base64url of 32 random bytes}</c>. The
 /// payload is the token OpenIddict made, encrypted with the Tenant's token protection key. The token
 /// manager hashes the whole value before the store sees it, so only that hash is stored. Nothing here
 /// logs the value.
@@ -74,7 +74,7 @@ internal sealed class AttachTenantReferenceId(IOpenIddictTokenManager tokens) : 
 }
 
 /// <summary>
-/// A presented code (or, from Story 2.10, refresh token) whose prefix isn't the serving Tenant's public
+/// A presented code or refresh token (Stories 2.9 and 2.10) whose prefix isn't the serving Tenant's public
 /// ID is refused here with <c>invalid_token</c>, which the token endpoint answers as <c>invalid_grant</c>,
 /// before OpenIddict's <c>ValidateReferenceTokenIdentifier</c> looks anything up (AD-9): no other Tenant's
 /// artifact, and no value with no prefix, ever reaches this Tenant's store. Nothing proves where such a

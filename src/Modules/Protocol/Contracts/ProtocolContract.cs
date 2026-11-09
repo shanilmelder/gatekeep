@@ -12,9 +12,10 @@ using OpenIddict.Server;
 namespace Gatekeep.Modules.Protocol.Contracts;
 
 /// <summary>
-/// Each Tenant's own OpenID Provider on Host.Hosted (Stories 2.3, 2.5 and 2.9, AD-8, AD-9): OpenIddict
+/// Each Tenant's own OpenID Provider on Host.Hosted (Stories 2.3, 2.5, 2.9 and 2.10, AD-8, AD-9): OpenIddict
 /// 7.7.2, wrapped per Tenant. It serves discovery, JWKS, the authorization endpoint (the code flow with
-/// S256 PKCE only) and the token endpoint (Client Credentials and the authorization code grant).
+/// S256 PKCE only) and the token endpoint (Client Credentials, the authorization code grant and its
+/// rotating refresh tokens).
 /// </summary>
 public static class ProtocolContract
 {

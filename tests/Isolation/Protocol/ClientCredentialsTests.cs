@@ -90,7 +90,7 @@ public sealed class ClientCredentialsTests(PostgresFixture postgres, OpenBaoFixt
     }
 
     [Fact]
-    public async Task Discovery_advertises_the_token_endpoint_its_two_grants_and_two_secret_methods_only()
+    public async Task Discovery_advertises_the_token_endpoint_its_three_grants_and_two_secret_methods_only()
     {
         var (database, a, _) = await TwoTenantsAsync();
         await using var host = await ProtocolHost.StartAsync(database.Hosted, bao);
@@ -99,7 +99,7 @@ public sealed class ClientCredentialsTests(PostgresFixture postgres, OpenBaoFixt
         var root = discovery.RootElement;
 
         Assert.Equal($"{a.Issuer}connect/token", root.GetProperty("token_endpoint").GetString());
-        Assert.Equal(["authorization_code", "client_credentials"], Strings(root.GetProperty("grant_types_supported")).Order(StringComparer.Ordinal));
+        Assert.Equal(["authorization_code", "client_credentials", "refresh_token"], Strings(root.GetProperty("grant_types_supported")).Order(StringComparer.Ordinal));
         Assert.Equal(["client_secret_basic", "client_secret_post"], Strings(root.GetProperty("token_endpoint_auth_methods_supported")).Order(StringComparer.Ordinal));
         Assert.Equal($"{a.Issuer}connect/authorize", root.GetProperty("authorization_endpoint").GetString());
         Assert.Equal(0, host.Custody.Calls(Gatekeep.Kernel.Secrets.KeyOperation.Sign));
@@ -226,10 +226,10 @@ public sealed class ClientCredentialsTests(PostgresFixture postgres, OpenBaoFixt
         Assert.Equal(0L, await database.ScalarAsync<long>("SELECT count(*) FROM token"));
     }
 
-    // Story 2.9 opened authorization_code, which AuthorizationCodeTests covers.
+    // Story 2.9 opened authorization_code, which AuthorizationCodeTests covers, and Story 2.10
+    // refresh_token, which RefreshTokenTests covers.
     [Theory]
     [InlineData("password")]
-    [InlineData("refresh_token")]
     [InlineData("urn:ietf:params:oauth:grant-type:device_code")]
     public async Task Any_other_grant_type_is_unsupported(string grant)
     {
@@ -743,6 +743,9 @@ internal sealed class TokenResponse(HttpResponseMessage response, JsonDocument b
     public string? Error => Body.RootElement.TryGetProperty("error", out var error) ? error.GetString() : null;
 
     public string AccessToken => Body.RootElement.GetProperty("access_token").GetString()!;
+
+    /// <summary>The refresh token a code exchange or a refresh returned (Story 2.10).</summary>
+    public string RefreshToken => Body.RootElement.GetProperty("refresh_token").GetString()!;
 
     public void Dispose()
     {

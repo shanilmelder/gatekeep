@@ -34,6 +34,36 @@ internal static class AuthorizeEndpoint
     public const string SessionIdClaim = "sid";
 
     /// <summary>
+    /// The only scopes an authorization grants (Stories 2.9 and 2.10): <c>openid</c>, always, and
+    /// <c>offline_access</c>, for a refresh token. Story 3.7 adds APIs' scopes.
+    /// </summary>
+    public static readonly IReadOnlySet<string> GrantableScopes = new HashSet<string>(StringComparer.Ordinal)
+    {
+        Scopes.OpenId,
+        Scopes.OfflineAccess,
+    };
+
+    /// <summary>
+    /// Sets a signed-in User's claims and their destinations (Stories 2.9 and 2.10): <c>sub</c> (the User's
+    /// <c>usr_</c> ID) for both tokens, and <c>sid</c>, <c>auth_time</c> and <c>amr</c> for the ID token
+    /// only, from the Session the sign-in started. A code flow and every refresh of its family set them
+    /// the same way, a refresh from the family's anchored Session as it stands.
+    /// </summary>
+    public static void SetUserClaims(ClaimsIdentity identity, Guid userId, Guid sessionId, DateTimeOffset authTime, IEnumerable<string> amr)
+    {
+        identity.SetClaim(Claims.Subject, PublicId.Format(PublicIdType.User, userId));
+        identity.SetClaim(SessionIdClaim, PublicId.Format(PublicIdType.Session, sessionId));
+        identity.SetClaim(Claims.AuthenticationTime, (long?)authTime.ToUnixTimeSeconds());
+        identity.SetClaims(Claims.AuthenticationMethodReference, ImmutableArray.CreateRange(amr));
+        identity.SetDestinations(static claim => claim.Type switch
+        {
+            Claims.Subject => [Destinations.AccessToken, Destinations.IdentityToken],
+            SessionIdClaim or Claims.AuthenticationTime or Claims.AuthenticationMethodReference => [Destinations.IdentityToken],
+            _ => [],
+        });
+    }
+
+    /// <summary>
     /// The request parameters a sign-in transaction keeps, for the sign-in to honour (Story 4.2 reads
     /// <c>prompt</c> and <c>max_age</c>). Anything else a request carries is left out, so no unknown
     /// value is stored.
@@ -152,37 +182,47 @@ internal sealed class TrustRedirectTarget(IOpenIddictApplicationManager applicat
 }
 
 /// <summary>
-/// Gatekeep's own authorization request rules (Story 2.9), where OpenIddict's scope check would run
-/// (it needs a scope store, which there is none of): <c>openid</c> is required and is the only scope
-/// accepted, so any other is <c>invalid_scope</c>; and no sign-in can complete without the User, so
-/// <c>prompt=none</c> is <c>login_required</c>. <c>prompt=login</c> and <c>max_age</c> pass to the
-/// sign-in; Story 4.2 honours them.
+/// Gatekeep's own authorization request rules (Stories 2.9 and 2.10), where OpenIddict's scope check
+/// would run (it needs a scope store, which there is none of): <c>openid</c> is required, and the only
+/// other scope accepted is <c>offline_access</c>, for an Application allowed the <c>refresh_token</c>
+/// grant, so any other, or <c>offline_access</c> for any other Application, is <c>invalid_scope</c>; and
+/// no sign-in can complete without the User, so <c>prompt=none</c> is <c>login_required</c>.
+/// <c>prompt=login</c> and <c>max_age</c> pass to the sign-in; Story 4.2 honours them.
 /// </summary>
-internal sealed class ValidateGatekeepAuthorizationRequest : IOpenIddictServerHandler<ValidateAuthorizationRequestContext>
+internal sealed class ValidateGatekeepAuthorizationRequest(IOpenIddictApplicationManager applications)
+    : IOpenIddictServerHandler<ValidateAuthorizationRequestContext>
 {
     public static OpenIddictServerHandlerDescriptor Descriptor { get; } =
         OpenIddictServerHandlerDescriptor.CreateBuilder<ValidateAuthorizationRequestContext>()
-            .UseSingletonHandler<ValidateGatekeepAuthorizationRequest>()
+            .UseScopedHandler<ValidateGatekeepAuthorizationRequest>()
             .SetOrder(OpenIddictServerHandlers.Authentication.ValidateScopes.Descriptor.Order)
             .SetType(OpenIddictServerHandlerType.Custom)
             .Build();
 
-    public ValueTask HandleAsync(ValidateAuthorizationRequestContext context)
+    public async ValueTask HandleAsync(ValidateAuthorizationRequestContext context)
     {
         ArgumentNullException.ThrowIfNull(context);
 
         var scopes = context.Request.GetScopes();
-        if (!scopes.Contains(Scopes.OpenId, StringComparer.Ordinal) || scopes.Any(s => s != Scopes.OpenId))
+        if (!scopes.Contains(Scopes.OpenId, StringComparer.Ordinal) || scopes.Any(s => !AuthorizeEndpoint.GrantableScopes.Contains(s)))
         {
-            context.Reject(Errors.InvalidScope, "openid is required, and is the only scope accepted.");
+            context.Reject(Errors.InvalidScope, "openid is required, and the only other scope accepted is offline_access.");
+        }
+        else if (scopes.Contains(Scopes.OfflineAccess, StringComparer.Ordinal) && !await MayRefreshAsync(context))
+        {
+            context.Reject(Errors.InvalidScope, "offline_access isn't allowed for this client.");
         }
         else if (context.Request.HasPromptValue(PromptValues.None))
         {
             context.Reject(Errors.LoginRequired, "The User must sign in.");
         }
-
-        return ValueTask.CompletedTask;
     }
+
+    /// <summary>Whether the client, which <see cref="TrustRedirectTarget"/> already found, is allowed the refresh grant.</summary>
+    private async Task<bool> MayRefreshAsync(ValidateAuthorizationRequestContext context) =>
+        !string.IsNullOrEmpty(context.ClientId)
+        && await applications.FindByClientIdAsync(context.ClientId, context.CancellationToken) is { } application
+        && await applications.HasPermissionAsync(application, Permissions.GrantTypes.RefreshToken, context.CancellationToken);
 }
 
 /// <summary>
@@ -310,7 +350,8 @@ internal sealed class AnswerInvalidRequestPage(ProtocolPageHeaders headers) : IO
 /// token gets those and the <c>nonce</c>, and the access token <c>sub</c> and its audience; one ad-hoc
 /// authorization, the Token Family, is anchored to the result's Session, and OpenIddict issues the code.
 /// No result is <c>temporarily_unavailable</c>. Either way OpenIddict's response, with <c>iss</c>, ends
-/// the transaction. No refresh token is issued (Story 2.10).
+/// the transaction. The authorization grants <c>openid</c>, and <c>offline_access</c> when it was asked
+/// for (Story 2.10), so that the code's exchange also returns a refresh token.
 /// </summary>
 internal static class AuthorizePassthrough
 {
@@ -364,19 +405,13 @@ internal static class AuthorizePassthrough
         var subject = PublicId.Format(PublicIdType.User, result.UserId);
         string[] audiences = application.Audiences.IsDefaultOrEmpty ? [ProtocolContract.PlaceholderAudience] : [.. application.Audiences];
 
+        // openid, and offline_access when it was asked for and allowed (Story 2.10): what the family grants.
+        var scopes = request.GetScopes().Where(AuthorizeEndpoint.GrantableScopes.Contains).Distinct(StringComparer.Ordinal).ToImmutableArray();
+
         var identity = new ClaimsIdentity(TokenValidationParameters.DefaultAuthenticationType, Claims.Name, Claims.Role);
-        identity.SetClaim(Claims.Subject, subject);
-        identity.SetClaim(AuthorizeEndpoint.SessionIdClaim, PublicId.Format(PublicIdType.Session, result.SessionId));
-        identity.SetClaim(Claims.AuthenticationTime, (long?)result.AuthTime.ToUnixTimeSeconds());
-        identity.SetClaims(Claims.AuthenticationMethodReference, ImmutableArray.CreateRange(result.Amr));
-        identity.SetScopes(ImmutableArray.Create(Scopes.OpenId));
+        identity.SetScopes(scopes);
         identity.SetAudiences(audiences);
-        identity.SetDestinations(static claim => claim.Type switch
-        {
-            Claims.Subject => [Destinations.AccessToken, Destinations.IdentityToken],
-            AuthorizeEndpoint.SessionIdClaim or Claims.AuthenticationTime or Claims.AuthenticationMethodReference => [Destinations.IdentityToken],
-            _ => [],
-        });
+        AuthorizeEndpoint.SetUserClaims(identity, result.UserId, result.SessionId, result.AuthTime, result.Amr);
 
         var principal = new ClaimsPrincipal(identity);
 
@@ -391,7 +426,7 @@ internal static class AuthorizePassthrough
             Subject = subject,
             Type = AuthorizationTypes.AdHoc,
         };
-        descriptor.Scopes.Add(Scopes.OpenId);
+        descriptor.Scopes.UnionWith(scopes);
         descriptor.Properties[SessionsContract.SessionAnchorProperty] = JsonSerializer.SerializeToElement(result.SessionId.ToString());
 
         var authorization = await authorizations.CreateAsync(descriptor, cancellationToken);

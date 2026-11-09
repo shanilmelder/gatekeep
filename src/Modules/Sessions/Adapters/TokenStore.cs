@@ -13,10 +13,11 @@ namespace Gatekeep.Modules.Sessions.Adapters;
 
 /// <summary>
 /// OpenIddict's token store (AD-8, AD-13), on the request's own Tenant context: exactly what Client
-/// Credentials (Story 2.5) and the authorization code grant (Story 2.9) call. It makes, finds and
-/// updates <c>token</c> rows; an update changes only a row's status (never to revoked), payload,
-/// reference ID and redemption date, and refuses any other change. OpenIddict's family revocation, on a
-/// replayed code, goes to <see cref="ISessions.RevokeAccessAsync"/>, the one revocation path, and is
+/// Credentials (Story 2.5), the authorization code grant (Story 2.9) and the refresh grant (Story 2.10)
+/// call. It makes, finds and updates <c>token</c> rows; an update changes only a row's status (never to
+/// revoked), payload, reference ID and redemption date, and refuses any other change. OpenIddict's family
+/// revocation, on a replayed code or a reused refresh token, and a lost race to redeem either, go to
+/// <see cref="ISessions.RevokeAccessAsync"/>, the one revocation path, and are
 /// recorded on the request first, so it is committed even though the request is refused. Every other
 /// call, a query, a listing, a prune, a delete or another revocation, throws. A failed statement marks
 /// the request failed, since OpenIddict swallows some store failures.
@@ -145,13 +146,19 @@ internal sealed class TokenStore(StoreRequest request, ISessions sessions) : IOp
 
         if (updated == 0)
         {
-            // Two exchanges of one code raced, and this one lost its redemption: the code was replayed,
-            // so its family is revoked as on any replay, then the redemption fails as OpenIddict expects.
-            if (token.Type == TokenTypeIdentifiers.Private.AuthorizationCode
-                && token.Status == Statuses.Redeemed
-                && token.AuthorizationId is { } family)
+            // Two exchanges of one code, or two refreshes of one refresh token (Story 2.10), raced, and
+            // this one lost its redemption: the code was replayed, or the refresh token reused, so its
+            // family is revoked as on any replay or reuse, then the redemption fails as OpenIddict expects.
+            if (token.Status == Statuses.Redeemed && token.AuthorizationId is { } family)
             {
-                await RevokeFamilyAsync(family, RevocationReason.CodeReplay, cancellationToken);
+                if (token.Type == TokenTypeIdentifiers.Private.AuthorizationCode)
+                {
+                    await RevokeFamilyAsync(family, RevocationReason.CodeReplay, cancellationToken);
+                }
+                else if (token.Type == TokenTypeIdentifiers.RefreshToken)
+                {
+                    await RevokeFamilyAsync(family, RevocationReason.TokenReuse, cancellationToken);
+                }
             }
 
             throw new OpenIddictExceptions.ConcurrencyException("The token changed or was revoked since it was read.");
@@ -365,7 +372,7 @@ internal sealed class TokenStore(StoreRequest request, ISessions sessions) : IOp
     private static void Add(DbCommand command, string name, object? value) => StoreSql.Add(command, name, value);
 
     private static NotSupportedException Unsupported() =>
-        new("The token store serves Client Credentials and the code grant only (Stories 2.5 and 2.9).");
+        new("The token store serves Client Credentials, the code grant and the refresh grant only (Stories 2.5, 2.9 and 2.10).");
 }
 
 /// <summary>
@@ -575,7 +582,7 @@ internal sealed class AuthorizationStore(StoreRequest request) : IOpenIddictAuth
     }
 
     private static NotSupportedException Unsupported() =>
-        new("The authorization store serves the code grant only (Story 2.9).");
+        new("The authorization store serves the code and refresh grants only (Stories 2.9 and 2.10).");
 }
 
 /// <summary>What both stores share: parameters, readers, and marking the request failed on a failed statement.</summary>

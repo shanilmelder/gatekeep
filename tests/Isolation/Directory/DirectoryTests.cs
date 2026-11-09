@@ -109,7 +109,7 @@ public sealed class DirectoryTests(PostgresFixture postgres)
 
             var superuser = postgres.SuperuserConnection(database);
             Assert.Equal(1L, await PostgresFixture.ScalarAsync<long>(superuser,
-                $"SELECT count(*) FROM application WHERE id = '{created.ApplicationId}' AND kind = 'web' AND grant_types = ARRAY['authorization_code'] AND audiences = '{{}}' AND redirect_uris = ARRAY['https://app.example/callback', 'http://127.0.0.1:8080/cb', 'http://[::1]/cb?x=1']"));
+                $"SELECT count(*) FROM application WHERE id = '{created.ApplicationId}' AND kind = 'web' AND grant_types = ARRAY['authorization_code', 'refresh_token'] AND audiences = '{{}}' AND redirect_uris = ARRAY['https://app.example/callback', 'http://127.0.0.1:8080/cb', 'http://[::1]/cb?x=1']"));
             Assert.Equal(1L, await CountAsync(superuser, "SELECT count(*) FROM client_secret WHERE application_id = @id AND secret_hash = @hash",
                 ("id", created.ApplicationId), ("hash", SHA256.HashData(Encoding.UTF8.GetBytes(secret)))));
             Assert.Equal(1L, await PostgresFixture.ScalarAsync<long>(superuser,
@@ -125,7 +125,7 @@ public sealed class DirectoryTests(PostgresFixture postgres)
             postgres.SuperuserConnection(database), "SELECT id FROM application WHERE kind = 'web'")), Cancellation))!;
         Assert.Equal(uris, await store.GetRedirectUrisAsync(found, Cancellation));
         Assert.Equal(
-            ["ept:authorization", "ept:token", "gt:authorization_code", "rst:code"],
+            ["ept:authorization", "ept:token", "gt:authorization_code", "gt:refresh_token", "rst:code"],
             (await store.GetPermissionsAsync(found, Cancellation)).Order(StringComparer.Ordinal));
         Assert.Equal(["ft:pkce"], await store.GetRequirementsAsync(found, Cancellation));
         Assert.Equal("confidential", await store.GetClientTypeAsync(found, Cancellation));
@@ -276,7 +276,11 @@ public sealed class DirectoryTests(PostgresFixture postgres)
     [InlineData("INSERT INTO client_secret (tenant_id, id, application_id, secret_hash, created_at) VALUES ('{0}', gen_random_uuid(), '{1}', decode(repeat('00', 31), 'hex'), now())")]
     [InlineData("INSERT INTO application (tenant_id, id, name, kind, grant_types, created_at) VALUES ('{0}', gen_random_uuid(), 'x', 'system', ARRAY['client_credentials'], now())")]
     [InlineData("INSERT INTO application (tenant_id, id, name, kind, audiences, created_at) VALUES ('{0}', gen_random_uuid(), 'x', 'system', ARRAY['https://api.test'], now())")]
-    // Story 2.9: a web client has 1 to 10 redirect URIs and the code grant only; no other kind has one.
+    // Story 2.9: a web client has 1 to 10 redirect URIs and the code grant, from Story 2.10 with or without
+    // refresh tokens, and nothing else; no other kind has one.
+    [InlineData("INSERT INTO application (tenant_id, id, name, kind, grant_types, redirect_uris, created_at) VALUES ('{0}', gen_random_uuid(), 'x', 'web', ARRAY['refresh_token'], ARRAY['https://app.test/cb'], now())")]
+    [InlineData("INSERT INTO application (tenant_id, id, name, kind, grant_types, redirect_uris, created_at) VALUES ('{0}', gen_random_uuid(), 'x', 'web', ARRAY['refresh_token', 'authorization_code'], ARRAY['https://app.test/cb'], now())")]
+    [InlineData("INSERT INTO application (tenant_id, id, name, kind, grant_types, redirect_uris, created_at) VALUES ('{0}', gen_random_uuid(), 'x', 'web', ARRAY['authorization_code', 'refresh_token', 'client_credentials'], ARRAY['https://app.test/cb'], now())")]
     [InlineData("INSERT INTO application (tenant_id, id, name, kind, grant_types, created_at) VALUES ('{0}', gen_random_uuid(), 'x', 'web', ARRAY['authorization_code'], now())")]
     [InlineData("INSERT INTO application (tenant_id, id, name, kind, grant_types, redirect_uris, created_at) VALUES ('{0}', gen_random_uuid(), 'x', 'web', ARRAY['client_credentials'], ARRAY['https://app.test/cb'], now())")]
     [InlineData("INSERT INTO application (tenant_id, id, name, kind, grant_types, redirect_uris, created_at) VALUES ('{0}', gen_random_uuid(), 'x', 'web', ARRAY['authorization_code', 'client_credentials'], ARRAY['https://app.test/cb'], now())")]

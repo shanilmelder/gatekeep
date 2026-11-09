@@ -217,7 +217,9 @@ internal sealed class BeginTokenTransaction(TokenRequestTransaction transaction,
 /// before OpenIddict reads it. No scope is known yet either, so a Client Credentials request naming one
 /// is refused with <c>invalid_scope</c>. A code exchange may name only <c>openid</c>, the one scope a
 /// code is ever granted (Story 2.9), which is then dropped, since it adds nothing to the code; any other
-/// is <c>invalid_scope</c>. Story 3.7 replaces both with real APIs.
+/// is <c>invalid_scope</c>. A refresh's scope is checked against what its family was granted, once its
+/// token is read, by <see cref="RefuseUngrantedRefreshScopes"/> (Story 2.10). Story 3.7 replaces these
+/// with real APIs.
 /// </summary>
 internal sealed class RefuseTokenTargets : IOpenIddictServerHandler<ValidateTokenRequestContext>
 {
@@ -236,9 +238,12 @@ internal sealed class RefuseTokenTargets : IOpenIddictServerHandler<ValidateToke
         {
             context.Reject(Errors.InvalidTarget, "No audience or resource may be requested here.");
         }
-        else if (context.Request.IsAuthorizationCodeGrantType()
-            ? context.Request.GetScopes().Any(s => s != Scopes.OpenId)
-            : !context.Request.GetScopes().IsDefaultOrEmpty)
+        // A refresh may name only scopes its family was granted (Story 2.10): RefuseUngrantedRefreshScopes
+        // checks them once the refresh token is read.
+        else if (!context.Request.IsRefreshTokenGrantType()
+            && (context.Request.IsAuthorizationCodeGrantType()
+                ? context.Request.GetScopes().Any(s => s != Scopes.OpenId)
+                : !context.Request.GetScopes().IsDefaultOrEmpty))
         {
             context.Reject(Errors.InvalidScope, "No scope may be requested here but openid, on a code exchange.");
         }

@@ -41,10 +41,11 @@ public sealed class DiscoveryAndJwksTests(PostgresFixture postgres, OpenBaoFixtu
         Assert.Equal($"{a.Issuer}.well-known/jwks", root.GetProperty("jwks_uri").GetString());
 
         // Story 2.5: the token endpoint and the two secret methods it accepts. Story 2.9: the code flow,
-        // with S256 PKCE only and iss in every authorization response.
+        // with S256 PKCE only and iss in every authorization response. Story 2.10: refresh tokens, and
+        // offline_access among the scopes.
         Assert.Equal($"{a.Issuer}connect/token", root.GetProperty("token_endpoint").GetString());
         Assert.Equal(
-            ["authorization_code", "client_credentials"],
+            ["authorization_code", "client_credentials", "refresh_token"],
             root.GetProperty("grant_types_supported").EnumerateArray().Select(e => e.GetString()).Order(StringComparer.Ordinal));
         Assert.Equal(
             ["client_secret_basic", "client_secret_post"],
@@ -53,6 +54,8 @@ public sealed class DiscoveryAndJwksTests(PostgresFixture postgres, OpenBaoFixtu
         Assert.Equal(["code"], root.GetProperty("response_types_supported").EnumerateArray().Select(e => e.GetString()));
         Assert.Equal(["S256"], root.GetProperty("code_challenge_methods_supported").EnumerateArray().Select(e => e.GetString()));
         Assert.True(root.GetProperty("authorization_response_iss_parameter_supported").GetBoolean());
+        Assert.Contains("offline_access", root.GetProperty("scopes_supported").EnumerateArray().Select(e => e.GetString()));
+        Assert.Contains("openid", root.GetProperty("scopes_supported").EnumerateArray().Select(e => e.GetString()));
         Assert.Equal(["RS256"], root.GetProperty("id_token_signing_alg_values_supported").EnumerateArray().Select(e => e.GetString()));
         Assert.Equal(0, host.Custody.Calls(KeyOperation.Sign));
     }

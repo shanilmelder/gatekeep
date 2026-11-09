@@ -23,9 +23,44 @@ public sealed record StartedSession(
     DateTimeOffset IdleExpiresAt,
     DateTimeOffset AbsoluteExpiresAt);
 
+/// <summary>
+/// A Token Family (AD-13) as a refresh reads it (Story 2.10): its authorization's status and creation, from
+/// which the absolute refresh limit counts, and the Session it is anchored to, whose User, authentication
+/// methods and authentication time the refreshed tokens carry. Times are in UTC.
+/// </summary>
+/// <param name="IsValid">Whether the family's authorization is still <c>valid</c>, not revoked.</param>
+/// <param name="CreatedAt">When the family's authorization was made, by its code flow.</param>
+public sealed record TokenFamily(
+    Guid AuthorizationId,
+    bool IsValid,
+    DateTimeOffset CreatedAt,
+    Guid SessionId,
+    Guid UserId,
+    IReadOnlyList<string> Amr,
+    DateTimeOffset AuthTime);
+
 /// <summary>User Sessions (AD-12). Sessions owns <c>user_session</c>, <c>authorization</c> and <c>token</c>.</summary>
 public interface ISessions
 {
+    /// <summary>
+    /// The Token Family <paramref name="authorizationId"/> names in the context's Tenant, with its anchored
+    /// Session, whether that Session has ended or expired or not: a Session's natural expiry doesn't end
+    /// its families (AD-13), and its end revokes them. Null when there is none. Reads only.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The context has no Tenant.</exception>
+    Task<TokenFamily?> FindFamilyAsync(CommandContext context, Guid authorizationId, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Burns a presented refresh token (Story 2.10): a <c>valid</c> refresh token row becomes
+    /// <c>redeemed</c>, as OpenIddict's redemption makes it, so it can never be used again. It is the effect
+    /// a refresh refused after its token was redeemed keeps once the rest of its work is undone, since
+    /// OpenIddict redeems the token before the new tokens are made. A row of another type, or not
+    /// <c>valid</c>, doesn't change. Whether a row changed.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The context has no Tenant. Nothing is written.</exception>
+    [StateChanging]
+    Task<bool> BurnRefreshTokenAsync(CommandContext context, Guid tokenId, CancellationToken cancellationToken);
+
     /// <summary>
     /// Writes a <c>user_session</c> row for the context's Tenant and one
     /// <c>sessions.session.started</c> audit event, both in the caller's context. Idle and
