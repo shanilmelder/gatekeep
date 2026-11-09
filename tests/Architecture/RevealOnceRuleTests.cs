@@ -26,6 +26,8 @@ public class RevealOnceRuleTests
         ("src/Gatekeep.Host.Admin/RecoveryCodeApi.cs", "AdminRecoveryCodeResponse"),
         // Story 2.5: a machine client's secret, shown once to the caller that created it (AD-24).
         ("src/Modules/Directory/Contracts/IDirectory.cs", "CreatedMachineClient"),
+        // Story 2.9: a web client's secret, the same way.
+        ("src/Modules/Directory/Contracts/IDirectory.cs", "CreatedWebClient"),
     ];
 
     /// <summary>Where one may be built: the handler that sends the reviewed response.</summary>

@@ -21,11 +21,13 @@ using static OpenIddict.Server.OpenIddictServerEvents;
 namespace Gatekeep.Modules.Protocol.Core;
 
 /// <summary>
-/// The OpenIddict server registration (Stories 2.3 and 2.5, AD-8). Degraded mode is off. The stores
-/// live in their owners (Directory's application store, Sessions' token and authorization stores), and
-/// every store call runs in the token request's one transaction; entity caching is off, no scope store
-/// is registered, and nothing prunes. The token endpoint serves Client Credentials only, authenticated
-/// by Gatekeep's handler against Directory, with <c>client_secret_basic</c> and <c>client_secret_post</c>.
+/// The OpenIddict server registration (Stories 2.3, 2.5 and 2.9, AD-8). Degraded mode is off. The
+/// stores live in their owners (Directory's application store, Sessions' token and authorization
+/// stores), and every store call runs in the request's one transaction; entity caching is off, no scope
+/// store is registered, and nothing prunes. The token endpoint serves Client Credentials and the
+/// authorization code grant, its clients authenticated by Gatekeep's handler against Directory, with
+/// <c>client_secret_basic</c> and <c>client_secret_post</c>. The authorization endpoint serves the code
+/// flow only, with S256 PKCE, <c>iss</c> in every response, and its sign-in through the passthrough.
 /// </summary>
 internal static class ProtocolServer
 {
@@ -44,6 +46,9 @@ internal static class ProtocolServer
             DirectoryContract.CreateDirectory(provider.GetRequiredService<IAuditAppender>(), provider.GetRequiredService<TimeProvider>()),
             provider.GetRequiredService<IAuditAppender>(),
             provider.GetRequiredService<TokenRequestLimits>(),
+            AuthenticationContract.CreateAuthentication(provider.GetRequiredService<IAuditAppender>(), provider.GetRequiredService<TimeProvider>()),
+            SessionsContract.CreateSessions(provider.GetRequiredService<IAuditAppender>(), provider.GetRequiredService<TimeProvider>()),
+            provider.GetRequiredService<TimeProvider>(),
             provider.GetService<ILoggerFactory>()));
         services.AddScoped<TokenRequestTransaction>();
 
@@ -63,22 +68,39 @@ internal static class ProtocolServer
             core.Services.Replace(ServiceDescriptor.Scoped(provider =>
                 DirectoryContract.CreateApplicationStore(() => provider.GetRequiredService<TokenRequestTransaction>().Context)));
             core.Services.Replace(ServiceDescriptor.Scoped(provider =>
-                SessionsContract.CreateTokenStore(() => provider.GetRequiredService<TokenRequestTransaction>().Context)));
-            core.Services.Replace(ServiceDescriptor.Scoped(_ => SessionsContract.CreateAuthorizationStore()));
+                SessionsContract.CreateTokenStore(
+                    provider.GetRequiredService<TokenRequestTransaction>().Store,
+                    provider.GetRequiredService<TokenEndpointServices>().Sessions)));
+            core.Services.Replace(ServiceDescriptor.Scoped(provider =>
+                SessionsContract.CreateAuthorizationStore(provider.GetRequiredService<TokenRequestTransaction>().Store)));
         });
 
         openIddict.AddServer(options =>
         {
             options.SetConfigurationEndpointUris(ProtocolContract.ConfigurationPath[1..])
                 .SetJsonWebKeySetEndpointUris(ProtocolContract.JsonWebKeySetPath[1..])
-                .SetTokenEndpointUris(ProtocolContract.TokenPath[1..]);
+                .SetTokenEndpointUris(ProtocolContract.TokenPath[1..])
+                .SetAuthorizationEndpointUris(ProtocolContract.AuthorizePath[1..]);
 
-            // The one grant type (Story 2.5): any other is unsupported_grant_type.
+            // Client Credentials (Story 2.5) and the code flow with PKCE (Story 2.9): any other grant is
+            // unsupported_grant_type, and implicit, hybrid and the password grant are never enabled.
             options.AllowClientCredentialsFlow();
+            options.AllowAuthorizationCodeFlow();
+            options.RequireProofKeyForCodeExchange();
 
-            // Access tokens are JWS, unencrypted (AD-8), for the §5.2 default lifetime.
+            // S256 only, with responses by query or form_post, never in a fragment (RFC 9700).
+            options.Configure(server =>
+            {
+                server.CodeChallengeMethods.Remove(CodeChallengeMethods.Plain);
+                server.ResponseModes.Remove(ResponseModes.Fragment);
+            });
+
+            // Access and ID tokens are JWS, unencrypted (AD-8), for the §5.2 default lifetimes; a code
+            // lives 60 seconds.
             options.DisableAccessTokenEncryption();
             options.SetAccessTokenLifetime(SecurityLimits.DefaultAccessTokenLifetime);
+            options.SetIdentityTokenLifetime(SecurityLimits.DefaultIdentityTokenLifetime);
+            options.SetAuthorizationCodeLifetime(SecurityLimits.AuthorizationCodeLifetime);
 
             // No scope store, so OpenIddict's own scope check, which needs one, is off.
             options.DisableScopeValidation();
@@ -115,9 +137,29 @@ internal static class ProtocolServer
             options.RemoveEventHandler(OpenIddictServerHandlers.ValidateClientSecret.Descriptor);
             options.AddEventHandler(AuthenticateGatekeepClient.Descriptor);
 
+            // The authorization endpoint (Story 2.9): one transaction, a redirect target trusted only
+            // once the client and its exact redirect URI are known, Gatekeep's scope and prompt rules,
+            // the sign-in through the passthrough, and the static page for a request with no trusted
+            // redirect target.
+            options.AddEventHandler(BeginAuthorizeTransaction.Descriptor);
+            options.AddEventHandler(TrustRedirectTarget.Descriptor);
+            options.AddEventHandler(ValidateGatekeepAuthorizationRequest.Descriptor);
+            options.AddEventHandler(EndAuthorizeTransaction.Descriptor);
+            options.AddEventHandler(RedirectTrustedErrors.Descriptor);
+            options.AddEventHandler(KeepResponseModes.Descriptor);
+            options.AddEventHandler(AnswerInvalidRequestPage.Descriptor);
+
+            // Codes are {tenantPublicId}.{random} reference tokens, protected with the Tenant's key, and a
+            // presented one with another prefix is refused before any lookup (AD-9).
+            options.RemoveEventHandler(OpenIddictServerHandlers.Protection.AttachTokenPayload.Descriptor);
+            options.AddEventHandler(AttachTenantReferenceId.Descriptor);
+            options.AddEventHandler(RejectForeignReferenceIds.Descriptor);
+
             // TLS ends at Caddy, so every request reaches Host.Hosted over plain HTTP, and no
             // forwarded scheme is believed (AD-6): the stored https issuer is what clients see.
-            options.UseAspNetCore().DisableTransportSecurityRequirement();
+            options.UseAspNetCore()
+                .DisableTransportSecurityRequirement()
+                .EnableAuthorizationEndpointPassthrough();
         });
     }
 

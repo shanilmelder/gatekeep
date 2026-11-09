@@ -92,6 +92,96 @@ public sealed class DirectoryTests(PostgresFixture postgres)
     }
 
     [Fact]
+    public async Task Creating_a_web_client_writes_its_redirect_uris_the_code_grant_one_secret_hash_and_one_event()
+    {
+        var database = await DatabaseAsync();
+        string[] uris = ["https://app.example/callback", "http://127.0.0.1:8080/cb", "http://[::1]/cb?x=1"];
+
+        await using (var source = NpgsqlDataSource.Create(postgres.RoleConnection(TableRegistry.Admin, database)))
+        await using (var scope = await TenantScope.BeginAsync(source, TenantA, Cancellation))
+        {
+            var created = await _directory.CreateWebClientAsync(scope.CreateCommandContext(), "Web app", uris, Cancellation);
+            await scope.CommitAsync(Cancellation);
+
+            var secret = created.Secret.Use(static s => s);
+            Assert.Equal(PublicId.Format(PublicIdType.Application, created.ApplicationId), created.ClientId);
+            Assert.True(SecretShape.IsMatch(secret), "The secret isn't {tenantPublicId}.{base64url of 32 bytes}.");
+
+            var superuser = postgres.SuperuserConnection(database);
+            Assert.Equal(1L, await PostgresFixture.ScalarAsync<long>(superuser,
+                $"SELECT count(*) FROM application WHERE id = '{created.ApplicationId}' AND kind = 'web' AND grant_types = ARRAY['authorization_code'] AND audiences = '{{}}' AND redirect_uris = ARRAY['https://app.example/callback', 'http://127.0.0.1:8080/cb', 'http://[::1]/cb?x=1']"));
+            Assert.Equal(1L, await CountAsync(superuser, "SELECT count(*) FROM client_secret WHERE application_id = @id AND secret_hash = @hash",
+                ("id", created.ApplicationId), ("hash", SHA256.HashData(Encoding.UTF8.GetBytes(secret)))));
+            Assert.Equal(1L, await PostgresFixture.ScalarAsync<long>(superuser,
+                $"SELECT count(*) FROM audit_event WHERE type_code = 'directory.application.created' AND actor_kind = 'system' AND target_id = '{created.ApplicationId}'"));
+        }
+
+        // OpenIddict's store hands out the redirect URIs, the code flow's permissions and PKCE.
+        await using var hosted = NpgsqlDataSource.Create(postgres.RoleConnection(TableRegistry.Hosted, database));
+        await using var read = await TenantScope.BeginAsync(hosted, TenantA, Cancellation);
+        var context = read.CreateCommandContext();
+        var store = DirectoryContract.CreateApplicationStore(() => context);
+        var found = (await store.FindByClientIdAsync(PublicId.Format(PublicIdType.Application, await PostgresFixture.ScalarAsync<Guid>(
+            postgres.SuperuserConnection(database), "SELECT id FROM application WHERE kind = 'web'")), Cancellation))!;
+        Assert.Equal(uris, await store.GetRedirectUrisAsync(found, Cancellation));
+        Assert.Equal(
+            ["ept:authorization", "ept:token", "gt:authorization_code", "rst:code"],
+            (await store.GetPermissionsAsync(found, Cancellation)).Order(StringComparer.Ordinal));
+        Assert.Equal(["ft:pkce"], await store.GetRequirementsAsync(found, Cancellation));
+        Assert.Equal("confidential", await store.GetClientTypeAsync(found, Cancellation));
+    }
+
+    [Fact]
+    public async Task The_system_Application_and_machine_clients_have_no_redirect_uri_or_code_flow_permission()
+    {
+        var database = await DatabaseAsync();
+        var machine = await CreateAsync(database, TenantA);
+        await EnsureAsync(database, TenantA);
+
+        await using var hosted = NpgsqlDataSource.Create(postgres.RoleConnection(TableRegistry.Hosted, database));
+        await using var read = await TenantScope.BeginAsync(hosted, TenantA, Cancellation);
+        var context = read.CreateCommandContext();
+        var store = DirectoryContract.CreateApplicationStore(() => context);
+        var found = (await store.FindByClientIdAsync(machine.ClientId, Cancellation))!;
+
+        Assert.Empty(await store.GetRedirectUrisAsync(found, Cancellation));
+        Assert.Empty(await store.GetRequirementsAsync(found, Cancellation));
+        Assert.Equal(["ept:token", "gt:client_credentials"], (await store.GetPermissionsAsync(found, Cancellation)).Order(StringComparer.Ordinal));
+    }
+
+    public static TheoryData<string[]> BadRedirectUris => new()
+    {
+        new[] { "http://example.com/cb" },
+        new[] { "http://localhost/cb" },
+        new[] { "http://localhost:8080/cb" },
+        new[] { "https://example.com/cb#fragment" },
+        new[] { "https://example.com/cb#" },
+        new[] { "/relative/cb" },
+        new[] { "https://user:pass@example.com/cb" },
+        new[] { "https://example.com/c b" },
+        new[] { "https://example.com/" + new string('a', 2000) },
+        new[] { "https://example.com/cb", "https://example.com/cb" },
+        Enumerable.Range(0, 11).Select(i => $"https://example.com/cb{i}").ToArray(),
+        Array.Empty<string>(),
+    };
+
+    [Theory]
+    [MemberData(nameof(BadRedirectUris))]
+    public async Task A_bad_redirect_uri_set_is_refused_and_writes_nothing(string[] uris)
+    {
+        var database = await DatabaseAsync();
+        await using var source = NpgsqlDataSource.Create(postgres.RoleConnection(TableRegistry.Admin, database));
+        await using var scope = await TenantScope.BeginAsync(source, TenantA, Cancellation);
+
+        await Assert.ThrowsAsync<ArgumentException>(() => _directory.CreateWebClientAsync(scope.CreateCommandContext(), "Web app", uris, Cancellation));
+        await scope.CommitAsync(Cancellation);
+
+        Assert.Equal(0L, await PostgresFixture.ScalarAsync<long>(postgres.SuperuserConnection(database), "SELECT count(*) FROM application"));
+        Assert.Equal(0L, await PostgresFixture.ScalarAsync<long>(
+            postgres.SuperuserConnection(database), "SELECT count(*) FROM audit_event WHERE type_code = 'directory.application.created'"));
+    }
+
+    [Fact]
     public async Task Two_clients_get_different_secrets()
     {
         var database = await DatabaseAsync();
@@ -186,6 +276,13 @@ public sealed class DirectoryTests(PostgresFixture postgres)
     [InlineData("INSERT INTO client_secret (tenant_id, id, application_id, secret_hash, created_at) VALUES ('{0}', gen_random_uuid(), '{1}', decode(repeat('00', 31), 'hex'), now())")]
     [InlineData("INSERT INTO application (tenant_id, id, name, kind, grant_types, created_at) VALUES ('{0}', gen_random_uuid(), 'x', 'system', ARRAY['client_credentials'], now())")]
     [InlineData("INSERT INTO application (tenant_id, id, name, kind, audiences, created_at) VALUES ('{0}', gen_random_uuid(), 'x', 'system', ARRAY['https://api.test'], now())")]
+    // Story 2.9: a web client has 1 to 10 redirect URIs and the code grant only; no other kind has one.
+    [InlineData("INSERT INTO application (tenant_id, id, name, kind, grant_types, created_at) VALUES ('{0}', gen_random_uuid(), 'x', 'web', ARRAY['authorization_code'], now())")]
+    [InlineData("INSERT INTO application (tenant_id, id, name, kind, grant_types, redirect_uris, created_at) VALUES ('{0}', gen_random_uuid(), 'x', 'web', ARRAY['client_credentials'], ARRAY['https://app.test/cb'], now())")]
+    [InlineData("INSERT INTO application (tenant_id, id, name, kind, grant_types, redirect_uris, created_at) VALUES ('{0}', gen_random_uuid(), 'x', 'web', ARRAY['authorization_code', 'client_credentials'], ARRAY['https://app.test/cb'], now())")]
+    [InlineData("INSERT INTO application (tenant_id, id, name, kind, grant_types, redirect_uris, created_at) VALUES ('{0}', gen_random_uuid(), 'x', 'web', ARRAY['authorization_code'], array_fill('https://app.test/cb'::text, ARRAY[11]), now())")]
+    [InlineData("INSERT INTO application (tenant_id, id, name, kind, grant_types, redirect_uris, created_at) VALUES ('{0}', gen_random_uuid(), 'x', 'machine', ARRAY['client_credentials'], ARRAY['https://app.test/cb'], now())")]
+    [InlineData("INSERT INTO application (tenant_id, id, name, kind, redirect_uris, created_at) VALUES ('{0}', gen_random_uuid(), 'x', 'system', ARRAY['https://app.test/cb'], now())")]
     public async Task Each_check_refuses_a_row_that_breaks_it(string statement)
     {
         var database = await DatabaseAsync();
@@ -325,7 +422,11 @@ public sealed class DirectoryTests(PostgresFixture postgres)
         Assert.Equal(0L, await PostgresFixture.ScalarAsync<long>(superuser, $"SELECT count(*) FROM \"{table}\""));
     }
 
-    /// <summary>Host.Hosted may update <c>"authorization"</c> and <c>token</c> rows: no update may point one at the system Application.</summary>
+    /// <summary>
+    /// No update may point an <c>"authorization"</c> or <c>token</c> row at the system Application. From
+    /// Story 2.9 Host.Hosted can't update either's <c>application_id</c> at all; the guard still refuses
+    /// any role that can.
+    /// </summary>
     [Theory]
     [InlineData("authorization", SessionIn, "INSERT INTO \"authorization\" (tenant_id, id, application_id, user_session_id, status, type, concurrency_token) VALUES ('{0}', '01900000-0000-7000-8000-0000000028b1', '{1}', '01900000-0000-7000-8000-0000000028a2', 'valid', 'ad-hoc', gen_random_uuid())")]
     [InlineData("token", "", "INSERT INTO token (tenant_id, id, application_id, type, status, concurrency_token) VALUES ('{0}', '01900000-0000-7000-8000-0000000028b1', '{1}', 'access_token', 'valid', gen_random_uuid())")]
@@ -342,12 +443,16 @@ public sealed class DirectoryTests(PostgresFixture postgres)
 
         await PostgresFixture.ExecuteAsync(superuser, string.Format(System.Globalization.CultureInfo.InvariantCulture, insert, TenantA, machine.ApplicationId));
 
-        var error = await Assert.ThrowsAsync<PostgresException>(() => InTenantAsync(database, TableRegistry.Hosted, TenantA, async c =>
+        var update = $"UPDATE \"{table}\" SET application_id = '{id}' WHERE id = '01900000-0000-7000-8000-0000000028b1'";
+        var refused = await Assert.ThrowsAsync<PostgresException>(() => InTenantAsync(database, TableRegistry.Hosted, TenantA, async c =>
         {
             await using var command = c.CreateCommand();
-            command.CommandText = $"UPDATE \"{table}\" SET application_id = '{id}' WHERE id = '01900000-0000-7000-8000-0000000028b1'";
+            command.CommandText = update;
             return await command.ExecuteNonQueryAsync(Cancellation);
         }));
+        Assert.True(refused.SqlState == PermissionDenied, $"{table}: {refused.SqlState}");
+
+        var error = await Assert.ThrowsAsync<PostgresException>(() => PostgresFixture.ExecuteAsync(superuser, update));
 
         Assert.True(error.SqlState == SystemApplicationNamed, $"{table}: {error.SqlState}");
         Assert.Equal(1L, await PostgresFixture.ScalarAsync<long>(

@@ -29,7 +29,7 @@ public sealed class DiscoveryAndJwksTests(PostgresFixture postgres, OpenBaoFixtu
     private static CancellationToken Cancellation => TestContext.Current.CancellationToken;
 
     [Fact]
-    public async Task Discovery_names_the_stored_issuer_and_advertises_Client_Credentials_only()
+    public async Task Discovery_names_the_stored_issuer_and_advertises_Client_Credentials_and_the_code_flow()
     {
         var (database, a, _) = await TwoTenantsAsync();
         await using var host = await ProtocolHost.StartAsync(database.Hosted, bao);
@@ -40,13 +40,19 @@ public sealed class DiscoveryAndJwksTests(PostgresFixture postgres, OpenBaoFixtu
         Assert.Equal(a.Issuer, root.GetProperty("issuer").GetString());
         Assert.Equal($"{a.Issuer}.well-known/jwks", root.GetProperty("jwks_uri").GetString());
 
-        // Story 2.5: the token endpoint, the one grant type and the two secret methods it accepts.
+        // Story 2.5: the token endpoint and the two secret methods it accepts. Story 2.9: the code flow,
+        // with S256 PKCE only and iss in every authorization response.
         Assert.Equal($"{a.Issuer}connect/token", root.GetProperty("token_endpoint").GetString());
-        Assert.Equal(["client_credentials"], root.GetProperty("grant_types_supported").EnumerateArray().Select(e => e.GetString()));
+        Assert.Equal(
+            ["authorization_code", "client_credentials"],
+            root.GetProperty("grant_types_supported").EnumerateArray().Select(e => e.GetString()).Order(StringComparer.Ordinal));
         Assert.Equal(
             ["client_secret_basic", "client_secret_post"],
             root.GetProperty("token_endpoint_auth_methods_supported").EnumerateArray().Select(e => e.GetString()).Order(StringComparer.Ordinal));
-        Assert.False(root.TryGetProperty("authorization_endpoint", out _));
+        Assert.Equal($"{a.Issuer}connect/authorize", root.GetProperty("authorization_endpoint").GetString());
+        Assert.Equal(["code"], root.GetProperty("response_types_supported").EnumerateArray().Select(e => e.GetString()));
+        Assert.Equal(["S256"], root.GetProperty("code_challenge_methods_supported").EnumerateArray().Select(e => e.GetString()));
+        Assert.True(root.GetProperty("authorization_response_iss_parameter_supported").GetBoolean());
         Assert.Equal(["RS256"], root.GetProperty("id_token_signing_alg_values_supported").EnumerateArray().Select(e => e.GetString()));
         Assert.Equal(0, host.Custody.Calls(KeyOperation.Sign));
     }
@@ -206,7 +212,7 @@ public sealed class DiscoveryAndJwksTests(PostgresFixture postgres, OpenBaoFixtu
         var (database, _, _) = await TwoTenantsAsync();
         await using var host = await ProtocolHost.StartAsync(database.Hosted, bao);
 
-        foreach (var path in new[] { "/", "/connect/authorize", "/.well-known/other", "/favicon.ico" })
+        foreach (var path in new[] { "/", "/connect/userinfo", "/.well-known/other", "/favicon.ico" })
         {
             using var response = await GetAsync(host, HostA, path);
             Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);

@@ -19,6 +19,8 @@ namespace Gatekeep.Modules.Directory.Adapters;
 /// <see cref="IDirectory.VerifyClientSecretAsync"/> in place of OpenIddict's secret check. Both lookups
 /// hide the Tenant's <c>system</c> Application (Story 2.8, AD-12): its ID and <c>client_id</c> find
 /// nothing, so OpenIddict refuses it as an unknown client and never issues a code or token for it.
+/// Story 2.9: a <c>web</c> client's redirect URIs, its authorization endpoint and <c>code</c> response
+/// type permissions and its PKCE requirement. Every Application stays confidential.
 /// </summary>
 internal sealed class ApplicationStore(Func<CommandContext> context) : IOpenIddictApplicationStore<DirectoryApplication>
 {
@@ -69,9 +71,17 @@ internal sealed class ApplicationStore(Func<CommandContext> context) : IOpenIddi
     public ValueTask<JsonWebKeySet?> GetJsonWebKeySetAsync(DirectoryApplication application, CancellationToken cancellationToken) =>
         new((JsonWebKeySet?)null);
 
-    /// <summary>The token endpoint, and a <c>gt:</c> permission for each grant type the row allows.</summary>
-    public ValueTask<ImmutableArray<string>> GetPermissionsAsync(DirectoryApplication application, CancellationToken cancellationToken) =>
-        new([Permissions.Endpoints.Token, .. Checked(application).GrantTypes.Select(g => Permissions.Prefixes.GrantType + g)]);
+    /// <summary>
+    /// The token endpoint, and a <c>gt:</c> permission for each grant type the row allows. A <c>web</c>
+    /// client also gets the authorization endpoint and the <c>code</c> response type, the only one
+    /// (Story 2.9). No <c>scp:</c> permission is given: <c>openid</c>, the one scope, needs none.
+    /// </summary>
+    public ValueTask<ImmutableArray<string>> GetPermissionsAsync(DirectoryApplication application, CancellationToken cancellationToken)
+    {
+        var row = Checked(application);
+        string[] code = row.IsWeb ? [Permissions.Endpoints.Authorization, Permissions.ResponseTypes.Code] : [];
+        return new([Permissions.Endpoints.Token, .. code, .. row.GrantTypes.Select(g => Permissions.Prefixes.GrantType + g)]);
+    }
 
     public ValueTask<ImmutableArray<string>> GetPostLogoutRedirectUrisAsync(DirectoryApplication application, CancellationToken cancellationToken) =>
         new(ImmutableArray<string>.Empty);
@@ -79,11 +89,13 @@ internal sealed class ApplicationStore(Func<CommandContext> context) : IOpenIddi
     public ValueTask<ImmutableDictionary<string, JsonElement>> GetPropertiesAsync(DirectoryApplication application, CancellationToken cancellationToken) =>
         new(ImmutableDictionary<string, JsonElement>.Empty);
 
+    /// <summary>A <c>web</c> client's registered redirect URIs, which OpenIddict matches exactly (Story 2.9).</summary>
     public ValueTask<ImmutableArray<string>> GetRedirectUrisAsync(DirectoryApplication application, CancellationToken cancellationToken) =>
-        new(ImmutableArray<string>.Empty);
+        new(Checked(application).RedirectUris);
 
+    /// <summary>A <c>web</c> client must use PKCE (Story 2.9), as every client must on the Deployment.</summary>
     public ValueTask<ImmutableArray<string>> GetRequirementsAsync(DirectoryApplication application, CancellationToken cancellationToken) =>
-        new(ImmutableArray<string>.Empty);
+        new(Checked(application).IsWeb ? [Requirements.Features.ProofKeyForCodeExchange] : ImmutableArray<string>.Empty);
 
     public ValueTask<ImmutableDictionary<string, string>> GetSettingsAsync(DirectoryApplication application, CancellationToken cancellationToken) =>
         new(ImmutableDictionary<string, string>.Empty);
@@ -91,6 +103,10 @@ internal sealed class ApplicationStore(Func<CommandContext> context) : IOpenIddi
     public IAsyncEnumerable<DirectoryApplication> FindByPostLogoutRedirectUriAsync(string uri, CancellationToken cancellationToken) =>
         throw Unsupported();
 
+    /// <summary>
+    /// Unused: OpenIddict checks a redirect URI against the client its <c>client_id</c> names, never by
+    /// looking an Application up by URI.
+    /// </summary>
     public IAsyncEnumerable<DirectoryApplication> FindByRedirectUriAsync(string uri, CancellationToken cancellationToken) =>
         throw Unsupported();
 

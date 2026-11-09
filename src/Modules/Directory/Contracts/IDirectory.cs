@@ -18,6 +18,20 @@ public sealed class CreatedMachineClient
     public required RevealOnce<string> Secret { get; init; }
 }
 
+/// <summary>
+/// A web client just created (Story 2.9): a confidential client allowed only the authorization code
+/// grant, to its registered redirect URIs. Its <c>client_id</c> and secret have the shape and the
+/// once-only reveal of <see cref="CreatedMachineClient"/>'s.
+/// </summary>
+public sealed class CreatedWebClient
+{
+    public required Guid ApplicationId { get; init; }
+
+    public required string ClientId { get; init; }
+
+    public required RevealOnce<string> Secret { get; init; }
+}
+
 /// <summary>Applications and their client secrets (AD-8, AD-27). Directory owns <c>application</c> and <c>client_secret</c>.</summary>
 public interface IDirectory
 {
@@ -31,6 +45,29 @@ public interface IDirectory
     /// <exception cref="ArgumentException"><paramref name="name"/> is empty, longer than 200 characters or holds a NUL character.</exception>
     [StateChanging]
     Task<CreatedMachineClient> CreateMachineClientAsync(CommandContext context, string name, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Writes a <c>web</c> Application allowed only the <c>authorization_code</c> grant, with its
+    /// <paramref name="redirectUris"/> registered exactly as given and no audience, its one client
+    /// secret, and one <c>directory.application.created</c> audit event by the System, all in the
+    /// caller's context and only in its Tenant (Story 2.9), as <see cref="CreateMachineClientAsync"/> does.
+    /// Every web client is confidential: it authenticates at the token endpoint with its secret, and
+    /// must also use PKCE.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The context has no Tenant. Nothing is written.</exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="name"/> is empty, longer than 200 characters or holds a NUL character; or there
+    /// are no redirect URIs, more than <see cref="DirectoryContract.MaxRedirectUris"/>, or a repeated one;
+    /// or one isn't an absolute <c>https</c> URI (or <c>http</c> on a loopback host only), has a fragment,
+    /// userinfo or white space, or is longer than <see cref="DirectoryContract.MaxRedirectUriLength"/>
+    /// characters. Nothing is written.
+    /// </exception>
+    [StateChanging]
+    Task<CreatedWebClient> CreateWebClientAsync(
+        CommandContext context,
+        string name,
+        IReadOnlyList<string> redirectUris,
+        CancellationToken cancellationToken);
 
     /// <summary>
     /// Whether <paramref name="secret"/> is a live secret of the Application <paramref name="clientId"/>

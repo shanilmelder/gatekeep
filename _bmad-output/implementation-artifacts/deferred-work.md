@@ -98,9 +98,11 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-2-6-add-session-and-transaction-tables.md`
   summary: Narrow `gk_hosted` UPDATE on `user_session`, `signin_transaction`, `authorization` and `token` to the columns that change, once Story 2.9's stores and Story 2.7's revocation define them.
   evidence: Story 2.6 grants table-wide UPDATE, so the Hosted path could rewrite `id_hash`, `binding_hash` or `user_id`.
+  status: done in Story 2.9 for `token` and `authorization`. `Migration20261110000000CreateCodeFlow` and `TableRegistry` give `gk_hosted` UPDATE on `token (status, payload, reference_id, redemption_date, concurrency_token)` and `"authorization" (status, concurrency_token)` only. `user_session` and `signin_transaction` keep table-wide UPDATE until Story 4.2 writes them.
 - source_spec: `_bmad-output/implementation-artifacts/spec-2-6-add-session-and-transaction-tables.md`
   summary: Confirm the `token.reference_id` CHECK (`^[A-Za-z0-9+/_-]{43}=?$`) against real OpenIddict output in Story 2.9, and recheck it on every OpenIddict upgrade.
   evidence: It assumes OpenIddict 7.7.2's obfuscated form (base64 SHA-256), and only a hand-built value has tested it.
+  status: confirmed in Story 2.9. OpenIddict 7.7.2's `ObfuscateReferenceIdAsync` is `Convert.ToBase64String(SHA256(UTF-8 value))`, 43 characters and one `=`, and `AuthorizationCodeTests`' happy path writes a real code row the CHECK accepts. Recheck on every OpenIddict upgrade.
 - source_spec: `_bmad-output/implementation-artifacts/spec-1-13-generate-design-tokens-and-bundle-fonts.md`
   summary: Prove fonts and same-origin requests through Caddy once the stack serves the apps.
   evidence: Story 1.13 proved them on vite preview.
@@ -125,6 +127,7 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-2-7-build-the-one-revocation-path.md`
   summary: In Story 2.9, record every revocation OpenIddict asks the stores for (token store `RevokeByAuthorizationIdAsync`, authorization-store revokes, and any `UpdateAsync` that sets a revoked status) on the request, route it through `ISessions.RevokeAccessAsync`, and replay it through `FailureContext` at endpoint end, including the unhandled-exception path.
   evidence: The spike 2.2 carry-over gave this capture to Story 2.7, but 2.7 has no stores to capture from. It proved only that `RevokeAccessAsync` commits inside `CommitAfterRollbackAsync`.
+  status: done in Story 2.9. The token store's `RevokeByAuthorizationIdAsync` records `RevokeAccessAsync(Authorization, CodeReplay or TokenReuse, Actor.Anonymous)` on the request, then runs it; `TokenRequestTransaction` replays it after the rollback at endpoint end and on disposal (an unhandled exception). The code grant calls no authorization-store revoke, so those, `RevokeBySubjectAsync` and the authorization store's `UpdateAsync` refuse; the token store's `UpdateAsync` writes only a valid or redeemed status.
 - source_spec: `_bmad-output/implementation-artifacts/spec-1-20-add-the-rate-limiter-and-admin-csp.md`
   summary: Purge expired `admin_attempt` rows with a job.
   evidence: Story 1.20 never deletes a row: an elapsed window is reset in place by the next attempt, so a subject that never returns keeps its row until a crash empties the `UNLOGGED` table. `gk_admin` has no `DELETE` on it, so the purge needs its own grant and job type.
@@ -382,6 +385,7 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-2-3-publish-discovery-and-jwks-per-tenant.md`
   summary: A stored, unique, dot-free `tenant.public_id` before Story 2.9 issues codes.
   evidence: Story 2.3 left it out by spec; only `PublicId.Format` exists.
+  status: Story 2.9 prefixes codes with `PublicId.Format(PublicIdType.Tenant, tenantId)`, as client secrets are: derived from the Tenant's UUID, so unique and dot-free by construction. No stored column was added.
 - source_spec: `_bmad-output/implementation-artifacts/spec-2-3-publish-discovery-and-jwks-per-tenant.md`
   summary: Story 2.4 adds the `NOTIFY` that clears Host.Hosted's 5-second Tenant runtime cache on a key state change.
   evidence: Story 2.3 caches each runtime for at most 5 seconds, with no NOTIFY yet.

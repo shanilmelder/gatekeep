@@ -90,7 +90,7 @@ public sealed class ClientCredentialsTests(PostgresFixture postgres, OpenBaoFixt
     }
 
     [Fact]
-    public async Task Discovery_advertises_the_token_endpoint_client_credentials_and_two_secret_methods_only()
+    public async Task Discovery_advertises_the_token_endpoint_its_two_grants_and_two_secret_methods_only()
     {
         var (database, a, _) = await TwoTenantsAsync();
         await using var host = await ProtocolHost.StartAsync(database.Hosted, bao);
@@ -99,9 +99,9 @@ public sealed class ClientCredentialsTests(PostgresFixture postgres, OpenBaoFixt
         var root = discovery.RootElement;
 
         Assert.Equal($"{a.Issuer}connect/token", root.GetProperty("token_endpoint").GetString());
-        Assert.Equal(["client_credentials"], Strings(root.GetProperty("grant_types_supported")));
+        Assert.Equal(["authorization_code", "client_credentials"], Strings(root.GetProperty("grant_types_supported")).Order(StringComparer.Ordinal));
         Assert.Equal(["client_secret_basic", "client_secret_post"], Strings(root.GetProperty("token_endpoint_auth_methods_supported")).Order(StringComparer.Ordinal));
-        Assert.False(root.TryGetProperty("authorization_endpoint", out _));
+        Assert.Equal($"{a.Issuer}connect/authorize", root.GetProperty("authorization_endpoint").GetString());
         Assert.Equal(0, host.Custody.Calls(Gatekeep.Kernel.Secrets.KeyOperation.Sign));
     }
 
@@ -226,9 +226,9 @@ public sealed class ClientCredentialsTests(PostgresFixture postgres, OpenBaoFixt
         Assert.Equal(0L, await database.ScalarAsync<long>("SELECT count(*) FROM token"));
     }
 
+    // Story 2.9 opened authorization_code, which AuthorizationCodeTests covers.
     [Theory]
     [InlineData("password")]
-    [InlineData("authorization_code")]
     [InlineData("refresh_token")]
     [InlineData("urn:ietf:params:oauth:grant-type:device_code")]
     public async Task Any_other_grant_type_is_unsupported(string grant)

@@ -24,15 +24,27 @@ using static OpenIddict.Server.OpenIddictServerEvents;
 
 namespace Gatekeep.Modules.Protocol.Core;
 
-/// <summary>What the token endpoint's handlers share: its connections, counters, Directory, audit and limits.</summary>
+/// <summary>
+/// What the token and authorization endpoints' handlers share: their connections, counters, Directory,
+/// audit and limits, and from Story 2.9 sign-in and Sessions.
+/// </summary>
 internal sealed class TokenEndpointServices(
     HostedDataSource database,
     IRateLimiter limiter,
     IDirectory directory,
     IAuditAppender audit,
     TokenRequestLimits limits,
+    IAuthentication authentication,
+    Gatekeep.Modules.Sessions.Contracts.ISessions sessions,
+    TimeProvider time,
     ILoggerFactory? loggers = null)
 {
+    public IAuthentication Authentication { get; } = authentication;
+
+    public Gatekeep.Modules.Sessions.Contracts.ISessions Sessions { get; } = sessions;
+
+    public TimeProvider Time { get; } = time;
+
     public HostedDataSource Database { get; } = database;
 
     public IRateLimiter Limiter { get; } = limiter;
@@ -104,6 +116,28 @@ internal static class TokenEndpoint
 
     public static void RejectClient(BaseValidatingContext context) =>
         context.Reject(Errors.InvalidClient, InvalidClientDescription);
+
+    /// <summary>
+    /// An unauthenticated cross-Tenant mismatch (AD-9, Story 2.5): a client secret, or from Story 2.9 a
+    /// code, that isn't this Tenant's. It is counted per source in this Tenant's <c>tenant_attempt</c>,
+    /// and the first per source per hour writes <c>protocol.client.cross_tenant_rejected</c> to this
+    /// Tenant's Log, anonymous and naming nothing of the other Tenant. Both are kept through the
+    /// request's failure path, so they commit after its rollback.
+    /// </summary>
+    public static void KeepUnauthenticatedMismatch(BaseContext context, TokenRequestTransaction transaction, TokenEndpointServices services)
+    {
+        var rejected = new AuditEvent(ProtocolEvents.ClientCrossTenantRejected.Code, Actor.Anonymous);
+        var source = Source(Http(context));
+        transaction.KeepOnFailure(async (log, cancellationToken) =>
+        {
+            await services.Limiter.AttemptAsync(log, AuthenticationContract.CrossTenantMismatchPolicy, source, cancellationToken);
+            var first = await services.Limiter.AttemptAsync(log, AuthenticationContract.CrossTenantMismatchLogPolicy, source, cancellationToken);
+            if (first.Allowed)
+            {
+                await services.Audit.AppendAsync(log, rejected, detail: null, cancellationToken);
+            }
+        });
+    }
 }
 
 /// <summary>
@@ -180,8 +214,10 @@ internal sealed class BeginTokenTransaction(TokenRequestTransaction transaction,
 /// <summary>
 /// No audience or resource may be requested at a Tenant's token endpoint (Story 2.5), so the
 /// Management API audience can never be minted here: either is refused with <c>invalid_target</c>,
-/// before OpenIddict reads it. No scope is known yet either, so one is refused with
-/// <c>invalid_scope</c>. Story 3.7 replaces both with real APIs.
+/// before OpenIddict reads it. No scope is known yet either, so a Client Credentials request naming one
+/// is refused with <c>invalid_scope</c>. A code exchange may name only <c>openid</c>, the one scope a
+/// code is ever granted (Story 2.9), which is then dropped, since it adds nothing to the code; any other
+/// is <c>invalid_scope</c>. Story 3.7 replaces both with real APIs.
 /// </summary>
 internal sealed class RefuseTokenTargets : IOpenIddictServerHandler<ValidateTokenRequestContext>
 {
@@ -200,9 +236,17 @@ internal sealed class RefuseTokenTargets : IOpenIddictServerHandler<ValidateToke
         {
             context.Reject(Errors.InvalidTarget, "No audience or resource may be requested here.");
         }
-        else if (!context.Request.GetScopes().IsDefaultOrEmpty)
+        else if (context.Request.IsAuthorizationCodeGrantType()
+            ? context.Request.GetScopes().Any(s => s != Scopes.OpenId)
+            : !context.Request.GetScopes().IsDefaultOrEmpty)
         {
-            context.Reject(Errors.InvalidScope, "No scope may be requested here.");
+            context.Reject(Errors.InvalidScope, "No scope may be requested here but openid, on a code exchange.");
+        }
+        else if (context.Request.IsAuthorizationCodeGrantType())
+        {
+            // openid alone names nothing the code doesn't already carry; OpenIddict refuses any scope on
+            // a code exchange, so it is dropped before OpenIddict reads the request.
+            context.Request.Scope = null;
         }
 
         return ValueTask.CompletedTask;
@@ -270,16 +314,7 @@ internal sealed class AuthenticateGatekeepClient(TokenRequestTransaction transac
         }
         else
         {
-            var source = TokenEndpoint.Source(TokenEndpoint.Http(context));
-            transaction.KeepOnFailure(async (log, cancellationToken) =>
-            {
-                await services.Limiter.AttemptAsync(log, AuthenticationContract.CrossTenantMismatchPolicy, source, cancellationToken);
-                var first = await services.Limiter.AttemptAsync(log, AuthenticationContract.CrossTenantMismatchLogPolicy, source, cancellationToken);
-                if (first.Allowed)
-                {
-                    await services.Audit.AppendAsync(log, rejected, detail: null, cancellationToken);
-                }
-            });
+            TokenEndpoint.KeepUnauthenticatedMismatch(context, transaction, services);
         }
 
         // Nothing of the other Tenant, nor the presented values, is logged.
@@ -380,10 +415,11 @@ internal sealed class SignInClient(IOpenIddictApplicationManager applications, T
 /// <summary>
 /// Endpoint end (AD-5): a token response with no error commits the request's transaction, before the
 /// response is written; any error rolls it back, committing what a refused request keeps, such as a
-/// cross-Tenant event, through <see cref="FailureContext"/>. A request refused before its transaction
-/// opened, such as a rate-limited one, has nothing to end.
+/// cross-Tenant event or a replayed code's revocation, through <see cref="FailureContext"/>. A request
+/// refused before its transaction opened, such as a rate-limited one, has nothing to end. A transaction
+/// a store marked failed never commits: its response becomes <c>server_error</c> (Story 2.9).
 /// </summary>
-internal sealed class EndTokenTransaction(TokenRequestTransaction transaction) : IOpenIddictServerHandler<ApplyTokenResponseContext>
+internal sealed class EndTokenTransaction(TokenRequestTransaction transaction, TokenEndpointServices services) : IOpenIddictServerHandler<ApplyTokenResponseContext>
 {
     public static OpenIddictServerHandlerDescriptor Descriptor { get; } =
         OpenIddictServerHandlerDescriptor.CreateBuilder<ApplyTokenResponseContext>()
@@ -396,9 +432,35 @@ internal sealed class EndTokenTransaction(TokenRequestTransaction transaction) :
     {
         ArgumentNullException.ThrowIfNull(context);
 
+        await RequestEnd.EndAsync(transaction, context, services.Logger);
+    }
+}
+
+/// <summary>
+/// How a writing endpoint's request transaction ends (AD-5, Story 2.9): a response with no error commits
+/// it; an error rolls it back and commits what a refused request keeps. A transaction a store marked
+/// failed is never committed: a response that would have been a success becomes <c>server_error</c>,
+/// and nothing it issued is sent, since nothing it wrote was kept.
+/// </summary>
+internal static class RequestEnd
+{
+    public const string FailedDescription = "The request couldn't be completed. Try again.";
+
+    public static async Task EndAsync(TokenRequestTransaction transaction, BaseRequestContext context, ILogger? logger)
+    {
         if (!transaction.IsOpen)
         {
             return;
+        }
+
+        if (transaction.Failed && string.IsNullOrEmpty(context.Transaction.Response?.Error))
+        {
+            logger?.LogWarning("A request was refused: a statement in its transaction failed.");
+            context.Transaction.Response = new OpenIddictResponse
+            {
+                Error = Errors.ServerError,
+                ErrorDescription = FailedDescription,
+            };
         }
 
         if (string.IsNullOrEmpty(context.Transaction.Response?.Error))
