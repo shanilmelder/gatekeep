@@ -2,7 +2,6 @@ using Gatekeep.Kernel.Audit;
 using Gatekeep.Kernel.Identifiers;
 using Gatekeep.Modules.Directory.Contracts;
 using Gatekeep.Modules.Sessions.Contracts;
-using Microsoft.Extensions.Logging;
 using OpenIddict.Abstractions;
 using OpenIddict.Server;
 using OpenIddict.Server.AspNetCore;
@@ -74,14 +73,17 @@ internal sealed class LeaveRevokedTokenToGatekeep : IOpenIddictServerHandler<Pro
 /// <item>A <c>valid</c>, unexpired refresh token of this Tenant issued to the authenticated client: its whole Token
 /// Family is revoked through <see cref="ISessions.RevokeAccessAsync"/> with <see cref="RevocationReason.ClientRevoke"/>,
 /// by <see cref="Actor.Client"/> (the client's Application), which writes one <c>sessions.access.revoked</c>. The
-/// request then commits and answers 200 with no body.</item>
-/// <item>A value with another Tenant's prefix, or a malformed one, that isn't a JWT: refused before any lookup, and
-/// counted as Story 2.5's unauthenticated cross-Tenant mismatch. Answered 200.</item>
+/// request then commits and answers 200 with no body. A revocation that, once its statements ran, changed no
+/// family and no token (another revocation, a logout or a reuse got there first) revokes nothing instead, so
+/// its event rolls back and only one <c>sessions.access.revoked</c> is ever kept.</item>
+/// <item>A JWT whose header <c>kid</c> is one of this Tenant's published Signing Keys, so an access or ID token of
+/// this Tenant: <c>unsupported_token_type</c> (RFC 7009 §2.2.1). Neither is revocable (AD-13): an access token
+/// stays valid until it expires. Its signature isn't checked: the answer revokes nothing either way.</item>
+/// <item>Any other value without this Tenant's prefix, another Tenant's reference token or JWT, or a malformed
+/// value: refused before any lookup, and counted as Story 2.5's unauthenticated cross-Tenant mismatch. Answered 200.</item>
 /// <item>Anything else of this Tenant's prefix, an unknown, revoked, redeemed or expired refresh token, a code, or
 /// another client's refresh token: <c>invalid_token</c>, which OpenIddict answers as an empty 200. Nothing is
 /// revoked, and the request rolls back.</item>
-/// <item>A JWT, which is an access or ID token: <c>unsupported_token_type</c> (RFC 7009 §2.2.1). Neither is
-/// revocable (AD-13): an access token stays valid until it expires.</item>
 /// </list>
 /// </summary>
 internal sealed class RevokeRefreshTokenFamily(
@@ -107,16 +109,16 @@ internal sealed class RevokeRefreshTokenFamily(
 
         if (!token.StartsWith(prefix, StringComparison.Ordinal))
         {
-            // Access and ID tokens are the only JWTs issued here; neither is revocable (AD-13).
-            if (context.Options.JsonWebTokenHandler.CanReadToken(token))
+            // Access and ID tokens are the only JWTs issued here, under this Tenant's keys; neither is revocable (AD-13).
+            if (IsThisTenantsJwt(context, token))
             {
                 context.Reject(Errors.UnsupportedTokenType, "Only refresh tokens can be revoked; an access token stays valid until it expires.");
                 return;
             }
 
-            // No other Tenant's reference token, and no value without a prefix, reaches this Tenant's store (AD-9).
+            // No other Tenant's token, and no value without a prefix, reaches this Tenant's store (AD-9). Counted, and
+            // logged at most once per source per hour, by the mismatch itself.
             TokenEndpoint.KeepUnauthenticatedMismatch(context, transaction, services);
-            services.Logger?.LogInformation("A token not issued by this Tenant was presented for revocation.");
             RevokeNothing(context);
             return;
         }
@@ -134,8 +136,12 @@ internal sealed class RevokeRefreshTokenFamily(
             return;
         }
 
-        var application = await applications.FindByClientIdAsync(context.Request.ClientId!, context.CancellationToken) as DirectoryApplication
-            ?? throw new InvalidOperationException("The authenticated client has no Application.");
+        // An Application deleted since its client was authenticated revokes nothing.
+        if (await applications.FindByClientIdAsync(context.Request.ClientId!, context.CancellationToken) is not DirectoryApplication application)
+        {
+            RevokeNothing(context);
+            return;
+        }
 
         // Another client's refresh token is left alone (RFC 7009 §2.1), and told apart from no token at all by nothing.
         if (!Guid.TryParse(await tokens.GetApplicationIdAsync(entry, context.CancellationToken), out var owner) || owner != application.Id)
@@ -144,13 +150,47 @@ internal sealed class RevokeRefreshTokenFamily(
             return;
         }
 
-        await services.Sessions.RevokeAccessAsync(
+        var outcome = await services.Sessions.RevokeAccessAsync(
             transaction.Context,
             new RevocationScope.Authorization(family),
             exceptSessionId: null,
             RevocationReason.ClientRevoke,
             Actor.Client(application.Id),
             context.CancellationToken);
+
+        // The status read above takes no lock: a concurrent revocation, a logout or a reuse may have revoked the
+        // family first, and this request's statements, waiting on its row locks, then changed nothing. Its event
+        // rolls back with it, so one revocation is recorded once.
+        if (outcome.FamiliesRevoked == 0 && outcome.TokensRevoked == 0)
+        {
+            RevokeNothing(context);
+        }
+    }
+
+    /// <summary>
+    /// Whether <paramref name="token"/> reads as a JWT whose header names one of this Tenant's published Signing
+    /// Keys as its <c>kid</c>. Nothing else of it is read.
+    /// </summary>
+    private static bool IsThisTenantsJwt(HandleRevocationRequestContext context, string token)
+    {
+        if (!context.Options.JsonWebTokenHandler.CanReadToken(token))
+        {
+            return false;
+        }
+
+        string? kid;
+        try
+        {
+            kid = context.Options.JsonWebTokenHandler.ReadJsonWebToken(token).Kid;
+        }
+        catch (Exception e) when (e is ArgumentException or Microsoft.IdentityModel.Tokens.SecurityTokenException or System.Text.Json.JsonException or FormatException)
+        {
+            // A malformed header: not one of this Tenant's tokens.
+            return false;
+        }
+
+        return !string.IsNullOrEmpty(kid)
+            && context.Options.SigningCredentials.Any(c => string.Equals(c.Key.KeyId, kid, StringComparison.Ordinal));
     }
 
     /// <summary>Nothing is revoked: OpenIddict answers <c>invalid_token</c> as an empty 200 (RFC 7009 §2.2), and the request rolls back.</summary>

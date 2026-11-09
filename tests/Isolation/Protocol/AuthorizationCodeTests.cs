@@ -271,6 +271,37 @@ public sealed class AuthorizationCodeTests(PostgresFixture postgres, OpenBaoFixt
     }
 
     [Fact]
+    public async Task Prompt_login_with_a_sign_in_half_a_second_before_the_request_is_a_login_required_redirect()
+    {
+        var flow = await CodeFlowSetup.CreateAsync(postgres, bao, HostA, HostB);
+        await using var host = await flow.StartHostAsync();
+
+        // Earlier than the request's start, possibly in the same second: prompt=login is compared exactly.
+        using var authorize = await CodeFlow.AuthorizeAsync(
+            host, HostA, flow.ClientA.ClientId, Callback, Pkce.New(), flow.UserA, state: "state-f6", extra: [("prompt", "login")],
+            authTime: DateTimeOffset.UtcNow - TimeSpan.FromMilliseconds(500));
+
+        AssertErrorRedirect(authorize, flow.A, "login_required", "state-f6");
+        await AssertNothingBegunAsync(flow);
+    }
+
+    [Fact]
+    public async Task A_max_age_too_large_for_a_long_demands_nothing_and_issues_a_code()
+    {
+        var flow = await CodeFlowSetup.CreateAsync(postgres, bao, HostA, HostB);
+        await using var host = await flow.StartHostAsync();
+
+        using var authorize = await CodeFlow.AuthorizeAsync(
+            host, HostA, flow.ClientA.ClientId, Callback, Pkce.New(), flow.UserA, state: "state-f7", extra: [("max_age", "99999999999999999999")],
+            authTime: DateTimeOffset.UtcNow - TimeSpan.FromDays(30));
+
+        Assert.Equal(HttpStatusCode.Found, authorize.StatusCode);
+        var query = QueryHelpers.ParseQuery(authorize.Headers.Location!.Query);
+        Assert.False(query.ContainsKey("error"));
+        Assert.True(query.ContainsKey("code"), "No code was issued.");
+    }
+
+    [Fact]
     public async Task Max_age_longer_than_the_sign_ins_age_issues_a_code_whose_ID_token_carries_that_auth_time()
     {
         var flow = await CodeFlowSetup.CreateAsync(postgres, bao, HostA, HostB);
@@ -352,6 +383,7 @@ public sealed class AuthorizationCodeTests(PostgresFixture postgres, OpenBaoFixt
         Assert.Equal(started, At(Request(("prompt", "login"), ("max_age", "600"))));
         Assert.Equal(started.AddSeconds(-60), At(Request(("prompt", "consent"), ("max_age", "60"))));
         Assert.Equal(DateTimeOffset.UnixEpoch, At(Request(("max_age", long.MaxValue.ToString(System.Globalization.CultureInfo.InvariantCulture)))));
+        Assert.Equal(DateTimeOffset.UnixEpoch, At(Request(("max_age", "99999999999999999999"))));
     }
 
     [Theory]

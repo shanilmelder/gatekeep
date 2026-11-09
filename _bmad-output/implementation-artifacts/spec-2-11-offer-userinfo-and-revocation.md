@@ -2,9 +2,10 @@
 title: 'Story 2.11: Offer userinfo and revocation'
 type: 'feature'
 created: '2026-11-09'
-status: 'ready-for-dev'
+status: 'done'
+baseline_revision: 'fa0ef2a8c34c9fe98934b634e81839acaa2a8208'
 review_loop_iteration: 0
-followup_review_recommended: false
+followup_review_recommended: true
 context:
   - '{project-root}/_bmad-output/implementation-artifacts/epic-2-context.md'
   - '{project-root}/_bmad-output/implementation-artifacts/spec-2-10-rotate-refresh-tokens-and-detect-reuse.md'
@@ -141,6 +142,39 @@ deferred: []
 
 ## Review Triage Log
 
+### 2026-11-09 — Review pass
+- Layers: Blind Hunter, Edge Case Hunter, Verification Gap and Intent Alignment.
+- Intent Alignment was descriptive and filed no findings. It found Story 2.11 built to fit 2.10. Its main note: `prompt=login`/`max_age` is "honoured" by refusing a stale sign-in, shown only through the test sign-in, and a real re-prompt is Story 4.2's.
+- Verdicts: 25 findings in total (high 0, medium 5, low 19, false 1, maybe-false 0).
+
+| # | Verdict | Route | Finding | Evidence / action |
+|---|---------|-------|---------|-------------------|
+| 1 | medium | patch | VG: no test presents an authorization code at `/connect/revoke` | Removing the refresh-token type check would let a code revoke its family. Tests added for an unredeemed code and an exchanged code. |
+| 2 | medium | patch | BH: a used code at revocation is untested | Same root cause as row 1. |
+| 3 | low | patch | BH: JWT-shaped garbage gets 400, not 200, and isn't counted | `unsupported_token_type` now only for a JWT whose `kid` is this Tenant's key. Anything else takes the 200-and-count path. Same root cause as row 20. |
+| 4 | low | patch | BH: every garbage revocation writes a log line, unthrottled | The line is removed; `KeepUnauthenticatedMismatch` keeps its hourly throttle. |
+| 5 | medium | patch | BH: userinfo has no rate limit | Registered under the token-request policy, per Tenant and per source, with a test. |
+| 6 | low | reject | BH: revocations share the token endpoint's request budget | The spec mandates "the same per-Tenant and per-source rate limits". |
+| 7 | low | reject | BH: `client_revoke` is an allowed Session `end_reason` no Session can have | The CHECK mirrors the closed `RevocationReason` set, which `RevokeAccessTests` holds equal. Harmless. |
+| 8 | low | reject | BH: the `prompt=login`/`max_age` anchor is recomputed on every pass | There is no resume in v1 until Story 4.2, which stores the anchor on the transaction when it adds re-prompting. |
+| 9 | low | patch | BH: `prompt=login` allows an authentication earlier in the same second | Exact comparison for `prompt=login`, with a test. |
+| 10 | low | patch | BH: `max_age` above `long.MaxValue` is refused | An all-digit overflow is treated as the epoch bound, tested end to end. Same root cause as row 21. |
+| 11 | low | patch | BH: userinfo accepts a header and a parameter together | 400 `invalid_request` (RFC 6750 §2), tested. Same root cause as row 22. |
+| 12 | low | patch | BH: `no-store` isn't asserted on userinfo responses | Asserted on 200, 401 and 403. |
+| 13 | low | patch | BH: the HS256 confusion test doesn't use real public-key encodings | SPKI DER, PEM and JWK added. |
+| 14 | medium | patch | BH: revocation racing another revocation is untested | The handler now rolls back when `RevokeAccessAsync` changed nothing, with a concurrent-revocation test. Same root cause as rows 19, 20 and 24. |
+| 15 | low | patch | BH: revocation request-shape errors are untested | Missing `token` and GET tests added. |
+| 16 | low | patch | BH: every Application gets `ept:revocation` | Granted only with `refresh_token`, with a machine-client refusal test. |
+| 17 | low | reject | BH: a redundant Application lookup and inconsistent JWT-shape checks | Performance and style only. The null case is patched in row 23. |
+| 18 | medium | patch | ECH: two concurrent revocations both write an event | Same root cause as row 14. |
+| 19 | low | patch | ECH: a family revoked by a logout or reuse between the read and the revoke still records `client_revoke` | Same root cause as row 14. |
+| 20 | low | patch | ECH: a JWS-shaped garbage value gets 400 | Same root cause as row 3. |
+| 21 | low | patch | ECH: a valid `max_age` above `long.MaxValue` is refused | Same root cause as row 10. |
+| 22 | low | patch | ECH: header plus `access_token` is accepted | Same root cause as row 11. |
+| 23 | low | patch | ECH: an Application deleted mid-request causes a 500 | Now `RevokeNothing` on null. |
+| 24 | low | patch | ECH (claim): "one `sessions.access.revoked`" fails under a race | Same root cause as row 14. |
+| 25 | false | reject | ECH (claim): `deferred-work.md` wasn't updated | The implementer added three entries. The reviewed diff covered only `src`, `tests` and `docs`. |
+
 ## Design Notes
 
 **Why refuse instead of re-prompt.** No sign-in screen exists until Story 4.1. A request that demands a fresher authentication than the sign-in delivered must not get a code. Refusing with `login_required` is safe, and Story 4.2 replaces it with a re-prompt.
@@ -151,3 +185,50 @@ deferred: []
 
 **Commands:**
 - CI on the PR (Architecture and Isolation suites in Docker) -- expected: green. Don't run the full suite locally (low memory); targeted classes one at a time in the tests container at most.
+
+## Auto Run Result
+
+**Summary.** Tenant hosts now offer userinfo and RFC 7009 revocation, and authorize enforces `prompt=login` and `max_age` (FR-23, RFC 7009, AD-9).
+
+**Userinfo** (`/connect/userinfo`):
+- Accepts only this Tenant's `at+jwt` access token that names a User and carries `openid`.
+- Answers exactly `{"sub": "usr_…"}`, with `no-store` set.
+- Refuses with 401 `invalid_token`: an ID token, `alg: none`, HS256 key confusion, another Tenant's token, a Client Credentials token, or an expired token.
+- Answers 400 to a request that sends the token by two methods.
+- Rate-limited per Tenant and per source.
+
+**Revocation** (`/connect/revoke`), handled by Gatekeep ahead of OpenIddict's own revoke:
+- Uses the token endpoint's client authentication, limits and transaction.
+- A valid refresh token of the calling client ends its family through `RevokeAccessAsync(ClientRevoke, Actor.Client)`.
+- Revokes nothing, answers 200 and rolls back for: another client's token, unknown, redeemed or expired tokens, codes, and a racing duplicate revocation.
+- A foreign or garbage value is answered 200 and counted as a cross-Tenant mismatch.
+- This Tenant's own access and ID tokens get `unsupported_token_type`.
+- Only Applications with the refresh grant may call it.
+
+**Authorize freshness:** refuses with `login_required` a sign-in older than the request demands. `prompt=login` compares exactly; `max_age` compares in whole seconds, and an overflowing value means no demand.
+
+**Files changed (main ones)**
+- `src/Modules/Protocol/Core/{RevocationEndpoint.cs, UserinfoEndpoint.cs}` (new), `ProtocolServer.cs`, `TokenEndpoint.cs`, `AuthorizeEndpoint.cs`, `TokenRequestTransaction.cs`, and `Contracts/ProtocolContract.cs`.
+- `src/Modules/Sessions/Contracts/Revocation.cs` (`ClientRevoke`), `src/Adapters/Postgres/Migrations/Migration20261112000000AddClientRevokeReason.cs`, and `src/Modules/Directory/Adapters/ApplicationStore.cs`.
+- Tests:
+  - `UserinfoAndRevocationTests` (new);
+  - `AuthorizationCodeTests` (freshness), `TestAuthorizationSignIn` (`X-Test-Auth-Time`);
+  - discovery, `CrossTenant/*`, `Canary/*`, `DirectoryTests`, `RevokeAccessTests`;
+  - `MigrateCommandTests` (28).
+- Docs: `docs/spikes/2-2-openiddict-stores.md` and `deferred-work.md`.
+
+**Review findings.** 25 findings: 20 patched (12 root causes), 0 deferred, and 5 rejected (1 false, 4 low). Reasons are in the triage log.
+
+**Follow-up review: recommended (`true`).** Five medium entries were patched (patched counts by verdict: medium 5, low 15). A second pass should check these risks:
+- **OpenIddict internals:** the design depends on OpenIddict 7.7.2 internals, read from source: token validation is switched off on revocation, and token IDs are stripped for userinfo.
+- **The `kid`-based JWT rule:** it decides `unsupported_token_type` versus 200.
+- **The test-only scope stripping:** the `insufficient_scope` test removes `openid` through a test-only handler.
+
+**Verification**
+- The solution built clean (0 errors, 0 warnings) in an SDK 10.0.403 container, before and after the patches.
+- No tests were run locally. CI on PR #56 runs the full Architecture and Isolation suites, and is the first run of the new tests.
+- **Matrix audit:** every I/O row has a named test in `UserinfoAndRevocationTests` or `AuthorizationCodeTests`. Whether they ran and passed is judged from CI before merge.
+
+**Residual risks**
+- `prompt=login` and `max_age` are refused, not re-prompted, until Story 4.2. Only the test sign-in exercises them.
+- Userinfo returns only `sub` until User profile data exists (Epics 5 and 6).

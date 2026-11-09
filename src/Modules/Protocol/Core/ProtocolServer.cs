@@ -175,8 +175,12 @@ internal static class ProtocolServer
             options.AddEventHandler(AnswerRateLimited<ApplyRevocationResponseContext>.Descriptor);
             options.AddEventHandler(AnswerRevocationWithNoBody.Descriptor);
 
-            // The userinfo endpoint (Story 2.11): the bearer from the header only, read from the token alone
-            // with no transaction, for a User with openid, answering sub and nothing else.
+            // The userinfo endpoint (Story 2.11): counted under the token endpoint's limits (each call costs a
+            // signature check and needs no client), the bearer from the header only, read from the token alone
+            // with no request transaction, for a User with openid, answering sub and nothing else, no-store.
+            options.AddEventHandler(LimitTokenRequests<ExtractUserInfoRequestContext>.Descriptor);
+            options.AddEventHandler(AnswerRateLimited<ApplyUserInfoResponseContext>.Descriptor);
+            options.AddEventHandler(AnswerUserinfoNoStore.Descriptor);
             options.AddEventHandler(TakeUserinfoBearerFromHeaderOnly.Descriptor);
             options.AddEventHandler(RefuseUserinfoReferenceTokens.Descriptor);
             options.AddEventHandler(ReadUserinfoTokensStatelessly.Descriptor);

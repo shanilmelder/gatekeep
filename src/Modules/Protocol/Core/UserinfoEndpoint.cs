@@ -10,7 +10,8 @@ namespace Gatekeep.Modules.Protocol.Core;
 /// <summary>
 /// Userinfo takes its bearer token from the <c>Authorization</c> header only (Story 2.11, RFC 6750 §2.1): an
 /// <c>access_token</c> in the query or the form is dropped before OpenIddict reads the header, so a request
-/// with no header has no token, whatever else it carries.
+/// with no header has no token, whatever else it carries. A request with both a bearer header and an
+/// <c>access_token</c> uses more than one method, which RFC 6750 §2 forbids: <c>invalid_request</c>.
 /// </summary>
 internal sealed class TakeUserinfoBearerFromHeaderOnly : IOpenIddictServerHandler<ExtractUserInfoRequestContext>
 {
@@ -27,6 +28,13 @@ internal sealed class TakeUserinfoBearerFromHeaderOnly : IOpenIddictServerHandle
 
         if (context.Transaction.Request is { } request)
         {
+            var header = TokenEndpoint.Http(context).Request.Headers.Authorization.ToString();
+            if (!string.IsNullOrEmpty(request.AccessToken) && header.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
+            {
+                context.Reject(Errors.InvalidRequest, "Send the access token by one method only.");
+                return ValueTask.CompletedTask;
+            }
+
             request.AccessToken = null;
         }
 
@@ -120,6 +128,30 @@ internal sealed class RequireUserinfoUserAndOpenId : IOpenIddictServerHandler<Va
             context.Reject(Errors.InsufficientScope, "The access token wasn't granted openid.");
         }
 
+        return ValueTask.CompletedTask;
+    }
+}
+
+/// <summary>
+/// Every userinfo response, a User's <c>sub</c> or an error, is <c>Cache-Control: no-store</c> (Story 2.11, OIDC
+/// Core §5.3.2 via RFC 6749 §5.1): OpenIddict sets no cache header on this endpoint.
+/// </summary>
+internal sealed class AnswerUserinfoNoStore : IOpenIddictServerHandler<ApplyUserInfoResponseContext>
+{
+    public static OpenIddictServerHandlerDescriptor Descriptor { get; } =
+        OpenIddictServerHandlerDescriptor.CreateBuilder<ApplyUserInfoResponseContext>()
+            .UseSingletonHandler<AnswerUserinfoNoStore>()
+            .SetOrder(OpenIddictServerAspNetCoreHandlers.AttachHttpResponseCode<ApplyUserInfoResponseContext>.Descriptor.Order + 600)
+            .SetType(OpenIddictServerHandlerType.Custom)
+            .Build();
+
+    public ValueTask HandleAsync(ApplyUserInfoResponseContext context)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+
+        var response = TokenEndpoint.Http(context).Response;
+        response.Headers.CacheControl = "no-store";
+        response.Headers.Pragma = "no-cache";
         return ValueTask.CompletedTask;
     }
 }

@@ -146,7 +146,7 @@ public sealed class DirectoryTests(PostgresFixture postgres)
 
         Assert.Empty(await store.GetRedirectUrisAsync(found, Cancellation));
         Assert.Empty(await store.GetRequirementsAsync(found, Cancellation));
-        Assert.Equal(["ept:revocation", "ept:token", "gt:client_credentials"], (await store.GetPermissionsAsync(found, Cancellation)).Order(StringComparer.Ordinal));
+        Assert.Equal(["ept:token", "gt:client_credentials"], (await store.GetPermissionsAsync(found, Cancellation)).Order(StringComparer.Ordinal));
     }
 
     public static TheoryData<string[]> BadRedirectUris => new()

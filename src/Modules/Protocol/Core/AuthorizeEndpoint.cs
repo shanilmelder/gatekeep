@@ -66,7 +66,8 @@ internal static class AuthorizeEndpoint
 
     /// <summary>
     /// The request's <c>max_age</c> (Story 2.11, OIDC Core §3.1.2.1): null when it names none; false when
-    /// it isn't a non-negative integer of seconds, which is <c>invalid_request</c>.
+    /// it isn't a non-negative integer of seconds, which is <c>invalid_request</c>. One too large for a
+    /// <see cref="long"/> is <see cref="long.MaxValue"/>, which demands nothing any sign-in doesn't meet.
     /// </summary>
     public static bool TryReadMaxAge(OpenIddictRequest request, out long? maxAge)
     {
@@ -76,9 +77,15 @@ internal static class AuthorizeEndpoint
             return true;
         }
 
-        if (!long.TryParse(parameter.ToString(), NumberStyles.None, CultureInfo.InvariantCulture, out var seconds))
+        var text = parameter.ToString();
+        if (!long.TryParse(text, NumberStyles.None, CultureInfo.InvariantCulture, out var seconds))
         {
-            return false;
+            if (string.IsNullOrEmpty(text) || !text.All(char.IsAsciiDigit))
+            {
+                return false;
+            }
+
+            seconds = long.MaxValue;
         }
 
         maxAge = seconds;
@@ -108,11 +115,15 @@ internal static class AuthorizeEndpoint
     }
 
     /// <summary>
-    /// Whether a sign-in at <paramref name="authTime"/> is fresh enough for <paramref name="since"/>, compared
-    /// in whole seconds, as <c>auth_time</c> and <c>max_age</c> are (OIDC Core §2).
+    /// Whether a sign-in at <paramref name="authTime"/> is fresh enough for <paramref name="since"/>. With
+    /// <c>prompt=login</c> (<paramref name="exact"/>) the bound is the request's start, which no authentication
+    /// before it meets, so it is compared exactly; a <c>max_age</c> bound alone is compared in whole seconds,
+    /// its unit (OIDC Core §2). With <c>prompt=login</c> the bound is always the request's start, since a
+    /// <c>max_age</c> bound is never later.
     /// </summary>
-    public static bool IsFreshEnough(DateTimeOffset authTime, DateTimeOffset? since) =>
-        since is not { } required || authTime.ToUnixTimeSeconds() >= required.ToUnixTimeSeconds();
+    public static bool IsFreshEnough(DateTimeOffset authTime, DateTimeOffset? since, bool exact) =>
+        since is not { } required
+        || (exact ? authTime >= required : authTime.ToUnixTimeSeconds() >= required.ToUnixTimeSeconds());
 
     /// <summary>
     /// The request parameters a sign-in transaction keeps, for the sign-in to honour (Story 4.2 reads
@@ -466,7 +477,7 @@ internal static class AuthorizePassthrough
 
         // An authentication older than prompt=login or max_age allows gets no code (OIDC Core §3.1.2.1): refused,
         // not re-prompted, until Story 4.2. The refusal rolls back the sign-in's Session with the rest.
-        if (!AuthorizeEndpoint.IsFreshEnough(result.AuthTime, authenticatedSince))
+        if (!AuthorizeEndpoint.IsFreshEnough(result.AuthTime, authenticatedSince, request.HasPromptValue(PromptValues.Login)))
         {
             await RefuseAsync(http, Errors.LoginRequired, "The User must sign in again.");
             return;

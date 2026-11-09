@@ -120,8 +120,8 @@ public interface IAuthorizationSignIn
     /// commits only if a code is issued. <paramref name="authenticatedSince"/> is the freshness the request
     /// demands (Story 2.11, OIDC Core §3.1.2.1): from <c>prompt=login</c>, the time the request started; from
     /// <c>max_age</c>, that many seconds before now; the later of the two when both are given; null when
-    /// neither is. A result whose <see cref="AuthenticationResult.AuthTime"/> is before it, to the second,
-    /// is refused with <c>login_required</c> and no code, so a sign-in should authenticate the User again
+    /// neither is. A result whose <see cref="AuthenticationResult.AuthTime"/> is before it (exactly for
+    /// <c>prompt=login</c>, to the second for <c>max_age</c>) is refused with <c>login_required</c> and no code, so a sign-in should authenticate the User again
     /// rather than reuse an older authentication (Story 4.2).
     /// </summary>
     ValueTask<AuthenticationResult?> CompleteAsync(

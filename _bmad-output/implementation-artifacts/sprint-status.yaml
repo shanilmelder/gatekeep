@@ -29,7 +29,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 # - Retrospective appends its action items to action_items; the status view surfaces open ones
 generated: 11-02-2026 02:20
-last_updated: 11-09-2026 10:30
+last_updated: 11-09-2026 14:00
 project: gatekeep
 project_key: NOKEY
 tracking_system: file-system
@@ -81,7 +81,7 @@ development_status:
   2-8-add-the-system-application: done
   2-9-run-the-authorization-code-flow-with-pkce: done
   2-10-rotate-refresh-tokens-and-detect-reuse: done
-  2-11-offer-userinfo-and-revocation: backlog
+  2-11-offer-userinfo-and-revocation: done
   epic-2-retrospective: optional
 
   epic-3: backlog

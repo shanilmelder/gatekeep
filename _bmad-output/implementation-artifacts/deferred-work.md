@@ -469,10 +469,7 @@
   evidence: Story 2.10 writes a token row for every rotation and never deletes one. No pruning job exists yet; the spec rules it out of this story.
 - source_spec: `_bmad-output/implementation-artifacts/spec-2-11-offer-userinfo-and-revocation.md`
   summary: Replace the `login_required` refusal for an authentication too old for `prompt=login` or `max_age` with a real re-authentication (Story 4.2), and decide whether Story 4.2's sign-in should honour `IAuthorizationSignIn.CompleteAsync`'s `authenticatedSince` itself.
-  evidence: Story 2.11 refuses a stale `AuthenticationResult.AuthTime` with `login_required`; no sign-in screen exists before Story 4.1. The comparison is in whole seconds, so an authentication earlier in the same second as the request's start passes `prompt=login`.
-- source_spec: `_bmad-output/implementation-artifacts/spec-2-11-offer-userinfo-and-revocation.md`
-  summary: Make two concurrent revocations of one refresh token write one `sessions.access.revoked`, not two.
-  evidence: Story 2.11's `RevokeRefreshTokenFamily` reads the token's status, then calls `RevokeAccessAsync`, which always writes its event. Two requests racing both read `valid`, so both write an event; the second changes no row. Sequential revocations write one, as the spec asks.
+  evidence: Story 2.11 refuses a stale `AuthenticationResult.AuthTime` with `login_required`; no sign-in screen exists before Story 4.1.
 - source_spec: `_bmad-output/implementation-artifacts/spec-2-11-offer-userinfo-and-revocation.md`
   summary: Add the profile and email claims to userinfo, by scope, when Epics 5 and 6 store them.
   evidence: Story 2.11 answers `{"sub": …}` only; OpenIddict's `AttachClaims` is removed in favour of `AttachUserinfoSubject`.

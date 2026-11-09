@@ -57,6 +57,7 @@ public sealed class UserinfoAndRevocationTests(PostgresFixture postgres, OpenBao
 
         Assert.Equal(HttpStatusCode.OK, response.Status);
         Assert.Equal("application/json", response.ContentType);
+        Assert.True(response.NoStore, "The userinfo response isn't no-store.");
         AssertOnlySub(response.Body, flow.UserA);
 
         // It reads the token alone: nothing is written.
@@ -129,10 +130,26 @@ public sealed class UserinfoAndRevocationTests(PostgresFixture postgres, OpenBao
         var tokens = await TokensAsync(host, flow);
         var access = new JsonWebToken(tokens.Access);
         var jwks = await CodeFlow.JwksAsync(host, HostA);
-        var modulus = Base64UrlEncoder.DecodeBytes(jwks.Keys.Single(k => k.Kid == access.Kid).N);
+        var jwk = jwks.Keys.Single(k => k.Kid == access.Kid);
+        var modulus = Base64UrlEncoder.DecodeBytes(jwk.N);
+        using var rsa = RSA.Create();
+        rsa.ImportParameters(new RSAParameters { Modulus = modulus, Exponent = Base64UrlEncoder.DecodeBytes(jwk.E) });
+        string jwkJson;
+        using (var document = await CodeFlow.GetJsonAsync(host, HostA, ProtocolContract.JsonWebKeySetPath))
+        {
+            jwkJson = document.RootElement.GetProperty("keys").EnumerateArray().Single(k => k.GetProperty("kid").GetString() == access.Kid).GetRawText();
+        }
 
-        // The real claims, MACed with a random key and with the RSA public key's modulus as the HMAC key.
-        foreach (var key in new[] { RandomNumberGenerator.GetBytes(32), modulus })
+        // The real claims, MACed with a random key, and with the Tenant's public key as the HMAC secret in every form
+        // a confused verifier might use: its modulus, its SubjectPublicKeyInfo DER, its PEM text and its JWK JSON.
+        foreach (var key in new[]
+        {
+            RandomNumberGenerator.GetBytes(32),
+            modulus,
+            rsa.ExportSubjectPublicKeyInfo(),
+            Encoding.ASCII.GetBytes(rsa.ExportSubjectPublicKeyInfoPem()),
+            Encoding.UTF8.GetBytes(jwkJson),
+        })
         {
             var signed = $"{Header($"{{\"alg\":\"HS256\",\"typ\":\"at+jwt\",\"kid\":\"{access.Kid}\"}}")}.{tokens.Access.Split('.')[1]}";
             var mac = Base64UrlEncoder.Encode(HMACSHA256.HashData(key, Encoding.ASCII.GetBytes(signed)));
@@ -234,6 +251,7 @@ public sealed class UserinfoAndRevocationTests(PostgresFixture postgres, OpenBao
         using var response = await UserinfoAsync(host, HostA, tokens.Access);
 
         Assert.Equal(HttpStatusCode.Forbidden, response.Status);
+        Assert.True(response.NoStore, "The userinfo response isn't no-store.");
         Assert.StartsWith("Bearer", response.WwwAuthenticate, StringComparison.Ordinal);
         Assert.Contains("error=\"insufficient_scope\"", response.WwwAuthenticate, StringComparison.Ordinal);
     }
@@ -422,6 +440,7 @@ public sealed class UserinfoAndRevocationTests(PostgresFixture postgres, OpenBao
     [InlineData("abc")]
     [InlineData("ten_aaaaaaaaaaaaaaaaaaaaaaaaaa.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")]
     [InlineData(".AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")]
+    [InlineData("a.b.c")]
     public async Task A_garbage_or_foreign_prefixed_token_is_200_counted_as_a_mismatch_and_revokes_nothing(string garbage)
     {
         var flow = await CodeFlowSetup.CreateAsync(postgres, bao, HostA, HostB);
@@ -615,6 +634,195 @@ public sealed class UserinfoAndRevocationTests(PostgresFixture postgres, OpenBao
         Assert.False(root.TryGetProperty("end_session_endpoint", out _));
     }
 
+    [Fact]
+    public async Task Userinfo_refuses_a_token_sent_both_as_a_bearer_and_as_a_parameter()
+    {
+        var flow = await CodeFlowSetup.CreateAsync(postgres, bao, HostA, HostB);
+        await using var host = await flow.StartHostAsync();
+        var tokens = await TokensAsync(host, flow);
+
+        foreach (var post in new[] { false, true })
+        {
+            using var response = await UserinfoAsync(host, HostA, tokens.Access, post: post, parameter: tokens.Access);
+            Assert.Equal(HttpStatusCode.BadRequest, response.Status);
+            Assert.Contains("error=\"invalid_request\"", response.WwwAuthenticate, StringComparison.Ordinal);
+            Assert.DoesNotContain("usr_", response.Body, StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
+    public async Task The_sixty_first_userinfo_call_from_one_source_is_429_with_Retry_After_and_another_source_still_answers()
+    {
+        var flow = await CodeFlowSetup.CreateAsync(postgres, bao, HostA, HostB);
+        await using var host = await flow.StartHostAsync();
+        var tokens = await TokensAsync(host, flow);
+
+        // Every userinfo call is counted before its token is read, under the token endpoint's limits.
+        for (var i = 0; i < SecurityLimits.TokenRequestSourceAttempts; i++)
+        {
+            using var counted = await UserinfoAsync(host, HostA, "garbage", source: "203.0.113.80");
+            Assert.Equal(HttpStatusCode.Unauthorized, counted.Status);
+        }
+
+        using (var limited = await UserinfoAsync(host, HostA, tokens.Access, source: "203.0.113.80"))
+        {
+            Assert.Equal(HttpStatusCode.TooManyRequests, limited.Status);
+            var retryAfter = Assert.Single(limited.Headers.GetValues("Retry-After"));
+            Assert.InRange(int.Parse(retryAfter, System.Globalization.CultureInfo.InvariantCulture), 1, (int)SecurityLimits.TokenRequestWindow.TotalSeconds);
+            Assert.DoesNotContain("usr_", limited.Body, StringComparison.Ordinal);
+        }
+
+        Assert.Equal(
+            SecurityLimits.TokenRequestSourceAttempts + 1,
+            await AttemptsAsync(flow.Database, flow.A.TenantId, AuthenticationContract.TokenRequestSourcePolicy.Code, "203.0.113.80"));
+
+        using var other = await UserinfoAsync(host, HostA, tokens.Access, source: "203.0.113.81");
+        Assert.Equal(HttpStatusCode.OK, other.Status);
+        AssertOnlySub(other.Body, flow.UserA);
+    }
+
+    [Fact]
+    public async Task Two_revocations_of_one_refresh_token_racing_both_get_200_and_write_one_event()
+    {
+        var flow = await CodeFlowSetup.CreateAsync(postgres, bao, HostA, HostB);
+        await using var host = await flow.StartHostAsync();
+        var tokens = await TokensAsync(host, flow);
+
+        var results = await Task.WhenAll(
+            RevokeAsync(host, HostA, flow.ClientA.ClientId, flow.ClientA.Secret, tokens.Refresh),
+            RevokeAsync(host, HostA, flow.ClientA.ClientId, flow.ClientA.Secret, tokens.Refresh));
+        try
+        {
+            Assert.All(results, r => Assert.Equal(HttpStatusCode.OK, r.Status));
+        }
+        finally
+        {
+            foreach (var result in results)
+            {
+                result.Dispose();
+            }
+        }
+
+        Assert.Equal(1L, await RevocationEventsAsync(flow));
+        Assert.Equal(1L, await flow.Database.ScalarAsync<long>($"SELECT count(*) FROM \"authorization\" WHERE tenant_id = '{flow.A.TenantId}' AND status = 'revoked'"));
+        Assert.Equal(0L, await RefreshRowsAsync(flow, "status = 'valid'"));
+    }
+
+    [Fact]
+    public async Task Another_Tenants_access_token_at_revocation_is_200_counted_as_a_mismatch_and_revokes_nothing()
+    {
+        var flow = await CodeFlowSetup.CreateAsync(postgres, bao, HostA, HostB);
+        var clientB = await flow.Database.CreateWebClientAsync(flow.B.TenantId, [Callback]);
+        await using var host = await flow.StartHostAsync();
+        var tokens = await TokensAsync(host, flow);
+
+        // A's real access token: its kid is none of B's keys, so at B it is just a value B didn't issue.
+        using (var response = await RevokeAsync(host, HostB, clientB.ClientId, clientB.Secret, tokens.Access, source: "192.0.2.40"))
+        {
+            Assert.Equal(HttpStatusCode.OK, response.Status);
+            Assert.Equal(string.Empty, response.Body);
+        }
+
+        Assert.Equal(1, await AttemptsAsync(flow.Database, flow.B.TenantId, AuthenticationContract.CrossTenantMismatchPolicy.Code, "192.0.2.40"));
+        Assert.Equal(1L, await flow.Database.ScalarAsync<long>(
+            $"SELECT count(*) FROM audit_event WHERE tenant_id = '{flow.B.TenantId}' AND type_code = '{CrossTenantRejected}' AND actor_kind = 'anonymous'"));
+        Assert.Equal(0L, await flow.Database.ScalarAsync<long>($"SELECT count(*) FROM audit_event WHERE type_code = '{Revoked}'"));
+        Assert.Equal(0L, await flow.Database.ScalarAsync<long>("SELECT count(*) FROM token WHERE status = 'revoked'"));
+    }
+
+    [Fact]
+    public async Task A_Client_Credentials_client_has_no_revocation_permission_and_revokes_nothing()
+    {
+        var flow = await CodeFlowSetup.CreateAsync(postgres, bao, HostA, HostB);
+        var machine = await flow.Database.CreateClientAsync(flow.A.TenantId);
+        await using var host = await flow.StartHostAsync();
+        var tokens = await TokensAsync(host, flow);
+
+        using (var refused = await RevokeAsync(host, HostA, machine.ClientId, machine.Secret, tokens.Refresh))
+        {
+            Assert.Equal(HttpStatusCode.BadRequest, refused.Status);
+            Assert.Equal("unauthorized_client", refused.Error);
+        }
+
+        Assert.Equal(0L, await RevocationEventsAsync(flow));
+        Assert.Equal(1L, await RefreshRowsAsync(flow, "status = 'valid'"));
+    }
+
+    [Fact]
+    public async Task An_unredeemed_code_presented_for_revocation_is_200_revokes_nothing_and_still_exchanges()
+    {
+        var flow = await CodeFlowSetup.CreateAsync(postgres, bao, HostA, HostB);
+        await using var host = await flow.StartHostAsync();
+        var pkce = Pkce.New();
+        var code = await CodeFlow.CodeAsync(host, HostA, flow.ClientA.ClientId, Callback, pkce, flow.UserA, scope: Offline);
+
+        using (var response = await RevokeAsync(host, HostA, flow.ClientA.ClientId, flow.ClientA.Secret, code))
+        {
+            Assert.Equal(HttpStatusCode.OK, response.Status);
+            Assert.Equal(string.Empty, response.Body);
+        }
+
+        Assert.Equal(0L, await RevocationEventsAsync(flow));
+        Assert.Equal(0L, await flow.Database.ScalarAsync<long>($"SELECT count(*) FROM \"authorization\" WHERE tenant_id = '{flow.A.TenantId}' AND status = 'revoked'"));
+
+        using var issued = await CodeFlow.ExchangeAsync(host, HostA, flow.ClientA.ClientId, flow.ClientA.Secret, code, Callback, pkce.Verifier);
+        Assert.Equal(HttpStatusCode.OK, issued.Status);
+    }
+
+    [Fact]
+    public async Task An_exchanged_code_presented_for_revocation_is_200_and_is_never_taken_for_a_replay()
+    {
+        var flow = await CodeFlowSetup.CreateAsync(postgres, bao, HostA, HostB);
+        await using var host = await flow.StartHostAsync();
+        var pkce = Pkce.New();
+        var code = await CodeFlow.CodeAsync(host, HostA, flow.ClientA.ClientId, Callback, pkce, flow.UserA, scope: Offline);
+        string refresh;
+        using (var issued = await CodeFlow.ExchangeAsync(host, HostA, flow.ClientA.ClientId, flow.ClientA.Secret, code, Callback, pkce.Verifier))
+        {
+            Assert.Equal(HttpStatusCode.OK, issued.Status);
+            refresh = issued.RefreshToken;
+        }
+
+        // The code now reads redeemed: revoking it revokes nothing, and its family isn't revoked as a code replay.
+        using (var response = await RevokeAsync(host, HostA, flow.ClientA.ClientId, flow.ClientA.Secret, code))
+        {
+            Assert.Equal(HttpStatusCode.OK, response.Status);
+            Assert.Equal(string.Empty, response.Body);
+        }
+
+        Assert.Equal(0L, await RevocationEventsAsync(flow));
+        Assert.Equal(0L, await flow.Database.ScalarAsync<long>($"SELECT count(*) FROM \"authorization\" WHERE tenant_id = '{flow.A.TenantId}' AND status = 'revoked'"));
+        await RefreshOkAsync(host, flow, refresh);
+    }
+
+    [Fact]
+    public async Task A_revocation_with_no_token_is_invalid_request_and_a_GET_is_refused()
+    {
+        var flow = await CodeFlowSetup.CreateAsync(postgres, bao, HostA, HostB);
+        await using var host = await flow.StartHostAsync();
+        var basic = new AuthenticationHeaderValue(
+            "Basic", Convert.ToBase64String(Encoding.UTF8.GetBytes($"{Uri.EscapeDataString(flow.ClientA.ClientId)}:{Uri.EscapeDataString(flow.ClientA.Secret)}")));
+        var uri = new Uri($"http://{HostA}{ProtocolContract.RevocationPath}");
+
+        using (var request = new HttpRequestMessage(HttpMethod.Post, uri) { Content = new FormUrlEncodedContent(new Dictionary<string, string>()) })
+        {
+            request.Headers.Authorization = basic;
+            using var noToken = await EndpointResponse.ReadAsync(await host.Http.SendAsync(request, Cancellation));
+            Assert.Equal(HttpStatusCode.BadRequest, noToken.Status);
+            Assert.Equal("invalid_request", noToken.Error);
+        }
+
+        using (var request = new HttpRequestMessage(HttpMethod.Get, new Uri($"{uri}?token=abc")))
+        {
+            request.Headers.Authorization = basic;
+            using var get = await EndpointResponse.ReadAsync(await host.Http.SendAsync(request, Cancellation));
+            Assert.Equal(HttpStatusCode.BadRequest, get.Status);
+            Assert.Equal("invalid_request", get.Error);
+        }
+
+        Assert.Equal(0L, await RevocationEventsAsync(flow));
+    }
+
     /// <summary>A code flow with <paramref name="scope"/> for the setup's User and web client in Tenant A, exchanged.</summary>
     internal static async Task<(string Access, string Id, string Refresh)> TokensAsync(ProtocolHost host, CodeFlowSetup flow, string tenantHost = HostA, string scope = Offline)
     {
@@ -630,7 +838,7 @@ public sealed class UserinfoAndRevocationTests(PostgresFixture postgres, OpenBao
     /// header, and <paramref name="parameter"/> as an <c>access_token</c> in the query or form.
     /// </summary>
     internal static async Task<EndpointResponse> UserinfoAsync(
-        ProtocolHost host, string tenantHost, string? bearer, bool post = false, string? parameter = null)
+        ProtocolHost host, string tenantHost, string? bearer, bool post = false, string? parameter = null, string? source = null)
     {
         var uri = $"http://{tenantHost}{ProtocolContract.UserinfoPath}";
         using var request = post
@@ -642,6 +850,11 @@ public sealed class UserinfoAndRevocationTests(PostgresFixture postgres, OpenBao
         if (bearer is not null)
         {
             request.Headers.TryAddWithoutValidation("Authorization", $"Bearer {bearer}");
+        }
+
+        if (source is not null)
+        {
+            request.Headers.TryAddWithoutValidation(ProtocolHost.SourceHeader, source);
         }
 
         return await EndpointResponse.ReadAsync(await host.Http.SendAsync(request, Cancellation));
@@ -703,6 +916,7 @@ public sealed class UserinfoAndRevocationTests(PostgresFixture postgres, OpenBao
     private static void AssertInvalidToken(EndpointResponse response)
     {
         Assert.Equal(HttpStatusCode.Unauthorized, response.Status);
+        Assert.True(response.NoStore, "The userinfo response isn't no-store.");
         Assert.StartsWith("Bearer", response.WwwAuthenticate, StringComparison.Ordinal);
         Assert.Contains("error=\"invalid_token\"", response.WwwAuthenticate, StringComparison.Ordinal);
         Assert.DoesNotContain("usr_", response.Body, StringComparison.Ordinal);
