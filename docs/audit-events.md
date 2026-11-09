@@ -64,5 +64,5 @@ Each class a Tenant's Log must cover, and the codes that prove it. A pending cla
 | Admin changes | None yet | Pending: Story 8.2 |
 | Key operations | None yet | Pending: Story 9.2 |
 | Management API grants | None yet | Pending: Story 17.2 |
-| Token Family revocations | None yet | Pending: Story 2.10 |
+| Token Family revocations | `sessions.access.revoked` | Proved |
 | Rejected cross-Tenant attempts | `admin.cross_tenant.rejected`, `protocol.client.cross_tenant_rejected` | Proved |

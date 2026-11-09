@@ -86,7 +86,12 @@ public sealed class SessionsAuthorization
 /// <param name="Context">The request's own Tenant context. Throws when no transaction is open.</param>
 /// <param name="KeepOnFailure">Records an effect the request keeps, durably, even if it is refused.</param>
 /// <param name="MarkFailed">Marks the request's transaction failed, so it never reports success.</param>
+/// <param name="MarkRedeemed">
+/// Records that this request's own redemption of a token (its ID) succeeded (Story 2.10). OpenIddict ignores
+/// a failed refresh redemption, so the request needs to know whether it won it.
+/// </param>
 public sealed record StoreRequest(
     Func<Gatekeep.Kernel.Persistence.CommandContext> Context,
     Action<Func<Gatekeep.Kernel.Persistence.CommandContext, CancellationToken, Task>> KeepOnFailure,
-    Action MarkFailed);
+    Action MarkFailed,
+    Action<Guid>? MarkRedeemed = null);

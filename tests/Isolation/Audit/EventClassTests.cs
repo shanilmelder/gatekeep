@@ -34,6 +34,7 @@ public sealed class EventClassTests(PostgresFixture postgres)
     private static readonly Dictionary<TenantLogClass, Func<PostgresFixture, Task<(string Database, Guid TenantId)>>> Proofs = new()
     {
         [TenantLogClass.SessionRevocation] = ProveSessionRevocationAsync,
+        [TenantLogClass.TokenFamilyRevocation] = ProveTokenFamilyRevocationAsync,
         [TenantLogClass.CrossTenantRejection] = ProveClientCrossTenantRejectionAsync,
     };
 
@@ -63,7 +64,7 @@ public sealed class EventClassTests(PostgresFixture postgres)
 
         foreach (var (logClass, prove) in Proofs)
         {
-            var codes = catalogue.Where(e => e.TenantLogClass == logClass.ToString()).Select(e => e.Code).ToList();
+            var codes = AuditCatalogue.TenantLogClasses.Single(c => c.Name == logClass.ToString()).Codes(catalogue).ToList();
             Assert.NotEmpty(codes);
 
             var (database, tenantId) = await prove(postgres);
@@ -165,7 +166,7 @@ public sealed class EventClassTests(PostgresFixture postgres)
 
         foreach (var logClass in classes)
         {
-            var codes = events.Where(e => e.TenantLogClass == logClass.Name).Select(e => e.Code).ToList();
+            var codes = logClass.Codes(events).ToList();
             var mapped = string.Join(", ", codes);
 
             if (codes.Count == 0 && logClass.PendingStory is null)
@@ -259,6 +260,47 @@ public sealed class EventClassTests(PostgresFixture postgres)
             RevocationReason.AdminRevoke,
             Actor.System,
             CancellationToken.None);
+        await scope.CommitAsync(CancellationToken.None);
+
+        return (database, tenantId);
+    }
+
+    /// <summary>
+    /// Story 2.10: a rotated refresh token presented again. OpenIddict finds it redeemed and asks the token
+    /// store, as <c>gk_hosted</c>, to revoke its family. The store revokes it through the one revocation
+    /// path, which writes <c>sessions.access.revoked</c>. <c>RefreshTokenTests</c> drives the same path
+    /// end to end through the token endpoint.
+    /// </summary>
+    private static async Task<(string Database, Guid TenantId)> ProveTokenFamilyRevocationAsync(PostgresFixture postgres)
+    {
+        var database = await postgres.NewMigratedDatabaseAsync();
+        var tenantId = Guid.CreateVersion7();
+        var user = Guid.CreateVersion7();
+        var session = Guid.CreateVersion7();
+        var family = Guid.CreateVersion7();
+        var referenceId = new string('A', 43) + "=";
+        await PostgresFixture.ExecuteAsync(postgres.SuperuserConnection(database), TestTenants.InsertSql(tenantId));
+        await PostgresFixture.ExecuteAsync(
+            postgres.SuperuserConnection(database),
+            $"""
+            INSERT INTO "user" (tenant_id, id) VALUES ('{tenantId}', '{user}');
+            INSERT INTO user_session (tenant_id, id, user_id, id_hash, amr, auth_time, idle_expires_at, absolute_expires_at, created_at)
+            VALUES ('{tenantId}', '{session}', '{user}', decode(repeat('01', 32), 'hex'), ARRAY['test'], now(), now() + interval '1 day', now() + interval '2 days', now());
+            INSERT INTO "authorization" (tenant_id, id, user_session_id, status, type, creation_date, concurrency_token)
+            VALUES ('{tenantId}', '{family}', '{session}', 'valid', 'ad-hoc', now(), gen_random_uuid());
+            INSERT INTO token (tenant_id, id, authorization_id, type, status, reference_id, redemption_date, concurrency_token)
+            VALUES ('{tenantId}', gen_random_uuid(), '{family}', 'urn:ietf:params:oauth:token-type:refresh_token', 'redeemed', '{referenceId}', now(), gen_random_uuid());
+            """);
+
+        await using var source = NpgsqlDataSource.Create(postgres.RoleConnection(TableRegistry.Hosted, database));
+        await using var scope = await TenantScope.BeginAsync(source, tenantId, CancellationToken.None);
+        var context = scope.CreateCommandContext();
+        var store = SessionsContract.CreateTokenStore(
+            new StoreRequest(() => context, _ => { }, () => { }),
+            SessionsContract.CreateSessions(AuditContract.CreateAppender(), TimeProvider.System));
+
+        Assert.NotNull(await store.FindByReferenceIdAsync(referenceId, CancellationToken.None));
+        Assert.Equal(1L, await store.RevokeByAuthorizationIdAsync(family.ToString(), CancellationToken.None));
         await scope.CommitAsync(CancellationToken.None);
 
         return (database, tenantId);

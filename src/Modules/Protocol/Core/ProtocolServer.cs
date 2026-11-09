@@ -21,11 +21,11 @@ using static OpenIddict.Server.OpenIddictServerEvents;
 namespace Gatekeep.Modules.Protocol.Core;
 
 /// <summary>
-/// The OpenIddict server registration (Stories 2.3, 2.5 and 2.9, AD-8). Degraded mode is off. The
+/// The OpenIddict server registration (Stories 2.3, 2.5, 2.9 and 2.10, AD-8). Degraded mode is off. The
 /// stores live in their owners (Directory's application store, Sessions' token and authorization
 /// stores), and every store call runs in the request's one transaction; entity caching is off, no scope
-/// store is registered, and nothing prunes. The token endpoint serves Client Credentials and the
-/// authorization code grant, its clients authenticated by Gatekeep's handler against Directory, with
+/// store is registered, and nothing prunes. The token endpoint serves Client Credentials, the
+/// authorization code grant and the refresh grant, its clients authenticated by Gatekeep's handler against Directory, with
 /// <c>client_secret_basic</c> and <c>client_secret_post</c>. The authorization endpoint serves the code
 /// flow only, with S256 PKCE, <c>iss</c> in every response, and its sign-in through the passthrough.
 /// </summary>
@@ -82,11 +82,21 @@ internal static class ProtocolServer
                 .SetTokenEndpointUris(ProtocolContract.TokenPath[1..])
                 .SetAuthorizationEndpointUris(ProtocolContract.AuthorizePath[1..]);
 
-            // Client Credentials (Story 2.5) and the code flow with PKCE (Story 2.9): any other grant is
-            // unsupported_grant_type, and implicit, hybrid and the password grant are never enabled.
+            // Client Credentials (Story 2.5), the code flow with PKCE (Story 2.9) and its refresh tokens
+            // (Story 2.10): any other grant is unsupported_grant_type, and implicit, hybrid and the password
+            // grant are never enabled. The refresh grant also lists offline_access among the scopes.
             options.AllowClientCredentialsFlow();
             options.AllowAuthorizationCodeFlow();
+            options.AllowRefreshTokenFlow();
             options.RequireProofKeyForCodeExchange();
+
+            // Refresh tokens are {tenantPublicId}.{random} reference tokens, like codes, rotated on every use
+            // (rolling, OpenIddict's default, kept) with no leeway: a rotated one presented again is reuse
+            // (AD-13). Each expires 7 days after its issue; CapRefreshTokenLifetime keeps it within its
+            // family's 30-day absolute end.
+            options.UseReferenceRefreshTokens();
+            options.SetRefreshTokenLifetime(SecurityLimits.RefreshTokenInactivityLifetime);
+            options.SetRefreshTokenReuseLeeway(TimeSpan.Zero);
 
             // S256 only, with responses by query or form_post, never in a fragment (RFC 9700).
             options.Configure(server =>
@@ -128,6 +138,13 @@ internal static class ProtocolServer
             options.AddEventHandler(BeginTokenTransaction.Descriptor);
             options.AddEventHandler(RefuseTokenTargets.Descriptor);
             options.AddEventHandler(SignInClient.Descriptor);
+
+            // The refresh grant (Story 2.10): its scope rule, its sign-in from the family's Session within
+            // the absolute limit, its late refusals, and the absolute limit on every new refresh token.
+            options.AddEventHandler(RefuseUngrantedRefreshScopes.Descriptor);
+            options.AddEventHandler(SignInRefresh.Descriptor);
+            options.AddEventHandler(RefuseLateRefreshes.Descriptor);
+            options.AddEventHandler(CapRefreshTokenLifetime.Descriptor);
             options.AddEventHandler(ReportAccessTokenLifetime.Descriptor);
             options.AddEventHandler(EndTokenTransaction.Descriptor);
             options.AddEventHandler(AnswerRateLimited.Descriptor);
@@ -149,7 +166,7 @@ internal static class ProtocolServer
             options.AddEventHandler(KeepResponseModes.Descriptor);
             options.AddEventHandler(AnswerInvalidRequestPage.Descriptor);
 
-            // Codes are {tenantPublicId}.{random} reference tokens, protected with the Tenant's key, and a
+            // Codes and refresh tokens are {tenantPublicId}.{random} reference tokens, protected with the Tenant's key, and a
             // presented one with another prefix is refused before any lookup (AD-9).
             options.RemoveEventHandler(OpenIddictServerHandlers.Protection.AttachTokenPayload.Descriptor);
             options.AddEventHandler(AttachTenantReferenceId.Descriptor);

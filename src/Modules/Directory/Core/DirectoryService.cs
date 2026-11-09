@@ -24,11 +24,12 @@ internal sealed class DirectoryService(IAuditAppender audit, TimeProvider time) 
         VALUES (@tenant_id, @id, @name, 'machine', ARRAY['client_credentials']::text[], '{}', @created_at)
         """;
 
-    // Story 2.9: the code flow only, to the registered redirect URIs, which the table holds to 1 to 10.
+    // Story 2.9: the code flow, to the registered redirect URIs, which the table holds to 1 to 10; from
+    // Story 2.10 with rotating refresh tokens.
     private const string InsertWebApplication =
         """
         INSERT INTO application (tenant_id, id, name, kind, grant_types, audiences, redirect_uris, created_at)
-        VALUES (@tenant_id, @id, @name, 'web', ARRAY['authorization_code']::text[], '{}', @redirect_uris, @created_at)
+        VALUES (@tenant_id, @id, @name, 'web', ARRAY['authorization_code', 'refresh_token']::text[], '{}', @redirect_uris, @created_at)
         """;
 
     // grant_types and audiences take their empty defaults, which the system CHECK requires (Story 2.8).

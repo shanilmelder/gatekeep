@@ -195,6 +195,27 @@ public static class SecurityLimits
     public static readonly TimeSpan AuthorizationCodeLifetime = TimeSpan.FromSeconds(60);
 
     /// <summary>
+    /// The default absolute lifetime of a Token Family's refresh tokens: 30 days from the family's
+    /// authorization, made by its code flow (PRD §5.2, AD-13, Story 2.10). No refresh token of the
+    /// family outlives it, however often it rotates. Never more than <see cref="HardRefreshTokenAbsoluteLifetime"/>;
+    /// Story 3.4 makes it configurable within that.
+    /// </summary>
+    public static readonly TimeSpan RefreshTokenAbsoluteLifetime = TimeSpan.FromDays(30);
+
+    /// <summary>The hard maximum of <see cref="RefreshTokenAbsoluteLifetime"/>: 90 days (PRD §5.2).</summary>
+    public static readonly TimeSpan HardRefreshTokenAbsoluteLifetime = TimeSpan.FromDays(90);
+
+    /// <summary>
+    /// The default inactivity lifetime of a refresh token: 7 days from its issue (PRD §5.2, Story 2.10).
+    /// Each use rotates it, so a family left unused that long ends. Never more than
+    /// <see cref="HardRefreshTokenInactivityLifetime"/>; Story 3.4 makes it configurable within that.
+    /// </summary>
+    public static readonly TimeSpan RefreshTokenInactivityLifetime = TimeSpan.FromDays(7);
+
+    /// <summary>The hard maximum of <see cref="RefreshTokenInactivityLifetime"/>: 30 days (PRD §5.2).</summary>
+    public static readonly TimeSpan HardRefreshTokenInactivityLifetime = TimeSpan.FromDays(30);
+
+    /// <summary>
     /// Token requests one Tenant's token endpoint takes in <see cref="TokenRequestWindow"/>: 1200, from
     /// every source together (PRD §5.2, AD-14, Story 2.5). Each is counted before its client is
     /// authenticated, so past it every request is a 429 until the window ends.

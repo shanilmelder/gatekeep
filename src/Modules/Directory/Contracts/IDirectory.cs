@@ -47,7 +47,8 @@ public interface IDirectory
     Task<CreatedMachineClient> CreateMachineClientAsync(CommandContext context, string name, CancellationToken cancellationToken);
 
     /// <summary>
-    /// Writes a <c>web</c> Application allowed only the <c>authorization_code</c> grant, with its
+    /// Writes a <c>web</c> Application allowed the <c>authorization_code</c> grant and, from Story 2.10,
+    /// <c>refresh_token</c>, so it may ask for <c>offline_access</c>, with its
     /// <paramref name="redirectUris"/> registered exactly as given and no audience, its one client
     /// secret, and one <c>directory.application.created</c> audit event by the System, all in the
     /// caller's context and only in its Tenant (Story 2.9), as <see cref="CreateMachineClientAsync"/> does.

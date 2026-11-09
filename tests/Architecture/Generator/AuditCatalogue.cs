@@ -11,8 +11,15 @@ internal sealed record CatalogueEvent(string Code, string Module, string Summary
 /// One FR-40 Tenant Log class. <see cref="Name"/> is the Kernel <c>TenantLogClass</c> member.
 /// <see cref="PendingStory"/> names the story that will add its event, while no catalogued code
 /// proves it. A class whose story is done, or a class both pending and mapped, fails a test.
+/// <see cref="SharedCode"/> names a code another class owns that proves this one too, as one event can
+/// record both (Story 2.10: a Token Family's revocation is written as <c>sessions.access.revoked</c>).
 /// </summary>
-internal sealed record LogClass(string Name, string Title, string? PendingStory);
+internal sealed record LogClass(string Name, string Title, string? PendingStory, string? SharedCode = null)
+{
+    /// <summary>The catalogued codes that prove this class: those mapped to it, and its shared code if catalogued.</summary>
+    public IReadOnlyList<string> Codes(IEnumerable<CatalogueEvent> events) =>
+        [.. events.Where(e => e.TenantLogClass == Name || (SharedCode is not null && e.Code == SharedCode)).Select(e => e.Code)];
+}
 
 /// <summary>
 /// Reads every module's <c>{Module}Events</c> catalogue and renders <see cref="DocPath"/>. It
@@ -36,7 +43,7 @@ internal static class AuditCatalogue
 
     /// <summary>
     /// The 11 FR-40 Tenant classes, in the Kernel enum's order. A class is proved once its story
-    /// maps it to a catalogued code: Session and token revocation (Story 2.7) and rejected
+    /// maps it to a catalogued code: Session and token revocation (Story 2.7), Token Family revocations (Story 2.10, through the same code) and rejected
     /// cross-Tenant attempts (Stories 2.5 and 7.4) so far. The rest are pending (Story 7.8).
     /// </summary>
     public static readonly IReadOnlyList<LogClass> TenantLogClasses =
@@ -50,7 +57,9 @@ internal static class AuditCatalogue
         new("AdminChange", "Admin changes", "8.2"),
         new("KeyOperation", "Key operations", "9.2"),
         new("ManagementApiGrant", "Management API grants", "17.2"),
-        new("TokenFamilyRevocation", "Token Family revocations", "2.10"),
+        // Story 2.10: reuse and replay revoke a family through the one revocation path, whose one event is
+        // sessions.access.revoked (AD-13, Story 2.7); no second code is written.
+        new("TokenFamilyRevocation", "Token Family revocations", null, "sessions.access.revoked"),
         new("CrossTenantRejection", "Rejected cross-Tenant attempts", null),
     ];
 
@@ -190,7 +199,7 @@ internal static class AuditCatalogue
 
         foreach (var logClass in TenantLogClasses)
         {
-            var codes = events.Where(e => e.TenantLogClass == logClass.Name).Select(e => $"`{e.Code}`").ToList();
+            var codes = logClass.Codes(events).Select(code => $"`{code}`").ToList();
             var status = logClass.PendingStory is { } story ? $"Pending: Story {story}" : "Proved";
             text.Append($"| {logClass.Title} | {(codes.Count == 0 ? "None yet" : string.Join(", ", codes))} | {status} |\n");
         }

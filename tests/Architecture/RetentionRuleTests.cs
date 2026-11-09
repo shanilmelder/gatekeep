@@ -33,6 +33,13 @@ public class RetentionRuleTests
     private static readonly string[] RoleConnectionNames =
         ["Retention", "ConnectionStrings:Retention", "Database:Retention:Password"];
 
+    /// <summary>
+    /// Declarations that equal 90 days but aren't retention, each named in full so nothing else
+    /// slips through. Story 2.10: the §5.2 hard maximum of a refresh token's absolute lifetime.
+    /// </summary>
+    private static readonly string[] NotRetention =
+        ["public static readonly TimeSpan HardRefreshTokenAbsoluteLifetime = TimeSpan.FromDays(90);"];
+
     private static readonly Regex PeriodDeclaration = new(
         @"\b(?:int|long|short|uint|ulong|double|decimal|TimeSpan)\??\s+\w*(?i:retention|logdays|logfloor)\w*\s*(?:=|=>|\{)",
         RegexOptions.Compiled);
@@ -84,6 +91,8 @@ public class RetentionRuleTests
     [InlineData("public static readonly JobType SweepRetention = new(\"audit.retention.sweep\");", false)]
     [InlineData("now - TimeSpan.FromDays(RetentionPeriods.LogDays)", false)]
     [InlineData("public static readonly TimeSpan PurgeAge = TimeSpan.FromDays(30);", false)]
+    [InlineData("public static readonly TimeSpan HardRefreshTokenAbsoluteLifetime = TimeSpan.FromDays(90);", false)]
+    [InlineData("public static readonly TimeSpan HardSomethingElse = TimeSpan.FromDays(90);", true)]
     public void Retention_period_declaration_detection(string source, bool expected)
     {
         Assert.Equal(expected, DeclaresPeriod(source));
@@ -166,7 +175,15 @@ public class RetentionRuleTests
         return (int)field.GetRawConstantValue()!;
     }
 
-    private static bool DeclaresPeriod(string source) => PeriodDeclaration.IsMatch(source) || NinetyDays.IsMatch(source);
+    private static bool DeclaresPeriod(string source)
+    {
+        foreach (var allowed in NotRetention)
+        {
+            source = source.Replace(allowed, string.Empty, StringComparison.Ordinal);
+        }
+
+        return PeriodDeclaration.IsMatch(source) || NinetyDays.IsMatch(source);
+    }
 
     private static bool NamesRetention(string text)
     {

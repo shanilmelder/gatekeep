@@ -22,6 +22,30 @@ internal sealed class SessionService(IAuditAppender audit, TimeProvider time) : 
           (@tenant_id, @id, @user_id, @id_hash, @amr, @auth_time, @connection_id, @idle_expires_at, @absolute_expires_at, @created_at)
         """;
 
+    // A family's authorization and its anchored Session, ended or not (Story 2.10), the authorization row
+    // share-locked until the caller's transaction ends (see ISessions.FindFamilyAsync).
+    private const string SelectFamily =
+        """
+        SELECT a.id, a.status = 'valid', a.creation_date, s.id, s.user_id, s.amr, s.auth_time
+        FROM "authorization" a
+        JOIN user_session s ON s.tenant_id = a.tenant_id AND s.id = a.user_session_id
+        WHERE a.tenant_id = @tenant_id AND a.id = @id AND a.creation_date IS NOT NULL
+        FOR SHARE OF a
+        """;
+
+    // OpenIddict's own redemption, committed for a refused refresh (Story 2.10): only a valid refresh token.
+    private const string BurnRefreshToken =
+        """
+        UPDATE token
+        SET status = @redeemed, redemption_date = coalesce(redemption_date, @now), concurrency_token = gen_random_uuid()
+        WHERE tenant_id = @tenant_id AND id = @id AND type = @type AND status = @valid
+        """;
+
+    // OpenIddict's values, as the token store writes them.
+    private const string RefreshTokenType = OpenIddict.Abstractions.OpenIddictConstants.TokenTypeIdentifiers.RefreshToken;
+    private const string RedeemedStatus = OpenIddict.Abstractions.OpenIddictConstants.Statuses.Redeemed;
+    private const string ValidStatus = OpenIddict.Abstractions.OpenIddictConstants.Statuses.Valid;
+
     private readonly IAuditAppender _audit = audit ?? throw new ArgumentNullException(nameof(audit));
     private readonly TimeProvider _time = time ?? throw new ArgumentNullException(nameof(time));
     private readonly SessionRevocation _revocation = new(audit, time);
@@ -79,6 +103,58 @@ internal sealed class SessionService(IAuditAppender audit, TimeProvider time) : 
             cancellationToken);
 
         return new StartedSession(id, token, authTime, idleExpiresAt, absoluteExpiresAt);
+    }
+
+    public async Task<TokenFamily?> FindFamilyAsync(CommandContext context, Guid authorizationId, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+
+        var tenantId = context.TenantId
+            ?? throw new InvalidOperationException("A Token Family is read only in a Tenant context.");
+
+        if (authorizationId == Guid.Empty)
+        {
+            return null;
+        }
+
+        await using var command = context.CreateCommand();
+        command.CommandText = SelectFamily;
+        Add(command, "tenant_id", tenantId);
+        Add(command, "id", authorizationId);
+
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        if (!await reader.ReadAsync(cancellationToken))
+        {
+            return null;
+        }
+
+        return new TokenFamily(
+            reader.GetGuid(0),
+            reader.GetBoolean(1),
+            reader.GetFieldValue<DateTimeOffset>(2),
+            reader.GetGuid(3),
+            reader.GetGuid(4),
+            reader.GetFieldValue<string[]>(5),
+            reader.GetFieldValue<DateTimeOffset>(6));
+    }
+
+    public async Task<bool> BurnRefreshTokenAsync(CommandContext context, Guid tokenId, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+
+        var tenantId = context.TenantId
+            ?? throw new InvalidOperationException("A refresh token is burnt only in a Tenant context.");
+
+        await using var command = context.CreateCommand();
+        command.CommandText = BurnRefreshToken;
+        Add(command, "tenant_id", tenantId);
+        Add(command, "id", tokenId);
+        Add(command, "type", RefreshTokenType);
+        Add(command, "redeemed", RedeemedStatus);
+        Add(command, "valid", ValidStatus);
+        Add(command, "now", ToMicroseconds(_time.GetUtcNow()));
+
+        return await command.ExecuteNonQueryAsync(cancellationToken) > 0;
     }
 
     public Task<RevocationOutcome> RevokeAccessAsync(

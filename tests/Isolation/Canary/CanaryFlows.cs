@@ -282,6 +282,7 @@ internal static class CanaryFlows
         // OpenIddict's routes are no Map… literal, so the token endpoint names no surface: it is covered here.
         new("protocol.client_credentials", [], ClientCredentialsAsync),
         new("protocol.authorization_code", [], AuthorizationCodeAsync),
+        new("protocol.refresh_token", [], RefreshTokenAsync),
     ];
 
     private static readonly DateOnly Reviewed = new(2026, 11, 2);
@@ -1541,6 +1542,85 @@ internal static class CanaryFlows
 
         run.Capture("Hosted log", captured.Text);
         Assert.Contains("connect/authorize", captured.Text, StringComparison.Ordinal);
+        Assert.Contains("connect/token", captured.Text, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Story 2.10: the refresh grant on a Tenant's token endpoint, through the real Protocol registration and
+    /// the hosts' scrubbing logging, with a real web client, the test-only sign-in and the real Transit. A code
+    /// flow with <c>offline_access</c> is exchanged for a refresh token, which is then rotated for a new one;
+    /// failing, the rotated-out token is presented again, which is reuse and revokes the family, and the
+    /// newest one is then refused. The client secret, the code, the verifier, both refresh tokens and their
+    /// random parts and every issued token must appear in no log or table; a response holds its tokens by
+    /// design, so only its other fields are captured.
+    /// </summary>
+    private static async Task RefreshTokenAsync(CanaryFlowContext context, FlowRun run, bool failing)
+    {
+        const string hostA = "canary-a.refresh.test";
+        const string hostB = "canary-b.refresh.test";
+
+        var flow = await Protocol.CodeFlowSetup.CreateAsync(context.Postgres, context.Bao, hostA, hostB);
+        run.Database = flow.Database.Name;
+        run.Plant("role-password", PostgresFixture.Password);
+        run.Plant("client-secret", flow.ClientA.Secret);
+        run.Plant("client-secret-random", flow.ClientA.Secret[(flow.ClientA.Secret.IndexOf('.', StringComparison.Ordinal) + 1)..]);
+
+        var pkce = Protocol.Pkce.New();
+        run.Plant("code-verifier", pkce.Verifier);
+
+        var captured = new CapturedConsole();
+        await using (var host = await flow.StartHostAsync(logging: logging =>
+        {
+            logging.AddGatekeepLogging().SetMinimumLevel(LogLevel.Trace);
+            logging.Services.AddSingleton<Microsoft.Extensions.Logging.Console.ConsoleFormatter>(captured);
+            logging.Services.Configure<Microsoft.Extensions.Logging.Console.ConsoleLoggerOptions>(options => options.FormatterName = captured.Name);
+        }))
+        {
+            var code = await Protocol.CodeFlow.CodeAsync(
+                host, hostA, flow.ClientA.ClientId, Protocol.CodeFlowSetup.Callback, pkce, flow.UserA, scope: "openid offline_access");
+            run.Plant("authorization-code", code);
+            run.Plant("authorization-code-random", code[(code.IndexOf('.', StringComparison.Ordinal) + 1)..]);
+
+            string first;
+            using (var issued = await Protocol.CodeFlow.ExchangeAsync(
+                host, hostA, flow.ClientA.ClientId, flow.ClientA.Secret, code, Protocol.CodeFlowSetup.Callback, pkce.Verifier))
+            {
+                Assert.Equal(HttpStatusCode.OK, issued.Status);
+                first = issued.RefreshToken;
+                run.Plant("refresh-token", first);
+                run.Plant("refresh-token-random", first[(first.IndexOf('.', StringComparison.Ordinal) + 1)..]);
+                run.Plant("access-token", issued.AccessToken);
+                run.Plant("id-token", issued.Body.RootElement.GetProperty("id_token").GetString()!);
+                run.Capture("token response", $"{issued.Body.RootElement.GetProperty("token_type").GetString()} {issued.Body.RootElement.GetProperty("expires_in").GetInt32()}");
+            }
+
+            string second;
+            using (var refreshed = await Protocol.CodeFlow.RefreshAsync(host, hostA, flow.ClientA.ClientId, flow.ClientA.Secret, first))
+            {
+                Assert.Equal(HttpStatusCode.OK, refreshed.Status);
+                second = refreshed.RefreshToken;
+                run.Plant("refresh-token-rotated", second);
+                run.Plant("refresh-token-rotated-random", second[(second.IndexOf('.', StringComparison.Ordinal) + 1)..]);
+                run.Plant("refreshed-access-token", refreshed.AccessToken);
+                run.Plant("refreshed-id-token", refreshed.Body.RootElement.GetProperty("id_token").GetString()!);
+                run.Capture("refresh response", $"{refreshed.Body.RootElement.GetProperty("token_type").GetString()} {refreshed.Body.RootElement.GetProperty("expires_in").GetInt32()}");
+            }
+
+            if (failing)
+            {
+                using (var reused = await Protocol.CodeFlow.RefreshAsync(host, hostA, flow.ClientA.ClientId, flow.ClientA.Secret, first))
+                {
+                    run.Capture("reuse response", reused.Body.RootElement.GetRawText());
+                    Assert.Equal("invalid_grant", reused.Error);
+                }
+
+                using var revoked = await Protocol.CodeFlow.RefreshAsync(host, hostA, flow.ClientA.ClientId, flow.ClientA.Secret, second);
+                run.Capture("revoked family response", revoked.Body.RootElement.GetRawText());
+                Assert.Equal("invalid_grant", revoked.Error);
+            }
+        }
+
+        run.Capture("Hosted log", captured.Text);
         Assert.Contains("connect/token", captured.Text, StringComparison.Ordinal);
     }
 

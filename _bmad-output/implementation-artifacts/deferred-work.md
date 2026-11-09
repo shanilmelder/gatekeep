@@ -461,3 +461,9 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-2-8-add-the-system-application.md`
   summary: Map the system Application's guard SQLSTATEs (`GK011`, `GK012` and `GK013`) to refusals when Epic 3 adds the Application edit, delete and secret routes (Stories 3.2, 3.3 and 3.5), and give those routes' roles the reads the guards make.
   evidence: Story 2.8 review and follow-up. No Admin route writes `application` or `client_secret` yet, so a mapping now would be dead code. Host.Admin maps each guard code in the route that can raise it (`TenantsApi.cs:308`, `AdminResponses.TenancyGuardStates`). The guards are SECURITY INVOKER: `application_guard_delete` reads `tenant.status` and `system_application_guard` reads `application.kind` as the writing role. So when Epic 3 grants UPDATE or DELETE on `application`, or a new role writes `client_secret`, `token` or `authorization`, that role needs those reads too. Without them, the route gets a 42501 instead of a clean refusal.
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-10-rotate-refresh-tokens-and-detect-reuse.md`
+  summary: Add the blocked User (Epic 5) to the refresh grant's late refusals in `RefuseLateRefreshes`, committing the presented token's burn through `FailureContext` as a family revoked mid-refresh does, and test a code's late refusal too.
+  evidence: Story 2.10 lists one late refusal that burns, a family revoked after the redemption. No User status exists yet, and the code path's late refusal is still untested (Story 2.2 carry-over).
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-10-rotate-refresh-tokens-and-detect-reuse.md`
+  summary: Prune redeemed, revoked and expired refresh token rows, and their families, with a job (AD-8: pruning is a job, not OpenIddict's).
+  evidence: Story 2.10 writes a token row for every rotation and never deletes one. No pruning job exists yet; the spec rules it out of this story.
