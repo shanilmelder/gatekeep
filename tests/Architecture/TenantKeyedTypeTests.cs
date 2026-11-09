@@ -21,7 +21,7 @@ public sealed class TenantKeyedTypeTests
 
     private static readonly string Root = EdgeList.FindRepositoryRoot(AppContext.BaseDirectory);
 
-    private static readonly Lazy<SourceAssemblies> Source = new(SourceAssemblies.Load);
+    internal static readonly Lazy<SourceAssemblies> Source = new(SourceAssemblies.Load);
 
     [Fact]
     public void Every_src_assembly_is_scanned()
@@ -329,7 +329,7 @@ public sealed class TenantKeyedTypeTests
     /// hosts' and Cli's output folders, which hold every package, then the ASP.NET Core shared
     /// framework, which they run on. Kernel and the core framework are shared with this test.
     /// </summary>
-    private sealed class SourceAssemblies : AssemblyLoadContext
+    internal sealed class SourceAssemblies : AssemblyLoadContext
     {
         private readonly Dictionary<string, string> _paths;
 

@@ -183,6 +183,18 @@ public static class SecurityLimits
     public static readonly TimeSpan DefaultAccessTokenLifetime = TimeSpan.FromMinutes(15);
 
     /// <summary>
+    /// The default lifetime of an ID token: 15 minutes (PRD §5.2, Story 2.9), the same as an access
+    /// token's, never more than <see cref="HardSignedTokenLifetime"/>.
+    /// </summary>
+    public static readonly TimeSpan DefaultIdentityTokenLifetime = TimeSpan.FromMinutes(15);
+
+    /// <summary>
+    /// How long an authorization code can be redeemed after it is issued: 60 seconds (PRD §5.2,
+    /// Story 2.9). It is single-use within that time, and bound to its client, redirect URI and Tenant.
+    /// </summary>
+    public static readonly TimeSpan AuthorizationCodeLifetime = TimeSpan.FromSeconds(60);
+
+    /// <summary>
     /// Token requests one Tenant's token endpoint takes in <see cref="TokenRequestWindow"/>: 1200, from
     /// every source together (PRD §5.2, AD-14, Story 2.5). Each is counted before its client is
     /// authenticated, so past it every request is a 429 until the window ends.

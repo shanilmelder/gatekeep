@@ -47,8 +47,14 @@ public static class SecurityHeaders
         });
     }
 
-    private static void Apply(IHeaderDictionary headers)
+    /// <summary>
+    /// Sets the four headers on <paramref name="headers"/>: for a host that sends them on one page only,
+    /// such as Host.Hosted's authorization error page (Story 2.9), rather than on every response.
+    /// </summary>
+    public static void Apply(IHeaderDictionary headers)
     {
+        ArgumentNullException.ThrowIfNull(headers);
+
         headers.ContentSecurityPolicy = ContentSecurityPolicy;
         headers["Referrer-Policy"] = ReferrerPolicy;
         headers.XFrameOptions = FrameOptions;

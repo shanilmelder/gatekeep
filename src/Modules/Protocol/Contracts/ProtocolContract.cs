@@ -1,16 +1,19 @@
+using Gatekeep.Kernel.Persistence;
+using Gatekeep.Modules.Authentication.Contracts;
 using Gatekeep.Modules.Protocol.Adapters;
 using Gatekeep.Modules.Protocol.Core;
 using Gatekeep.Modules.Tenancy.Contracts;
 using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using OpenIddict.Server;
 
 namespace Gatekeep.Modules.Protocol.Contracts;
 
 /// <summary>
-/// Each Tenant's own OpenID Provider on Host.Hosted (Stories 2.3 and 2.5, AD-8, AD-9): OpenIddict
-/// 7.7.2, wrapped per Tenant. It serves discovery, JWKS and the token endpoint, which issues access
-/// tokens by Client Credentials only.
+/// Each Tenant's own OpenID Provider on Host.Hosted (Stories 2.3, 2.5 and 2.9, AD-8, AD-9): OpenIddict
+/// 7.7.2, wrapped per Tenant. It serves discovery, JWKS, the authorization endpoint (the code flow with
+/// S256 PKCE only) and the token endpoint (Client Credentials and the authorization code grant).
 /// </summary>
 public static class ProtocolContract
 {
@@ -20,10 +23,14 @@ public static class ProtocolContract
 
     public const string TokenPath = "/connect/token";
 
+    /// <summary>The authorization endpoint (Story 2.9): the code flow with S256 PKCE, and nothing else.</summary>
+    public const string AuthorizePath = "/connect/authorize";
+
     /// <summary>
-    /// The one audience a Client Credentials token carries while its Application has none (Story 2.5).
-    /// Story 3.7 replaces it with real APIs. No request may name an audience or resource here, so the
-    /// Management API audience is never minted on a Tenant host.
+    /// The one audience a token carries while its Application has none (Story 2.5): a Client Credentials
+    /// token, and from Story 2.9 a code flow's access token. Story 3.7 replaces it with real APIs. No
+    /// request may name an audience or resource here, so the Management API audience is never minted on
+    /// a Tenant host.
     /// </summary>
     public const string PlaceholderAudience = "urn:gatekeep:placeholder";
 
@@ -39,16 +46,22 @@ public static class ProtocolContract
     /// options, built from the same options pipeline, with that Tenant's stored issuer, its Signing
     /// Keys through Transit and its unwrapped token protection key, read in a short read-only Tenant
     /// scope as <c>gk_hosted</c> through <paramref name="hostedConnectionString"/>, read on first use.
-    /// The token endpoint runs as <c>gk_hosted</c> too, in one transaction per request. Key custody is
-    /// the host's <c>IKeyCustody</c>, and audit the host's <c>IAuditAppender</c>. The token request limits
-    /// are <see cref="TokenRequestLimits"/>'s, unless the host registered its own first.
+    /// The authorization and token endpoints run as <c>gk_hosted</c> too, in one transaction per request.
+    /// Key custody is the host's <c>IKeyCustody</c>, and audit the host's <c>IAuditAppender</c>. The token
+    /// request limits are <see cref="TokenRequestLimits"/>'s, unless the host registered its own first.
+    /// The authorization endpoint completes a sign-in through the host's <see cref="IAuthorizationSignIn"/>,
+    /// which the host must register: a release build registers <see cref="UnavailableSignIn"/>.
+    /// <paramref name="pageHeaders"/> sets the host's browser-page headers (AD-21) on the one page the
+    /// authorization endpoint shows itself, for a request it can't send back to any client.
     /// </summary>
     public static IServiceCollection AddGatekeepProtocol(
         this IServiceCollection services,
-        Func<IServiceProvider, string> hostedConnectionString)
+        Func<IServiceProvider, string> hostedConnectionString,
+        Action<IHeaderDictionary> pageHeaders)
     {
         ArgumentNullException.ThrowIfNull(services);
         ArgumentNullException.ThrowIfNull(hostedConnectionString);
+        ArgumentNullException.ThrowIfNull(pageHeaders);
 
         services.AddSingleton<ITenantKeyReader>(provider => new TenantKeyReader(() => hostedConnectionString(provider)));
 
@@ -56,19 +69,59 @@ public static class ProtocolContract
         services.AddSingleton<ITenantKeyChanges>(provider => new SigningKeyChangeListener(
             () => hostedConnectionString(provider),
             provider.GetService<Microsoft.Extensions.Logging.ILogger<SigningKeyChangeListener>>()));
+        services.AddSingleton(new ProtocolPageHeaders(pageHeaders));
         ProtocolServer.Add(services, hostedConnectionString);
         return services;
     }
 
     /// <summary>
-    /// Runs OpenIddict on the request, after Tenant resolution and before routing. A path OpenIddict
+    /// Runs OpenIddict on the request, after Tenant resolution and before routing, then the authorization
+    /// endpoint's passthrough, which completes a validated authorization request. A path OpenIddict
     /// doesn't serve passes through to whatever follows.
     /// </summary>
     public static IApplicationBuilder UseGatekeepProtocol(this IApplicationBuilder app)
     {
         ArgumentNullException.ThrowIfNull(app);
-        return app.UseAuthentication();
+        app.UseAuthentication();
+        return app.Use(AuthorizePassthrough.InvokeAsync);
     }
+}
+
+/// <summary>
+/// The sign-in seam of the authorization endpoint (Story 2.9, AD-8). Protocol begins the sign-in with
+/// <c>IAuthentication.BeginAsync</c>, then asks this port to complete it. A result signs the User in:
+/// the Token Family is anchored to its Session and a code is issued. <see langword="null"/> means no
+/// sign-in completed, and the client gets <c>temporarily_unavailable</c>. A release build registers
+/// <see cref="UnavailableSignIn"/> until Stories 4.1 and 4.2 add the screens; only the tests plug in an
+/// authenticator.
+/// </summary>
+public interface IAuthorizationSignIn
+{
+    /// <summary>
+    /// Completes <paramref name="signIn"/>, begun for the validated authorization request on
+    /// <paramref name="http"/>, in the request's own Tenant <paramref name="context"/>, whose transaction
+    /// commits only if a code is issued.
+    /// </summary>
+    ValueTask<AuthenticationResult?> CompleteAsync(
+        CommandContext context,
+        StartedSignIn signIn,
+        HttpContext http,
+        CancellationToken cancellationToken);
+}
+
+/// <summary>
+/// The release build's sign-in (Story 2.9): it completes nothing, so the authorization endpoint answers
+/// every valid request with <c>temporarily_unavailable</c> and issues no code. Stories 4.1 and 4.2
+/// replace it with the sign-in screens and transaction-cookie resumption.
+/// </summary>
+public sealed class UnavailableSignIn : IAuthorizationSignIn
+{
+    public ValueTask<AuthenticationResult?> CompleteAsync(
+        CommandContext context,
+        StartedSignIn signIn,
+        HttpContext http,
+        CancellationToken cancellationToken) =>
+        ValueTask.FromResult<AuthenticationResult?>(null);
 }
 
 /// <summary>

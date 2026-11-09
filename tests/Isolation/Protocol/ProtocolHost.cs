@@ -60,14 +60,17 @@ internal sealed class ProtocolHost : IAsyncDisposable
     /// <summary>
     /// Starts the host. <paramref name="limits"/> replaces the token request limits, for a test that
     /// can't send a thousand requests; <paramref name="logging"/> replaces the capturing logger, for a
-    /// test that needs the production scrubbing pipeline.
+    /// test that needs the production scrubbing pipeline. <paramref name="signIn"/> completes the
+    /// authorization endpoint's sign-ins (Story 2.9): by default the release build's
+    /// <see cref="UnavailableSignIn"/>, which completes none; a code flow test passes the test-only one.
     /// </summary>
     public static async Task<ProtocolHost> StartAsync(
         string hostedConnection,
         OpenBaoFixture bao,
         TimeProvider? time = null,
         TokenRequestLimits? limits = null,
-        Action<ILoggingBuilder>? logging = null)
+        Action<ILoggingBuilder>? logging = null,
+        Func<IServiceProvider, IAuthorizationSignIn>? signIn = null)
     {
         var custody = new ControlledCustody(bao.Custody(OpenBaoFixture.Hosted));
         var logs = new CapturingLoggerProvider();
@@ -97,7 +100,16 @@ internal sealed class ProtocolHost : IAsyncDisposable
 
         builder.Services.AddSingleton<IKeyCustody>(custody);
         builder.Services.AddSingleton(AuditContract.CreateAppender());
-        builder.Services.AddGatekeepProtocol(_ => hostedConnection);
+        if (signIn is null)
+        {
+            builder.Services.AddSingleton<IAuthorizationSignIn, UnavailableSignIn>();
+        }
+        else
+        {
+            builder.Services.AddSingleton(signIn);
+        }
+
+        builder.Services.AddGatekeepProtocol(_ => hostedConnection, Gatekeep.Adapters.Hosting.SecurityHeaders.Apply);
 
         var app = builder.Build();
 
@@ -169,6 +181,29 @@ internal sealed class ProtocolDatabase(PostgresFixture postgres, string name)
             .CreateMachineClientAsync(scope.CreateCommandContext(), name, TestContext.Current.CancellationToken);
         await scope.CommitAsync(TestContext.Current.CancellationToken);
         return (created.ApplicationId, created.ClientId, created.Secret.Use(static s => s));
+    }
+
+    /// <summary>
+    /// A web client in the Tenant (Story 2.9), created the one Directory way, as <c>gk_admin</c>, with
+    /// <paramref name="redirectUris"/> registered and its secret as the caller got it, once.
+    /// </summary>
+    public async Task<(Guid ApplicationId, string ClientId, string Secret)> CreateWebClientAsync(
+        Guid tenantId, IReadOnlyList<string> redirectUris, string name = "Web client")
+    {
+        await using var source = NpgsqlDataSource.Create(postgres.RoleConnection(TableRegistry.Admin, Name));
+        await using var scope = await TenantScope.BeginAsync(source, tenantId, TestContext.Current.CancellationToken);
+        var created = await DirectoryContract.CreateDirectory(AuditContract.CreateAppender(), TimeProvider.System)
+            .CreateWebClientAsync(scope.CreateCommandContext(), name, redirectUris, TestContext.Current.CancellationToken);
+        await scope.CommitAsync(TestContext.Current.CancellationToken);
+        return (created.ApplicationId, created.ClientId, created.Secret.Use(static s => s));
+    }
+
+    /// <summary>A User row in the Tenant, as the superuser: Identity writes none yet (Story 2.9).</summary>
+    public async Task<Guid> AddUserAsync(Guid tenantId)
+    {
+        var id = Guid.CreateVersion7();
+        await PostgresFixture.ExecuteAsync(Superuser, $"INSERT INTO \"user\" (tenant_id, id) VALUES ('{tenantId}', '{id}')");
+        return id;
     }
 
     /// <summary>The Tenant's hidden system Application (Story 2.8), written the one Directory way, as <c>gk_worker</c> as Tenant creation does.</summary>

@@ -1,26 +1,49 @@
 using Gatekeep.Kernel.Persistence;
+using Gatekeep.Modules.Sessions.Contracts;
+using Microsoft.Extensions.Logging;
 
 namespace Gatekeep.Modules.Protocol.Core;
 
 /// <summary>
-/// The token endpoint's one transaction (AD-5, AD-8, AD-13): a <see cref="TenantScope"/> for the
-/// request's Tenant, opened after Tenant selection by <see cref="BeginTokenTransaction"/> and ended by
-/// <see cref="EndTokenTransaction"/> before the response is written. Scoped to the HTTP request, so the
-/// request's service scope disposes it, which rolls back anything left uncommitted, an unhandled
-/// exception included. Discovery and JWKS never open one. Every store call goes through
-/// <see cref="Context"/>, so none can fall back to autocommit.
+/// The one transaction of a request to an endpoint that writes (AD-5, AD-8, AD-13): the token endpoint
+/// (Story 2.5) and the authorization endpoint (Story 2.9). A <see cref="TenantScope"/> for the request's
+/// Tenant, opened after Tenant selection by <see cref="BeginTokenTransaction"/> or
+/// <see cref="BeginAuthorizeTransaction"/>, and ended before the response is written by
+/// <see cref="EndTokenTransaction"/> or <see cref="EndAuthorizeTransaction"/>. Scoped to the HTTP request,
+/// so the request's service scope disposes it. Discovery and JWKS never open one. Every store call goes
+/// through <see cref="Context"/>, so none can fall back to autocommit.
+/// <para>
+/// Effects a refused request keeps, a cross-Tenant event or a replayed code's revocation, are recorded
+/// with <see cref="KeepOnFailure"/> and committed after the rollback through <see cref="FailureContext"/>,
+/// on the normal end and also when the request never reached it (an unhandled exception), on disposal. A
+/// failed statement a store reports with <see cref="MarkFailed"/> means the request never commits, since
+/// PostgreSQL would turn a commit of the aborted transaction into a rollback without an error.
+/// </para>
 /// </summary>
 internal sealed class TokenRequestTransaction : IAsyncDisposable
 {
     private readonly List<Func<CommandContext, CancellationToken, Task>> _failureEffects = [];
+    private readonly ILogger? _logger;
     private TenantScope? _scope;
     private CommandContext? _context;
 
+    public TokenRequestTransaction(ILoggerFactory? loggers = null)
+    {
+        _logger = loggers?.CreateLogger("Gatekeep.Protocol");
+        Store = new StoreRequest(() => Context, KeepOnFailure, MarkFailed);
+    }
+
     public bool IsOpen => _scope is not null;
+
+    /// <summary>Whether a statement in this transaction failed, so it can never commit.</summary>
+    public bool Failed { get; private set; }
 
     /// <summary>The request's Tenant context. Any store call outside an open transaction throws.</summary>
     public CommandContext Context =>
-        _context ?? throw new InvalidOperationException("No token request transaction is open.");
+        _context ?? throw new InvalidOperationException("No request transaction is open.");
+
+    /// <summary>What the Sessions stores run in: this transaction's context, its kept effects and its failure flag.</summary>
+    public StoreRequest Store { get; }
 
     /// <summary>Durable effects a refused request keeps, committed after its rollback (AD-5).</summary>
     public IReadOnlyList<Func<CommandContext, CancellationToken, Task>> FailureEffects => _failureEffects;
@@ -36,11 +59,24 @@ internal sealed class TokenRequestTransaction : IAsyncDisposable
         _context = _scope.CreateCommandContext();
     }
 
-    /// <summary>Records an effect the request keeps even when it is refused, such as a cross-Tenant event.</summary>
-    public void KeepOnFailure(Func<CommandContext, CancellationToken, Task> effect) => _failureEffects.Add(effect);
+    /// <summary>Records an effect the request keeps even when it is refused, such as a cross-Tenant event or a revocation.</summary>
+    public void KeepOnFailure(Func<CommandContext, CancellationToken, Task> effect)
+    {
+        ArgumentNullException.ThrowIfNull(effect);
+        _failureEffects.Add(effect);
+    }
 
+    /// <summary>Marks the transaction failed: a statement in it failed, so it must not commit.</summary>
+    public void MarkFailed() => Failed = true;
+
+    /// <exception cref="InvalidOperationException">The transaction is marked failed; nothing is committed.</exception>
     public async Task CommitAsync(CancellationToken cancellationToken)
     {
+        if (Failed)
+        {
+            throw new InvalidOperationException("A failed request transaction is never committed.");
+        }
+
         var scope = Take();
         try
         {
@@ -64,6 +100,7 @@ internal sealed class TokenRequestTransaction : IAsyncDisposable
             }
 
             var effects = _failureEffects.ToList();
+            _failureEffects.Clear();
             await FailureContext.CommitAfterRollbackAsync(scope, async (context, cancellationToken) =>
             {
                 foreach (var effect in effects)
@@ -79,17 +116,37 @@ internal sealed class TokenRequestTransaction : IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// A transaction still open here never reached its endpoint's end, such as after an unhandled
+    /// exception: it is rolled back, and every recorded failure effect is still committed (AD-13). A
+    /// failure to commit them is logged by its type only, and never replaces the request's own error.
+    /// </summary>
     public async ValueTask DisposeAsync()
     {
-        if (_scope is not null)
+        if (_scope is null)
+        {
+            return;
+        }
+
+        if (_failureEffects.Count == 0)
         {
             await Take().DisposeAsync();
+            return;
+        }
+
+        try
+        {
+            await FailAsync();
+        }
+        catch (Exception e)
+        {
+            _logger?.LogError("A refused request's kept effects weren't committed, on {ErrorType}.", e.GetType().Name);
         }
     }
 
     private TenantScope Take()
     {
-        var scope = _scope ?? throw new InvalidOperationException("No open token request transaction.");
+        var scope = _scope ?? throw new InvalidOperationException("No open request transaction.");
         _scope = null;
         _context = null;
         return scope;

@@ -24,6 +24,13 @@ internal sealed class DirectoryService(IAuditAppender audit, TimeProvider time) 
         VALUES (@tenant_id, @id, @name, 'machine', ARRAY['client_credentials']::text[], '{}', @created_at)
         """;
 
+    // Story 2.9: the code flow only, to the registered redirect URIs, which the table holds to 1 to 10.
+    private const string InsertWebApplication =
+        """
+        INSERT INTO application (tenant_id, id, name, kind, grant_types, audiences, redirect_uris, created_at)
+        VALUES (@tenant_id, @id, @name, 'web', ARRAY['authorization_code']::text[], '{}', @redirect_uris, @created_at)
+        """;
+
     // grant_types and audiences take their empty defaults, which the system CHECK requires (Story 2.8).
     // A concurrent insert that won leaves this one doing nothing, so the caller re-selects the winner.
     private const string InsertSystemApplication =
@@ -52,6 +59,34 @@ internal sealed class DirectoryService(IAuditAppender audit, TimeProvider time) 
 
     public async Task<CreatedMachineClient> CreateMachineClientAsync(CommandContext context, string name, CancellationToken cancellationToken)
     {
+        var (applicationId, clientId, secret) = await CreateClientAsync(context, name, InsertApplication, redirectUris: null, cancellationToken);
+        return new CreatedMachineClient { ApplicationId = applicationId, ClientId = clientId, Secret = secret.Use(static value => new RevealOnce<string>(value)) };
+    }
+
+    public async Task<CreatedWebClient> CreateWebClientAsync(
+        CommandContext context,
+        string name,
+        IReadOnlyList<string> redirectUris,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        var checkedUris = RedirectUris.Checked(redirectUris);
+
+        var (applicationId, clientId, secret) = await CreateClientAsync(context, name, InsertWebApplication, checkedUris, cancellationToken);
+        return new CreatedWebClient { ApplicationId = applicationId, ClientId = clientId, Secret = secret.Use(static value => new RevealOnce<string>(value)) };
+    }
+
+    /// <summary>
+    /// The one way an Application with a secret is written (Stories 2.5 and 2.9): its row, its first
+    /// secret and its <c>directory.application.created</c> event, in the caller's context.
+    /// </summary>
+    private async Task<(Guid ApplicationId, string ClientId, Secret<string> Secret)> CreateClientAsync(
+        CommandContext context,
+        string name,
+        string insert,
+        string[]? redirectUris,
+        CancellationToken cancellationToken)
+    {
         ArgumentNullException.ThrowIfNull(context);
         var tenantId = context.TenantId
             ?? throw new InvalidOperationException("An Application is created only in a Tenant context.");
@@ -67,11 +102,16 @@ internal sealed class DirectoryService(IAuditAppender audit, TimeProvider time) 
 
         await using (var command = context.CreateCommand())
         {
-            command.CommandText = InsertApplication;
+            command.CommandText = insert;
             Add(command, "tenant_id", tenantId);
             Add(command, "id", applicationId);
             Add(command, "name", name);
             Add(command, "created_at", now);
+            if (redirectUris is not null)
+            {
+                Add(command, "redirect_uris", redirectUris);
+            }
+
             await command.ExecuteNonQueryAsync(cancellationToken);
         }
 
@@ -93,12 +133,10 @@ internal sealed class DirectoryService(IAuditAppender audit, TimeProvider time) 
             detail: null,
             cancellationToken);
 
-        return new CreatedMachineClient
-        {
-            ApplicationId = applicationId,
-            ClientId = PublicId.Format(PublicIdType.Application, applicationId),
-            Secret = secret.Use(static value => new RevealOnce<string>(value)),
-        };
+        return (
+            applicationId,
+            PublicId.Format(PublicIdType.Application, applicationId),
+            secret);
     }
 
     public async Task<bool> VerifyClientSecretAsync(CommandContext context, string clientId, Secret<string> secret, CancellationToken cancellationToken)
@@ -217,7 +255,7 @@ internal static class ApplicationRows
     /// <summary>The one predicate that hides the <c>system</c> Application from every caller-facing read.</summary>
     public const string Visible = "kind <> 'system'";
 
-    private const string Columns = "id, name, grant_types, audiences";
+    private const string Columns = "id, name, kind, grant_types, audiences, redirect_uris";
 
     private const string Select =
         $"SELECT {Columns} FROM application WHERE tenant_id = @tenant_id AND id = @id AND {Visible}";
@@ -227,6 +265,10 @@ internal static class ApplicationRows
 
     private const string SelectSystem =
         "SELECT id FROM application WHERE tenant_id = @tenant_id AND kind = 'system'";
+
+    // Story 2.9: OpenIddict's lookup by redirect URI, exact, on the GIN index over redirect_uris.
+    private const string SelectByRedirectUri =
+        $"SELECT {Columns} FROM application WHERE tenant_id = @tenant_id AND redirect_uris @> ARRAY[@uri]::text[] AND {Visible} ORDER BY created_at, id";
 
     public static async Task<DirectoryApplication?> FindAsync(CommandContext context, Guid id, CancellationToken cancellationToken)
     {
@@ -247,6 +289,26 @@ internal static class ApplicationRows
         await using var command = context.CreateCommand();
         command.CommandText = List;
         DirectoryService.Add(command, "tenant_id", tenantId);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        var applications = new List<DirectoryApplication>();
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            applications.Add(Read(reader));
+        }
+
+        return applications;
+    }
+
+    /// <summary>The visible Applications that registered <paramref name="uri"/> exactly (Story 2.9).</summary>
+    public static async Task<IReadOnlyList<DirectoryApplication>> FindByRedirectUriAsync(
+        CommandContext context, string uri, CancellationToken cancellationToken)
+    {
+        var tenantId = TenantOf(context);
+
+        await using var command = context.CreateCommand();
+        command.CommandText = SelectByRedirectUri;
+        DirectoryService.Add(command, "tenant_id", tenantId);
+        DirectoryService.Add(command, "uri", uri);
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         var applications = new List<DirectoryApplication>();
         while (await reader.ReadAsync(cancellationToken))
@@ -279,6 +341,60 @@ internal static class ApplicationRows
             reader.GetGuid(0),
             PublicId.Format(PublicIdType.Application, reader.GetGuid(0)),
             reader.GetString(1),
-            [.. reader.GetFieldValue<string[]>(2)],
-            [.. reader.GetFieldValue<string[]>(3)]);
+            reader.GetString(2),
+            [.. reader.GetFieldValue<string[]>(3)],
+            [.. reader.GetFieldValue<string[]>(4)],
+            [.. reader.GetFieldValue<string[]>(5)]);
+}
+
+/// <summary>
+/// A web client's redirect URIs (Story 2.9, RFC 9700 §2.1): each an absolute <c>https</c> URI, or
+/// <c>http</c> on a loopback host only, with no fragment, userinfo or white space, at most
+/// <see cref="DirectoryContract.MaxRedirectUriLength"/> characters; 1 to
+/// <see cref="DirectoryContract.MaxRedirectUris"/> of them, none repeated. Each is kept exactly as
+/// given, since OpenIddict matches a request's <c>redirect_uri</c> to it character for character.
+/// </summary>
+internal static class RedirectUris
+{
+    public static string[] Checked(IReadOnlyList<string>? uris)
+    {
+        if (uris is null || uris.Count is 0 or > DirectoryContract.MaxRedirectUris)
+        {
+            throw new ArgumentException("A web client registers 1 to 10 redirect URIs.", nameof(uris));
+        }
+
+        if (uris.Distinct(StringComparer.Ordinal).Count() != uris.Count)
+        {
+            throw new ArgumentException("A redirect URI is registered once only.", nameof(uris));
+        }
+
+        foreach (var uri in uris)
+        {
+            if (!IsAllowed(uri))
+            {
+                throw new ArgumentException(
+                    "A redirect URI is an absolute https URI, or http on a loopback host, with no fragment, at most 2000 characters.",
+                    nameof(uris));
+            }
+        }
+
+        return [.. uris];
+    }
+
+    private static bool IsAllowed(string? text)
+    {
+        if (string.IsNullOrEmpty(text)
+            || text.Length > DirectoryContract.MaxRedirectUriLength
+            || text.Contains('#', StringComparison.Ordinal)
+            || text.Any(c => char.IsWhiteSpace(c) || char.IsControl(c))
+            || !Uri.TryCreate(text, UriKind.Absolute, out var uri)
+            || uri.UserInfo.Length > 0
+            || uri.Fragment.Length > 0
+            || string.IsNullOrEmpty(uri.Host))
+        {
+            return false;
+        }
+
+        return uri.Scheme == Uri.UriSchemeHttps || (uri.Scheme == Uri.UriSchemeHttp && uri.IsLoopback);
+    }
 }

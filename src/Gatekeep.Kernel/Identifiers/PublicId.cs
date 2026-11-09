@@ -35,6 +35,12 @@ public enum PublicIdType
     /// it. Never their WebAuthn user handle.
     /// </summary>
     Admin,
+
+    /// <summary>
+    /// <c>usr_</c>: a User (Story 2.9), as the <c>sub</c> of the ID and access tokens a Tenant issues for
+    /// them. A malformed one names no User.
+    /// </summary>
+    User,
 }
 
 /// <summary>
@@ -62,6 +68,7 @@ public static class PublicId
         PublicIdType.AuditEvent => "evt",
         PublicIdType.Application => "app",
         PublicIdType.Admin => "adm",
+        PublicIdType.User => "usr",
         _ => throw new ArgumentOutOfRangeException(nameof(type)),
     };
 

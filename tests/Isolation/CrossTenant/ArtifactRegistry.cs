@@ -37,7 +37,7 @@ public static class ArtifactRegistry
 
     public static readonly IReadOnlyDictionary<string, ArtifactCoverage> Types = new Dictionary<string, ArtifactCoverage>(StringComparer.Ordinal)
     {
-        ["authorization code"] = ArtifactCoverage.Pending("2-9"),
+        ["authorization code"] = ArtifactCoverage.Covered("AuthorizationCodeTests.Tenant_As_code_presented_at_Tenant_B_is_invalid_grant_and_refused_before_any_lookup"),
         ["refresh token"] = ArtifactCoverage.Pending("2-10"),
         ["verification link"] = ArtifactCoverage.Pending("4-7"),
         ["reset link"] = ArtifactCoverage.Pending("4-11"),

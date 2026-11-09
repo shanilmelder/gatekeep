@@ -445,10 +445,16 @@ public sealed class SessionTablesTests(PostgresFixture postgres)
 
         await using var scope = await TenantScope.BeginAsync(hosted, TenantB, Cancellation);
         await using var command = scope.CreateCommandContext().CreateCommand();
-        command.CommandText = $"UPDATE \"{table}\" SET tenant_id = tenant_id WHERE tenant_id = '{TenantA}'";
+        command.CommandText = $"UPDATE \"{table}\" SET {UpdatableColumn(table)} = {UpdatableColumn(table)} WHERE tenant_id = '{TenantA}'";
 
         Assert.Equal(0, await command.ExecuteNonQueryAsync(Cancellation));
     }
+
+    /// <summary>
+    /// A column <c>gk_hosted</c> may update. From Story 2.9 it updates only some of <c>authorization</c>'s
+    /// and <c>token</c>'s, never <c>tenant_id</c>.
+    /// </summary>
+    private static string UpdatableColumn(string table) => table is "authorization" or "token" ? "concurrency_token" : "tenant_id";
 
     [Theory]
     [MemberData(nameof(UngrantedRoles))]
@@ -650,8 +656,9 @@ public sealed class SessionTablesTests(PostgresFixture postgres)
 
         var error = await Assert.ThrowsAsync<PostgresException>(() => command.ExecuteNonQueryAsync(Cancellation));
 
+        // Story 2.9: gk_hosted can't update an authorization's or token's tenant_id at all.
         Assert.Equal(RowSecurityOrPermission, error.SqlState);
-        Assert.Contains("row-level security", error.MessageText);
+        Assert.Contains(table is "authorization" or "token" ? "permission denied" : "row-level security", error.MessageText);
     }
 
     [Fact]

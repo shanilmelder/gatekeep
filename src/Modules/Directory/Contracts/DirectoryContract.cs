@@ -15,6 +15,15 @@ public static class DirectoryContract
     /// </summary>
     public const string SystemApplicationName = "Account Portal";
 
+    /// <summary>The <c>application.kind</c> of a confidential client that signs Users in by the code flow (Story 2.9).</summary>
+    public const string WebKind = "web";
+
+    /// <summary>The most redirect URIs a <c>web</c> client registers: 10, as the table checks (Story 2.9).</summary>
+    public const int MaxRedirectUris = 10;
+
+    /// <summary>The longest redirect URI a <c>web</c> client registers: 2000 characters (Story 2.9).</summary>
+    public const int MaxRedirectUriLength = 2000;
+
     /// <summary>Applications and client secrets over the Kernel audit port. <paramref name="time"/> stamps each creation.</summary>
     public static IDirectory CreateDirectory(IAuditAppender audit, TimeProvider time) => new DirectoryService(audit, time);
 

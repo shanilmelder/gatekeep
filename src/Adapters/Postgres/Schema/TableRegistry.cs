@@ -89,6 +89,16 @@ public static class TableRegistry
     /// </summary>
     private static readonly IReadOnlyList<string> SystemApplicationGuard = ["system_application_guard", "tenant_row_guard"];
 
+    /// <summary>
+    /// Story 2.9: what a token row's update may change, through the token store (a redemption, the
+    /// reference ID and payload a code gets once generated) or the one revocation path (its status).
+    /// </summary>
+    private static readonly IReadOnlyList<string> TokenUpdateColumns =
+        ["status", "payload", "reference_id", "redemption_date", "concurrency_token"];
+
+    /// <summary>Story 2.9: an authorization row changes only by the one revocation path: its status.</summary>
+    private static readonly IReadOnlyList<string> AuthorizationUpdateColumns = ["status", "concurrency_token"];
+
     /// <summary>A Tenant purge's read (Story 1.29): the one column its <c>WHERE</c> names, never the content.</summary>
     private static readonly IReadOnlyDictionary<string, IReadOnlyList<ColumnGrant>> PurgeColumns =
         new Dictionary<string, IReadOnlyList<ColumnGrant>>
@@ -315,17 +325,26 @@ public static class TableRegistry
             [Hosted] = [Select, Insert, Update],
             [Worker] = [Delete],
         }, PurgeColumns, RowGuard),
-        // Story 2.8: neither ever names a Tenant's system Application.
+        // Story 2.8: neither ever names a Tenant's system Application. Story 2.9: gk_hosted updates
+        // only the columns the Sessions stores and the one revocation path write.
         new("authorization", TableClass.Tenant, "Sessions", TableUse.Runtime, new Dictionary<string, IReadOnlyList<string>>
         {
-            [Hosted] = [Select, Insert, Update],
+            [Hosted] = [Select, Insert],
             [Worker] = [Delete],
-        }, PurgeColumns, SystemApplicationGuard),
+        }, new Dictionary<string, IReadOnlyList<ColumnGrant>>
+        {
+            [Hosted] = [new ColumnGrant(Update, AuthorizationUpdateColumns)],
+            [Worker] = [new ColumnGrant(Select, ["tenant_id"])],
+        }, SystemApplicationGuard),
         new("token", TableClass.Tenant, "Sessions", TableUse.Runtime, new Dictionary<string, IReadOnlyList<string>>
         {
-            [Hosted] = [Select, Insert, Update],
+            [Hosted] = [Select, Insert],
             [Worker] = [Delete],
-        }, PurgeColumns, SystemApplicationGuard),
+        }, new Dictionary<string, IReadOnlyList<ColumnGrant>>
+        {
+            [Hosted] = [new ColumnGrant(Update, TokenUpdateColumns)],
+            [Worker] = [new ColumnGrant(Select, ["tenant_id"])],
+        }, SystemApplicationGuard),
         new("signin_transaction", TableClass.Tenant, "Authentication", TableUse.Runtime, new Dictionary<string, IReadOnlyList<string>>
         {
             [Hosted] = [Select, Insert, Update],

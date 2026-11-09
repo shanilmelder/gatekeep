@@ -24,15 +24,27 @@ using static OpenIddict.Server.OpenIddictServerEvents;
 
 namespace Gatekeep.Modules.Protocol.Core;
 
-/// <summary>What the token endpoint's handlers share: its connections, counters, Directory, audit and limits.</summary>
+/// <summary>
+/// What the token and authorization endpoints' handlers share: their connections, counters, Directory,
+/// audit and limits, and from Story 2.9 sign-in and Sessions.
+/// </summary>
 internal sealed class TokenEndpointServices(
     HostedDataSource database,
     IRateLimiter limiter,
     IDirectory directory,
     IAuditAppender audit,
     TokenRequestLimits limits,
+    IAuthentication authentication,
+    Gatekeep.Modules.Sessions.Contracts.ISessions sessions,
+    TimeProvider time,
     ILoggerFactory? loggers = null)
 {
+    public IAuthentication Authentication { get; } = authentication;
+
+    public Gatekeep.Modules.Sessions.Contracts.ISessions Sessions { get; } = sessions;
+
+    public TimeProvider Time { get; } = time;
+
     public HostedDataSource Database { get; } = database;
 
     public IRateLimiter Limiter { get; } = limiter;
@@ -180,8 +192,9 @@ internal sealed class BeginTokenTransaction(TokenRequestTransaction transaction,
 /// <summary>
 /// No audience or resource may be requested at a Tenant's token endpoint (Story 2.5), so the
 /// Management API audience can never be minted here: either is refused with <c>invalid_target</c>,
-/// before OpenIddict reads it. No scope is known yet either, so one is refused with
-/// <c>invalid_scope</c>. Story 3.7 replaces both with real APIs.
+/// before OpenIddict reads it. No scope is known yet either, so a Client Credentials request naming one
+/// is refused with <c>invalid_scope</c>. The code grant may repeat its granted scope (Story 2.9), which
+/// OpenIddict holds to what the code carries. Story 3.7 replaces both with real APIs.
 /// </summary>
 internal sealed class RefuseTokenTargets : IOpenIddictServerHandler<ValidateTokenRequestContext>
 {
@@ -200,7 +213,7 @@ internal sealed class RefuseTokenTargets : IOpenIddictServerHandler<ValidateToke
         {
             context.Reject(Errors.InvalidTarget, "No audience or resource may be requested here.");
         }
-        else if (!context.Request.GetScopes().IsDefaultOrEmpty)
+        else if (!context.Request.IsAuthorizationCodeGrantType() && !context.Request.GetScopes().IsDefaultOrEmpty)
         {
             context.Reject(Errors.InvalidScope, "No scope may be requested here.");
         }
@@ -380,10 +393,11 @@ internal sealed class SignInClient(IOpenIddictApplicationManager applications, T
 /// <summary>
 /// Endpoint end (AD-5): a token response with no error commits the request's transaction, before the
 /// response is written; any error rolls it back, committing what a refused request keeps, such as a
-/// cross-Tenant event, through <see cref="FailureContext"/>. A request refused before its transaction
-/// opened, such as a rate-limited one, has nothing to end.
+/// cross-Tenant event or a replayed code's revocation, through <see cref="FailureContext"/>. A request
+/// refused before its transaction opened, such as a rate-limited one, has nothing to end. A transaction
+/// a store marked failed never commits: its response becomes <c>server_error</c> (Story 2.9).
 /// </summary>
-internal sealed class EndTokenTransaction(TokenRequestTransaction transaction) : IOpenIddictServerHandler<ApplyTokenResponseContext>
+internal sealed class EndTokenTransaction(TokenRequestTransaction transaction, TokenEndpointServices services) : IOpenIddictServerHandler<ApplyTokenResponseContext>
 {
     public static OpenIddictServerHandlerDescriptor Descriptor { get; } =
         OpenIddictServerHandlerDescriptor.CreateBuilder<ApplyTokenResponseContext>()
@@ -396,9 +410,35 @@ internal sealed class EndTokenTransaction(TokenRequestTransaction transaction) :
     {
         ArgumentNullException.ThrowIfNull(context);
 
+        await RequestEnd.EndAsync(transaction, context, services.Logger);
+    }
+}
+
+/// <summary>
+/// How a writing endpoint's request transaction ends (AD-5, Story 2.9): a response with no error commits
+/// it; an error rolls it back and commits what a refused request keeps. A transaction a store marked
+/// failed is never committed: a response that would have been a success becomes <c>server_error</c>,
+/// and nothing it issued is sent, since nothing it wrote was kept.
+/// </summary>
+internal static class RequestEnd
+{
+    public const string FailedDescription = "The request couldn't be completed. Try again.";
+
+    public static async Task EndAsync(TokenRequestTransaction transaction, BaseRequestContext context, ILogger? logger)
+    {
         if (!transaction.IsOpen)
         {
             return;
+        }
+
+        if (transaction.Failed && string.IsNullOrEmpty(context.Transaction.Response?.Error))
+        {
+            logger?.LogWarning("A request was refused: a statement in its transaction failed.");
+            context.Transaction.Response = new OpenIddictResponse
+            {
+                Error = Errors.ServerError,
+                ErrorDescription = FailedDescription,
+            };
         }
 
         if (string.IsNullOrEmpty(context.Transaction.Response?.Error))

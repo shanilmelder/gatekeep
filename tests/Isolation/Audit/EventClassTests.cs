@@ -294,7 +294,8 @@ public sealed class EventClassTests(PostgresFixture postgres)
         Microsoft.AspNetCore.TestHost.WebHostBuilderExtensions.UseTestServer(builder.WebHost);
         builder.Logging.ClearProviders();
         builder.Services.AddSingleton(AuditContract.CreateAppender());
-        Gatekeep.Modules.Protocol.Contracts.ProtocolContract.AddGatekeepProtocol(builder.Services, _ => hosted);
+        builder.Services.AddSingleton<Gatekeep.Modules.Protocol.Contracts.IAuthorizationSignIn, Gatekeep.Modules.Protocol.Contracts.UnavailableSignIn>();
+        Gatekeep.Modules.Protocol.Contracts.ProtocolContract.AddGatekeepProtocol(builder.Services, _ => hosted, Gatekeep.Adapters.Hosting.SecurityHeaders.Apply);
 
         await using var app = builder.Build();
         Gatekeep.Modules.Tenancy.Contracts.TenancyContract.UseTenantResolution(app, () => hosted);

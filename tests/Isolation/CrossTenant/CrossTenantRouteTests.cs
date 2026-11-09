@@ -205,6 +205,25 @@ public sealed class CrossTenantRouteTests(PostgresFixture postgres, OpenBaoFixtu
                 break;
             }
 
+            case ProtocolContract.AuthorizePath:
+            {
+                // Tenant A's real web client, at B's host (Story 2.9): B doesn't know it, so the request gets
+                // the static page, never a redirect to A's client, and naming nothing of A. Nothing begins.
+                var client = await database.CreateWebClientAsync(a.TenantId, [CodeFlowSetup.Callback]);
+                var user = await database.AddUserAsync(a.TenantId);
+                using var response = await CodeFlow.AuthorizeAsync(host, HostB, client.ClientId, CodeFlowSetup.Callback, Pkce.New(), user, state: "cross-tenant");
+                Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+                Assert.Null(response.Headers.Location);
+                var body = await response.Content.ReadAsStringAsync(Cancellation);
+                Assert.Contains("Something went wrong", body, StringComparison.Ordinal);
+                Assert.DoesNotContain(HostA, body, StringComparison.OrdinalIgnoreCase);
+                Assert.DoesNotContain(client.ClientId, body, StringComparison.Ordinal);
+                Assert.DoesNotContain("cross-tenant", body, StringComparison.Ordinal);
+                Assert.Equal(0L, await database.ScalarAsync<long>("SELECT count(*) FROM signin_transaction"));
+                Assert.Equal(0L, await database.ScalarAsync<long>("SELECT count(*) FROM token"));
+                break;
+            }
+
             default:
                 Assert.Fail($"{entry} is HostResolved but has no case here: add one to {nameof(Hosted_route_on_Tenant_B_s_host_carries_only_Tenant_B)}.");
                 break;
