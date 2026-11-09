@@ -147,9 +147,13 @@ internal sealed class TokenStore(StoreRequest request, ISessions sessions) : IOp
         if (updated == 0)
         {
             // Two exchanges of one code, or two refreshes of one refresh token (Story 2.10), raced, and
-            // this one lost its redemption: the code was replayed, or the refresh token reused, so its
-            // family is revoked as on any replay or reuse, then the redemption fails as OpenIddict expects.
-            if (token.Status == Statuses.Redeemed && token.AuthorizationId is { } family)
+            // this one lost its redemption: the row now reads redeemed. The code was replayed, or the
+            // refresh token reused, so its family is revoked as on any replay or reuse. A row that reads
+            // anything else was revoked meanwhile, by a logout for instance, so nothing more is revoked.
+            // Either way the redemption fails, as OpenIddict expects.
+            if (token.Status == Statuses.Redeemed
+                && token.AuthorizationId is { } family
+                && (await FindAsync("id = @key", token.Id, cancellationToken))?.Status == Statuses.Redeemed)
             {
                 if (token.Type == TokenTypeIdentifiers.Private.AuthorizationCode)
                 {
@@ -165,6 +169,12 @@ internal sealed class TokenStore(StoreRequest request, ISessions sessions) : IOp
         }
 
         token.ConcurrencyToken = next;
+
+        // This request's own redemption won (Story 2.10): the request can tell it from a lost race.
+        if (token.Status == Statuses.Redeemed)
+        {
+            request.MarkRedeemed?.Invoke(token.Id);
+        }
     }
 
     /// <summary>

@@ -22,13 +22,15 @@ internal sealed class SessionService(IAuditAppender audit, TimeProvider time) : 
           (@tenant_id, @id, @user_id, @id_hash, @amr, @auth_time, @connection_id, @idle_expires_at, @absolute_expires_at, @created_at)
         """;
 
-    // A family's authorization and its anchored Session, ended or not (Story 2.10).
+    // A family's authorization and its anchored Session, ended or not (Story 2.10), the authorization row
+    // share-locked until the caller's transaction ends (see ISessions.FindFamilyAsync).
     private const string SelectFamily =
         """
         SELECT a.id, a.status = 'valid', a.creation_date, s.id, s.user_id, s.amr, s.auth_time
         FROM "authorization" a
         JOIN user_session s ON s.tenant_id = a.tenant_id AND s.id = a.user_session_id
         WHERE a.tenant_id = @tenant_id AND a.id = @id AND a.creation_date IS NOT NULL
+        FOR SHARE OF a
         """;
 
     // OpenIddict's own redemption, committed for a refused refresh (Story 2.10): only a valid refresh token.

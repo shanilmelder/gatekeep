@@ -2,9 +2,10 @@
 title: 'Story 2.10: Rotate refresh tokens and detect reuse'
 type: 'feature'
 created: '2026-11-09'
-status: 'ready-for-dev'
+status: 'done'
+baseline_revision: '876f572c0ead401c4139fd2ac4e389ebadbe7dff'
 review_loop_iteration: 0
-followup_review_recommended: false
+followup_review_recommended: true
 context:
   - '{project-root}/_bmad-output/implementation-artifacts/epic-2-context.md'
   - '{project-root}/_bmad-output/implementation-artifacts/spec-2-9-run-the-authorization-code-flow-with-pkce.md'
@@ -141,6 +142,34 @@ deferred: []
 
 ## Review Triage Log
 
+### 2026-11-09 — Review pass
+- Layers: Blind Hunter, Edge Case Hunter, Verification Gap and Intent Alignment.
+- Intent Alignment was descriptive and filed no findings. It found Story 2.10 only, with every acceptance criterion tested over HTTP and in the database. It recorded two choices the story text leaves open: every new `web` client gets the refresh grant (Story 3.2 makes it per Application), and refresh shares the token endpoint's limits.
+- Verdicts: 20 findings in total (high 0, medium 4, low 15, false 1, maybe-false 0).
+
+| # | Verdict | Route | Finding | Evidence / action |
+|---|---------|-------|---------|-------------------|
+| 1 | medium | patch | BH: `RefuseLateRefreshes` doesn't check that this request redeemed the token | A race loser reads the winner's committed `redeemed` row under READ COMMITTED. It is stopped only by the family check, because the store revokes inline. The store now records a successful redemption on the request, the handler refuses without it, and the docs describe the real mechanism. Same root cause as row 16. |
+| 2 | medium | patch | BH: no test forces the lost-race branch | `Task.WhenAll` doesn't control the interleaving. Added a deterministic test that holds A after validation until B commits. Same root cause as row 14. |
+| 3 | low | patch | BH: the race test asserts `>= 1` revocation event | The deterministic test asserts exactly one. |
+| 4 | low | patch | BH: the burn test flips `authorization.status` with a raw UPDATE, not the real revocation | Replaced: a real `RevokeAccessAsync(Session)` now runs from another connection while the refresh is held, and the test asserts no `valid` token is left in a revoked family. The old raw-UPDATE burn test was removed, because it would deadlock against row 17's lock. The burn path is now an untested defensive refusal. Same root cause as row 20. |
+| 5 | low | patch | BH: Story 2.9's `web` rows aren't backfilled | Added a `ForEachTenant` UPDATE to both grants. Same root cause as row 19. |
+| 6 | low | reject | BH: `offline_access` accepted without `prompt=consent` (OIDC Core §11) | §11 allows it when "other conditions for processing the request permitting offline access" are known. Applications are registered by the Tenant's own Admins with implicit consent (`ConsentTypes.Implicit`, Story 2.5), and there is no consent screen in v1. |
+| 7 | low | reject | BH: removing the refresh grant after issuance is untested | No path edits an Application's grants until Story 3.2, which owns that test. |
+| 8 | low | patch | BH: no test shows a family outliving its Session's natural expiry (AD-13) | Added: backdate the Session's expiry, and the refresh still works. |
+| 9 | low | patch | BH: refresh with `scope=openid` alone is undecided | Tested and documented: no new refresh token is issued and R1 is redeemed, which is the client's choice to end offline access. |
+| 10 | low | patch | BH: refreshed ID tokens aren't checked for `nonce` | Asserts no `nonce` (OIDC Core §12.2); the claim cloning is fixed if needed. |
+| 11 | false | reject | BH: each garbage refresh writes its own event, and the AD-9 hourly cap is missing | `KeepUnauthenticatedMismatch` (Story 2.5, reused in 2.9) writes at most one event per source per `CrossTenantMismatchLogWindow`. Counting a prefix-less value as unauthenticated is Story 2.5's decided behaviour (its "Garbage prefix" row). |
+| 12 | low | patch | BH: access and ID tokens aren't capped at the family's absolute end | Documented: the absolute end bounds refresh tokens, and access and ID tokens keep their 15-minute §5.2 lifetime. |
+| 13 | low | reject | BH: the scoped handler does a second client lookup; `CapRefreshTokenLifetime` lacks two filters | Performance only. Token storage and degraded mode are fixed by the server options, so the filters never change the outcome. |
+| 14 | medium | patch | VG: the lost-race branch is verified only by a timing-dependent test | Same root cause as row 2. |
+| 15 | low | patch | VG: the refresh grant's no-signing-key `server_error` is untested | Added: a keyless Tenant gets `server_error`, no tokens, and R1 stays `valid`. |
+| 16 | low | patch | VG (other): the `RefuseLateRefreshes` docs describe a mechanism that isn't the one that works | Same root cause as row 1. |
+| 17 | medium | patch | ECH: a revocation alongside a refresh misses the R2 committed meanwhile | The refresh now reads its family `FOR SHARE OF a`, so a revoker either finishes first or waits for the refresh to commit, and its token UPDATE then sees R2. |
+| 18 | low | patch | ECH: a logout that commits between validation and redemption is recorded as `TokenReuse` | On 0 rows the store re-reads the status and revokes only if it is `redeemed`. |
+| 19 | low | patch | ECH: existing `web` clients never get refresh tokens | Same root cause as row 5. |
+| 20 | low | patch | ECH (claim): the burn path is unreachable through the real revocation | Same root cause as row 4. With row 17's lock it stays as a documented defensive refusal. |
+
 ## Design Notes
 
 **Absolute limit.** OpenIddict's refresh lifetime is per token, so rotating forever would never hit a family-wide end. The authorization (the Token Family, AD-13) has a creation date. Capping each new token's expiry at that date plus the absolute lifetime, and refusing any refresh past it, gives both limits without a new column.
@@ -151,3 +180,40 @@ deferred: []
 
 **Commands:**
 - CI on the PR (Architecture and Isolation suites in Docker) -- expected: green. Don't run the full suite locally (low memory); run targeted test classes one at a time in the tests container.
+
+## Auto Run Result
+
+**Summary.** Tenant hosts now issue rotating refresh tokens (FR-15, FR-13, NFR-3, AD-13, AD-5).
+- **Issue:** a code flow that asked for `offline_access` (allowed only for Applications with the refresh grant) also returns a refresh token. It is a `{tenantPublicId}.{random}` reference token, stored only as a hash.
+- **Rotate:** each refresh returns a new one and redeems the old one, with no leeway.
+- **Detect reuse:** a rotated token presented again, or a lost race, revokes the family through `RevokeAccessAsync(TokenReuse)`, committed through `FailureContext`.
+- **Limits:** inactivity is 7 days, and the absolute end is 30 days from the family's creation, both refused with `invalid_grant`.
+- **Rebuilt claims:** the refreshed ID token takes `sub`, `sid`, `auth_time` and `amr` from the anchored Session and carries no `nonce`.
+- **Concurrent revocation:** the refresh reads its family `FOR SHARE`, so it can't commit a token a concurrent revocation would miss.
+- **Rate limits:** refresh counts against the existing per-Tenant and per-source limits.
+- **Cross-Tenant:** the suite covers refresh tokens.
+
+**Files changed (main ones)**
+- `src/Gatekeep.Kernel/Limits/SecurityLimits.cs`: refresh limits.
+- `src/Adapters/Postgres/Migrations/Migration20261111000000AllowRefreshTokens.cs`: the `web` grant CHECK and the backfill.
+- `src/Modules/Directory/**`: web clients get the refresh grant.
+- `src/Modules/Sessions/{Adapters/TokenStore.cs, Contracts/ISessions.cs, Contracts/SessionsEntities.cs, Core/SessionService.cs}`: `FindFamilyAsync` (with `FOR SHARE`), `BurnRefreshTokenAsync`, race and reuse routing, the redemption record.
+- `src/Modules/Protocol/Core/{ProtocolServer.cs, AuthorizeEndpoint.cs, TokenEndpoint.cs, RefreshTokens.cs, TokenRequestTransaction.cs}`: options, `offline_access`, the refresh handlers.
+- Tests: `RefreshTokenTests` (new), `DirectoryTests`, the discovery tests, `ArtifactRegistry`, the canary flow, `MigrateCommandTests` (27).
+- Docs: `docs/spikes/2-2-openiddict-stores.md`, `deferred-work.md`.
+
+**Review findings.** 20 findings: 16 patched (9 root causes), 0 deferred, and 4 rejected (1 false, 3 low). Reasons are in the triage log.
+
+**Follow-up review: recommended (`true`).** Four medium entries were patched (patched counts by verdict: medium 4, low 12). The risks a second pass should check:
+- Concurrency correctness rests on the new `FOR SHARE` lock and the redemption record. The deterministic tests have their first run in CI.
+- The removed raw-UPDATE test leaves the defensive burn path untested.
+- The no-signing-key test builds a runtime with only a `next` key.
+
+**Verification**
+- The solution built clean (0 errors, 0 warnings) in an SDK 10.0.403 container, both before and after the patches.
+- No tests were run locally (memory). CI on PR #55 runs the full Architecture and Isolation suites, and is the first run of the new tests.
+- **Matrix audit:** every I/O row has a named test in `RefreshTokenTests` or `DirectoryTests`. Whether those ran and passed is judged from CI before merge.
+
+**Residual risks**
+- The revocation-during-refresh test accepts either outcome (200 or `invalid_grant`), and asserts only the invariant that no `valid` token is left in a revoked family.
+- The default refresh grant for every `web` client is to be made per-Application in Story 3.2.

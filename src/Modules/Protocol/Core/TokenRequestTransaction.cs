@@ -23,6 +23,7 @@ namespace Gatekeep.Modules.Protocol.Core;
 internal sealed class TokenRequestTransaction : IAsyncDisposable
 {
     private readonly List<Func<CommandContext, CancellationToken, Task>> _failureEffects = [];
+    private readonly HashSet<Guid> _redeemed = [];
     private readonly ILogger? _logger;
     private TenantScope? _scope;
     private CommandContext? _context;
@@ -30,7 +31,7 @@ internal sealed class TokenRequestTransaction : IAsyncDisposable
     public TokenRequestTransaction(ILoggerFactory? loggers = null)
     {
         _logger = loggers?.CreateLogger("Gatekeep.Protocol");
-        Store = new StoreRequest(() => Context, KeepOnFailure, MarkFailed);
+        Store = new StoreRequest(() => Context, KeepOnFailure, MarkFailed, id => _redeemed.Add(id));
     }
 
     public bool IsOpen => _scope is not null;
@@ -65,6 +66,12 @@ internal sealed class TokenRequestTransaction : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(effect);
         _failureEffects.Add(effect);
     }
+
+    /// <summary>
+    /// Whether this request's own redemption of the token <paramref name="tokenId"/> succeeded (Story 2.10), as
+    /// the token store reported it. A request that lost a race to redeem it hasn't.
+    /// </summary>
+    public bool HasRedeemed(Guid tokenId) => _redeemed.Contains(tokenId);
 
     /// <summary>Marks the transaction failed: a statement in it failed, so it must not commit.</summary>
     public void MarkFailed() => Failed = true;

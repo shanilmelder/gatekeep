@@ -604,6 +604,39 @@ public sealed class DirectoryTests(PostgresFixture postgres)
         Assert.Equal(0L, await PostgresFixture.ScalarAsync<long>(superuser, "SELECT count(*) FROM audit_event"));
     }
 
+    /// <summary>
+    /// Story 2.10's backfill, rendered the same way and run as the migrator: a Story 2.9 web client allowed
+    /// only the code grant gains the refresh grant, and nothing else changes.
+    /// </summary>
+    [Fact]
+    public async Task Refresh_backfill_gives_each_code_only_web_client_the_refresh_grant_and_nothing_else()
+    {
+        var database = await DatabaseAsync();
+        var superuser = postgres.SuperuserConnection(database);
+        var machine = await CreateAsync(database, TenantA);
+        var webA = await InTenantAsync(database, TableRegistry.Admin, TenantA, c => _directory.CreateWebClientAsync(c, "Web A", ["https://a.example/cb"], Cancellation));
+        var webB = await InTenantAsync(database, TableRegistry.Admin, TenantB, c => _directory.CreateWebClientAsync(c, "Web B", ["https://b.example/cb"], Cancellation));
+        var refreshing = await InTenantAsync(database, TableRegistry.Admin, TenantB, c => _directory.CreateWebClientAsync(c, "Web B2", ["https://b.example/cb2"], Cancellation));
+        await PostgresFixture.ExecuteAsync(superuser,
+            $"UPDATE application SET grant_types = ARRAY['authorization_code'] WHERE id IN ('{webA.ApplicationId}', '{webB.ApplicationId}')");
+
+        var builder = new MigrationBuilder("Npgsql.EntityFrameworkCore.PostgreSQL");
+        builder.ForEachTenant(Migration20261111000000AllowRefreshTokens.Backfill);
+        var sql = Assert.IsType<SqlOperation>(Assert.Single(builder.Operations)).Sql;
+
+        // The migration's Up() runs exactly that statement, last.
+        var migration = new Migration20261111000000AllowRefreshTokens { ActiveProvider = "Npgsql.EntityFrameworkCore.PostgreSQL" };
+        Assert.Equal(sql, Assert.IsType<SqlOperation>(migration.UpOperations[^1]).Sql);
+
+        await PostgresFixture.ExecuteAsync(postgres.RoleConnection(TableRegistry.Migrator, database), sql);
+        await PostgresFixture.ExecuteAsync(postgres.RoleConnection(TableRegistry.Migrator, database), sql);
+
+        Assert.Equal(3L, await PostgresFixture.ScalarAsync<long>(superuser,
+            $"SELECT count(*) FROM application WHERE id IN ('{webA.ApplicationId}', '{webB.ApplicationId}', '{refreshing.ApplicationId}') AND grant_types = ARRAY['authorization_code', 'refresh_token']"));
+        Assert.Equal(1L, await PostgresFixture.ScalarAsync<long>(superuser,
+            $"SELECT count(*) FROM application WHERE id = '{machine.ApplicationId}' AND grant_types = ARRAY['client_credentials']"));
+    }
+
     private async Task<Guid> EnsureAsync(string database, Guid tenantId) =>
         await InTenantAsync(database, TableRegistry.Worker, tenantId, c => _directory.EnsureSystemApplicationAsync(c, Cancellation));
 

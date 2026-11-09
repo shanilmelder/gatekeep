@@ -45,7 +45,12 @@ public interface ISessions
     /// <summary>
     /// The Token Family <paramref name="authorizationId"/> names in the context's Tenant, with its anchored
     /// Session, whether that Session has ended or expired or not: a Session's natural expiry doesn't end
-    /// its families (AD-13), and its end revokes them. Null when there is none. Reads only.
+    /// its families (AD-13), and its end revokes them. Null when there is none. It writes nothing, but it
+    /// takes <c>FOR SHARE</c> on the authorization row until the caller's transaction ends. So a refresh that
+    /// reads its family before redeeming its token can't race a revocation (Story 2.10). A concurrent
+    /// <see cref="RevokeAccessAsync"/> that updated the row first makes this wait, then read <c>revoked</c>.
+    /// Otherwise the revocation waits until the refresh commits, and its token update, a later statement,
+    /// then sees and revokes the refresh's new tokens. No valid token is left in a revoked family.
     /// </summary>
     /// <exception cref="InvalidOperationException">The context has no Tenant.</exception>
     Task<TokenFamily?> FindFamilyAsync(CommandContext context, Guid authorizationId, CancellationToken cancellationToken);

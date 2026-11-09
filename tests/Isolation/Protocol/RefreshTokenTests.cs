@@ -235,7 +235,7 @@ public sealed class RefreshTokenTests(PostgresFixture postgres, OpenBaoFixture b
         // Whichever way the loser lost, R1 was reused: the winner's tokens are revoked with their family.
         Assert.Equal(0L, await flow.Database.ScalarAsync<long>($"SELECT count(*) FROM token WHERE tenant_id = '{flow.A.TenantId}' AND status <> 'revoked'"));
         Assert.Equal(1L, await flow.Database.ScalarAsync<long>($"SELECT count(*) FROM \"authorization\" WHERE tenant_id = '{flow.A.TenantId}' AND status = 'revoked'"));
-        Assert.True(await RevocationEventsAsync(flow) >= 1, "The family's revocation wasn't committed.");
+        Assert.Equal(1L, await RevocationEventsAsync(flow));
     }
 
     [Fact]
@@ -337,40 +337,182 @@ public sealed class RefreshTokenTests(PostgresFixture postgres, OpenBaoFixture b
     }
 
     [Fact]
-    public async Task A_refresh_whose_family_is_revoked_after_its_redemption_is_refused_and_its_token_stays_burnt()
+    public async Task A_refresh_that_loses_the_race_to_redeem_its_token_is_invalid_grant_and_revokes_the_family_once()
     {
         var flow = await CodeFlowSetup.CreateAsync(postgres, bao, HostA, HostB);
-        var revokeMidRequest = new MidRequestSwitch();
-        await using var host = await flow.StartHostAsync(configure: services => services.AddOpenIddict().AddServer(server =>
-            server.AddEventHandler<ProcessSignInContext>(handler => handler
-                .UseInlineHandler(async context =>
-                {
-                    // Between OpenIddict's redemption and Gatekeep's late refusals: the family is revoked
-                    // by another request that commits while this one runs.
-                    if (revokeMidRequest.On && context.Request.IsRefreshTokenGrantType())
-                    {
-                        await flow.Database.BackdateAsync(
-                            $"UPDATE \"authorization\" SET status = 'revoked', concurrency_token = gen_random_uuid() WHERE tenant_id = '{flow.A.TenantId}'");
-                        Interlocked.Increment(ref revokeMidRequest.Runs);
-                    }
-                })
-                .SetOrder(OpenIddictServerHandlers.RedeemTokenEntry.Descriptor.Order + 250))));
+        var gate = new HoldFirstRefresh();
+        await using var host = await flow.StartHostAsync(configure: gate.Register);
         var r1 = await OfflineAsync(host, flow);
-        var tokensBefore = await flow.Database.ScalarAsync<long>($"SELECT count(*) FROM token WHERE tenant_id = '{flow.A.TenantId}'");
 
-        revokeMidRequest.On = true;
+        // A has read R1 as valid and its family, and is held just before its redemption.
+        gate.On = true;
+        var a = CodeFlow.RefreshAsync(host, HostA, flow.ClientA.ClientId, flow.ClientA.Secret, r1);
+        await gate.Held.Task.WaitAsync(TimeSpan.FromSeconds(30), Cancellation);
+
+        // B redeems R1 and commits first.
+        using (var b = await CodeFlow.RefreshAsync(host, HostA, flow.ClientA.ClientId, flow.ClientA.Secret, r1))
+        {
+            Assert.Equal(HttpStatusCode.OK, b.Status);
+        }
+
+        gate.Release();
+        using (var lost = await a)
+        {
+            Assert.Equal(HttpStatusCode.BadRequest, lost.Status);
+            Assert.Equal("invalid_grant", lost.Error);
+            Assert.False(lost.Body.RootElement.TryGetProperty("access_token", out _));
+            Assert.False(lost.Body.RootElement.TryGetProperty("refresh_token", out _));
+        }
+
+        // A's lost redemption was reuse: every token of the family, B's included, is revoked, once.
+        Assert.Equal(0L, await flow.Database.ScalarAsync<long>($"SELECT count(*) FROM token WHERE tenant_id = '{flow.A.TenantId}' AND status <> 'revoked'"));
+        Assert.Equal(1L, await flow.Database.ScalarAsync<long>($"SELECT count(*) FROM \"authorization\" WHERE tenant_id = '{flow.A.TenantId}' AND status = 'revoked'"));
+        Assert.Equal(1L, await RevocationEventsAsync(flow));
+    }
+
+    [Fact]
+    public async Task A_revocation_while_a_refresh_runs_leaves_no_valid_token_in_the_revoked_family()
+    {
+        var flow = await CodeFlowSetup.CreateAsync(postgres, bao, HostA, HostB);
+        var gate = new HoldFirstRefresh();
+        await using var host = await flow.StartHostAsync(configure: gate.Register);
+        var r1 = await OfflineAsync(host, flow);
+        var sessionId = await flow.Database.ScalarAsync<Guid>($"SELECT id FROM user_session WHERE tenant_id = '{flow.A.TenantId}'");
+
+        // The refresh has read its family and is held just before its redemption.
+        gate.On = true;
+        var refresh = CodeFlow.RefreshAsync(host, HostA, flow.ClientA.ClientId, flow.ClientA.Secret, r1);
+        await gate.Held.Task.WaitAsync(TimeSpan.FromSeconds(30), Cancellation);
+
+        // A logout, through the one revocation path, on its own connection.
+        var revoke = Task.Run(async () =>
+        {
+            await using var source = NpgsqlDataSource.Create(flow.Database.Hosted);
+            await using var scope = await TenantScope.BeginAsync(source, flow.A.TenantId, Cancellation);
+            await SessionsContract.CreateSessions(AuditContract.CreateAppender(), TimeProvider.System).RevokeAccessAsync(
+                scope.CreateCommandContext(), new RevocationScope.Session(sessionId), null, RevocationReason.Logout, Actor.User(flow.UserA), Cancellation);
+            await scope.CommitAsync(Cancellation);
+        }, Cancellation);
+
+        // It waits on the refresh's lock on the family, or has already finished.
+        for (var i = 0; i < 200 && !revoke.IsCompleted && await LockWaitsAsync(flow) == 0; i++)
+        {
+            await Task.Delay(50, Cancellation);
+        }
+
+        gate.Release();
+        using var result = await refresh;
+        await revoke;
+
+        Assert.True(
+            result.Status == HttpStatusCode.OK || (result.Status == HttpStatusCode.BadRequest && result.Error == "invalid_grant"),
+            "The refresh neither succeeded nor was refused with invalid_grant.");
+        Assert.Equal(1L, await flow.Database.ScalarAsync<long>($"SELECT count(*) FROM \"authorization\" WHERE tenant_id = '{flow.A.TenantId}' AND status = 'revoked'"));
+        Assert.Equal(0L, await flow.Database.ScalarAsync<long>(
+            $"SELECT count(*) FROM token t JOIN \"authorization\" a ON a.tenant_id = t.tenant_id AND a.id = t.authorization_id WHERE t.tenant_id = '{flow.A.TenantId}' AND a.status = 'revoked' AND t.status = 'valid'"));
+        if (result.Status == HttpStatusCode.OK)
+        {
+            // R2 was issued, then revoked with its family.
+            Assert.Equal(1L, await RefreshRowsAsync(flow, "status = 'revoked' AND redemption_date IS NULL"));
+        }
+    }
+
+    [Fact]
+    public async Task A_family_whose_Session_has_naturally_expired_still_refreshes()
+    {
+        var flow = await CodeFlowSetup.CreateAsync(postgres, bao, HostA, HostB);
+        await using var host = await flow.StartHostAsync();
+        var r1 = await OfflineAsync(host, flow);
+
+        // Past both its idle and absolute expiry, but never ended: AD-13 keeps its families.
+        await flow.Database.BackdateAsync(
+            $"UPDATE user_session SET idle_expires_at = now() - interval '2 minutes', absolute_expires_at = now() - interval '1 minute' WHERE tenant_id = '{flow.A.TenantId}'");
+
+        var r2 = await RefreshOkAsync(host, flow, r1);
+        Assert.True(r1 != r2, "The refresh didn't rotate the refresh token.");
+        Assert.Equal(1L, await RefreshRowsAsync(flow, "status = 'valid'"));
+    }
+
+    [Fact]
+    public async Task A_refresh_naming_openid_alone_ends_offline_access_with_no_new_refresh_token()
+    {
+        var flow = await CodeFlowSetup.CreateAsync(postgres, bao, HostA, HostB);
+        await using var host = await flow.StartHostAsync();
+        var r1 = await OfflineAsync(host, flow);
+
+        using (var refreshed = await CodeFlow.RefreshAsync(host, HostA, flow.ClientA.ClientId, flow.ClientA.Secret, r1, scope: "openid"))
+        {
+            Assert.Equal(HttpStatusCode.OK, refreshed.Status);
+            Assert.True(refreshed.Body.RootElement.TryGetProperty("access_token", out _));
+            Assert.True(refreshed.Body.RootElement.TryGetProperty("id_token", out _));
+            Assert.False(refreshed.Body.RootElement.TryGetProperty("refresh_token", out _));
+        }
+
+        // R1 is redeemed, and no refresh token of the family is valid any more.
+        Assert.Equal(1L, await RefreshRowsAsync(flow, "true"));
+        Assert.Equal(1L, await RefreshRowsAsync(flow, "status = 'redeemed'"));
+
+        using var after = await CodeFlow.RefreshAsync(host, HostA, flow.ClientA.ClientId, flow.ClientA.Secret, r1);
+        Assert.Equal("invalid_grant", after.Error);
+    }
+
+    [Fact]
+    public async Task A_refreshed_ID_token_carries_no_nonce()
+    {
+        var flow = await CodeFlowSetup.CreateAsync(postgres, bao, HostA, HostB);
+        await using var host = await flow.StartHostAsync();
+
+        var pkce = Pkce.New();
+        string code;
+        using (var authorize = await CodeFlow.AuthorizeAsync(host, HostA, flow.ClientA.ClientId, Callback, pkce, flow.UserA, nonce: "nonce-r", scope: Offline))
+        {
+            Assert.Equal(HttpStatusCode.Found, authorize.StatusCode);
+            code = QueryHelpers.ParseQuery(authorize.Headers.Location!.Query)["code"].ToString();
+        }
+
+        string r1;
+        using (var issued = await CodeFlow.ExchangeAsync(host, HostA, flow.ClientA.ClientId, flow.ClientA.Secret, code, Callback, pkce.Verifier))
+        {
+            Assert.Equal(HttpStatusCode.OK, issued.Status);
+            Assert.Equal("nonce-r", new JsonWebToken(issued.Body.RootElement.GetProperty("id_token").GetString()!).GetClaim("nonce").Value);
+            r1 = issued.RefreshToken;
+        }
+
+        using var refreshed = await CodeFlow.RefreshAsync(host, HostA, flow.ClientA.ClientId, flow.ClientA.Secret, r1);
+        Assert.Equal(HttpStatusCode.OK, refreshed.Status);
+        Assert.False(new JsonWebToken(refreshed.Body.RootElement.GetProperty("id_token").GetString()!).TryGetClaim("nonce", out _));
+
+        // Nor does the one after.
+        using var again = await CodeFlow.RefreshAsync(host, HostA, flow.ClientA.ClientId, flow.ClientA.Secret, refreshed.RefreshToken);
+        Assert.Equal(HttpStatusCode.OK, again.Status);
+        Assert.False(new JsonWebToken(again.Body.RootElement.GetProperty("id_token").GetString()!).TryGetClaim("nonce", out _));
+    }
+
+    [Fact]
+    public async Task A_refresh_at_a_Tenant_with_no_current_Signing_Key_is_server_error_and_redeems_nothing()
+    {
+        var flow = await CodeFlowSetup.CreateAsync(postgres, bao, HostA, HostB);
+        string r1;
+        await using (var issuing = await flow.StartHostAsync())
+        {
+            r1 = await OfflineAsync(issuing, flow);
+        }
+
+        // The current key is gone; a fresh host builds A's runtime with no key that signs.
+        await flow.Database.BackdateAsync(
+            $"UPDATE signing_key SET state = 'revoked' WHERE tenant_id = '{flow.A.TenantId}' AND purpose = 'signing' AND state = 'current'");
+        var tokensBefore = await flow.Database.ScalarAsync<long>($"SELECT count(*) FROM token WHERE tenant_id = '{flow.A.TenantId}'");
+        await using var host = await flow.StartHostAsync();
+
         using var refused = await CodeFlow.RefreshAsync(host, HostA, flow.ClientA.ClientId, flow.ClientA.Secret, r1);
 
-        Assert.Equal(1, Volatile.Read(ref revokeMidRequest.Runs));
-        Assert.Equal(HttpStatusCode.BadRequest, refused.Status);
-        Assert.Equal("invalid_grant", refused.Error);
+        Assert.Equal(HttpStatusCode.InternalServerError, refused.Status);
+        Assert.Equal("server_error", refused.Error);
         Assert.False(refused.Body.RootElement.TryGetProperty("access_token", out _));
         Assert.False(refused.Body.RootElement.TryGetProperty("refresh_token", out _));
-
-        // The request rolled back, but R1's redemption was committed: it can't come back to life.
         Assert.Equal(tokensBefore, await flow.Database.ScalarAsync<long>($"SELECT count(*) FROM token WHERE tenant_id = '{flow.A.TenantId}'"));
-        Assert.Equal(1L, await RefreshRowsAsync(flow, "status = 'redeemed' AND redemption_date IS NOT NULL"));
-        Assert.Equal(0L, await RefreshRowsAsync(flow, "status = 'valid'"));
+        Assert.Equal(1L, await RefreshRowsAsync(flow, "status = 'valid' AND redemption_date IS NULL"));
+        Assert.Equal(0, host.Custody.Calls(Gatekeep.Kernel.Secrets.KeyOperation.Sign));
     }
 
     [Fact]
@@ -601,11 +743,38 @@ public sealed class RefreshTokenTests(PostgresFixture postgres, OpenBaoFixture b
     private static Task<long> RevocationEventsAsync(CodeFlowSetup flow) =>
         flow.Database.ScalarAsync<long>($"SELECT count(*) FROM audit_event WHERE tenant_id = '{flow.A.TenantId}' AND type_code = '{Revoked}'");
 
-    /// <summary>Turns the mid-request revocation on, and counts its runs.</summary>
-    private sealed class MidRequestSwitch
+    /// <summary>Sessions of the test's database waiting on a lock, such as a revocation waiting on a refresh's.</summary>
+    private static Task<long> LockWaitsAsync(CodeFlowSetup flow) =>
+        flow.Database.ScalarAsync<long>(
+            "SELECT count(*) FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock'");
+
+    /// <summary>
+    /// A test-only handler that, while on, holds the first refresh to arrive after its token was validated and
+    /// its family read (by <c>SignInRefresh</c>), just before OpenIddict redeems the token, until released.
+    /// Every other request passes.
+    /// </summary>
+    private sealed class HoldFirstRefresh
     {
-        public int Runs;
+        private readonly TaskCompletionSource _release = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private int _arrivals;
 
         public volatile bool On;
+
+        /// <summary>Completes once the first refresh is held.</summary>
+        public TaskCompletionSource Held { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public void Release() => _release.TrySetResult();
+
+        public void Register(IServiceCollection services) =>
+            services.AddOpenIddict().AddServer(server => server.AddEventHandler<ProcessSignInContext>(handler => handler
+                .UseInlineHandler(async context =>
+                {
+                    if (On && context.Request.IsRefreshTokenGrantType() && Interlocked.Increment(ref _arrivals) == 1)
+                    {
+                        Held.TrySetResult();
+                        await _release.Task.WaitAsync(TimeSpan.FromSeconds(60));
+                    }
+                })
+                .SetOrder(OpenIddictServerHandlers.RedeemTokenEntry.Descriptor.Order - 500)));
     }
 }
