@@ -6,6 +6,7 @@ using Gatekeep.Modules.Tenancy.Contracts;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using OpenIddict.Server;
 
 namespace Gatekeep.Modules.Protocol.Contracts;
@@ -49,8 +50,8 @@ public static class ProtocolContract
     /// The authorization and token endpoints run as <c>gk_hosted</c> too, in one transaction per request.
     /// Key custody is the host's <c>IKeyCustody</c>, and audit the host's <c>IAuditAppender</c>. The token
     /// request limits are <see cref="TokenRequestLimits"/>'s, unless the host registered its own first.
-    /// The authorization endpoint completes a sign-in through the host's <see cref="IAuthorizationSignIn"/>,
-    /// which the host must register: a release build registers <see cref="UnavailableSignIn"/>.
+    /// The authorization endpoint completes a sign-in through <see cref="IAuthorizationSignIn"/>:
+    /// <see cref="UnavailableSignIn"/>, which completes none, unless the host registered its own first.
     /// <paramref name="pageHeaders"/> sets the host's browser-page headers (AD-21) on the one page the
     /// authorization endpoint shows itself, for a request it can't send back to any client.
     /// </summary>
@@ -70,6 +71,9 @@ public static class ProtocolContract
             () => hostedConnectionString(provider),
             provider.GetService<Microsoft.Extensions.Logging.ILogger<SigningKeyChangeListener>>()));
         services.AddSingleton(new ProtocolPageHeaders(pageHeaders));
+
+        // The release build's sign-in, unless the host registered its own first (only tests do).
+        services.TryAddSingleton<IAuthorizationSignIn, UnavailableSignIn>();
         ProtocolServer.Add(services, hostedConnectionString);
         return services;
     }

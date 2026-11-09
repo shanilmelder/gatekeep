@@ -266,10 +266,6 @@ internal static class ApplicationRows
     private const string SelectSystem =
         "SELECT id FROM application WHERE tenant_id = @tenant_id AND kind = 'system'";
 
-    // Story 2.9: OpenIddict's lookup by redirect URI, exact, on the GIN index over redirect_uris.
-    private const string SelectByRedirectUri =
-        $"SELECT {Columns} FROM application WHERE tenant_id = @tenant_id AND redirect_uris @> ARRAY[@uri]::text[] AND {Visible} ORDER BY created_at, id";
-
     public static async Task<DirectoryApplication?> FindAsync(CommandContext context, Guid id, CancellationToken cancellationToken)
     {
         var tenantId = TenantOf(context);
@@ -289,26 +285,6 @@ internal static class ApplicationRows
         await using var command = context.CreateCommand();
         command.CommandText = List;
         DirectoryService.Add(command, "tenant_id", tenantId);
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-        var applications = new List<DirectoryApplication>();
-        while (await reader.ReadAsync(cancellationToken))
-        {
-            applications.Add(Read(reader));
-        }
-
-        return applications;
-    }
-
-    /// <summary>The visible Applications that registered <paramref name="uri"/> exactly (Story 2.9).</summary>
-    public static async Task<IReadOnlyList<DirectoryApplication>> FindByRedirectUriAsync(
-        CommandContext context, string uri, CancellationToken cancellationToken)
-    {
-        var tenantId = TenantOf(context);
-
-        await using var command = context.CreateCommand();
-        command.CommandText = SelectByRedirectUri;
-        DirectoryService.Add(command, "tenant_id", tenantId);
-        DirectoryService.Add(command, "uri", uri);
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         var applications = new List<DirectoryApplication>();
         while (await reader.ReadAsync(cancellationToken))
@@ -348,37 +324,31 @@ internal static class ApplicationRows
 }
 
 /// <summary>
-/// A web client's redirect URIs (Story 2.9, RFC 9700 §2.1): each an absolute <c>https</c> URI, or
-/// <c>http</c> on a loopback host only, with no fragment, userinfo or white space, at most
+/// A web client's redirect URIs (Story 2.9, RFC 9700 §2.1, RFC 8252 §8.3): each an absolute <c>https</c>
+/// URI, or <c>http</c> only on the loopback IP literal <c>127.0.0.1</c> or <c>[::1]</c>, never the name
+/// <c>localhost</c>; with no fragment, userinfo, white space or control character; at most
 /// <see cref="DirectoryContract.MaxRedirectUriLength"/> characters; 1 to
-/// <see cref="DirectoryContract.MaxRedirectUris"/> of them, none repeated. Each is kept exactly as
-/// given, since OpenIddict matches a request's <c>redirect_uri</c> to it character for character.
+/// <see cref="DirectoryContract.MaxRedirectUris"/> of them, none repeated. Each is kept exactly as given:
+/// OpenIddict matches a request's <c>redirect_uri</c> to it character for character, the port included,
+/// since every web client is confidential and none is a native app whose loopback port may vary.
 /// </summary>
 internal static class RedirectUris
 {
-    public static string[] Checked(IReadOnlyList<string>? uris)
+    private static readonly string Rules = string.Create(
+        System.Globalization.CultureInfo.InvariantCulture,
+        $"A web client registers 1 to {DirectoryContract.MaxRedirectUris} distinct redirect URIs, each an absolute https URI, or http on 127.0.0.1 or [::1] only, with no fragment, userinfo, white space or control character, at most {DirectoryContract.MaxRedirectUriLength} characters.");
+
+    public static string[] Checked(IReadOnlyList<string>? redirectUris)
     {
-        if (uris is null || uris.Count is 0 or > DirectoryContract.MaxRedirectUris)
+        if (redirectUris is null
+            || redirectUris.Count is 0 or > DirectoryContract.MaxRedirectUris
+            || redirectUris.Distinct(StringComparer.Ordinal).Count() != redirectUris.Count
+            || !redirectUris.All(IsAllowed))
         {
-            throw new ArgumentException("A web client registers 1 to 10 redirect URIs.", nameof(uris));
+            throw new ArgumentException(Rules, nameof(redirectUris));
         }
 
-        if (uris.Distinct(StringComparer.Ordinal).Count() != uris.Count)
-        {
-            throw new ArgumentException("A redirect URI is registered once only.", nameof(uris));
-        }
-
-        foreach (var uri in uris)
-        {
-            if (!IsAllowed(uri))
-            {
-                throw new ArgumentException(
-                    "A redirect URI is an absolute https URI, or http on a loopback host, with no fragment, at most 2000 characters.",
-                    nameof(uris));
-            }
-        }
-
-        return [.. uris];
+        return [.. redirectUris];
     }
 
     private static bool IsAllowed(string? text)
@@ -389,12 +359,13 @@ internal static class RedirectUris
             || text.Any(c => char.IsWhiteSpace(c) || char.IsControl(c))
             || !Uri.TryCreate(text, UriKind.Absolute, out var uri)
             || uri.UserInfo.Length > 0
-            || uri.Fragment.Length > 0
             || string.IsNullOrEmpty(uri.Host))
         {
             return false;
         }
 
-        return uri.Scheme == Uri.UriSchemeHttps || (uri.Scheme == Uri.UriSchemeHttp && uri.IsLoopback);
+        return uri.Scheme == Uri.UriSchemeHttps
+            || (uri.Scheme == Uri.UriSchemeHttp && uri.HostNameType is UriHostNameType.IPv4 or UriHostNameType.IPv6
+                && uri.Host is "127.0.0.1" or "[::1]");
     }
 }

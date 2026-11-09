@@ -2,9 +2,10 @@
 title: 'Story 2.9: Run the authorization code flow with PKCE'
 type: 'feature'
 created: '2026-11-09'
-status: 'ready-for-dev'
+status: 'done'
+baseline_revision: '7bf1b457d749891a91149aef458f4a065ee0ad3b'
 review_loop_iteration: 0
-followup_review_recommended: false
+followup_review_recommended: true
 context:
   - '{project-root}/_bmad-output/implementation-artifacts/epic-2-context.md'
   - '{project-root}/docs/spikes/2-2-openiddict-stores.md'
@@ -172,6 +173,41 @@ deferred: []
 
 ## Review Triage Log
 
+### 2026-11-09 — Review pass
+- Layers: Blind Hunter, Edge Case Hunter, Verification Gap and Intent Alignment.
+- Intent Alignment was descriptive and filed no findings. It found Story 2.9 implemented, with every acceptance criterion mapped to code and a test. The evidence sits at the test-host surface: `ProtocolHost`, a header-driven test sign-in, and a check of the `src` assemblies.
+- Verdicts: 27 findings in total (high 0, medium 6, low 18, false 3, maybe-false 0).
+
+| # | Verdict | Route | Finding | Evidence / action |
+|---|---------|-------|---------|-------------------|
+| 1 | medium | patch | VG: the store-marked-failed → `server_error` end is never driven through an endpoint | Only `SessionStoresTests` sets the flag. Added an endpoint test that forces a failed store statement. |
+| 2 | medium | patch | VG: no test races two exchanges of one code | Added a `Task.WhenAll` test: exactly one 200. Same root cause as rows 18 and 26. |
+| 3 | low | patch | VG: the 15-minute ID token lifetime is never asserted | The happy path now asserts `exp - iat`. |
+| 4 | low | patch | VG: a code exchange with `scope` is untested | Same root cause as rows 23 and 27. |
+| 5 | low | patch | VG: authorize's no-signing-key and oversized-parameter refusals never run | Two tests added (unprovisioned Tenant; 17000-character `state`). |
+| 6 | low | patch | VG: Host.Hosted's own `IAuthorizationSignIn` registration is never exercised | `AddGatekeepProtocol` now `TryAdd`s `UnavailableSignIn`, so no host can miss it. Same root cause as row 15. |
+| 7 | low | patch | BH: `sid` is the raw Session GUID | Added `PublicIdType.Session` (`ses_`); `sid` uses it before any relying party depends on the format. |
+| 8 | medium | patch | BH: `http://localhost` is accepted as a loopback redirect | `Uri.IsLoopback` is true for the name. Plain `http` is now allowed only for the IP literals `127.0.0.1` and `[::1]` (RFC 8252 §8.3), and exact port matching is documented. |
+| 9 | low | patch | BH: the redirect-URI error message is incomplete, hard-codes limits, and has the wrong `ParamName` | Direct correction. |
+| 10 | low | reject | BH: the database doesn't check each URI's form | Directory is the only writer and validates every URI. A per-element CHECK needs a SQL function for no named harm. |
+| 11 | low | patch | BH: `FindByRedirectUriAsync` and its GIN index are dead | OpenIddict validates the redirect URI on the client found by `client_id`. The method now throws `Unsupported()`, and the unreleased index is dropped. |
+| 12 | medium | patch | BH: a foreign-prefix code is refused with no Log event | Classified as an unauthenticated cross-Tenant mismatch through Story 2.5's counter and hourly-logged event. |
+| 13 | low | patch | BH: a cancelled statement doesn't mark the request failed | Same root cause as row 22. |
+| 14 | low | reject | BH: replay depends on OpenIddict swallowing store exceptions | The replay test pins the response and the committed revocation, so an upgrade that rethrows fails it. |
+| 15 | low | patch | BH: a missing sign-in registration fails at request time | Same root cause as row 6. |
+| 16 | low | reject | BH: `authorization`/`token` restate the purge grant | `CatalogueAudit` compares each registry entry with the live grants (same call as 2.8's follow-up). |
+| 17 | low | reject | BH: `TokenEndpointServices`/`TokenRequestTransaction` names now span both endpoints | A rename is churn. The doc comments state the wider role. |
+| 18 | medium | patch | BH: several new paths are untested | Same root cause as rows 1, 2 and 5. The Session-ended-within-60-s case is false: a Session's revocation revokes its family, code row included. |
+| 19 | false | reject | ECH: a revoked token can be un-revoked through `UpdateAsync` | `SessionRevocation` sets `concurrency_token = gen_random_uuid()` on revoke, so a stale update matches no row. OpenIddict never moves a revoked entity to valid. |
+| 20 | low | reject | ECH: a DB failure inside the passthrough answers a bare 500 | Only during a database outage. Same call as Story 2.5's row 14. |
+| 21 | false | reject | ECH: the passthrough throws when the validated client has no Application | OpenIddict's own client validation found it moments before in the same transaction, so this is unreachable. |
+| 22 | low | patch | ECH: `StoreSql` catches only `DbException` | It now also marks the request failed on `OperationCanceledException`. |
+| 23 | low | patch | ECH: extra scope on a code exchange relies on an unverified OpenIddict check | The code grant now refuses any scope but `openid`. Same root cause as rows 4 and 27. |
+| 24 | false | reject | ECH: the authorization anchor could name an ended or foreign Session | The anchor is the Session `CompleteAsync` started in the same transaction, so this is unreachable. |
+| 25 | low | reject | ECH (claim): `iss` isn't on a bare 500 | A 500 from a database outage isn't an authorization response. Same root cause as row 20. |
+| 26 | medium | patch | ECH: a raced redemption is refused but the family isn't revoked | A 0-row redeem of a code now records the `CodeReplay` revocation through `KeepOnFailure`. Tested with the race. |
+| 27 | low | patch | ECH (claim): the `RefuseTokenTargets` comment claims a check nothing enforces | The comment matches the new explicit check. |
+
 ## Design Notes
 
 **The sign-in seam.** AD-8 says Protocol calls `IAuthentication.Begin` and receives an `AuthenticationResult`. No screens exist until Story 4.1, and Story 4.2 binds real transactions and cookies. So Protocol owns a narrow port, `IAuthorizationSignIn`. The test host plugs `TestOnlyAuthenticator` in, and the release build plugs in `UnavailableSignIn`, which completes nothing. The authorize request therefore runs end to end in one call in tests, and safely refuses in production. Story 4.2 replaces the default with transaction-cookie resumption, not the port.
@@ -184,3 +220,54 @@ deferred: []
 
 **Commands:**
 - CI on the PR (Architecture and Isolation suites in Docker) -- expected: green. Don't run the full suite locally; targeted classes in the tests container are fine.
+
+## Auto Run Result
+
+**Summary.** Tenant hosts now run the authorization code flow with S256 PKCE (FR-13, FR-23, FR-47, AD-8, AD-9).
+- **Authorize:** `/connect/authorize` validates the client and its exact redirect URI, then calls `IAuthentication.BeginAsync` and the new `IAuthorizationSignIn` port.
+  - On a result it creates one ad-hoc authorization anchored to the Session, then issues a `{tenantPublicId}.{random}` code that lives 60 seconds. `iss` is in every response.
+  - The release default, `UnavailableSignIn`, answers `temporarily_unavailable`. The test host plugs in `TestOnlyAuthenticator`.
+  - An unknown client or unregistered `redirect_uri` gets a static fixed-text page with the AD-21 CSP, never a redirect.
+- **Token exchange:** the code grant issues an `at+jwt` access token and an ID token.
+- **Replay:** a replayed or raced code revokes its family through `RevokeAccessAsync(CodeReplay)`, committed by `FailureContext`.
+- **Foreign codes:** a code carrying another Tenant's prefix is refused before lookup and logged as an unauthenticated cross-Tenant mismatch.
+- **Stores and grants:** Sessions' authorization and token stores are built, with a revoked status refused through update. `gk_hosted`'s UPDATE on `token`/`authorization` is narrowed to columns.
+- **Directory:** gains confidential `web` clients with validated redirect URIs.
+
+**Files changed (main ones)**
+- `src/Adapters/Postgres/Migrations/Migration20261110000000CreateCodeFlow.cs`, `TableRegistry.cs`: `web` kind, `redirect_uris`, CHECKs, narrowed grants.
+- `src/Gatekeep.Kernel/{Limits/SecurityLimits.cs, Identifiers/PublicId.cs}`: the code and ID token lifetimes, `usr_` and `ses_`.
+- `src/Modules/Directory/**`: `CreateWebClientAsync`, redirect-URI rules, store permissions and PKCE requirement.
+- `src/Modules/Sessions/Adapters/TokenStore.cs`, `Contracts/*`: the token and authorization stores, replay and race routing, failure marking.
+- `src/Modules/Protocol/Core/{AuthorizeEndpoint.cs, ReferenceIds.cs, TokenEndpoint.cs, TokenRequestTransaction.cs, ProtocolServer.cs}`, `Contracts/ProtocolContract.cs`: the endpoint, the port and its default, reference IDs, scope rules, and replay on dispose.
+- `src/Gatekeep.Host.Hosted/Program.cs`, `src/Adapters/Hosting/SecurityHeaders.cs`: composition and page headers.
+- Tests:
+  - new: `AuthorizationCodeTests`, `TestAuthorizationSignIn`, `SessionStoresTests`, `SignInPortRuleTests`;
+  - updated: discovery, cross-Tenant registries, canary, `MigrateCommandTests` (26).
+
+**Deviations from the spec**
+- The authorize transaction opens at `ExtractAuthorizationRequestContext`, because OpenIddict's client checks read through it.
+- A validation error after the client and redirect URI are trusted goes back to the client with `iss`. OpenIddict normally answers those locally.
+- A code exchange may send only `scope=openid`, which is dropped before OpenIddict sees it, because OpenIddict 7.7.2 refuses any scope there. Any other scope gets `invalid_scope`.
+- `AddGatekeepProtocol` takes a page-headers delegate, and `TryAdd`s the release sign-in.
+- Only `token` and `authorization` grants are narrowed. `user_session` and `signin_transaction` keep table-wide UPDATE.
+
+**Review findings.** 27 findings: 17 patched (9 root causes), 0 deferred, and 10 rejected (3 false, 7 low). Reasons are in the triage log.
+
+**Follow-up review: recommended (`true`).** Six medium entries were patched (patched counts by verdict: medium 6, low 11). The unverified risks a second pass should check:
+- The foreign-prefix logging now runs inside a token-request handler. A second pass should confirm it never logs a value or holds two pooled connections.
+- The `scope=openid` drop relies on OpenIddict's handler order.
+- The swallowed-failure test reaches `TokenRequestTransaction.Store` by reflection, and assumes the ID token row is OpenIddict's last write.
+
+**Verification**
+- Implementer runs in the tests container, before the patches:
+  - Architecture: 758 of 758.
+  - `AuthorizationCodeTests`, `SessionStoresTests`, `DirectoryTests` and `SessionTablesTests`: 180 of 180.
+- After the patches, in the same container: `AuthorizationCodeTests` 36 of 36, `DirectoryTests` 69 of 69 and `SessionStoresTests` 4 of 4.
+- The full local run was stopped for low memory, so the full Architecture and Isolation suites run in CI on PR #54.
+- **Matrix audit:** every I/O row has a test in `AuthorizationCodeTests`, `DirectoryTests` or `SessionStoresTests`, and those classes passed in the runs above.
+
+**Residual risks**
+- `form_post` auto-submit hasn't been tried in a real browser under Hosted's headers.
+- Discovery still lists the `consent` and `select_account` prompt values.
+- The real Host.Hosted is never driven through authorize; the release default is tested through Protocol's own `TryAdd`.

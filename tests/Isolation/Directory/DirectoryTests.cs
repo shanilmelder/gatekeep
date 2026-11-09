@@ -95,7 +95,7 @@ public sealed class DirectoryTests(PostgresFixture postgres)
     public async Task Creating_a_web_client_writes_its_redirect_uris_the_code_grant_one_secret_hash_and_one_event()
     {
         var database = await DatabaseAsync();
-        string[] uris = ["https://app.example/callback", "http://localhost:8080/cb", "http://127.0.0.1/cb?x=1"];
+        string[] uris = ["https://app.example/callback", "http://127.0.0.1:8080/cb", "http://[::1]/cb?x=1"];
 
         await using (var source = NpgsqlDataSource.Create(postgres.RoleConnection(TableRegistry.Admin, database)))
         await using (var scope = await TenantScope.BeginAsync(source, TenantA, Cancellation))
@@ -109,26 +109,26 @@ public sealed class DirectoryTests(PostgresFixture postgres)
 
             var superuser = postgres.SuperuserConnection(database);
             Assert.Equal(1L, await PostgresFixture.ScalarAsync<long>(superuser,
-                $"SELECT count(*) FROM application WHERE id = '{created.ApplicationId}' AND kind = 'web' AND grant_types = ARRAY['authorization_code'] AND audiences = '{{}}' AND redirect_uris = ARRAY['https://app.example/callback', 'http://localhost:8080/cb', 'http://127.0.0.1/cb?x=1']"));
+                $"SELECT count(*) FROM application WHERE id = '{created.ApplicationId}' AND kind = 'web' AND grant_types = ARRAY['authorization_code'] AND audiences = '{{}}' AND redirect_uris = ARRAY['https://app.example/callback', 'http://127.0.0.1:8080/cb', 'http://[::1]/cb?x=1']"));
             Assert.Equal(1L, await CountAsync(superuser, "SELECT count(*) FROM client_secret WHERE application_id = @id AND secret_hash = @hash",
                 ("id", created.ApplicationId), ("hash", SHA256.HashData(Encoding.UTF8.GetBytes(secret)))));
             Assert.Equal(1L, await PostgresFixture.ScalarAsync<long>(superuser,
                 $"SELECT count(*) FROM audit_event WHERE type_code = 'directory.application.created' AND actor_kind = 'system' AND target_id = '{created.ApplicationId}'"));
         }
 
-        // OpenIddict's store hands out the redirect URIs, the code flow's permissions and PKCE, and finds the client by a URI.
+        // OpenIddict's store hands out the redirect URIs, the code flow's permissions and PKCE.
         await using var hosted = NpgsqlDataSource.Create(postgres.RoleConnection(TableRegistry.Hosted, database));
         await using var read = await TenantScope.BeginAsync(hosted, TenantA, Cancellation);
         var context = read.CreateCommandContext();
         var store = DirectoryContract.CreateApplicationStore(() => context);
-        var found = Assert.Single(await ToListAsync(store.FindByRedirectUriAsync("http://localhost:8080/cb", Cancellation)));
+        var found = (await store.FindByClientIdAsync(PublicId.Format(PublicIdType.Application, await PostgresFixture.ScalarAsync<Guid>(
+            postgres.SuperuserConnection(database), "SELECT id FROM application WHERE kind = 'web'")), Cancellation))!;
         Assert.Equal(uris, await store.GetRedirectUrisAsync(found, Cancellation));
         Assert.Equal(
             ["ept:authorization", "ept:token", "gt:authorization_code", "rst:code"],
             (await store.GetPermissionsAsync(found, Cancellation)).Order(StringComparer.Ordinal));
         Assert.Equal(["ft:pkce"], await store.GetRequirementsAsync(found, Cancellation));
         Assert.Equal("confidential", await store.GetClientTypeAsync(found, Cancellation));
-        Assert.Empty(await ToListAsync(store.FindByRedirectUriAsync("http://localhost:8080/cb/", Cancellation)));
     }
 
     [Fact]
@@ -147,12 +147,13 @@ public sealed class DirectoryTests(PostgresFixture postgres)
         Assert.Empty(await store.GetRedirectUrisAsync(found, Cancellation));
         Assert.Empty(await store.GetRequirementsAsync(found, Cancellation));
         Assert.Equal(["ept:token", "gt:client_credentials"], (await store.GetPermissionsAsync(found, Cancellation)).Order(StringComparer.Ordinal));
-        Assert.Empty(await ToListAsync(store.FindByRedirectUriAsync("https://app.example/callback", Cancellation)));
     }
 
     public static TheoryData<string[]> BadRedirectUris => new()
     {
         new[] { "http://example.com/cb" },
+        new[] { "http://localhost/cb" },
+        new[] { "http://localhost:8080/cb" },
         new[] { "https://example.com/cb#fragment" },
         new[] { "https://example.com/cb#" },
         new[] { "/relative/cb" },
@@ -178,17 +179,6 @@ public sealed class DirectoryTests(PostgresFixture postgres)
         Assert.Equal(0L, await PostgresFixture.ScalarAsync<long>(postgres.SuperuserConnection(database), "SELECT count(*) FROM application"));
         Assert.Equal(0L, await PostgresFixture.ScalarAsync<long>(
             postgres.SuperuserConnection(database), "SELECT count(*) FROM audit_event WHERE type_code = 'directory.application.created'"));
-    }
-
-    private static async Task<List<T>> ToListAsync<T>(IAsyncEnumerable<T> items)
-    {
-        var list = new List<T>();
-        await foreach (var item in items)
-        {
-            list.Add(item);
-        }
-
-        return list;
     }
 
     [Fact]

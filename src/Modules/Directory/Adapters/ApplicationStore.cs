@@ -20,8 +20,7 @@ namespace Gatekeep.Modules.Directory.Adapters;
 /// hide the Tenant's <c>system</c> Application (Story 2.8, AD-12): its ID and <c>client_id</c> find
 /// nothing, so OpenIddict refuses it as an unknown client and never issues a code or token for it.
 /// Story 2.9: a <c>web</c> client's redirect URIs, its authorization endpoint and <c>code</c> response
-/// type permissions and its PKCE requirement, and the lookup by redirect URI, which hides the
-/// <c>system</c> Application too. Every Application stays confidential.
+/// type permissions and its PKCE requirement. Every Application stays confidential.
 /// </summary>
 internal sealed class ApplicationStore(Func<CommandContext> context) : IOpenIddictApplicationStore<DirectoryApplication>
 {
@@ -104,20 +103,12 @@ internal sealed class ApplicationStore(Func<CommandContext> context) : IOpenIddi
     public IAsyncEnumerable<DirectoryApplication> FindByPostLogoutRedirectUriAsync(string uri, CancellationToken cancellationToken) =>
         throw Unsupported();
 
-    /// <summary>The visible Applications that registered <paramref name="uri"/> exactly; never the <c>system</c> one (Story 2.9).</summary>
-    public async IAsyncEnumerable<DirectoryApplication> FindByRedirectUriAsync(
-        string uri, [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
-    {
-        if (string.IsNullOrEmpty(uri))
-        {
-            yield break;
-        }
-
-        foreach (var application in await ApplicationRows.FindByRedirectUriAsync(context(), uri, cancellationToken))
-        {
-            yield return application;
-        }
-    }
+    /// <summary>
+    /// Unused: OpenIddict checks a redirect URI against the client its <c>client_id</c> names, never by
+    /// looking an Application up by URI.
+    /// </summary>
+    public IAsyncEnumerable<DirectoryApplication> FindByRedirectUriAsync(string uri, CancellationToken cancellationToken) =>
+        throw Unsupported();
 
     public ValueTask<long> CountAsync(CancellationToken cancellationToken) => throw Unsupported();
 

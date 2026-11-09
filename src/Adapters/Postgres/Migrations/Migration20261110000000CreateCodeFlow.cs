@@ -10,8 +10,6 @@ namespace Gatekeep.Adapters.Postgres.Migrations;
 /// <c>application.redirect_uris</c> holds its registered redirect URIs. <c>application_redirect_uris</c>
 /// holds a <c>web</c> row to 1 to 10 redirect URIs and exactly the <c>authorization_code</c> grant, and
 /// a <c>machine</c> or <c>system</c> row to none. Directory checks each URI's form before it writes one.</item>
-/// <item><c>application_redirect_uri_lookup</c> serves OpenIddict's lookup of an Application by a
-/// redirect URI (<c>redirect_uris @&gt; ARRAY[…]</c>).</item>
 /// <item>The 2.6 and 2.7 deferral: <c>gk_hosted</c>'s table-wide <c>UPDATE</c> on <c>token</c> and
 /// <c>"authorization"</c> is narrowed to exactly the columns the Sessions stores and the one revocation
 /// path update. A token is updated only in its status, payload, reference ID, redemption date and
@@ -38,8 +36,6 @@ public sealed class Migration20261110000000CreateCodeFlow : Migration
                 AND cardinality(redirect_uris) BETWEEN 1 AND 10
                 AND grant_types = ARRAY['authorization_code']::text[])
               OR (kind <> 'web' AND redirect_uris = '{}'));
-
-            CREATE INDEX application_redirect_uri_lookup ON application USING gin (redirect_uris);
 
             -- Only the columns the stores and the revocation path update (Story 2.6 and 2.7 deferral).
             REVOKE UPDATE ON token FROM gk_hosted;

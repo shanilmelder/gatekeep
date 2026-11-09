@@ -63,6 +63,8 @@ internal sealed class ProtocolHost : IAsyncDisposable
     /// test that needs the production scrubbing pipeline. <paramref name="signIn"/> completes the
     /// authorization endpoint's sign-ins (Story 2.9): by default the release build's
     /// <see cref="UnavailableSignIn"/>, which completes none; a code flow test passes the test-only one.
+    /// <paramref name="configure"/> changes the services once Protocol registered its own, for a test
+    /// that wraps one.
     /// </summary>
     public static async Task<ProtocolHost> StartAsync(
         string hostedConnection,
@@ -70,7 +72,8 @@ internal sealed class ProtocolHost : IAsyncDisposable
         TimeProvider? time = null,
         TokenRequestLimits? limits = null,
         Action<ILoggingBuilder>? logging = null,
-        Func<IServiceProvider, IAuthorizationSignIn>? signIn = null)
+        Func<IServiceProvider, IAuthorizationSignIn>? signIn = null,
+        Action<IServiceCollection>? configure = null)
     {
         var custody = new ControlledCustody(bao.Custody(OpenBaoFixture.Hosted));
         var logs = new CapturingLoggerProvider();
@@ -100,16 +103,14 @@ internal sealed class ProtocolHost : IAsyncDisposable
 
         builder.Services.AddSingleton<IKeyCustody>(custody);
         builder.Services.AddSingleton(AuditContract.CreateAppender());
-        if (signIn is null)
-        {
-            builder.Services.AddSingleton<IAuthorizationSignIn, UnavailableSignIn>();
-        }
-        else
+        // With none, Protocol's own default stands, as on Host.Hosted.
+        if (signIn is not null)
         {
             builder.Services.AddSingleton(signIn);
         }
 
         builder.Services.AddGatekeepProtocol(_ => hostedConnection, Gatekeep.Adapters.Hosting.SecurityHeaders.Apply);
+        configure?.Invoke(builder.Services);
 
         var app = builder.Build();
 

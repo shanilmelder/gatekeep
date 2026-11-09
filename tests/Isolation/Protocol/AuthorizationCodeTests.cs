@@ -19,6 +19,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.IdentityModel.JsonWebTokens;
 using Microsoft.IdentityModel.Tokens;
 using Npgsql;
+using OpenIddict.Abstractions;
 using Xunit;
 
 namespace Gatekeep.Tests.Isolation.Protocol;
@@ -36,9 +37,11 @@ public sealed class AuthorizationCodeTests(PostgresFixture postgres, OpenBaoFixt
 {
     private const string HostA = "acme.code.test";
     private const string HostB = "beta.code.test";
+    private const string HostC = "bare.code.test";
     private const string Callback = "https://client.code.test/callback";
     private const string OtherCallback = "https://client.code.test/other-callback";
     private const string Revoked = "sessions.access.revoked";
+    private const string CrossTenantRejected = "protocol.client.cross_tenant_rejected";
 
     private static CancellationToken Cancellation => TestContext.Current.CancellationToken;
 
@@ -88,9 +91,10 @@ public sealed class AuthorizationCodeTests(PostgresFixture postgres, OpenBaoFixt
         Assert.Equal(SecurityAlgorithms.RsaSha256, id.Alg);
         Assert.Equal(subject, id.Subject);
         Assert.Equal("nonce-1", id.GetClaim("nonce").Value);
+        Assert.Equal(SecurityLimits.DefaultIdentityTokenLifetime, id.ValidTo - id.IssuedAt);
         Assert.Equal([flow.ClientA.ClientId], id.Audiences);
         var sessionId = await flow.Database.ScalarAsync<Guid>($"SELECT id FROM user_session WHERE tenant_id = '{flow.A.TenantId}' AND user_id = '{flow.UserA}'");
-        Assert.Equal(sessionId.ToString(), id.GetClaim("sid").Value);
+        Assert.Equal(PublicId.Format(PublicIdType.Session, sessionId), id.GetClaim("sid").Value);
         var authTime = await flow.Database.ScalarAsync<DateTime>($"SELECT auth_time FROM user_session WHERE id = '{sessionId}'");
         Assert.Equal(new DateTimeOffset(authTime, TimeSpan.Zero).ToUnixTimeSeconds().ToString(System.Globalization.CultureInfo.InvariantCulture), id.GetClaim("auth_time").Value);
         Assert.Contains("\"amr\":[\"test\"]", Encoding.UTF8.GetString(Base64UrlEncoder.DecodeBytes(idToken.Split('.')[1])), StringComparison.Ordinal);
@@ -303,6 +307,114 @@ public sealed class AuthorizationCodeTests(PostgresFixture postgres, OpenBaoFixt
     }
 
     [Fact]
+    public async Task Two_exchanges_of_one_code_racing_get_one_token_and_the_family_is_revoked()
+    {
+        var flow = await CodeFlowSetup.CreateAsync(postgres, bao, HostA, HostB);
+        await using var host = await flow.StartHostAsync();
+
+        var pkce = Pkce.New();
+        var code = await CodeFlow.CodeAsync(host, HostA, flow.ClientA.ClientId, Callback, pkce, flow.UserA);
+
+        var results = await Task.WhenAll(
+            CodeFlow.ExchangeAsync(host, HostA, flow.ClientA.ClientId, flow.ClientA.Secret, code, Callback, pkce.Verifier),
+            CodeFlow.ExchangeAsync(host, HostA, flow.ClientA.ClientId, flow.ClientA.Secret, code, Callback, pkce.Verifier));
+        try
+        {
+            Assert.Single(results, r => r.Status == HttpStatusCode.OK);
+            Assert.Single(results, r => r.Status == HttpStatusCode.BadRequest && r.Error == "invalid_grant");
+        }
+        finally
+        {
+            foreach (var result in results)
+            {
+                result.Dispose();
+            }
+        }
+
+        // Whichever way the loser lost, the code was replayed: the winner's tokens are revoked with their family.
+        Assert.Equal(0L, await flow.Database.ScalarAsync<long>($"SELECT count(*) FROM token WHERE tenant_id = '{flow.A.TenantId}' AND status <> 'revoked'"));
+        Assert.Equal(3L, await flow.Database.ScalarAsync<long>($"SELECT count(*) FROM token WHERE tenant_id = '{flow.A.TenantId}' AND status = 'revoked'"));
+        Assert.Equal(1L, await flow.Database.ScalarAsync<long>($"SELECT count(*) FROM \"authorization\" WHERE tenant_id = '{flow.A.TenantId}' AND status = 'revoked'"));
+    }
+
+    [Fact]
+    public async Task A_code_exchange_may_name_openid_and_no_other_scope()
+    {
+        var flow = await CodeFlowSetup.CreateAsync(postgres, bao, HostA, HostB);
+        await using var host = await flow.StartHostAsync();
+
+        var refusedPkce = Pkce.New();
+        var refusedCode = await CodeFlow.CodeAsync(host, HostA, flow.ClientA.ClientId, Callback, refusedPkce, flow.UserA);
+        using (var refused = await CodeFlow.ExchangeAsync(
+            host, HostA, flow.ClientA.ClientId, flow.ClientA.Secret, refusedCode, Callback, refusedPkce.Verifier, scope: "openid email"))
+        {
+            Assert.Equal(HttpStatusCode.BadRequest, refused.Status);
+            Assert.Equal("invalid_scope", refused.Error);
+            Assert.False(refused.Body.RootElement.TryGetProperty("access_token", out _));
+        }
+
+        var pkce = Pkce.New();
+        var code = await CodeFlow.CodeAsync(host, HostA, flow.ClientA.ClientId, Callback, pkce, flow.UserA);
+        using var issued = await CodeFlow.ExchangeAsync(host, HostA, flow.ClientA.ClientId, flow.ClientA.Secret, code, Callback, pkce.Verifier, scope: "openid");
+        Assert.Equal(HttpStatusCode.OK, issued.Status);
+    }
+
+    [Fact]
+    public async Task A_Tenant_with_no_Signing_Key_refuses_with_a_server_error_redirect_and_begins_nothing()
+    {
+        var flow = await CodeFlowSetup.CreateAsync(postgres, bao, HostA, HostB);
+        var bare = await flow.Database.AddTenantAsync(HostC);
+        var client = await flow.Database.CreateWebClientAsync(bare.TenantId, [Callback]);
+        var user = await flow.Database.AddUserAsync(bare.TenantId);
+        await using var host = await flow.StartHostAsync();
+
+        using var authorize = await CodeFlow.AuthorizeAsync(host, HostC, client.ClientId, Callback, Pkce.New(), user, state: "state-8");
+
+        AssertErrorRedirect(authorize, bare, "server_error", "state-8");
+        await AssertNothingBegunAsync(flow);
+    }
+
+    [Fact]
+    public async Task A_state_too_large_to_keep_is_an_invalid_request_redirect_and_writes_nothing()
+    {
+        var flow = await CodeFlowSetup.CreateAsync(postgres, bao, HostA, HostB);
+        await using var host = await flow.StartHostAsync();
+        var state = new string('s', 17_000);
+
+        using var authorize = await CodeFlow.AuthorizeAsync(host, HostA, flow.ClientA.ClientId, Callback, Pkce.New(), flow.UserA, state: state);
+
+        AssertErrorRedirect(authorize, flow.A, "invalid_request", state);
+        await AssertNothingBegunAsync(flow);
+        Assert.Equal(0L, await flow.Database.ScalarAsync<long>("SELECT count(*) FROM token"));
+    }
+
+    [Fact]
+    public async Task A_store_statement_that_fails_and_is_swallowed_ends_as_server_error_and_commits_nothing()
+    {
+        var flow = await CodeFlowSetup.CreateAsync(postgres, bao, HostA, HostB);
+        var failing = new FailingTokenStore.Switch();
+        await using var host = await flow.StartHostAsync(configure: services => FailingTokenStore.Wrap(services, failing));
+
+        var pkce = Pkce.New();
+        var code = await CodeFlow.CodeAsync(host, HostA, flow.ClientA.ClientId, Callback, pkce, flow.UserA);
+        var tokensBefore = await flow.Database.ScalarAsync<long>($"SELECT count(*) FROM token WHERE tenant_id = '{flow.A.TenantId}'");
+
+        failing.On = true;
+        using var refused = await CodeFlow.ExchangeAsync(host, HostA, flow.ClientA.ClientId, flow.ClientA.Secret, code, Callback, pkce.Verifier);
+
+        Assert.Equal(1, failing.Failures);
+        Assert.Equal(HttpStatusCode.InternalServerError, refused.Status);
+        Assert.Equal("server_error", refused.Error);
+        Assert.False(refused.Body.RootElement.TryGetProperty("access_token", out _));
+        Assert.False(refused.Body.RootElement.TryGetProperty("id_token", out _));
+
+        // Nothing the exchange wrote was kept: no new token row, and the code is still unredeemed.
+        Assert.Equal(tokensBefore, await flow.Database.ScalarAsync<long>($"SELECT count(*) FROM token WHERE tenant_id = '{flow.A.TenantId}'"));
+        Assert.Equal(1L, await flow.Database.ScalarAsync<long>(
+            $"SELECT count(*) FROM token WHERE tenant_id = '{flow.A.TenantId}' AND status = 'valid' AND redemption_date IS NULL"));
+    }
+
+    [Fact]
     public async Task A_code_redeemed_by_another_client_or_to_another_redirect_uri_is_invalid_grant()
     {
         var flow = await CodeFlowSetup.CreateAsync(postgres, bao, HostA, HostB);
@@ -344,6 +456,17 @@ public sealed class AuthorizationCodeTests(PostgresFixture postgres, OpenBaoFixt
             Assert.Equal(HttpStatusCode.BadRequest, byB.Status);
             Assert.Equal("invalid_grant", byB.Error);
             Assert.False(byB.Body.RootElement.TryGetProperty("access_token", out _));
+        }
+
+        // An unauthenticated cross-Tenant mismatch: counted and logged once in B's Log, anonymous, and none in A's.
+        Assert.Equal(1L, await flow.Database.ScalarAsync<long>(
+            $"SELECT count(*) FROM audit_event WHERE tenant_id = '{flow.B.TenantId}' AND type_code = '{CrossTenantRejected}' AND actor_kind = 'anonymous' AND target_id IS NULL"));
+        Assert.Equal(0L, await flow.Database.ScalarAsync<long>(
+            $"SELECT count(*) FROM audit_event WHERE tenant_id = '{flow.A.TenantId}' AND type_code = '{CrossTenantRejected}'"));
+        foreach (var name in new[] { flow.A.TenantId.ToString(), PublicId.Format(PublicIdType.Tenant, flow.A.TenantId), flow.ClientA.ClientId })
+        {
+            Assert.Equal(0L, await flow.Database.ScalarAsync<long>(
+                $"SELECT count(*) FROM audit_event r WHERE tenant_id = '{flow.B.TenantId}' AND strpos(to_jsonb(r)::text, '{name}') > 0"));
         }
 
         // With A's client too: its credential isn't B's, so B refuses the client before the code.
@@ -525,13 +648,17 @@ internal sealed record CodeFlowSetup(
     }
 
     /// <summary>The Hosted pipeline with the test-only sign-in plugged into Protocol's port.</summary>
-    public Task<ProtocolHost> StartHostAsync(TimeProvider? time = null, Action<Microsoft.Extensions.Logging.ILoggingBuilder>? logging = null) =>
+    public Task<ProtocolHost> StartHostAsync(
+        TimeProvider? time = null,
+        Action<Microsoft.Extensions.Logging.ILoggingBuilder>? logging = null,
+        Action<IServiceCollection>? configure = null) =>
         ProtocolHost.StartAsync(
             Database.Hosted,
             Bao,
             time: time,
             logging: logging,
-            signIn: provider => new TestAuthorizationSignIn(provider.GetRequiredService<TimeProvider>()));
+            signIn: provider => new TestAuthorizationSignIn(provider.GetRequiredService<TimeProvider>()),
+            configure: configure);
 }
 
 /// <summary>A PKCE pair: a 256-bit verifier, and its S256 challenge.</summary>
@@ -621,17 +748,23 @@ internal static class CodeFlow
 
     /// <summary>Redeems <paramref name="code"/> at the token endpoint, authenticating the client by Basic.</summary>
     public static async Task<TokenResponse> ExchangeAsync(
-        ProtocolHost host, string tenantHost, string clientId, string secret, string code, string redirectUri, string verifier)
+        ProtocolHost host, string tenantHost, string clientId, string secret, string code, string redirectUri, string verifier, string? scope = null)
     {
+        var form = new Dictionary<string, string>
+        {
+            ["grant_type"] = "authorization_code",
+            ["code"] = code,
+            ["redirect_uri"] = redirectUri,
+            ["code_verifier"] = verifier,
+        };
+        if (scope is not null)
+        {
+            form["scope"] = scope;
+        }
+
         using var request = new HttpRequestMessage(HttpMethod.Post, new Uri($"http://{tenantHost}{ProtocolContract.TokenPath}"))
         {
-            Content = new FormUrlEncodedContent(new Dictionary<string, string>
-            {
-                ["grant_type"] = "authorization_code",
-                ["code"] = code,
-                ["redirect_uri"] = redirectUri,
-                ["code_verifier"] = verifier,
-            }),
+            Content = new FormUrlEncodedContent(form),
         };
         request.Headers.Authorization = new AuthenticationHeaderValue(
             "Basic", Convert.ToBase64String(Encoding.UTF8.GetBytes($"{Uri.EscapeDataString(clientId)}:{Uri.EscapeDataString(secret)}")));
@@ -680,5 +813,77 @@ internal static class CodeFlow
         await using var command = new NpgsqlCommand($"SELECT count(*) FROM \"{table}\" r WHERE strpos(to_jsonb(r)::text, @value) > 0", connection);
         command.Parameters.AddWithValue("value", value);
         return (long)(await command.ExecuteScalarAsync(Cancellation))!;
+    }
+}
+
+/// <summary>
+/// Protocol's token store, wrapped (Story 2.9): while its switch is on, once the ID token's row is
+/// written, the last store write of a code exchange, it runs one statement that fails in the request's
+/// own transaction and swallows the failure, as OpenIddict swallows some store failures, after marking
+/// the request failed through its <see cref="StoreRequest"/>, as the real store does.
+/// </summary>
+public class FailingTokenStore : DispatchProxy
+{
+    private IOpenIddictTokenStore<SessionsToken> _inner = null!;
+    private StoreRequest _request = null!;
+    private Switch _switch = null!;
+
+    /// <summary>Replaces Protocol's token store registration with this wrapper around it.</summary>
+    internal static void Wrap(IServiceCollection services, Switch failing)
+    {
+        var registered = services.Last(d => d.ServiceType == typeof(IOpenIddictTokenStore<SessionsToken>));
+        var transactionType = typeof(ProtocolContract).Assembly.GetType("Gatekeep.Modules.Protocol.Core.TokenRequestTransaction", throwOnError: true)!;
+        services.Remove(registered);
+        services.AddScoped(provider =>
+        {
+            var proxy = Create<IOpenIddictTokenStore<SessionsToken>, FailingTokenStore>();
+            var wrapper = (FailingTokenStore)(object)proxy;
+            wrapper._inner = (IOpenIddictTokenStore<SessionsToken>)registered.ImplementationFactory!(provider);
+            wrapper._request = (StoreRequest)transactionType.GetProperty("Store")!.GetValue(provider.GetRequiredService(transactionType))!;
+            wrapper._switch = failing;
+            return proxy;
+        });
+    }
+
+    protected override object? Invoke(MethodInfo? targetMethod, object?[]? args)
+    {
+        var result = targetMethod!.Invoke(_inner, args);
+        if (targetMethod.Name == nameof(IOpenIddictTokenStore<SessionsToken>.CreateAsync) && _switch.On && result is ValueTask created)
+        {
+            return new ValueTask(FailAfterAsync(created, (SessionsToken)args![0]!));
+        }
+
+        return result;
+    }
+
+    private async Task FailAfterAsync(ValueTask created, SessionsToken token)
+    {
+        await created;
+        if (await _inner.GetTypeAsync(token, CancellationToken.None) != OpenIddict.Abstractions.OpenIddictConstants.TokenTypeIdentifiers.IdentityToken)
+        {
+            return;
+        }
+
+        try
+        {
+            await using var command = _request.Context().CreateCommand();
+            command.CommandText = "SELECT 1 / 0";
+            await command.ExecuteScalarAsync(CancellationToken.None);
+        }
+        catch (PostgresException)
+        {
+            _request.MarkFailed();
+            Interlocked.Increment(ref _switch.FailureCount);
+        }
+    }
+
+    /// <summary>Turns the failure on, and counts the failures made.</summary>
+    internal sealed class Switch
+    {
+        public int FailureCount;
+
+        public volatile bool On;
+
+        public int Failures => Volatile.Read(ref FailureCount);
     }
 }

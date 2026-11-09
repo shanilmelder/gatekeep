@@ -18,10 +18,10 @@ builder.AddGatekeepHost(new HostProfile("Host.Hosted", ["Hosted"], HasPublicEndp
 // Each Tenant's OpenID Provider (Stories 2.3, 2.5 and 2.9): discovery, JWKS, Client Credentials and
 // the code flow with PKCE, as gk_hosted. Its audit events, such as a refused cross-Tenant credential,
 // go to the Tenant's Log. No sign-in screen exists before Stories 4.1 and 4.2, so a release build
-// completes no sign-in: every valid authorization request gets temporarily_unavailable and no code.
+// completes no sign-in (Protocol's default UnavailableSignIn): every valid authorization request gets
+// temporarily_unavailable and no code.
 // The one page the authorization endpoint shows carries the AD-21 Hosted headers.
 builder.Services.AddSingleton<IAuditAppender>(AuditContract.CreateAppender());
-builder.Services.AddSingleton<IAuthorizationSignIn, UnavailableSignIn>();
 builder.Services.AddGatekeepProtocol(services => services.GetRequiredService<HostDatabases>()["Hosted"], SecurityHeaders.Apply);
 var app = builder.Build();
 

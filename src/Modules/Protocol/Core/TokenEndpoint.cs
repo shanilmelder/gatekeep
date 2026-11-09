@@ -116,6 +116,28 @@ internal static class TokenEndpoint
 
     public static void RejectClient(BaseValidatingContext context) =>
         context.Reject(Errors.InvalidClient, InvalidClientDescription);
+
+    /// <summary>
+    /// An unauthenticated cross-Tenant mismatch (AD-9, Story 2.5): a client secret, or from Story 2.9 a
+    /// code, that isn't this Tenant's. It is counted per source in this Tenant's <c>tenant_attempt</c>,
+    /// and the first per source per hour writes <c>protocol.client.cross_tenant_rejected</c> to this
+    /// Tenant's Log, anonymous and naming nothing of the other Tenant. Both are kept through the
+    /// request's failure path, so they commit after its rollback.
+    /// </summary>
+    public static void KeepUnauthenticatedMismatch(BaseContext context, TokenRequestTransaction transaction, TokenEndpointServices services)
+    {
+        var rejected = new AuditEvent(ProtocolEvents.ClientCrossTenantRejected.Code, Actor.Anonymous);
+        var source = Source(Http(context));
+        transaction.KeepOnFailure(async (log, cancellationToken) =>
+        {
+            await services.Limiter.AttemptAsync(log, AuthenticationContract.CrossTenantMismatchPolicy, source, cancellationToken);
+            var first = await services.Limiter.AttemptAsync(log, AuthenticationContract.CrossTenantMismatchLogPolicy, source, cancellationToken);
+            if (first.Allowed)
+            {
+                await services.Audit.AppendAsync(log, rejected, detail: null, cancellationToken);
+            }
+        });
+    }
 }
 
 /// <summary>
@@ -193,8 +215,9 @@ internal sealed class BeginTokenTransaction(TokenRequestTransaction transaction,
 /// No audience or resource may be requested at a Tenant's token endpoint (Story 2.5), so the
 /// Management API audience can never be minted here: either is refused with <c>invalid_target</c>,
 /// before OpenIddict reads it. No scope is known yet either, so a Client Credentials request naming one
-/// is refused with <c>invalid_scope</c>. The code grant may repeat its granted scope (Story 2.9), which
-/// OpenIddict holds to what the code carries. Story 3.7 replaces both with real APIs.
+/// is refused with <c>invalid_scope</c>. A code exchange may name only <c>openid</c>, the one scope a
+/// code is ever granted (Story 2.9), which is then dropped, since it adds nothing to the code; any other
+/// is <c>invalid_scope</c>. Story 3.7 replaces both with real APIs.
 /// </summary>
 internal sealed class RefuseTokenTargets : IOpenIddictServerHandler<ValidateTokenRequestContext>
 {
@@ -213,9 +236,17 @@ internal sealed class RefuseTokenTargets : IOpenIddictServerHandler<ValidateToke
         {
             context.Reject(Errors.InvalidTarget, "No audience or resource may be requested here.");
         }
-        else if (!context.Request.IsAuthorizationCodeGrantType() && !context.Request.GetScopes().IsDefaultOrEmpty)
+        else if (context.Request.IsAuthorizationCodeGrantType()
+            ? context.Request.GetScopes().Any(s => s != Scopes.OpenId)
+            : !context.Request.GetScopes().IsDefaultOrEmpty)
         {
-            context.Reject(Errors.InvalidScope, "No scope may be requested here.");
+            context.Reject(Errors.InvalidScope, "No scope may be requested here but openid, on a code exchange.");
+        }
+        else if (context.Request.IsAuthorizationCodeGrantType())
+        {
+            // openid alone names nothing the code doesn't already carry; OpenIddict refuses any scope on
+            // a code exchange, so it is dropped before OpenIddict reads the request.
+            context.Request.Scope = null;
         }
 
         return ValueTask.CompletedTask;
@@ -283,16 +314,7 @@ internal sealed class AuthenticateGatekeepClient(TokenRequestTransaction transac
         }
         else
         {
-            var source = TokenEndpoint.Source(TokenEndpoint.Http(context));
-            transaction.KeepOnFailure(async (log, cancellationToken) =>
-            {
-                await services.Limiter.AttemptAsync(log, AuthenticationContract.CrossTenantMismatchPolicy, source, cancellationToken);
-                var first = await services.Limiter.AttemptAsync(log, AuthenticationContract.CrossTenantMismatchLogPolicy, source, cancellationToken);
-                if (first.Allowed)
-                {
-                    await services.Audit.AppendAsync(log, rejected, detail: null, cancellationToken);
-                }
-            });
+            TokenEndpoint.KeepUnauthenticatedMismatch(context, transaction, services);
         }
 
         // Nothing of the other Tenant, nor the presented values, is logged.

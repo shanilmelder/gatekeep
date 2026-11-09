@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using Gatekeep.Kernel.Identifiers;
+using Microsoft.Extensions.Logging;
 using Microsoft.IdentityModel.Tokens;
 using OpenIddict.Abstractions;
 using OpenIddict.Server;
@@ -76,13 +77,16 @@ internal sealed class AttachTenantReferenceId(IOpenIddictTokenManager tokens) : 
 /// A presented code (or, from Story 2.10, refresh token) whose prefix isn't the serving Tenant's public
 /// ID is refused here with <c>invalid_token</c>, which the token endpoint answers as <c>invalid_grant</c>,
 /// before OpenIddict's <c>ValidateReferenceTokenIdentifier</c> looks anything up (AD-9): no other Tenant's
-/// artifact, and no value with no prefix, ever reaches this Tenant's store.
+/// artifact, and no value with no prefix, ever reaches this Tenant's store. Nothing proves where such a
+/// value came from, so it is an unauthenticated cross-Tenant mismatch, counted and logged as Story 2.5's
+/// client secrets are.
 /// </summary>
-internal sealed class RejectForeignReferenceIds : IOpenIddictServerHandler<ValidateTokenContext>
+internal sealed class RejectForeignReferenceIds(TokenRequestTransaction transaction, TokenEndpointServices services)
+    : IOpenIddictServerHandler<ValidateTokenContext>
 {
     public static OpenIddictServerHandlerDescriptor Descriptor { get; } =
         OpenIddictServerHandlerDescriptor.CreateBuilder<ValidateTokenContext>()
-            .UseSingletonHandler<RejectForeignReferenceIds>()
+            .UseScopedHandler<RejectForeignReferenceIds>()
             .SetOrder(OpenIddictServerHandlers.Protection.RemoveDisallowedCharacters.Descriptor.Order + 500)
             .SetType(OpenIddictServerHandlerType.Custom)
             .Build();
@@ -101,6 +105,13 @@ internal sealed class RejectForeignReferenceIds : IOpenIddictServerHandler<Valid
         var prefix = PublicId.Format(PublicIdType.Tenant, TokenEndpoint.Tenant(context).TenantId) + ".";
         if (string.IsNullOrEmpty(context.Token) || !context.Token.StartsWith(prefix, StringComparison.Ordinal))
         {
+            if (transaction.IsOpen)
+            {
+                TokenEndpoint.KeepUnauthenticatedMismatch(context, transaction, services);
+            }
+
+            // Nothing of the value, or of any Tenant it names, is logged.
+            services.Logger?.LogInformation("A code or refresh token not issued by this Tenant was refused.");
             context.Reject(Errors.InvalidToken, "The token isn't valid.");
         }
 

@@ -30,7 +30,7 @@ internal static class AuthorizeEndpoint
     /// <summary>Where <see cref="TrustRedirectTarget"/> leaves the client's exact registered redirect URI.</summary>
     public const string TrustedRedirectProperty = ".gatekeep_trusted_redirect_uri";
 
-    /// <summary>The <c>sid</c> claim: the Session the sign-in started (OpenID Connect Front-Channel Logout).</summary>
+    /// <summary>The <c>sid</c> claim: the Session the sign-in started, as its <c>ses_</c> public ID (OpenID Connect Front-Channel Logout).</summary>
     public const string SessionIdClaim = "sid";
 
     /// <summary>
@@ -366,7 +366,7 @@ internal static class AuthorizePassthrough
 
         var identity = new ClaimsIdentity(TokenValidationParameters.DefaultAuthenticationType, Claims.Name, Claims.Role);
         identity.SetClaim(Claims.Subject, subject);
-        identity.SetClaim(AuthorizeEndpoint.SessionIdClaim, result.SessionId.ToString());
+        identity.SetClaim(AuthorizeEndpoint.SessionIdClaim, PublicId.Format(PublicIdType.Session, result.SessionId));
         identity.SetClaim(Claims.AuthenticationTime, (long?)result.AuthTime.ToUnixTimeSeconds());
         identity.SetClaims(Claims.AuthenticationMethodReference, ImmutableArray.CreateRange(result.Amr));
         identity.SetScopes(ImmutableArray.Create(Scopes.OpenId));

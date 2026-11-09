@@ -145,6 +145,15 @@ internal sealed class TokenStore(StoreRequest request, ISessions sessions) : IOp
 
         if (updated == 0)
         {
+            // Two exchanges of one code raced, and this one lost its redemption: the code was replayed,
+            // so its family is revoked as on any replay, then the redemption fails as OpenIddict expects.
+            if (token.Type == TokenTypeIdentifiers.Private.AuthorizationCode
+                && token.Status == Statuses.Redeemed
+                && token.AuthorizationId is { } family)
+            {
+                await RevokeFamilyAsync(family, RevocationReason.CodeReplay, cancellationToken);
+            }
+
             throw new OpenIddictExceptions.ConcurrencyException("The token changed or was revoked since it was read.");
         }
 
@@ -165,6 +174,15 @@ internal sealed class TokenStore(StoreRequest request, ISessions sessions) : IOp
         }
 
         var reason = _presentedType == TokenTypeIdentifiers.RefreshToken ? RevocationReason.TokenReuse : RevocationReason.CodeReplay;
+        return await RevokeFamilyAsync(authorizationId, reason, cancellationToken);
+    }
+
+    /// <summary>
+    /// Revokes a Token Family through the one revocation path with an anonymous Actor, recorded on the
+    /// request first, so the request commits it again after its rollback (AD-13).
+    /// </summary>
+    private async Task<long> RevokeFamilyAsync(Guid authorizationId, RevocationReason reason, CancellationToken cancellationToken)
+    {
         var scope = new RevocationScope.Authorization(authorizationId);
 
         request.KeepOnFailure((context, token) => sessions.RevokeAccessAsync(context, scope, null, reason, Actor.Anonymous, token));
@@ -563,15 +581,16 @@ internal sealed class AuthorizationStore(StoreRequest request) : IOpenIddictAuth
 /// <summary>What both stores share: parameters, readers, and marking the request failed on a failed statement.</summary>
 internal static class StoreSql
 {
-    /// <summary>Runs one statement; a database failure marks the request failed before it propagates.</summary>
+    /// <summary>Runs one statement; a database failure or a cancellation marks the request failed before it propagates.</summary>
     public static async Task<T> RunAsync<T>(StoreRequest request, Func<Task<T>> statement)
     {
         try
         {
             return await statement();
         }
-        catch (DbException)
+        catch (Exception e) when (e is DbException or OperationCanceledException)
         {
+            // Either one leaves PostgreSQL's transaction aborted: a cancelled statement as much as a failed one.
             request.MarkFailed();
             throw;
         }
