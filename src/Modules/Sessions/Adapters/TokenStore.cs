@@ -36,13 +36,16 @@ internal sealed class TokenStore(StoreRequest request, ISessions sessions) : IOp
         "id, application_id, authorization_id, subject, type, status, reference_id, payload, creation_date, "
         + "expiration_date, redemption_date, properties::text AS properties, concurrency_token";
 
-    // Only the columns gk_hosted may update (Story 2.9), under the row's concurrency token.
+    // Only the columns gk_hosted may update (Story 2.9), under the row's concurrency token. A redemption
+    // succeeds only on a row that is still valid (Story 2.10): one read again after another request
+    // redeemed and committed it matches nothing, and is a lost race.
     private const string Update =
         """
         UPDATE token
         SET status = @status, payload = @payload, reference_id = @reference_id, redemption_date = @redemption_date,
             concurrency_token = @next
         WHERE tenant_id = @tenant_id AND id = @id AND concurrency_token = @concurrency_token
+          AND (@status <> @redeemed OR status = @valid)
         """;
 
     /// <summary>The statuses the store itself writes. A family's tokens become revoked only by the one revocation path.</summary>
@@ -141,6 +144,8 @@ internal sealed class TokenStore(StoreRequest request, ISessions sessions) : IOp
             Add(command, "redemption_date", token.RedemptionDate);
             Add(command, "next", next);
             Add(command, "concurrency_token", token.ConcurrencyToken);
+            Add(command, "redeemed", Statuses.Redeemed);
+            Add(command, "valid", Statuses.Valid);
             updated = await StoreSql.RunAsync(request, () => command.ExecuteNonQueryAsync(cancellationToken));
         }
 

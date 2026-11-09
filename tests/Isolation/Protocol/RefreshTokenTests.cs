@@ -498,9 +498,11 @@ public sealed class RefreshTokenTests(PostgresFixture postgres, OpenBaoFixture b
             r1 = await OfflineAsync(issuing, flow);
         }
 
-        // The current key is gone; a fresh host builds A's runtime with no key that signs.
+        // The current key steps down to previous with no successor: it still verifies R1, which it signed,
+        // so a fresh host's runtime accepts R1 but holds no key that signs. (Revoking it would unpublish it,
+        // and R1 would then be refused as unverifiable, with invalid_grant, before the signing check.)
         await flow.Database.BackdateAsync(
-            $"UPDATE signing_key SET state = 'revoked' WHERE tenant_id = '{flow.A.TenantId}' AND purpose = 'signing' AND state = 'current'");
+            $"UPDATE signing_key SET state = 'previous', rotated_at = now() WHERE tenant_id = '{flow.A.TenantId}' AND purpose = 'signing' AND state = 'current'");
         var tokensBefore = await flow.Database.ScalarAsync<long>($"SELECT count(*) FROM token WHERE tenant_id = '{flow.A.TenantId}'");
         await using var host = await flow.StartHostAsync();
 

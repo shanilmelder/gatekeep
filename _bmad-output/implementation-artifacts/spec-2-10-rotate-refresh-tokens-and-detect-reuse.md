@@ -217,3 +217,10 @@ deferred: []
 **Residual risks**
 - The revocation-during-refresh test accepts either outcome (200 or `invalid_grant`), and asserts only the invariant that no `valid` token is left in a revoked family.
 - The default refresh grant for every `web` client is to be made per-Application in Story 3.2.
+
+**CI fixes (2026-11-09).** CI's first run of the new tests found three failures:
+- **A real double-issue bug (also in 2.9's code race).** OpenIddict's `RedeemTokenEntry` re-reads the token after the winner commits. The loser's update then matched the winner's new concurrency token and succeeded, and a second token set was issued. Fix: the store's update redeems only a row still `valid`. Caught by the deterministic lost-race test.
+- **The no-signing-key test's setup** revoked the key that signs the refresh token's JWS payload. It now leaves that key verifiable but unable to sign.
+- **"Token Family revocations"** was still pending on Story 2.10. It is now proved through the shared `sessions.access.revoked` code, since 2.7 and 2.10 both require that one event.
+
+Also, an Architecture rule (`RetentionRuleTests`) now names the 90-day refresh hard limit as not a retention period.
