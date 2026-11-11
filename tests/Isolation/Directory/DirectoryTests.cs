@@ -404,14 +404,13 @@ public sealed class DirectoryTests(PostgresFixture postgres)
     [Theory]
     [InlineData("", "spa")]
     [InlineData("   ", "spa")]
-    [InlineData("ab", "spa")]
+    [InlineData("a\u0001b", "spa")]
     [InlineData("x", "system")]
     [InlineData("x", "implicit")]
     [InlineData("x", "")]
     public async Task An_Admins_Application_with_a_bad_name_or_kind_writes_nothing(string name, string kind)
     {
         var database = await DatabaseAsync();
-        name = System.Text.RegularExpressions.Regex.Unescape(name);
 
         await using var source = NpgsqlDataSource.Create(postgres.RoleConnection(TableRegistry.Admin, database));
         await using var scope = await TenantScope.BeginAsync(source, TenantA, Cancellation);

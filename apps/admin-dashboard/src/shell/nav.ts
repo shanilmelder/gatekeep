@@ -13,6 +13,7 @@
 // stories the other Applications ones.
 
 import type { AdminNavGroupId, AdminNavItem, Messages } from '@gatekeep/ui/admin';
+import { applicationsPath } from './applications';
 import type { Capability } from './capabilities';
 
 type DeploymentCapability = Extract<Capability, `deployment.${string}`>;
@@ -36,7 +37,7 @@ export const NAV: readonly NavEntry[] = [
   {
     group: 'applications',
     label: 'applicationsTitle',
-    href: (tenantId) => `/tenants/${encodeURIComponent(tenantId)}/applications`,
+    href: applicationsPath,
     requires: 'tenant.configuration.read',
   },
   {

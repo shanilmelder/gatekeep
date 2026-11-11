@@ -1,5 +1,6 @@
 using System.Net;
 using System.Security.Cryptography;
+using Gatekeep.Adapters.Hosting;
 using Gatekeep.Kernel.Identifiers;
 using Gatekeep.Tests.Isolation.Custody;
 using Gatekeep.Tests.Isolation.Protocol;
@@ -18,6 +19,12 @@ namespace Gatekeep.Tests.Isolation.Applications;
 public sealed class InertApplicationTests(PostgresFixture postgres, OpenBaoFixture bao)
 {
     private const string TenantHost = "inert.tokens.test";
+
+    private const string AuthorizeHostA = "inert-a.code.test";
+
+    private const string AuthorizeHostB = "inert-b.code.test";
+
+    private static CancellationToken Cancellation => TestContext.Current.CancellationToken;
 
     public static TheoryData<string, string, string> Requests => new()
     {
@@ -62,5 +69,39 @@ public sealed class InertApplicationTests(PostgresFixture postgres, OpenBaoFixtu
 
         Assert.Equal(0L, await database.ScalarAsync<long>("SELECT count(*) FROM token"));
         Assert.Equal(0L, await database.ScalarAsync<long>($"SELECT count(*) FROM client_secret WHERE application_id = '{applicationId}'"));
+    }
+
+    /// <summary>
+    /// A new web Application has no redirect URI (Story 3.1), and a single-page or native one no code
+    /// permission: authorize, with any redirect_uri, is the static page and never a redirect, and no
+    /// sign-in begins.
+    /// </summary>
+    [Theory]
+    [InlineData("web")]
+    [InlineData("spa")]
+    [InlineData("native")]
+    public async Task A_new_Application_at_authorize_gets_the_static_page_and_never_a_redirect(string kind)
+    {
+        var flow = await CodeFlowSetup.CreateAsync(postgres, bao, AuthorizeHostA, AuthorizeHostB);
+        var (_, clientId) = await flow.Database.CreateApplicationAsync(flow.A.TenantId, kind);
+        await using var host = await flow.StartHostAsync();
+
+        foreach (var redirectUri in new[] { CodeFlowSetup.Callback, "https://anything.example/cb", "http://127.0.0.1:8080/cb" })
+        {
+            using var response = await CodeFlow.AuthorizeAsync(host, AuthorizeHostA, clientId, redirectUri, Pkce.New(), flow.UserA, state: "echo-me-not");
+
+            Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+            Assert.Null(response.Headers.Location);
+            Assert.True(response.Headers.CacheControl?.NoStore, "The page isn't no-store.");
+            Assert.Equal([SecurityHeaders.ContentSecurityPolicy], response.Headers.GetValues("Content-Security-Policy"));
+            Assert.Equal("text/html", response.Content.Headers.ContentType?.MediaType);
+            var body = await response.Content.ReadAsStringAsync(Cancellation);
+            Assert.Contains("<h1>Something went wrong</h1>", body, StringComparison.Ordinal);
+            Assert.DoesNotContain("echo-me-not", body, StringComparison.Ordinal);
+            Assert.DoesNotContain(redirectUri, body, StringComparison.Ordinal);
+        }
+
+        Assert.Equal(0L, await flow.Database.ScalarAsync<long>("SELECT count(*) FROM signin_transaction"));
+        Assert.Equal(0L, await flow.Database.ScalarAsync<long>("SELECT count(*) FROM \"authorization\""));
     }
 }

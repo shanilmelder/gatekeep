@@ -3,14 +3,28 @@ title: 'Story 3.1: List and create Applications'
 type: 'feature'
 created: '2026-11-11'
 baseline_revision: '55dacdad8ec85446a78e621f88fb8357b9599082'
-status: 'in-review'
+status: 'done'
 review_loop_iteration: 0
 followup_review_recommended: false
 context:
   - '{project-root}/_bmad-output/implementation-artifacts/epic-3-context.md'
   - '{project-root}/_bmad-output/implementation-artifacts/spec-2-11-offer-userinfo-and-revocation.md'
 warnings: ['oversized']
-deferred: []
+deferred:
+  - summary: >-
+      The generated OpenAPI document declares no path parameter for sub-resource IDs (applicationId, operationId, credentialId).
+    evidence: |-
+      docs/api/openapi-v1.json lists only tenantId for /api/v1/tenants/{tenantId}/applications/{applicationId}; /operations/{operationId} and /deployment/credentials/{credentialId} have the same gap, so the generator predates Story 3.1. Generated clients get no pattern for the ID.
+    location: >-
+      src/Gatekeep.Host.Admin/AdminOpenApi.cs
+    severity: low
+  - summary: >-
+      ApplicationStore reports every Application to OpenIddict as Confidential and Web, now including the public spa and native kinds.
+    evidence: |-
+      src/Modules/Directory/Adapters/ApplicationStore.cs:47-57 returns ClientTypes.Confidential for all rows (pre-existing). New spa/native rows have no grants, so no flow reaches it yet; Story 3.2, which gives them grants, must map kind to client type.
+    location: >-
+      src/Modules/Directory/Adapters/ApplicationStore.cs:47
+    severity: low
 ---
 
 <intent-contract>
@@ -139,6 +153,46 @@ deferred: []
 - Given a created Application, when its detail opens, then the client ID shows with Copy, and Credentials says a secret is needed for regular web and machine-to-machine and "No secret needed." for single-page and native.
 - Given the API changes, when CI runs the contract check, then `openapi-v1.json` and `schema.generated.ts` match the live routes, and the cross-Tenant, canary and capability suites pass with the new routes registered.
 
+## Spec Change Log
+
+## Review Triage Log
+
+### 2026-11-12 — Review pass
+- verdicts: 32 findings — high 0, medium 2, low 25, false 5, maybe-false 0
+- findings:
+  - `[low]` `[defer]` (Blind) OpenAPI GET detail route lacks the `applicationId` path parameter — real, but every sub-resource route (operations, credentials) has the same generator gap; deferred as pre-existing.
+  - `[low]` `[patch]` (Blind) Name bound: the input's `maxLength=200` cuts a pasted padded name before trimming — dropped the input `maxLength`; `checkApplicationName` refuses over-long trimmed names. The OpenAPI `maxLength` describes the trimmed value and is left.
+  - `[low]` `[defer]` (Blind) `ApplicationStore` treats spa/native as Confidential — pre-existing store behaviour; inert because spa/native have no grants; deferred to Story 3.2.
+  - `[medium]` `[patch]` (Blind) No test that a web Application with zero redirect URIs is refused at `/authorize` — added an authorize case for new web, spa and native Applications in `InertApplicationTests`.
+  - `[low]` `[reject]` (Blind) "Newest first" follows UUIDv7 order, not `created_at` — the keyset is a total order with no skips or repeats; only same-millisecond creates can swap places. Unlikely to be noticed, and the fix adds a composite cursor.
+  - `[low]` `[patch]` (Blind) The Load more failure banner drops the code and trace ID — `loadMore` keeps the failure and the banner renders `ErrorReference`.
+  - `[low]` `[patch]` (Blind) The detail page recomputes `credentialRequired` — it now reads the server's field.
+  - `[low]` `[reject]` (Blind) Pages import helpers from each other — cosmetic; no named caller diverges, and the fix is a module move.
+  - `[low]` `[patch]` (Blind) `nav.ts` hard-codes the Applications href — uses `applicationsPath`.
+  - `[low]` `[patch]` (Blind) The dedupe in `loadMore` is dead code with a wrong comment — removed.
+  - `[low]` `[patch]` (Blind) Create modal branches (409, 401, double submit) have no browser coverage — added 409 and 401 browser tests (grouped with the Verification Gap 409 finding).
+  - `[low]` `[patch]` (Blind) The control character in the `DirectoryTests` data is invisible — written as an escaped literal.
+  - `[low]` `[reject]` (Blind) No per-Tenant cap on Applications — only Editors of the Tenant can create, and the epic sets no quota. The fix adds a new limit and refusal.
+  - `[false]` `[reject]` (Blind) The spec records nothing delivered — the finalize step writes the Auto Run Result after review; it hadn't run yet.
+  - `[low]` `[patch]` (Verification Gap) The create route's 4096-byte cap and non-JSON refusal are untested — added oversized and `text/plain` cases to the bad-body theory.
+  - `[low]` `[patch]` (Verification Gap) Load more's failure banner and Retry are untested — added a browser test with a failing cursor read and Retry.
+  - `[low]` `[patch]` (Verification Gap) Create's 409 `tenant_mismatch`, 401 and network branches are untested — added 409 and 401 browser tests.
+  - `[low]` `[patch]` (Verification Gap) Shell routing for reserved or undecodable Application IDs is not exercised — added browser navigations to `applications/logs`, `applications/settings` and an undecodable ID.
+  - `[medium]` `[patch]` (Verification Gap) A web Application with zero redirect URIs reaches `/authorize` untested — same fix as the Blind Hunter's authorize finding.
+  - `[low]` `[patch]` (Verification Gap) The "empty or too long name" browser test checks only the empty name — it now checks too-long and control-character names too.
+  - `[low]` `[defer]` (Verification Gap) `ApplicationStore` reports spa/native as Confidential and Web — same deferred entry as the Blind Hunter's.
+  - `[low]` `[reject]` (Edge Case) A late 201 after the modal unmounts navigates to the old Tenant — the modal overlays the shell, so the Tenant switcher can't be used during a create. Unlikely, and the fix adds a lifetime guard.
+  - `[low]` `[patch]` (Edge Case) A 401 after renewal shows nothing in the modal — now shows `actionRetryAfterSignIn`, as `DeleteTenantModal` does.
+  - `[false]` `[reject]` (Edge Case) A 201 without an `id` shows a failure and invites a duplicate — `ApplicationsApi.CreateAsync` always writes the JSON resource with its 201, so the case can't come from this server.
+  - `[low]` `[patch]` (Edge Case) `maxLength` truncates a padded paste — same fix as the Blind Hunter's name-bound finding.
+  - `[low]` `[reject]` (Edge Case) JS `trim()` and .NET `Trim()` strip different characters (U+FEFF, U+0085) — the server decides and the browser check is feedback only. A rare case, and the fix is a shared custom trim.
+  - `[low]` `[reject]` (Edge Case) A double-clicked Load more Retry sends two reads — reads are idempotent and the keyset makes the outcome the same. The fix adds a guard.
+  - `[false]` `[reject]` (Intent) UI criteria are tested only against a mocked API — that is the repo's browser-test convention; Isolation tests cover the server, and the contract diff binds the two.
+  - `[low]` `[patch]` (Intent) The credential need is derived twice — same fix as the Blind Hunter's: the UI uses the server's field.
+  - `[false]` `[reject]` (Intent) Machine-principal refusal is tested below HTTP — no machine HTTP scheme exists until Epic 17, and the matrix row names the Management refusal.
+  - `[false]` `[reject]` (Intent) The redirect-URI CHECK relaxation widens beyond "list and create" — creating a regular web Application with only a name and type requires it, as the spec's Boundaries state.
+  - `[low]` `[reject]` (Intent) The "no control character" name rule isn't in the spec — it matches the Tenant name rule and refuses only unprintable names; no harm named.
+
 ## Design Notes
 
 - **Kind names stay as stored:** `web` and `machine` already exist, so the API exposes the stored kinds directly rather than mapping new names. UI labels: Single-page, Regular web, Native, Machine-to-machine.
@@ -151,3 +205,52 @@ deferred: []
 - `dotnet build Gatekeep.slnx` in the SDK container -- expected: 0 errors, 0 warnings
 - `pnpm -r build` and `pnpm -r typecheck` (as the repo defines) -- expected: clean
 - Don't run the test suites locally. CI on the PR is the test run.
+
+## Auto Run Result
+
+**Summary.** Admins can list, read and create a Tenant's Applications through the Admin API and the Admin Dashboard. Signing in now lands on the Tenant's Applications list (FR-11, FR-44, UX-DR44, AD-20).
+
+**API** (Host.Admin, through Management and then Directory):
+- `GET /api/v1/tenants/{tenantId}/applications` lists newest first, 50 per page, with an `app_` cursor.
+- `GET .../applications/{applicationId}` reads one. An unknown, malformed, other-Tenant or system ID gets the same 404 `not_found`.
+- `POST .../applications` takes `{name, type}`. It answers 201 with `Location`, or 400 `application_invalid`, 403 or 409 `tenant_mismatch`.
+- Create runs as the calling Admin (or machine client) and writes no secret. One transaction writes the row and `directory.application.created`.
+- `credentialRequired` is true for `web` and `machine`.
+- New Applications are inert. `spa` and `native` get no grants, and no type can get a token without a secret. Tests prove this at the token endpoint and at `/authorize`.
+
+**Database:** migration 29 (`AddApplicationTypes`) adds the `spa` and `native` kinds, and lets a `web` row start with no redirect URI.
+
+**Dashboard:**
+- The Applications list has Copy, Load more and the "No applications yet" empty state. Create appears only with `tenant.applications.manage`.
+- The Create Application modal handles 400, 401, 403, 409 and 5xx answers.
+- The detail page shows the breadcrumb, the type badge, the client ID with Copy, and the Credentials text. It also has Retry banners and the forbidden page.
+- The sidebar entry and the landing change go with it.
+
+**Files changed (main ones)**
+- `src/Adapters/Postgres/Migrations/Migration20261113000000AddApplicationTypes.cs`: the kinds and the redirect-URI CHECK.
+- `src/Modules/Directory/{Contracts,Core}`: kind constants, `CredentialRequired`, `CreateApplicationAsync`, `ListApplicationsPageAsync`, `FindApplicationAsync`, and the event wording.
+- `src/Modules/Management/{Contracts/IApplicationManagement.cs, Core/ApplicationManagement.cs}`: the capability re-check, validation and actor.
+- `src/Gatekeep.Host.Admin/{ApplicationsApi.cs, AdminApi.cs, AdminApiServices.cs, AdminResponses.cs, AdminOpenApi.cs}`: the routes and problem codes.
+- `docs/api/openapi-v1.json`, `packages/api-client/*`: the regenerated contract and the typed methods.
+- `apps/admin-dashboard/src/shell/{ApplicationsPage, CreateApplicationModal, ApplicationDetailPage, applications, nav, Shell, LandingPage, currentTenant}`, `packages/ui/src/messages.tsx`: the screens.
+- Tests:
+  - new `tests/Isolation/Applications/{ApplicationsApiTests, InertApplicationTests}.cs` and `tests/browser/admin-applications.spec.ts`;
+  - updated `DirectoryTests`, `RouteRegistry`, `CanaryFlows`, `MigrateCommandTests` (29) and `ProtocolHost`, plus the landing assertions in four browser specs.
+
+**Review findings.** 32 findings: 17 patched (13 root causes), 3 deferred (2 entries) and 12 rejected.
+- Deferred: the OpenAPI generator declares no sub-resource path parameter (pre-existing), and `ApplicationStore` reports spa and native as Confidential (pre-existing, inert until Story 3.2).
+- Rejected (reasons in the triage log):
+  - 5 false: the spec's delivery record, a 201 with no body, mocked UI tests, machine refusal below HTTP, and the CHECK relaxation.
+  - 7 low: UUIDv7 ordering, cross-page imports, no Application quota, a late 201 after unmount, trim character sets, a double Retry, and the control-character rule not being in the spec.
+
+**Follow-up review: not recommended (`false`).** Patched counts by verdict: medium 1 (authorize coverage for inert Applications), low 12.
+
+**Verification**
+- `dotnet build Gatekeep.slnx` (SDK 10.0.403 container, `-p:NuGetAudit=false` because nuget.org was unreachable) passed with 0 warnings and 0 errors, before and after the patches.
+- `pnpm -r build` and typecheck (Node 26 container) are clean. The implementer ran the dashboard unit tests (12/12).
+- No suites were run locally. CI on PR #57 is the first run of the Isolation and browser tests.
+- **Matrix audit:** every I/O row has a named test in `ApplicationsApiTests`, `InertApplicationTests` or the Management test. Whether they passed is judged from CI before merge.
+
+**Residual risks**
+- The browser specs are unrun: the new Applications spec, the 401 renewal test (mocked sign-in) and the moved landing assertions.
+- The spa and native `/authorize` cases assume OpenIddict refuses an unregistered `redirect_uri` before it checks endpoint permissions.

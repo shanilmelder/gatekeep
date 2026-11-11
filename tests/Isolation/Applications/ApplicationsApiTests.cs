@@ -133,6 +133,28 @@ public sealed class ApplicationsApiTests(PostgresFixture postgres)
     }
 
     [Fact]
+    public async Task A_body_over_4096_bytes_or_not_sent_as_JSON_is_400_application_invalid_and_nothing_is_written()
+    {
+        await using var host = await AdminHost.StartAsync(postgres);
+        var tenant = await InsertAsync(host);
+        var (cookie, csrf, _) = await RoleSessionAsync(host, tenant, "editor");
+
+        foreach (var (body, contentType) in new[]
+        {
+            ($$"""{"name":"Web","type":"spa","pad":"{{new string('p', 4096)}}"}""", "application/json"),
+            ("""{"name":"Web","type":"spa"}""", "text/plain"),
+        })
+        {
+            using var response = await CreateAsync(host, cookie, csrf, tenant, body, contentType: contentType);
+            Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+            Assert.Equal("application_invalid", await CodeAsync(response));
+        }
+
+        Assert.Equal(0L, await host.ScalarAsync<long>("SELECT count(*) FROM application"));
+        Assert.Equal(0L, await TenantEventsAsync(host, tenant, Created));
+    }
+
+    [Fact]
     public async Task A_name_of_201_characters_is_400_and_one_of_200_is_created()
     {
         await using var host = await AdminHost.StartAsync(postgres);
@@ -359,10 +381,11 @@ public sealed class ApplicationsApiTests(PostgresFixture postgres)
 
     private static string Body(string name, string type) => JsonSerializer.Serialize(new { name, type });
 
-    private static Task<HttpResponseMessage> CreateAsync(AdminHost host, string cookie, string csrf, Guid tenant, string body, string? header = null)
+    private static Task<HttpResponseMessage> CreateAsync(
+        AdminHost host, string cookie, string csrf, Guid tenant, string body, string? header = null, string contentType = "application/json")
     {
         var headers = (header ?? Id(tenant)) is var value && value == NoHeader ? [] : new[] { (Header, value) };
-        return host.SendAsync(HttpMethod.Post, ApplicationsPath(tenant), cookie, csrf, AdminHost.Origin, body, headers);
+        return host.SendAsync(HttpMethod.Post, ApplicationsPath(tenant), cookie, csrf, AdminHost.Origin, body, headers, contentType);
     }
 
     /// <summary>The Tenant's hidden system Application, as Tenant creation writes it, as the superuser.</summary>

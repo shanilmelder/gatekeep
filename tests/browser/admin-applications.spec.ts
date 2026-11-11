@@ -5,12 +5,15 @@
 // (tests/Isolation/Applications); here, what the pages make of the answers.
 
 import AxeBuilder from '@axe-core/playwright';
-import { expect, test, type Page, type Route } from '@playwright/test';
+import { generateKeyPairSync, randomBytes } from 'node:crypto';
+import { expect, test, type CDPSession, type Page, type Route } from '@playwright/test';
 import { watchCsp } from './csp-watch';
 
 const SESSION = '/api/v1/deployment/session';
 const CAPABILITIES = '/api/v1/deployment/capabilities';
 const MY_TENANTS = '/api/v1/deployment/my-tenants';
+const BEGIN = '/api/v1/deployment/signin';
+const COMPLETE = '/api/v1/deployment/signin/complete';
 const CSRF = 'W'.repeat(43);
 const ADMIN_ID = '01900000-0000-7000-8000-000000000901';
 const TENANT = `ten_${'a'.repeat(25)}a`;
@@ -71,6 +74,8 @@ interface State {
   read: ((route: Route) => Promise<void>) | null;
   /** Replaces the create's answer. */
   create: ((route: Route) => Promise<void>) | null;
+  /** The Session has expired: every read but the sign-in's is 401 until the renewal completes. */
+  expired: boolean;
 }
 
 async function answerApi(page: Page, initial: Partial<State> = {}) {
@@ -84,6 +89,7 @@ async function answerApi(page: Page, initial: Partial<State> = {}) {
     list: null,
     read: null,
     create: null,
+    expired: false,
     ...initial,
   };
   await page.route(
@@ -93,6 +99,20 @@ async function answerApi(page: Page, initial: Partial<State> = {}) {
       const url = new URL(request.url());
       const { pathname } = url;
       log.push(`${request.method()} ${pathname}${url.search}`);
+      if (pathname === BEGIN) {
+        return json(route, 200, {
+          challenge: randomBytes(32).toString('base64url'),
+          rpId: url.hostname,
+          timeout: 300000,
+          userVerification: 'required',
+          allowCredentials: [],
+        });
+      }
+      if (pathname === COMPLETE) {
+        state.expired = false;
+        return json(route, 200, { adminId: ADMIN_ID, csrfToken: CSRF, setupComplete: true });
+      }
+      if (state.expired) return route.fulfill({ status: 401 });
       if (pathname === SESSION) {
         return json(route, 200, {
           adminId: ADMIN_ID,
@@ -131,6 +151,27 @@ async function answerApi(page: Page, initial: Partial<State> = {}) {
     },
   );
   return { log, posts, state, count: (entry: string) => log.filter((line) => line === entry).length };
+}
+
+/** A virtual CTAP2 authenticator holding the Admin's resident credential, so the shell's renewal completes by itself. */
+async function authenticator(page: Page, rpId: string) {
+  const cdp: CDPSession = await page.context().newCDPSession(page);
+  await cdp.send('WebAuthn.enable');
+  const { authenticatorId } = await cdp.send('WebAuthn.addVirtualAuthenticator', {
+    options: { protocol: 'ctap2', transport: 'usb', hasResidentKey: true, hasUserVerification: true, isUserVerified: true, automaticPresenceSimulation: true },
+  });
+  const { privateKey } = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
+  await cdp.send('WebAuthn.addCredential', {
+    authenticatorId,
+    credential: {
+      credentialId: randomBytes(32).toString('base64'),
+      isResidentCredential: true,
+      rpId,
+      privateKey: privateKey.export({ format: 'der', type: 'pkcs8' }).toString('base64'),
+      userHandle: randomBytes(64).toString('base64'),
+      signCount: 0,
+    },
+  });
 }
 
 async function axe(page: Page) {
@@ -216,6 +257,30 @@ test.describe('list', () => {
     await expect(page.getByTestId('application-name')).toHaveText([...ROWS.map((row) => row.name), older.name]);
     await expect(page.getByTestId('applications-load-more')).toHaveCount(0);
     expect(api.count(`GET ${LIST}?cursor=${app(3)}`)).toBe(1);
+  });
+
+  test('a Load more that fails shows the banner with its reference, keeps the rows, and Retry appends the next page', async ({ page }) => {
+    const older = application(5, 'Legacy portal', 'web', '2026-10-01T09:00:00.000Z');
+    const api = await answerApi(page, { nextCursor: app(3), later: [older] });
+    await page.goto(PAGE);
+    await expect(page.getByTestId('application-name')).toHaveCount(ROWS.length);
+
+    api.state.list = (route) =>
+      new URL(route.request().url()).searchParams.has('cursor')
+        ? problem(route, 500, 'unavailable')
+        : json(route, 200, { applications: ROWS, nextCursor: app(3) });
+    await page.getByTestId('applications-load-more').click();
+
+    const failed = page.getByTestId('applications-more-failed');
+    await expect(failed).toContainText("We couldn't load this page.");
+    await expect(failed).toContainText(TRACE);
+    await expect(page.getByTestId('application-name')).toHaveText(ROWS.map((row) => row.name));
+
+    api.state.list = null;
+    await failed.getByRole('button', { name: 'Retry' }).click();
+    await expect(page.getByTestId('application-name')).toHaveText([...ROWS.map((row) => row.name), older.name]);
+    await expect(page.getByTestId('applications-more-failed')).toHaveCount(0);
+    expect(api.count(`GET ${LIST}?cursor=${app(3)}`)).toBe(2);
   });
 
   test('an Editor with none sees "No applications yet" with Create application', async ({ page }) => {
@@ -319,16 +384,29 @@ test.describe('create', () => {
     });
   }
 
-  test('an empty or too long name is refused in the browser, with nothing sent; Cancel closes', async ({ page }) => {
+  test('an empty, too long or control-character name is refused in the browser, with nothing sent; Cancel closes', async ({ page }) => {
     const api = await answerApi(page);
     await page.goto(PAGE);
     await createButton(page).click();
     const dialog = modal(page);
+    const name = dialog.getByRole('textbox', { name: 'Name' });
+    const submit = dialog.getByRole('button', { name: 'Create application' });
 
-    await dialog.getByRole('textbox', { name: 'Name' }).fill('   ');
-    await dialog.getByRole('button', { name: 'Create application' }).click();
+    await name.fill('   ');
+    await submit.click();
     await expect(dialog.getByText('Enter a name.')).toBeVisible();
-    await expect(dialog.getByRole('textbox', { name: 'Name' })).toBeFocused();
+    await expect(name).toBeFocused();
+
+    // 201 characters after trimming: the field doesn't cut it short, the check refuses it.
+    await name.fill(`  ${'x'.repeat(201)}  `);
+    await expect(name).toHaveValue(`  ${'x'.repeat(201)}  `);
+    await submit.click();
+    await expect(dialog.getByText('Use at most 200 characters, with no control characters.')).toBeVisible();
+
+    // A pasted control character.
+    await name.fill('Myapp');
+    await submit.click();
+    await expect(dialog.getByText('Use at most 200 characters, with no control characters.')).toBeVisible();
     expect(api.posts).toHaveLength(0);
 
     await dialog.getByRole('button', { name: 'Cancel' }).click();
@@ -360,7 +438,59 @@ test.describe('create', () => {
   });
 });
 
+test.describe('create refusals the shell handles', () => {
+  test('a 409 tenant_mismatch closes the modal, leaves the URL, and opens nothing', async ({ page }) => {
+    const api = await answerApi(page, { create: (route) => problem(route, 409, 'tenant_mismatch') });
+    await page.goto(PAGE);
+    await createButton(page).click();
+    await modal(page).getByRole('textbox', { name: 'Name' }).fill('My app');
+    await modal(page).getByRole('button', { name: 'Create application' }).click();
+
+    await expect(modal(page)).toBeHidden();
+    await expect(page).toHaveURL(new RegExp(`${PAGE}$`));
+    await expect(heading(page)).toHaveText('Applications');
+    expect(api.posts).toHaveLength(1);
+    expect(api.count(`GET ${LIST}/${app(9)}`)).toBe(0);
+  });
+
+  test('a 401 the renewal answered keeps the modal, with the sign-in text and what was typed, and is never resent', async ({ page, baseURL }) => {
+    await authenticator(page, new URL(baseURL!).hostname);
+    const api = await answerApi(page);
+    await page.goto(PAGE);
+    await createButton(page).click();
+    const dialog = modal(page);
+    await dialog.getByRole('textbox', { name: 'Name' }).fill('My app');
+    api.state.expired = true;
+    await dialog.getByRole('button', { name: 'Create application' }).click();
+
+    await expect.poll(() => api.count(`POST ${COMPLETE}`)).toBe(1);
+
+    await expect(dialog.getByTestId('create-application-signed-in-again')).toHaveText(
+      "You're signed in again, but nothing was changed. Confirm to try again.",
+    );
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByRole('textbox', { name: 'Name' })).toHaveValue('My app');
+    await expect(page).toHaveURL(new RegExp(`${PAGE}$`));
+    // The refused POST reached no create: the renewal never sends it again.
+    expect(api.posts).toHaveLength(0);
+    expect(api.count(`POST ${LIST}`)).toBe(1);
+  });
+});
+
 test.describe('detail', () => {
+  for (const segment of ['logs', 'settings', '%E0%A4%A']) {
+    test(`/applications/${segment} is an Application's page, which says it doesn't exist`, async ({ page }) => {
+      await answerApi(page);
+
+      await page.goto(`${PAGE}/${segment}`);
+
+      await expect(page.getByTestId('application-not-found')).toHaveText("This application doesn't exist in this Tenant.");
+      await expect(page.getByTestId('logs-page')).toHaveCount(0);
+      await expect(heading(page)).not.toHaveText('Tenant settings');
+      await expect(heading(page)).not.toHaveText('Logs');
+    });
+  }
+
   test('an Application this Tenant has none of says so', async ({ page }) => {
     await answerApi(page);
 

@@ -2,7 +2,7 @@ import type { ApplicationResponse } from '@gatekeep/api-client';
 import { Banner, Button, ErrorReference, Field, Input, Modal, Radio, RadioGroup, useMessages } from '@gatekeep/ui/admin';
 import { useRef, useState, type FormEvent } from 'react';
 import { api } from '../session';
-import { APPLICATION_KINDS, APPLICATION_NAME_MAX_LENGTH, checkApplicationName, type ApplicationKind } from './applications';
+import { APPLICATION_KINDS, checkApplicationName, type ApplicationKind } from './applications';
 import type { ShellRequest } from './CredentialsPage';
 import styles from './ApplicationsPage.module.css';
 
@@ -24,7 +24,12 @@ export function kindText(kind: string, messages: Messages): { name: string; desc
   }
 }
 
-type Refusal = { kind: 'saveFailed'; code: string; traceId: string } | { kind: 'invalid' } | { kind: 'forbidden' } | null;
+type Refusal =
+  | { kind: 'saveFailed'; code: string; traceId: string }
+  | { kind: 'invalid' }
+  | { kind: 'forbidden' }
+  | { kind: 'signedInAgain' }
+  | null;
 
 export interface CreateApplicationModalProps {
   open: boolean;
@@ -98,6 +103,7 @@ export function CreateApplicationModal({ open, request, tenantId, onClose, onCre
       setRefusal({ kind: 'saveFailed', code: 'unavailable', traceId: '' });
     } else if (result.status === 401) {
       // The renewal brought the Admin back and didn't send it again: everything typed is kept.
+      setRefusal({ kind: 'signedInAgain' });
     } else if (!result.ok && result.status === 409 && result.problem?.code === 'tenant_mismatch') {
       // The shell's banner names both Tenants: nothing was created.
       close();
@@ -143,6 +149,11 @@ export function CreateApplicationModal({ open, request, tenantId, onClose, onCre
             {messages.createApplicationInvalid}
           </Banner>
         )}
+        {refusal?.kind === 'signedInAgain' && (
+          <Banner tone="bad" data-testid="create-application-signed-in-again">
+            {messages.actionRetryAfterSignIn}
+          </Banner>
+        )}
         {refusal?.kind === 'forbidden' && (
           <Banner tone="bad" data-testid="create-application-forbidden">
             {messages.actionForbidden}
@@ -153,7 +164,6 @@ export function CreateApplicationModal({ open, request, tenantId, onClose, onCre
             ref={nameInput}
             name="name"
             value={name}
-            maxLength={APPLICATION_NAME_MAX_LENGTH}
             autoComplete="off"
             readOnly={pending}
             onChange={(event) => {

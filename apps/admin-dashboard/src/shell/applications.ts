@@ -1,4 +1,4 @@
-// Applications (Story 3.1): the four types, which of them need a credential, the name rule as
+// Applications (Story 3.1): the four types, the name rule as
 // the browser checks it before a create, and the pages' paths. The server's rule is the same: the
 // name is trimmed, then must be 1 to 200 UTF-16 units with no control character (Unicode Cc).
 // This is feedback only: the server runs the rule again and decides every request.
@@ -25,11 +25,6 @@ export function checkApplicationName(value: string): ApplicationNameCheck {
   return { kind: 'ok', name };
 }
 
-/** Whether a type authenticates with a client secret: regular web and machine-to-machine do. */
-export function credentialRequired(kind: string): boolean {
-  return kind === 'web' || kind === 'machine';
-}
-
 /** The Tenant's Applications list. */
 export function applicationsPath(tenantId: string): string {
   return `/tenants/${encodeURIComponent(tenantId)}/applications`;
@@ -42,13 +37,16 @@ export function applicationPath(tenantId: string, applicationId: string): string
 
 const DETAIL_PATH = /^\/tenants\/[^/]+\/applications\/([^/]+)$/;
 
-/** The Application a detail path names, decoded once; null on any other path, or one whose escapes don't decode. */
+/**
+ * The Application a detail path names, decoded once, or as written when its escapes don't decode,
+ * so the server answers it as the unknown Application it is; null on any other path.
+ */
 export function applicationOfPath(path: string): string | null {
   const match = DETAIL_PATH.exec(path);
   if (!match) return null;
   try {
     return decodeURIComponent(match[1]!);
   } catch {
-    return null;
+    return match[1]!;
   }
 }

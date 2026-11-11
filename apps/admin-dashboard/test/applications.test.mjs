@@ -10,14 +10,11 @@ import {
   applicationPath,
   applicationsPath,
   checkApplicationName,
-  credentialRequired,
 } from '../src/shell/applications.ts';
 
 describe('applications', () => {
-  it('offers the four types, and only regular web and machine-to-machine need a credential', () => {
+  it('offers the four types', () => {
     assert.deepEqual([...APPLICATION_KINDS], ['spa', 'web', 'native', 'machine']);
-    assert.deepEqual(APPLICATION_KINDS.filter(credentialRequired), ['web', 'machine']);
-    assert.equal(credentialRequired('system'), false);
   });
 
   it('trims a name and accepts 1 to 200 characters', () => {
@@ -40,6 +37,6 @@ describe('applications', () => {
     assert.equal(applicationOfPath('/tenants/ten_a/applications/app_c%2Fd'), 'app_c/d');
     assert.equal(applicationOfPath('/tenants/ten_a/applications'), null);
     assert.equal(applicationOfPath('/tenants/ten_a/applications/a/b'), null);
-    assert.equal(applicationOfPath('/tenants/ten_a/applications/%E0%A4%A'), null);
+    assert.equal(applicationOfPath('/tenants/ten_a/applications/%E0%A4%A'), '%E0%A4%A');
   });
 });

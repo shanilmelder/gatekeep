@@ -3,7 +3,7 @@ import { Banner, CopyButton, EmptyState, ErrorReference, ProtocolBadge, SectionP
 import { useEffect, useState, type MouseEvent } from 'react';
 import { navigate } from '../navigation';
 import { api } from '../session';
-import { applicationsPath, credentialRequired } from './applications';
+import { applicationsPath } from './applications';
 import { failureOf } from './ApplicationsPage';
 import { kindText } from './CreateApplicationModal';
 import type { ShellRequest } from './CredentialsPage';
@@ -121,7 +121,7 @@ export function ApplicationDetailPage({ request, tenantId, applicationId }: Appl
   }
 
   const { application: ready } = load;
-  const needsSecret = credentialRequired(ready.type);
+  const needsSecret = ready.credentialRequired;
   return (
     <SectionPage
       eyebrow={eyebrow}

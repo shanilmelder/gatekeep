@@ -80,7 +80,7 @@ export function ApplicationsPage({ request, tenantId }: ApplicationsPageProps) {
   const canCreate = has('tenant.applications.manage');
   const [load, setLoad] = useState<Load>({ kind: 'loading' });
   const [attempt, setAttempt] = useState(0);
-  const [more, setMore] = useState<'idle' | 'loading' | 'failed'>('idle');
+  const [more, setMore] = useState<{ kind: 'idle' | 'loading' } | { kind: 'failed'; failure: Failure }>({ kind: 'idle' });
   const [creating, setCreating] = useState(false);
   // The page's own life: a late Load more after unmount lands nowhere.
   const alive = useRef(new AbortController());
@@ -89,7 +89,7 @@ export function ApplicationsPage({ request, tenantId }: ApplicationsPageProps) {
     const controller = new AbortController();
     alive.current = controller;
     setLoad({ kind: 'loading' });
-    setMore('idle');
+    setMore({ kind: 'idle' });
     void readPage(request, tenantId, undefined, controller.signal).then((result) => {
       if (!controller.signal.aborted) setLoad(result);
     });
@@ -97,28 +97,21 @@ export function ApplicationsPage({ request, tenantId }: ApplicationsPageProps) {
   }, [request, tenantId, attempt]);
 
   const loadMore = useCallback(async () => {
-    if (load.kind !== 'ready' || load.list.nextCursor == null || more === 'loading') return;
+    if (load.kind !== 'ready' || load.list.nextCursor == null || more.kind === 'loading') return;
     const controller = alive.current;
-    setMore('loading');
+    setMore({ kind: 'loading' });
     const next = await readPage(request, tenantId, load.list.nextCursor, controller.signal);
     if (controller.signal.aborted) return;
     if (next.kind !== 'ready') {
-      setMore('failed');
+      setMore({ kind: 'failed', failure: next.failure });
       return;
     }
-    setMore('idle');
-    setLoad((current) => {
-      if (current.kind !== 'ready') return current;
-      // An Application created since the first page may come again: each is listed once.
-      const seen = new Set(current.list.applications.map((application) => application.id));
-      return {
-        kind: 'ready',
-        list: {
-          applications: [...current.list.applications, ...next.list.applications.filter((application) => !seen.has(application.id))],
-          nextCursor: next.list.nextCursor,
-        },
-      };
-    });
+    setMore({ kind: 'idle' });
+    setLoad((current) =>
+      current.kind === 'ready'
+        ? { kind: 'ready', list: { applications: [...current.list.applications, ...next.list.applications], nextCursor: next.list.nextCursor } }
+        : current,
+    );
   }, [load, more, request, tenantId]);
 
   if (load.kind === 'forbidden') return <ForbiddenPage code={load.failure.code} traceId={load.failure.traceId} />;
@@ -180,16 +173,17 @@ export function ApplicationsPage({ request, tenantId }: ApplicationsPageProps) {
             <EmptyState message={messages.applicationsEmpty} action={canCreate ? { label: messages.createApplication, onClick: create } : undefined} />
           }
         />
-        {more === 'failed' && (
+        {more.kind === 'failed' && (
           <Banner tone="bad" action={{ label: messages.retry, onClick: () => void loadMore() }} data-testid="applications-more-failed">
-            {messages.loadFailed}
+            <p>{messages.loadFailed}</p>
+            <ErrorReference code={more.failure.code} traceId={more.failure.traceId} />
           </Banner>
         )}
-        {list.nextCursor != null && more !== 'failed' && (
+        {list.nextCursor != null && more.kind !== 'failed' && (
           <Button
             className={styles.more}
             variant="secondary"
-            pending={more === 'loading'}
+            pending={more.kind === 'loading'}
             onClick={() => void loadMore()}
             data-testid="applications-load-more"
           >
