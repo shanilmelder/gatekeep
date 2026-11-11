@@ -111,6 +111,8 @@ public static class RouteRegistry
         new("*", "/.well-known/jwks", CaseKind.HostResolved),
         new("*", "/connect/token", CaseKind.HostResolved),
         new("*", "/connect/authorize", CaseKind.HostResolved),
+        new("*", "/connect/userinfo", CaseKind.HostResolved),
+        new("*", "/connect/revoke", CaseKind.HostResolved),
 
         new("*", "{*path:nonfile}", CaseKind.NotTenantBound, Reason: "the one fixed 404, the same as an unknown host's (AD-6)"),
     ];

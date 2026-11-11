@@ -72,7 +72,8 @@ internal sealed class ApplicationStore(Func<CommandContext> context) : IOpenIddi
         new((JsonWebKeySet?)null);
 
     /// <summary>
-    /// The token endpoint, and a <c>gt:</c> permission for each grant type the row allows. A <c>web</c>
+    /// The token endpoint, the revocation endpoint for a row allowed the <c>refresh_token</c> grant (Story 2.11:
+    /// only a client that can hold a refresh token has one to revoke), and a <c>gt:</c> permission for each grant type the row allows. A <c>web</c>
     /// client also gets the authorization endpoint and the <c>code</c> response type, the only one
     /// (Story 2.9). No <c>scp:</c> permission is given: <c>openid</c> and <c>offline_access</c>, the only
     /// scopes, are protocol scopes that need none; <c>offline_access</c> is allowed only with the
@@ -82,7 +83,8 @@ internal sealed class ApplicationStore(Func<CommandContext> context) : IOpenIddi
     {
         var row = Checked(application);
         string[] code = row.IsWeb ? [Permissions.Endpoints.Authorization, Permissions.ResponseTypes.Code] : [];
-        return new([Permissions.Endpoints.Token, .. code, .. row.GrantTypes.Select(g => Permissions.Prefixes.GrantType + g)]);
+        string[] revocation = row.GrantTypes.Contains(GrantTypes.RefreshToken) ? [Permissions.Endpoints.Revocation] : [];
+        return new([Permissions.Endpoints.Token, .. revocation, .. code, .. row.GrantTypes.Select(g => Permissions.Prefixes.GrantType + g)]);
     }
 
     public ValueTask<ImmutableArray<string>> GetPostLogoutRedirectUrisAsync(DirectoryApplication application, CancellationToken cancellationToken) =>

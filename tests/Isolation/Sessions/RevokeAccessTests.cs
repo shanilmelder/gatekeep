@@ -429,7 +429,7 @@ public sealed class RevokeAccessTests(PostgresFixture postgres)
         Assert.Equal(
             [
                 "logout", "credential_change", "admin_revoke", "user_blocked", "user_deleted",
-                "token_reuse", "code_replay", "application_deleted", "tenant_deleted",
+                "token_reuse", "code_replay", "application_deleted", "tenant_deleted", "client_revoke",
             ],
             RevocationReason.All.Select(r => r.Code));
     }

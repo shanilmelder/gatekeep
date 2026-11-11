@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using System.Globalization;
 using System.Security.Claims;
 using System.Text;
 using System.Text.Json;
@@ -62,6 +63,67 @@ internal static class AuthorizeEndpoint
             _ => [],
         });
     }
+
+    /// <summary>
+    /// The request's <c>max_age</c> (Story 2.11, OIDC Core §3.1.2.1): null when it names none; false when
+    /// it isn't a non-negative integer of seconds, which is <c>invalid_request</c>. One too large for a
+    /// <see cref="long"/> is <see cref="long.MaxValue"/>, which demands nothing any sign-in doesn't meet.
+    /// </summary>
+    public static bool TryReadMaxAge(OpenIddictRequest request, out long? maxAge)
+    {
+        maxAge = null;
+        if (request.GetParameter(Parameters.MaxAge) is not { } parameter)
+        {
+            return true;
+        }
+
+        var text = parameter.ToString();
+        if (!long.TryParse(text, NumberStyles.None, CultureInfo.InvariantCulture, out var seconds))
+        {
+            if (string.IsNullOrEmpty(text) || !text.All(char.IsAsciiDigit))
+            {
+                return false;
+            }
+
+            seconds = long.MaxValue;
+        }
+
+        maxAge = seconds;
+        return true;
+    }
+
+    /// <summary>
+    /// The time the sign-in must be at or after (Story 2.11, OIDC Core §3.1.2.1), for a request that started
+    /// at <paramref name="started"/>: from <c>prompt=login</c>, the request's start; from <c>max_age=N</c>,
+    /// N seconds before it, so <c>max_age=0</c> is the same as <c>prompt=login</c>; with both, the later;
+    /// with neither, null. A <c>max_age</c> reaching back past the Unix epoch demands nothing. The request's
+    /// <c>max_age</c> is already known to be well formed.
+    /// </summary>
+    public static DateTimeOffset? AuthenticatedSince(OpenIddictRequest request, DateTimeOffset started)
+    {
+        DateTimeOffset? since = request.HasPromptValue(PromptValues.Login) ? started : null;
+
+        if (TryReadMaxAge(request, out var maxAge) && maxAge is { } seconds)
+        {
+            var bound = seconds >= (started - DateTimeOffset.UnixEpoch).TotalSeconds
+                ? DateTimeOffset.UnixEpoch
+                : started.AddSeconds(-seconds);
+            since = since is { } login && login > bound ? login : bound;
+        }
+
+        return since;
+    }
+
+    /// <summary>
+    /// Whether a sign-in at <paramref name="authTime"/> is fresh enough for <paramref name="since"/>. With
+    /// <c>prompt=login</c> (<paramref name="exact"/>) the bound is the request's start, which no authentication
+    /// before it meets, so it is compared exactly; a <c>max_age</c> bound alone is compared in whole seconds,
+    /// its unit (OIDC Core §2). With <c>prompt=login</c> the bound is always the request's start, since a
+    /// <c>max_age</c> bound is never later.
+    /// </summary>
+    public static bool IsFreshEnough(DateTimeOffset authTime, DateTimeOffset? since, bool exact) =>
+        since is not { } required
+        || (exact ? authTime >= required : authTime.ToUnixTimeSeconds() >= required.ToUnixTimeSeconds());
 
     /// <summary>
     /// The request parameters a sign-in transaction keeps, for the sign-in to honour (Story 4.2 reads
@@ -185,9 +247,10 @@ internal sealed class TrustRedirectTarget(IOpenIddictApplicationManager applicat
 /// Gatekeep's own authorization request rules (Stories 2.9 and 2.10), where OpenIddict's scope check
 /// would run (it needs a scope store, which there is none of): <c>openid</c> is required, and the only
 /// other scope accepted is <c>offline_access</c>, for an Application allowed the <c>refresh_token</c>
-/// grant, so any other, or <c>offline_access</c> for any other Application, is <c>invalid_scope</c>; and
-/// no sign-in can complete without the User, so <c>prompt=none</c> is <c>login_required</c>.
-/// <c>prompt=login</c> and <c>max_age</c> pass to the sign-in; Story 4.2 honours them.
+/// grant, so any other, or <c>offline_access</c> for any other Application, is <c>invalid_scope</c>; a
+/// <c>max_age</c> that isn't a non-negative integer is <c>invalid_request</c> (Story 2.11); and no sign-in
+/// can complete without the User, so <c>prompt=none</c> is <c>login_required</c>. <c>prompt=login</c> and
+/// <c>max_age</c> are enforced against the sign-in's <c>auth_time</c> by <see cref="AuthorizePassthrough"/>.
 /// </summary>
 internal sealed class ValidateGatekeepAuthorizationRequest(IOpenIddictApplicationManager applications)
     : IOpenIddictServerHandler<ValidateAuthorizationRequestContext>
@@ -211,6 +274,10 @@ internal sealed class ValidateGatekeepAuthorizationRequest(IOpenIddictApplicatio
         else if (scopes.Contains(Scopes.OfflineAccess, StringComparer.Ordinal) && !await MayRefreshAsync(context))
         {
             context.Reject(Errors.InvalidScope, "offline_access isn't allowed for this client.");
+        }
+        else if (!AuthorizeEndpoint.TryReadMaxAge(context.Request, out _))
+        {
+            context.Reject(Errors.InvalidRequest, "max_age must be a non-negative integer of seconds.");
         }
         else if (context.Request.HasPromptValue(PromptValues.None))
         {
@@ -345,7 +412,10 @@ internal sealed class AnswerInvalidRequestPage(ProtocolPageHeaders headers) : IO
 /// The authorization endpoint's passthrough (Story 2.9, AD-8): a request OpenIddict has validated, client,
 /// exact redirect URI, <c>response_type=code</c>, S256 PKCE and Gatekeep's scope and prompt rules, reaches
 /// it in the request's open transaction. It begins the sign-in with <c>IAuthentication.BeginAsync</c>,
-/// then asks the host's <see cref="IAuthorizationSignIn"/> to complete it. A result signs the User in: the
+/// then asks the host's <see cref="IAuthorizationSignIn"/> to complete it, passing the freshness
+/// <c>prompt=login</c> and <c>max_age</c> demand (Story 2.11). A result older than that is refused with
+/// <c>login_required</c>, so no code is issued and nothing is committed; Story 4.2 replaces the refusal
+/// with a new sign-in. A result fresh enough signs the User in: the
 /// claims are <c>sub</c> (the User's <c>usr_</c> ID), <c>sid</c>, <c>auth_time</c> and <c>amr</c>, the ID
 /// token gets those and the <c>nonce</c>, and the access token <c>sub</c> and its audience; one ad-hoc
 /// authorization, the Token Family, is anchored to the result's Session, and OpenIddict issues the code.
@@ -367,6 +437,9 @@ internal static class AuthorizePassthrough
         var services = http.RequestServices.GetRequiredService<TokenEndpointServices>();
         var requestTransaction = http.RequestServices.GetRequiredService<TokenRequestTransaction>();
         var cancellationToken = http.RequestAborted;
+
+        // The freshness prompt=login and max_age demand (Story 2.11), measured from the request's start here.
+        var authenticatedSince = AuthorizeEndpoint.AuthenticatedSince(request, services.Time.GetUtcNow());
 
         var runtime = transaction.GetProperty<TenantRuntime>(TenantRuntime.Property)
             ?? throw new InvalidOperationException("The authorization endpoint runs only on a Tenant runtime.");
@@ -395,10 +468,18 @@ internal static class AuthorizePassthrough
         }
 
         var signIn = http.RequestServices.GetRequiredService<IAuthorizationSignIn>();
-        var result = await signIn.CompleteAsync(requestTransaction.Context, started, http, cancellationToken);
+        var result = await signIn.CompleteAsync(requestTransaction.Context, started, authenticatedSince, http, cancellationToken);
         if (result is null)
         {
             await RefuseAsync(http, Errors.TemporarilyUnavailable, "Sign-in isn't available. Try again later.");
+            return;
+        }
+
+        // An authentication older than prompt=login or max_age allows gets no code (OIDC Core §3.1.2.1): refused,
+        // not re-prompted, until Story 4.2. The refusal rolls back the sign-in's Session with the rest.
+        if (!AuthorizeEndpoint.IsFreshEnough(result.AuthTime, authenticatedSince, request.HasPromptValue(PromptValues.Login)))
+        {
+            await RefuseAsync(http, Errors.LoginRequired, "The User must sign in again.");
             return;
         }
 

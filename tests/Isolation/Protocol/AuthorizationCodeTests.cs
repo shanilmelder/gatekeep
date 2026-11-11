@@ -230,6 +230,162 @@ public sealed class AuthorizationCodeTests(PostgresFixture postgres, OpenBaoFixt
         await AssertNothingBegunAsync(flow);
     }
 
+    [Fact]
+    public async Task Prompt_login_with_a_fresh_sign_in_issues_a_code_whose_ID_token_carries_its_auth_time_and_amr()
+    {
+        var flow = await CodeFlowSetup.CreateAsync(postgres, bao, HostA, HostB);
+        await using var host = await flow.StartHostAsync();
+        var before = DateTimeOffset.UtcNow;
+
+        // The test sign-in authenticates now, after the request started.
+        var pkce = Pkce.New();
+        using var authorize = await CodeFlow.AuthorizeAsync(
+            host, HostA, flow.ClientA.ClientId, Callback, pkce, flow.UserA, state: "state-f1", extra: [("prompt", "login")]);
+        Assert.Equal(HttpStatusCode.Found, authorize.StatusCode);
+        var query = QueryHelpers.ParseQuery(authorize.Headers.Location!.Query);
+        Assert.False(query.ContainsKey("error"));
+
+        // The sign-in was asked for an authentication at or after the request's start.
+        var since = ((TestAuthorizationSignIn)host.Services.GetRequiredService<IAuthorizationSignIn>()).LastAuthenticatedSince;
+        Assert.NotNull(since);
+        Assert.InRange(since.Value, before, DateTimeOffset.UtcNow);
+
+        using var token = await CodeFlow.ExchangeAsync(host, HostA, flow.ClientA.ClientId, flow.ClientA.Secret, query["code"].ToString(), Callback, pkce.Verifier);
+        Assert.Equal(HttpStatusCode.OK, token.Status);
+        await AssertIdTokenAuthAsync(flow, token.Body.RootElement.GetProperty("id_token").GetString()!);
+    }
+
+    [Fact]
+    public async Task Prompt_login_with_a_sign_in_older_than_the_request_is_a_login_required_redirect_and_commits_nothing()
+    {
+        var flow = await CodeFlowSetup.CreateAsync(postgres, bao, HostA, HostB);
+        await using var host = await flow.StartHostAsync();
+
+        using var authorize = await CodeFlow.AuthorizeAsync(
+            host, HostA, flow.ClientA.ClientId, Callback, Pkce.New(), flow.UserA, state: "state-f2", extra: [("prompt", "login")],
+            authTime: DateTimeOffset.UtcNow - TimeSpan.FromMinutes(5));
+
+        AssertErrorRedirect(authorize, flow.A, "login_required", "state-f2");
+        await AssertNothingBegunAsync(flow);
+        Assert.Equal(0L, await flow.Database.ScalarAsync<long>("SELECT count(*) FROM token"));
+    }
+
+    [Fact]
+    public async Task Prompt_login_with_a_sign_in_half_a_second_before_the_request_is_a_login_required_redirect()
+    {
+        var flow = await CodeFlowSetup.CreateAsync(postgres, bao, HostA, HostB);
+        await using var host = await flow.StartHostAsync();
+
+        // Earlier than the request's start, possibly in the same second: prompt=login is compared exactly.
+        using var authorize = await CodeFlow.AuthorizeAsync(
+            host, HostA, flow.ClientA.ClientId, Callback, Pkce.New(), flow.UserA, state: "state-f6", extra: [("prompt", "login")],
+            authTime: DateTimeOffset.UtcNow - TimeSpan.FromMilliseconds(500));
+
+        AssertErrorRedirect(authorize, flow.A, "login_required", "state-f6");
+        await AssertNothingBegunAsync(flow);
+    }
+
+    [Fact]
+    public async Task A_max_age_too_large_for_a_long_demands_nothing_and_issues_a_code()
+    {
+        var flow = await CodeFlowSetup.CreateAsync(postgres, bao, HostA, HostB);
+        await using var host = await flow.StartHostAsync();
+
+        using var authorize = await CodeFlow.AuthorizeAsync(
+            host, HostA, flow.ClientA.ClientId, Callback, Pkce.New(), flow.UserA, state: "state-f7", extra: [("max_age", "99999999999999999999")],
+            authTime: DateTimeOffset.UtcNow - TimeSpan.FromDays(30));
+
+        Assert.Equal(HttpStatusCode.Found, authorize.StatusCode);
+        var query = QueryHelpers.ParseQuery(authorize.Headers.Location!.Query);
+        Assert.False(query.ContainsKey("error"));
+        Assert.True(query.ContainsKey("code"), "No code was issued.");
+    }
+
+    [Fact]
+    public async Task Max_age_longer_than_the_sign_ins_age_issues_a_code_whose_ID_token_carries_that_auth_time()
+    {
+        var flow = await CodeFlowSetup.CreateAsync(postgres, bao, HostA, HostB);
+        await using var host = await flow.StartHostAsync();
+        var authTime = DateTimeOffset.UtcNow - TimeSpan.FromMinutes(5);
+
+        var pkce = Pkce.New();
+        using var authorize = await CodeFlow.AuthorizeAsync(
+            host, HostA, flow.ClientA.ClientId, Callback, pkce, flow.UserA, state: "state-f3", extra: [("max_age", "600")], authTime: authTime);
+        Assert.Equal(HttpStatusCode.Found, authorize.StatusCode);
+        var query = QueryHelpers.ParseQuery(authorize.Headers.Location!.Query);
+        Assert.False(query.ContainsKey("error"));
+
+        using var token = await CodeFlow.ExchangeAsync(host, HostA, flow.ClientA.ClientId, flow.ClientA.Secret, query["code"].ToString(), Callback, pkce.Verifier);
+        Assert.Equal(HttpStatusCode.OK, token.Status);
+        var idToken = token.Body.RootElement.GetProperty("id_token").GetString()!;
+        await AssertIdTokenAuthAsync(flow, idToken);
+        Assert.Equal(
+            authTime.ToUnixTimeSeconds().ToString(System.Globalization.CultureInfo.InvariantCulture),
+            new JsonWebToken(idToken).GetClaim("auth_time").Value);
+    }
+
+    [Theory]
+    [InlineData("60", 300)]
+    [InlineData("0", 1)]
+    public async Task Max_age_shorter_than_the_sign_ins_age_is_a_login_required_redirect(string maxAge, int ageSeconds)
+    {
+        var flow = await CodeFlowSetup.CreateAsync(postgres, bao, HostA, HostB);
+        await using var host = await flow.StartHostAsync();
+
+        using var authorize = await CodeFlow.AuthorizeAsync(
+            host, HostA, flow.ClientA.ClientId, Callback, Pkce.New(), flow.UserA, state: "state-f4", extra: [("max_age", maxAge)],
+            authTime: DateTimeOffset.UtcNow - TimeSpan.FromSeconds(ageSeconds));
+
+        AssertErrorRedirect(authorize, flow.A, "login_required", "state-f4");
+        await AssertNothingBegunAsync(flow);
+    }
+
+    [Theory]
+    [InlineData("-1")]
+    [InlineData("abc")]
+    [InlineData("1.5")]
+    public async Task A_malformed_max_age_is_an_invalid_request_redirect(string maxAge)
+    {
+        var flow = await CodeFlowSetup.CreateAsync(postgres, bao, HostA, HostB);
+        await using var host = await flow.StartHostAsync();
+
+        using var authorize = await CodeFlow.AuthorizeAsync(
+            host, HostA, flow.ClientA.ClientId, Callback, Pkce.New(), flow.UserA, state: "state-f5", extra: [("max_age", maxAge)]);
+
+        AssertErrorRedirect(authorize, flow.A, "invalid_request", "state-f5");
+        await AssertNothingBegunAsync(flow);
+    }
+
+    [Fact]
+    public void Prompt_login_and_max_age_demand_the_later_of_their_two_times()
+    {
+        var started = new DateTimeOffset(2026, 11, 9, 12, 0, 0, TimeSpan.Zero);
+        static OpenIddictRequest Request(params (string Name, string Value)[] parameters)
+        {
+            var request = new OpenIddictRequest();
+            foreach (var (name, value) in parameters)
+            {
+                request.SetParameter(name, value);
+            }
+
+            return request;
+        }
+
+        var since = typeof(ProtocolContract).Assembly
+            .GetType("Gatekeep.Modules.Protocol.Core.AuthorizeEndpoint", throwOnError: true)!
+            .GetMethod("AuthenticatedSince")!;
+        DateTimeOffset? At(OpenIddictRequest request) => (DateTimeOffset?)since.Invoke(null, [request, started]);
+
+        Assert.Null(At(Request()));
+        Assert.Equal(started, At(Request(("prompt", "login"))));
+        Assert.Equal(started.AddSeconds(-600), At(Request(("max_age", "600"))));
+        Assert.Equal(started, At(Request(("max_age", "0"))));
+        Assert.Equal(started, At(Request(("prompt", "login"), ("max_age", "600"))));
+        Assert.Equal(started.AddSeconds(-60), At(Request(("prompt", "consent"), ("max_age", "60"))));
+        Assert.Equal(DateTimeOffset.UnixEpoch, At(Request(("max_age", long.MaxValue.ToString(System.Globalization.CultureInfo.InvariantCulture)))));
+        Assert.Equal(DateTimeOffset.UnixEpoch, At(Request(("max_age", "99999999999999999999"))));
+    }
+
     [Theory]
     [InlineData("token")]
     [InlineData("code id_token")]
@@ -575,7 +731,7 @@ public sealed class AuthorizationCodeTests(PostgresFixture postgres, OpenBaoFixt
     {
         Assert.Equal(typeof(AuthorizationCodeTests).Assembly, typeof(TestAuthorizationSignIn).Assembly);
         Assert.Equal(typeof(ProtocolContract).Assembly, typeof(UnavailableSignIn).Assembly);
-        Assert.Null(await new UnavailableSignIn().CompleteAsync(null!, null!, new DefaultHttpContext(), Cancellation));
+        Assert.Null(await new UnavailableSignIn().CompleteAsync(null!, null!, null, new DefaultHttpContext(), Cancellation));
     }
 
     private static void AssertErrorRedirect(HttpResponseMessage response, ResolvedTenant tenant, string error, string state)
@@ -607,6 +763,20 @@ public sealed class AuthorizationCodeTests(PostgresFixture postgres, OpenBaoFixt
         }
 
         Assert.DoesNotContain("client.code.test", body, StringComparison.Ordinal);
+    }
+
+    /// <summary>The ID token's <c>auth_time</c> is the Session's, to the second, and its <c>amr</c> the result's (Story 2.11).</summary>
+    private static async Task AssertIdTokenAuthAsync(CodeFlowSetup flow, string idToken)
+    {
+        var id = new JsonWebToken(idToken);
+        var authTime = await flow.Database.ScalarAsync<DateTime>($"SELECT auth_time FROM user_session WHERE tenant_id = '{flow.A.TenantId}' AND user_id = '{flow.UserA}'");
+        Assert.Equal(
+            new DateTimeOffset(authTime, TimeSpan.Zero).ToUnixTimeSeconds().ToString(System.Globalization.CultureInfo.InvariantCulture),
+            id.GetClaim("auth_time").Value);
+        Assert.Equal(
+            Gatekeep.Tests.Isolation.Sessions.TestOnlyAuthenticator.Method,
+            await flow.Database.ScalarAsync<string>($"SELECT array_to_string(amr, ' ') FROM user_session WHERE tenant_id = '{flow.A.TenantId}' AND user_id = '{flow.UserA}'"));
+        Assert.Contains($"\"amr\":[\"{Gatekeep.Tests.Isolation.Sessions.TestOnlyAuthenticator.Method}\"]", Encoding.UTF8.GetString(Base64UrlEncoder.DecodeBytes(idToken.Split('.')[1])), StringComparison.Ordinal);
     }
 
     private static async Task AssertNothingBegunAsync(CodeFlowSetup flow)
@@ -678,7 +848,8 @@ internal static class CodeFlow
 
     /// <summary>
     /// GETs the authorization endpoint on <paramref name="tenantHost"/>. A null <paramref name="pkce"/>
-    /// sends no challenge; a null <paramref name="user"/> names no User to the test sign-in.
+    /// sends no challenge; a null <paramref name="user"/> names no User to the test sign-in, and
+    /// <paramref name="authTime"/>, when given, is the authentication time it returns (Story 2.11).
     /// </summary>
     public static async Task<HttpResponseMessage> AuthorizeAsync(
         ProtocolHost host,
@@ -691,7 +862,8 @@ internal static class CodeFlow
         string? nonce = null,
         string? scope = "openid",
         string responseType = "code",
-        (string Name, string Value)[]? extra = null)
+        (string Name, string Value)[]? extra = null,
+        DateTimeOffset? authTime = null)
     {
         var query = new List<KeyValuePair<string, string?>>
         {
@@ -731,6 +903,11 @@ internal static class CodeFlow
         if (user is { } id)
         {
             request.Headers.TryAddWithoutValidation(TestAuthorizationSignIn.UserHeader, id.ToString());
+        }
+
+        if (authTime is { } at)
+        {
+            request.Headers.TryAddWithoutValidation(TestAuthorizationSignIn.AuthTimeHeader, at.ToString("O", System.Globalization.CultureInfo.InvariantCulture));
         }
 
         return await host.Http.SendAsync(request, Cancellation);

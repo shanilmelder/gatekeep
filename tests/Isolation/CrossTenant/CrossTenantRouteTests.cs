@@ -6,6 +6,7 @@ using Gatekeep.Tests.Isolation.Admins;
 using Gatekeep.Tests.Isolation.Custody;
 using Gatekeep.Tests.Isolation.Protocol;
 using Gatekeep.Tests.Isolation.Tenancy;
+using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
 namespace Gatekeep.Tests.Isolation.CrossTenant;
@@ -154,7 +155,10 @@ public sealed class CrossTenantRouteTests(PostgresFixture postgres, OpenBaoFixtu
         var b = await database.AddTenantAsync(HostB);
         Assert.True(await database.ProvisionAsync(bao, a.TenantId));
         Assert.True(await database.ProvisionAsync(bao, b.TenantId));
-        await using var host = await ProtocolHost.StartAsync(database.Hosted, bao);
+        // The test-only sign-in completes a sign-in only for a request naming a User (Story 2.9), so it changes
+        // nothing for a case that names none.
+        await using var host = await ProtocolHost.StartAsync(
+            database.Hosted, bao, signIn: provider => new TestAuthorizationSignIn(provider.GetRequiredService<TimeProvider>()));
 
         switch (entry.Pattern)
         {
@@ -224,10 +228,51 @@ public sealed class CrossTenantRouteTests(PostgresFixture postgres, OpenBaoFixtu
                 break;
             }
 
+            case ProtocolContract.UserinfoPath:
+            {
+                // Tenant A's real access token, from A's code flow, as a bearer at B's userinfo (Story 2.11): B's keys
+                // don't verify it, so it is invalid_token and answers nothing of A's User.
+                var flow = await CodeFlowWithin(database, a, b);
+                var tokens = await UserinfoAndRevocationTests.TokensAsync(host, flow, HostA, "openid");
+                using var response = await UserinfoAndRevocationTests.UserinfoAsync(host, HostB, tokens.Access);
+                Assert.Equal(HttpStatusCode.Unauthorized, response.Status);
+                Assert.Contains("error=\"invalid_token\"", response.WwwAuthenticate, StringComparison.Ordinal);
+                Assert.DoesNotContain(PublicId.Format(PublicIdType.User, flow.UserA), response.Body, StringComparison.Ordinal);
+                break;
+            }
+
+            case ProtocolContract.RevocationPath:
+            {
+                // Tenant A's real refresh token, revoked at B by B's own client (Story 2.11): refused before any lookup,
+                // answered 200 as RFC 7009 asks, logged once in B's Log, and A's token still refreshes at A.
+                var flow = await CodeFlowWithin(database, a, b);
+                var clientB = await database.CreateWebClientAsync(b.TenantId, [CodeFlowSetup.Callback]);
+                var tokens = await UserinfoAndRevocationTests.TokensAsync(host, flow, HostA, "openid offline_access");
+                using (var response = await UserinfoAndRevocationTests.RevokeAsync(host, HostB, clientB.ClientId, clientB.Secret, tokens.Refresh))
+                {
+                    Assert.Equal(HttpStatusCode.OK, response.Status);
+                }
+
+                Assert.Equal(1L, await database.ScalarAsync<long>(
+                    $"SELECT count(*) FROM audit_event WHERE tenant_id = '{b.TenantId}' AND type_code = 'protocol.client.cross_tenant_rejected' AND actor_kind = 'anonymous' AND target_id IS NULL"));
+                Assert.Equal(0L, await database.ScalarAsync<long>("SELECT count(*) FROM audit_event WHERE type_code = 'sessions.access.revoked'"));
+                using var refreshed = await CodeFlow.RefreshAsync(host, HostA, flow.ClientA.ClientId, flow.ClientA.Secret, tokens.Refresh);
+                Assert.Equal(HttpStatusCode.OK, refreshed.Status);
+                break;
+            }
+
             default:
                 Assert.Fail($"{entry} is HostResolved but has no case here: add one to {nameof(Hosted_route_on_Tenant_B_s_host_carries_only_Tenant_B)}.");
                 break;
         }
+    }
+
+    /// <summary>A web client and a User in Tenant A of <paramref name="database"/>, for a code flow at A.</summary>
+    private async Task<CodeFlowSetup> CodeFlowWithin(ProtocolDatabase database, Gatekeep.Modules.Tenancy.Contracts.ResolvedTenant a, Gatekeep.Modules.Tenancy.Contracts.ResolvedTenant b)
+    {
+        var client = await database.CreateWebClientAsync(a.TenantId, [CodeFlowSetup.Callback]);
+        var user = await database.AddUserAsync(a.TenantId);
+        return new CodeFlowSetup(database, a, b, client, user, bao);
     }
 
     private static TheoryData<string, string> Cases(IEnumerable<RouteCase> registry, params CaseKind[] kinds)
