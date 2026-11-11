@@ -199,6 +199,20 @@ internal sealed class ProtocolDatabase(PostgresFixture postgres, string name)
         return (created.ApplicationId, created.ClientId, created.Secret.Use(static s => s));
     }
 
+    /// <summary>
+    /// An Application an Admin registers (Story 3.1), created the one Directory way the Admin API uses,
+    /// as <c>gk_admin</c>: <paramref name="kind"/>'s default grants and no secret.
+    /// </summary>
+    public async Task<(Guid ApplicationId, string ClientId)> CreateApplicationAsync(Guid tenantId, string kind, string name = "Admin's client")
+    {
+        await using var source = NpgsqlDataSource.Create(postgres.RoleConnection(TableRegistry.Admin, Name));
+        await using var scope = await TenantScope.BeginAsync(source, tenantId, TestContext.Current.CancellationToken);
+        var created = await DirectoryContract.CreateDirectory(AuditContract.CreateAppender(), TimeProvider.System)
+            .CreateApplicationAsync(scope.CreateCommandContext(), Gatekeep.Kernel.Audit.Actor.Admin(Guid.CreateVersion7()), name, kind, TestContext.Current.CancellationToken);
+        await scope.CommitAsync(TestContext.Current.CancellationToken);
+        return (created.Id, created.ClientId);
+    }
+
     /// <summary>A User row in the Tenant, as the superuser: Identity writes none yet (Story 2.9).</summary>
     public async Task<Guid> AddUserAsync(Guid tenantId)
     {

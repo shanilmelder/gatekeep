@@ -233,8 +233,10 @@ test.describe('sidebar', () => {
     const link = nav(page).getByRole('link', { name: 'Signing keys' });
     await expect(link).toHaveAttribute('href', PAGE);
     await expect(link).toHaveAttribute('aria-current', 'page');
-    // The Security group comes before Monitoring (Story 7.4's Logs) and Settings, in EXPERIENCE order.
+    // The Security group comes after Applications (Story 3.1) and before Monitoring (Story 7.4's
+    // Logs) and Settings, in EXPERIENCE order.
     expect(await nav(page).locator('button[data-group]').evaluateAll((elements) => elements.map((element) => element.getAttribute('data-group')))).toEqual([
+      'applications',
       'security',
       'monitoring',
       'settings',

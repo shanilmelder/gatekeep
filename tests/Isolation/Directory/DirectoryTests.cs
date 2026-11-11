@@ -276,17 +276,19 @@ public sealed class DirectoryTests(PostgresFixture postgres)
     [InlineData("INSERT INTO client_secret (tenant_id, id, application_id, secret_hash, created_at) VALUES ('{0}', gen_random_uuid(), '{1}', decode(repeat('00', 31), 'hex'), now())")]
     [InlineData("INSERT INTO application (tenant_id, id, name, kind, grant_types, created_at) VALUES ('{0}', gen_random_uuid(), 'x', 'system', ARRAY['client_credentials'], now())")]
     [InlineData("INSERT INTO application (tenant_id, id, name, kind, audiences, created_at) VALUES ('{0}', gen_random_uuid(), 'x', 'system', ARRAY['https://api.test'], now())")]
-    // Story 2.9: a web client has 1 to 10 redirect URIs and the code grant, from Story 2.10 with or without
-    // refresh tokens, and nothing else; no other kind has one.
+    // Story 2.9: a web client has up to 10 redirect URIs (from Story 3.1, possibly none) and the code grant,
+    // from Story 2.10 with or without refresh tokens, and nothing else; no other kind has one.
     [InlineData("INSERT INTO application (tenant_id, id, name, kind, grant_types, redirect_uris, created_at) VALUES ('{0}', gen_random_uuid(), 'x', 'web', ARRAY['refresh_token'], ARRAY['https://app.test/cb'], now())")]
     [InlineData("INSERT INTO application (tenant_id, id, name, kind, grant_types, redirect_uris, created_at) VALUES ('{0}', gen_random_uuid(), 'x', 'web', ARRAY['refresh_token', 'authorization_code'], ARRAY['https://app.test/cb'], now())")]
     [InlineData("INSERT INTO application (tenant_id, id, name, kind, grant_types, redirect_uris, created_at) VALUES ('{0}', gen_random_uuid(), 'x', 'web', ARRAY['authorization_code', 'refresh_token', 'client_credentials'], ARRAY['https://app.test/cb'], now())")]
-    [InlineData("INSERT INTO application (tenant_id, id, name, kind, grant_types, created_at) VALUES ('{0}', gen_random_uuid(), 'x', 'web', ARRAY['authorization_code'], now())")]
     [InlineData("INSERT INTO application (tenant_id, id, name, kind, grant_types, redirect_uris, created_at) VALUES ('{0}', gen_random_uuid(), 'x', 'web', ARRAY['client_credentials'], ARRAY['https://app.test/cb'], now())")]
     [InlineData("INSERT INTO application (tenant_id, id, name, kind, grant_types, redirect_uris, created_at) VALUES ('{0}', gen_random_uuid(), 'x', 'web', ARRAY['authorization_code', 'client_credentials'], ARRAY['https://app.test/cb'], now())")]
     [InlineData("INSERT INTO application (tenant_id, id, name, kind, grant_types, redirect_uris, created_at) VALUES ('{0}', gen_random_uuid(), 'x', 'web', ARRAY['authorization_code'], array_fill('https://app.test/cb'::text, ARRAY[11]), now())")]
     [InlineData("INSERT INTO application (tenant_id, id, name, kind, grant_types, redirect_uris, created_at) VALUES ('{0}', gen_random_uuid(), 'x', 'machine', ARRAY['client_credentials'], ARRAY['https://app.test/cb'], now())")]
     [InlineData("INSERT INTO application (tenant_id, id, name, kind, redirect_uris, created_at) VALUES ('{0}', gen_random_uuid(), 'x', 'system', ARRAY['https://app.test/cb'], now())")]
+    [InlineData("INSERT INTO application (tenant_id, id, name, kind, redirect_uris, created_at) VALUES ('{0}', gen_random_uuid(), 'x', 'spa', ARRAY['https://app.test/cb'], now())")]
+    [InlineData("INSERT INTO application (tenant_id, id, name, kind, redirect_uris, created_at) VALUES ('{0}', gen_random_uuid(), 'x', 'native', ARRAY['https://app.test/cb'], now())")]
+    [InlineData("INSERT INTO application (tenant_id, id, name, kind, created_at) VALUES ('{0}', gen_random_uuid(), 'x', 'implicit', now())")]
     public async Task Each_check_refuses_a_row_that_breaks_it(string statement)
     {
         var database = await DatabaseAsync();
@@ -364,6 +366,96 @@ public sealed class DirectoryTests(PostgresFixture postgres)
         Assert.Equal([first.ApplicationId, second.ApplicationId], listed.Select(a => a.Id));
         Assert.Equal(["First", "Second"], listed.Select(a => a.Name));
         Assert.Equal([first.ClientId, second.ClientId], listed.Select(a => a.ClientId));
+    }
+
+    // Story 3.1 (FR-11, FR-44): an Admin's Application, of four types, with no secret.
+
+    [Theory]
+    [InlineData("spa", "'{}'")]
+    [InlineData("native", "'{}'")]
+    [InlineData("web", "ARRAY['authorization_code']")]
+    [InlineData("machine", "ARRAY['client_credentials']")]
+    public async Task An_Admins_Application_has_its_kinds_grants_no_secret_and_one_event_by_its_actor(string kind, string grants)
+    {
+        var database = await DatabaseAsync();
+        var admin = Guid.CreateVersion7();
+
+        var created = await InTenantAsync(database, TableRegistry.Admin, TenantA, c => _directory.CreateApplicationAsync(c, Gatekeep.Kernel.Audit.Actor.Admin(admin), "My app", kind, Cancellation));
+
+        Assert.Equal(PublicId.Format(PublicIdType.Application, created.Id), created.ClientId);
+        Assert.Equal(7, created.Id.Version);
+        Assert.Equal(kind, created.Kind);
+        Assert.Equal(kind is "web" or "machine", created.CredentialRequired);
+        var superuser = postgres.SuperuserConnection(database);
+        Assert.Equal(1L, await PostgresFixture.ScalarAsync<long>(superuser,
+            $"SELECT count(*) FROM application WHERE tenant_id = '{TenantA}' AND id = '{created.Id}' AND name = 'My app' AND kind = '{kind}' AND grant_types = {grants} AND audiences = '{{}}' AND redirect_uris = '{{}}'"));
+        Assert.Equal(0L, await PostgresFixture.ScalarAsync<long>(superuser, "SELECT count(*) FROM client_secret"));
+        Assert.Equal(1L, await PostgresFixture.ScalarAsync<long>(superuser,
+            $"SELECT count(*) FROM audit_event WHERE tenant_id = '{TenantA}' AND type_code = 'directory.application.created' AND actor_kind = 'admin' AND actor_id = '{admin}' AND target_kind = 'client' AND target_id = '{created.Id}'"));
+
+        var found = await InTenantAsync(database, TableRegistry.Admin, TenantA, c => _directory.FindApplicationAsync(c, created.Id, Cancellation));
+        Assert.Equal(created.Id, found?.Id);
+        Assert.Equal(created.CreatedAt.ToUnixTimeMilliseconds(), found!.CreatedAt.ToUnixTimeMilliseconds());
+
+        // No secret: it verifies nothing, whatever is presented.
+        Assert.False(await VerifyAsync(database, TenantA, created.ClientId, new Secret<string>($"{PublicId.Format(PublicIdType.Tenant, TenantA)}.x")));
+    }
+
+    [Theory]
+    [InlineData("", "spa")]
+    [InlineData("   ", "spa")]
+    [InlineData("ab", "spa")]
+    [InlineData("x", "system")]
+    [InlineData("x", "implicit")]
+    [InlineData("x", "")]
+    public async Task An_Admins_Application_with_a_bad_name_or_kind_writes_nothing(string name, string kind)
+    {
+        var database = await DatabaseAsync();
+        name = System.Text.RegularExpressions.Regex.Unescape(name);
+
+        await using var source = NpgsqlDataSource.Create(postgres.RoleConnection(TableRegistry.Admin, database));
+        await using var scope = await TenantScope.BeginAsync(source, TenantA, Cancellation);
+        await Assert.ThrowsAsync<ArgumentException>(() => _directory.CreateApplicationAsync(scope.CreateCommandContext(), Gatekeep.Kernel.Audit.Actor.System, name, kind, Cancellation));
+        await Assert.ThrowsAsync<ArgumentException>(() => _directory.CreateApplicationAsync(scope.CreateCommandContext(), Gatekeep.Kernel.Audit.Actor.System, new string('x', 201), "spa", Cancellation));
+        await scope.CommitAsync(Cancellation);
+
+        Assert.Equal(0L, await PostgresFixture.ScalarAsync<long>(postgres.SuperuserConnection(database), "SELECT count(*) FROM application"));
+        Assert.Equal(0L, await PostgresFixture.ScalarAsync<long>(postgres.SuperuserConnection(database), "SELECT count(*) FROM audit_event"));
+    }
+
+    [Fact]
+    public async Task A_page_lists_newest_first_after_its_cursor_and_never_the_system_or_another_Tenants_Application()
+    {
+        var database = await DatabaseAsync();
+        var first = await CreateAsync(database, TenantA, "First");
+        await EnsureAsync(database, TenantA);
+        var second = await InTenantAsync(database, TableRegistry.Admin, TenantA, c => _directory.CreateApplicationAsync(c, Gatekeep.Kernel.Audit.Actor.System, "Second", "spa", Cancellation));
+        var third = await InTenantAsync(database, TableRegistry.Admin, TenantA, c => _directory.CreateApplicationAsync(c, Gatekeep.Kernel.Audit.Actor.System, "Third", "native", Cancellation));
+        await CreateAsync(database, TenantB, "Other Tenant's");
+
+        var page = await InTenantAsync(database, TableRegistry.Admin, TenantA, c => _directory.ListApplicationsPageAsync(c, null, 2, Cancellation));
+        Assert.Equal([third.Id, second.Id], page.Applications.Select(a => a.Id));
+        Assert.Equal(second.Id, page.NextAfter);
+
+        var rest = await InTenantAsync(database, TableRegistry.Admin, TenantA, c => _directory.ListApplicationsPageAsync(c, page.NextAfter, 2, Cancellation));
+        Assert.Equal([first.ApplicationId], rest.Applications.Select(a => a.Id));
+        Assert.Null(rest.NextAfter);
+
+        var all = await InTenantAsync(database, TableRegistry.Admin, TenantA, c => _directory.ListApplicationsPageAsync(c, null, 50, Cancellation));
+        Assert.Equal(3, all.Applications.Count);
+        Assert.Null(all.NextAfter);
+    }
+
+    [Fact]
+    public async Task Finding_an_Application_hides_the_system_one_and_another_Tenants()
+    {
+        var database = await DatabaseAsync();
+        var system = await EnsureAsync(database, TenantA);
+        var other = await CreateAsync(database, TenantB);
+
+        Assert.Null(await InTenantAsync(database, TableRegistry.Admin, TenantA, c => _directory.FindApplicationAsync(c, system, Cancellation)));
+        Assert.Null(await InTenantAsync(database, TableRegistry.Admin, TenantA, c => _directory.FindApplicationAsync(c, other.ApplicationId, Cancellation)));
+        Assert.Null(await InTenantAsync(database, TableRegistry.Admin, TenantA, c => _directory.FindApplicationAsync(c, Guid.CreateVersion7(), Cancellation)));
     }
 
     [Fact]

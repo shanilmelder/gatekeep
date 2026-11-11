@@ -1,3 +1,4 @@
+using Gatekeep.Kernel.Audit;
 using Gatekeep.Kernel.Persistence;
 using Gatekeep.Kernel.Secrets;
 
@@ -31,6 +32,12 @@ public sealed class CreatedWebClient
 
     public required RevealOnce<string> Secret { get; init; }
 }
+
+/// <summary>
+/// One page of a Tenant's Applications (Story 3.1), newest first, and the ID to pass as the next
+/// page's <c>after</c> when another page follows, else null.
+/// </summary>
+public sealed record DirectoryApplicationPage(IReadOnlyList<DirectoryApplication> Applications, Guid? NextAfter);
 
 /// <summary>Applications and their client secrets (AD-8, AD-27). Directory owns <c>application</c> and <c>client_secret</c>.</summary>
 public interface IDirectory
@@ -69,6 +76,47 @@ public interface IDirectory
         string name,
         IReadOnlyList<string> redirectUris,
         CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Writes an Application an Admin registers (Story 3.1, FR-11): <paramref name="name"/> as given and
+    /// <paramref name="kind"/>, one of <see cref="DirectoryContract.CreatableKinds"/>, with the kind's
+    /// default grants (<c>machine</c> <c>{client_credentials}</c>, <c>web</c> <c>{authorization_code}</c>,
+    /// <c>spa</c> and <c>native</c> none), no redirect URI, no audience and no client secret, and one
+    /// <c>directory.application.created</c> audit event by <paramref name="actor"/>, all in the caller's
+    /// context and only in its Tenant. With no secret, a <c>web</c> or <c>machine</c> Application fails
+    /// client authentication until one is created (Story 3.3), and no flow serves the others yet.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The context has no Tenant. Nothing is written.</exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="name"/> is empty or white space, longer than <see cref="DirectoryContract.MaxNameLength"/>
+    /// characters or holds a control character; or <paramref name="kind"/> isn't creatable. Nothing is written.
+    /// </exception>
+    [StateChanging]
+    Task<DirectoryApplication> CreateApplicationAsync(
+        CommandContext context,
+        Actor actor,
+        string name,
+        string kind,
+        CancellationToken cancellationToken);
+
+    /// <summary>
+    /// One page of the context Tenant's Applications (Story 3.1): at most <paramref name="limit"/>,
+    /// newest first by ID (UUIDv7), after <paramref name="after"/> when it is given. The <c>system</c>
+    /// Application is never among them (AD-12). It only reads.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The context has no Tenant.</exception>
+    Task<DirectoryApplicationPage> ListApplicationsPageAsync(
+        CommandContext context,
+        Guid? after,
+        int limit,
+        CancellationToken cancellationToken);
+
+    /// <summary>
+    /// The context Tenant's Application <paramref name="id"/>, or null when it has none by that ID, the
+    /// <c>system</c> Application's included (AD-12). It only reads.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The context has no Tenant.</exception>
+    Task<DirectoryApplication?> FindApplicationAsync(CommandContext context, Guid id, CancellationToken cancellationToken);
 
     /// <summary>
     /// Whether <paramref name="secret"/> is a live secret of the Application <paramref name="clientId"/>

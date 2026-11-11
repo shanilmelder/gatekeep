@@ -2,7 +2,8 @@
 title: 'Story 3.1: List and create Applications'
 type: 'feature'
 created: '2026-11-11'
-status: 'ready-for-dev'
+baseline_revision: '55dacdad8ec85446a78e621f88fb8357b9599082'
+status: 'in-review'
 review_loop_iteration: 0
 followup_review_recommended: false
 context:

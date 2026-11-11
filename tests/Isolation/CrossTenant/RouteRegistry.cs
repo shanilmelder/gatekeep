@@ -95,7 +95,10 @@ public static class RouteRegistry
         new("GET", "/api/v1/tenants/{tenantId}/logs", CaseKind.TenantPath),
         new("GET", "/api/v1/tenants/{tenantId}/signing-keys", CaseKind.TenantPath),
         new("GET", "/api/v1/tenants/{tenantId}/signing-keys/jwks", CaseKind.TenantPath),
+        new("GET", "/api/v1/tenants/{tenantId}/applications", CaseKind.TenantPath),
+        new("GET", "/api/v1/tenants/{tenantId}/applications/{applicationId}", CaseKind.TenantPath, RouteValues: new Dictionary<string, string> { ["applicationId"] = "app_aaaaaaaaaaaaaaaaaaaaaaaaaa" }),
         new("PUT", "/api/v1/tenants/{tenantId}/label", CaseKind.TenantPath, Body: """{"label":"staging"}"""),
+        new("POST", "/api/v1/tenants/{tenantId}/applications", CaseKind.TenantPath, Body: """{"name":"Cross-Tenant","type":"spa"}"""),
         new("POST", "/api/v1/tenants/{tenantId}/assertions", CaseKind.TenantPath, Body: """{"action":"tenant.label.manage","target":null}"""),
 
         // Program.cs's fallbacks.

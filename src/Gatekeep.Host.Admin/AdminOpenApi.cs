@@ -1,5 +1,6 @@
 using System.Text.Json.Nodes;
 using Gatekeep.Modules.Admins.Contracts;
+using Gatekeep.Modules.Management.Contracts;
 using Microsoft.AspNetCore.OpenApi;
 using Microsoft.OpenApi;
 
@@ -168,6 +169,21 @@ internal static class AdminOpenApi
                 else if (type == typeof(LogReference))
                 {
                     Enumerate(schema, "kind", TenantLogsApi.ReferenceKinds);
+                }
+                else if (type == typeof(CreateApplicationRequest))
+                {
+                    Enumerate(schema, "type", ApplicationsApi.Types);
+                    Bound(schema, "name", pattern: null, maxLength: ManagementContract.MaxApplicationNameLength);
+                }
+                else if (type == typeof(ApplicationResponse))
+                {
+                    Enumerate(schema, "type", ApplicationsApi.Types);
+                    Bound(schema, "id", ApplicationIdPattern, maxLength: null);
+                    Bound(schema, "clientId", ApplicationIdPattern, maxLength: null);
+                }
+                else if (type == typeof(ApplicationListResponse))
+                {
+                    Bound(schema, "nextCursor", ApplicationIdPattern, maxLength: null);
                 }
                 else if (type == typeof(ApiProblem))
                 {
@@ -440,6 +456,8 @@ internal static class AdminOpenApi
     private const string OperationIdPattern = "^opr_[a-z2-7]{25}[aeimquy4]$";
 
     private const string EventIdPattern = "^evt_[a-z2-7]{25}[aeimquy4]$";
+
+    private const string ApplicationIdPattern = "^app_[a-z2-7]{25}[aeimquy4]$";
 
     private const string TypeCodePattern = "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*$";
 

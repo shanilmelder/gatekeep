@@ -2097,6 +2097,265 @@
         "x-gatekeep-recovery-allowed": false
       }
     },
+    "/api/v1/tenants/{tenantId}/applications": {
+      "get": {
+        "tags": [
+          "Tenants"
+        ],
+        "summary": "The path Tenant's Applications: newest first, 50 a page.",
+        "description": "Any Tenant Role in the path Tenant. Read only, in the Tenant's own scope: no other Tenant's Application is ever listed, and neither is the Tenant's hidden system Application. Each Application's ID, which is also its client ID, its name, its type, whether that type needs a client secret, and when it was created; never a secret. nextCursor is the last Application's ID when an older page follows, else null; pass it back as cursor. A cursor sent twice, empty or that isn't an app_ ID is 400 invalid_request. A malformed, unknown or role-less Tenant is 403 access_denied, audited as every Tenant capability refusal is.",
+        "operationId": "ListApplications",
+        "parameters": [
+          {
+            "name": "tenantId",
+            "in": "path",
+            "description": "The Tenant's public ID: ten_ and the UUID's 16 bytes in lowercase RFC 4648 base32 with no padding, whose last character carries two zero bits. Only this canonical spelling, after URL decoding, names a Tenant, and the empty UUID's never does; anything else is refused like a Tenant the Admin holds no role in.",
+            "required": true,
+            "schema": {
+              "pattern": "^ten_[a-z2-7]{25}[aeimquy4]$",
+              "type": "string"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "The previous page's nextCursor: an app_ public ID.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApplicationListResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "access_denied, with the problem body, when the capability is refused. No body when an earlier check refuses first: a Session restricted to setup, or on a state-changing call a wrong Origin or CSRF token.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "adminSession": [ ]
+          }
+        ],
+        "x-gatekeep-setup-allowed": false,
+        "x-gatekeep-access": {
+          "kind": "capability",
+          "capability": "tenant.configuration.read",
+          "scope": "tenant",
+          "machineAllowed": true,
+          "freshAssertion": "never"
+        },
+        "x-gatekeep-recovery-allowed": false
+      },
+      "post": {
+        "tags": [
+          "Tenants"
+        ],
+        "summary": "Create an Application in the path Tenant, with a name and a type and no secret.",
+        "description": "Tenant Editors and Owners. The type is spa (single-page), web (regular web), native or machine (machine-to-machine); web and machine need a client secret, which isn't created here, so until one is the Application can't authenticate. It starts with no redirect URI and no audience; machine is allowed client_credentials and web authorization_code, and spa and native nothing yet. The name is trimmed, then 1 to 200 characters with no control character, and two Applications may share one. In one transaction it writes the Application and directory.application.created by the caller. A body that isn't JSON, is over 4096 bytes, misses a field or has the wrong type, and an invalid name or type, is 400 application_invalid, with nothing written. Location names the new Application.",
+        "operationId": "CreateApplication",
+        "parameters": [
+          {
+            "name": "tenantId",
+            "in": "path",
+            "description": "The Tenant's public ID: ten_ and the UUID's 16 bytes in lowercase RFC 4648 base32 with no padding, whose last character carries two zero bits. Only this canonical spelling, after URL decoding, names a Tenant, and the empty UUID's never does; anything else is refused like a Tenant the Admin holds no role in.",
+            "required": true,
+            "schema": {
+              "pattern": "^ten_[a-z2-7]{25}[aeimquy4]$",
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Gatekeep-Tenant",
+            "in": "header",
+            "description": "The Tenant the page shows, its ten_ ID: it must equal {tenantId}, or 409 tenant_mismatch. It never selects a Tenant.",
+            "required": true,
+            "schema": {
+              "pattern": "^ten_[a-z2-7]{25}[aeimquy4]$",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateApplicationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApplicationResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "access_denied, with the problem body, when the capability is refused. No body when an earlier check refuses first: a Session restricted to setup, or on a state-changing call a wrong Origin or CSRF token.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "tenant_mismatch, with the problem body, when X-Gatekeep-Tenant is missing, sent twice or isn't {tenantId}, and nothing ran; or another conflict the operation's description names.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "adminSession": [ ],
+            "csrf": [ ]
+          }
+        ],
+        "x-gatekeep-setup-allowed": false,
+        "x-gatekeep-access": {
+          "kind": "capability",
+          "capability": "tenant.applications.manage",
+          "scope": "tenant",
+          "machineAllowed": true,
+          "freshAssertion": "never"
+        },
+        "x-gatekeep-recovery-allowed": false
+      }
+    },
+    "/api/v1/tenants/{tenantId}/applications/{applicationId}": {
+      "get": {
+        "tags": [
+          "Tenants"
+        ],
+        "summary": "One of the path Tenant's Applications.",
+        "description": "Any Tenant Role in the path Tenant. Read only, in the Tenant's own scope. The same fields as the list, and never a secret. An applicationId that isn't an app_ ID, names no Application of this Tenant, names another Tenant's or names the hidden system Application is the same 404 not_found. A malformed, unknown or role-less Tenant is 403 access_denied, audited as every Tenant capability refusal is.",
+        "operationId": "GetApplication",
+        "parameters": [
+          {
+            "name": "tenantId",
+            "in": "path",
+            "description": "The Tenant's public ID: ten_ and the UUID's 16 bytes in lowercase RFC 4648 base32 with no padding, whose last character carries two zero bits. Only this canonical spelling, after URL decoding, names a Tenant, and the empty UUID's never does; anything else is refused like a Tenant the Admin holds no role in.",
+            "required": true,
+            "schema": {
+              "pattern": "^ten_[a-z2-7]{25}[aeimquy4]$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApplicationResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "access_denied, with the problem body, when the capability is refused. No body when an earlier check refuses first: a Session restricted to setup, or on a state-changing call a wrong Origin or CSRF token.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "adminSession": [ ]
+          }
+        ],
+        "x-gatekeep-setup-allowed": false,
+        "x-gatekeep-access": {
+          "kind": "capability",
+          "capability": "tenant.configuration.read",
+          "scope": "tenant",
+          "machineAllowed": true,
+          "freshAssertion": "never"
+        },
+        "x-gatekeep-recovery-allowed": false
+      }
+    },
     "/api/v1/tenants/{tenantId}/assertions": {
       "post": {
         "tags": [
@@ -2527,11 +2786,74 @@
               "tenant_deleted",
               "tenant_busy",
               "confirmation_mismatch",
-              "invalid_request"
+              "invalid_request",
+              "application_invalid",
+              "not_found"
             ],
             "type": "string"
           },
           "traceId": {
+            "type": "string"
+          }
+        }
+      },
+      "ApplicationListResponse": {
+        "required": [
+          "applications",
+          "nextCursor"
+        ],
+        "type": "object",
+        "properties": {
+          "applications": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ApplicationResponse"
+            }
+          },
+          "nextCursor": {
+            "pattern": "^app_[a-z2-7]{25}[aeimquy4]$",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        }
+      },
+      "ApplicationResponse": {
+        "required": [
+          "id",
+          "clientId",
+          "name",
+          "type",
+          "credentialRequired",
+          "createdAt"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "pattern": "^app_[a-z2-7]{25}[aeimquy4]$",
+            "type": "string"
+          },
+          "clientId": {
+            "pattern": "^app_[a-z2-7]{25}[aeimquy4]$",
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "type": {
+            "enum": [
+              "spa",
+              "web",
+              "native",
+              "machine"
+            ],
+            "type": "string"
+          },
+          "credentialRequired": {
+            "type": "boolean"
+          },
+          "createdAt": {
             "type": "string"
           }
         }
@@ -2610,6 +2932,28 @@
               ],
               "type": "string"
             }
+          }
+        }
+      },
+      "CreateApplicationRequest": {
+        "required": [
+          "name",
+          "type"
+        ],
+        "type": "object",
+        "properties": {
+          "name": {
+            "maxLength": 200,
+            "type": "string"
+          },
+          "type": {
+            "enum": [
+              "spa",
+              "web",
+              "native",
+              "machine"
+            ],
+            "type": "string"
           }
         }
       },

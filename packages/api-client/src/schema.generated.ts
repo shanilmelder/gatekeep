@@ -540,6 +540,50 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/tenants/{tenantId}/applications": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The path Tenant's Applications: newest first, 50 a page.
+         * @description Any Tenant Role in the path Tenant. Read only, in the Tenant's own scope: no other Tenant's Application is ever listed, and neither is the Tenant's hidden system Application. Each Application's ID, which is also its client ID, its name, its type, whether that type needs a client secret, and when it was created; never a secret. nextCursor is the last Application's ID when an older page follows, else null; pass it back as cursor. A cursor sent twice, empty or that isn't an app_ ID is 400 invalid_request. A malformed, unknown or role-less Tenant is 403 access_denied, audited as every Tenant capability refusal is.
+         */
+        get: operations["ListApplications"];
+        put?: never;
+        /**
+         * Create an Application in the path Tenant, with a name and a type and no secret.
+         * @description Tenant Editors and Owners. The type is spa (single-page), web (regular web), native or machine (machine-to-machine); web and machine need a client secret, which isn't created here, so until one is the Application can't authenticate. It starts with no redirect URI and no audience; machine is allowed client_credentials and web authorization_code, and spa and native nothing yet. The name is trimmed, then 1 to 200 characters with no control character, and two Applications may share one. In one transaction it writes the Application and directory.application.created by the caller. A body that isn't JSON, is over 4096 bytes, misses a field or has the wrong type, and an invalid name or type, is 400 application_invalid, with nothing written. Location names the new Application.
+         */
+        post: operations["CreateApplication"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tenants/{tenantId}/applications/{applicationId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * One of the path Tenant's Applications.
+         * @description Any Tenant Role in the path Tenant. Read only, in the Tenant's own scope. The same fields as the list, and never a secret. An applicationId that isn't an app_ ID, names no Application of this Tenant, names another Tenant's or names the hidden system Application is the same 404 not_found. A malformed, unknown or role-less Tenant is 403 access_denied, audited as every Tenant capability refusal is.
+         */
+        get: operations["GetApplication"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/tenants/{tenantId}/assertions": {
         parameters: {
             query?: never;
@@ -638,8 +682,21 @@ export interface components {
         };
         ApiProblem: {
             /** @enum {string} */
-            code: "bootstrap_refused" | "credential_refused" | "signin_refused" | "rate_limited" | "access_denied" | "fresh_assertion_required" | "assertion_refused" | "credentials_minimum" | "credentials_maximum" | "recovery_code_refused" | "recovery_code_superseded" | "enrolment_refused" | "tenant_invalid" | "subdomain_refused" | "operation_not_failed" | "tenant_mismatch" | "tenant_not_active" | "tenant_deleted" | "tenant_busy" | "confirmation_mismatch" | "invalid_request";
+            code: "bootstrap_refused" | "credential_refused" | "signin_refused" | "rate_limited" | "access_denied" | "fresh_assertion_required" | "assertion_refused" | "credentials_minimum" | "credentials_maximum" | "recovery_code_refused" | "recovery_code_superseded" | "enrolment_refused" | "tenant_invalid" | "subdomain_refused" | "operation_not_failed" | "tenant_mismatch" | "tenant_not_active" | "tenant_deleted" | "tenant_busy" | "confirmation_mismatch" | "invalid_request" | "application_invalid" | "not_found";
             traceId: string;
+        };
+        ApplicationListResponse: {
+            applications: components["schemas"]["ApplicationResponse"][];
+            nextCursor: null | string;
+        };
+        ApplicationResponse: {
+            id: string;
+            clientId: string;
+            name: string;
+            /** @enum {string} */
+            type: "spa" | "web" | "native" | "machine";
+            credentialRequired: boolean;
+            createdAt: string;
         };
         BootstrapClaimRequest: {
             token: string;
@@ -651,6 +708,11 @@ export interface components {
         };
         CapabilitiesResponse: {
             capabilities: ("tenant.configuration.read" | "tenant.users.read" | "tenant.logs.read" | "tenant.log_detail.read" | "tenant.applications.manage" | "tenant.application_callbacks.manage" | "tenant.apis.manage" | "tenant.roles.manage" | "tenant.users.manage" | "tenant.theme.manage" | "tenant.templates.manage" | "tenant.settings.manage" | "tenant.connections.toggle" | "tenant.configuration.export" | "tenant.client_secrets.manage" | "tenant.password_policy.manage" | "tenant.mfa_policy.manage" | "tenant.connection_credentials.manage" | "tenant.email_provider.manage" | "tenant.label.manage" | "tenant.signing_keys.rotate" | "tenant.signing_keys.revoke" | "tenant.management_access.grant" | "tenant.user_data.export" | "tenant.user_data.erase" | "tenant.incident_response.run" | "deployment.tenants.read" | "deployment.tenants.create" | "deployment.tenants.delete" | "deployment.admins.read" | "deployment.admins.manage" | "deployment.email_provider.manage" | "deployment.incident_response.run" | "deployment.log.read")[];
+        };
+        CreateApplicationRequest: {
+            name: string;
+            /** @enum {string} */
+            type: "spa" | "web" | "native" | "machine";
         };
         CreateTenantRequest: {
             name: string;
@@ -2505,6 +2567,190 @@ export interface operations {
             };
             /** @description access_denied, with the problem body, when the capability is refused. No body when an earlier check refuses first: a Session restricted to setup, or on a state-changing call a wrong Origin or CSRF token. */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    ListApplications: {
+        parameters: {
+            query?: {
+                /** @description The previous page's nextCursor: an app_ public ID. */
+                cursor?: string;
+            };
+            header?: never;
+            path: {
+                /** @description The Tenant's public ID: ten_ and the UUID's 16 bytes in lowercase RFC 4648 base32 with no padding, whose last character carries two zero bits. Only this canonical spelling, after URL decoding, names a Tenant, and the empty UUID's never does; anything else is refused like a Tenant the Admin holds no role in. */
+                tenantId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApplicationListResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description access_denied, with the problem body, when the capability is refused. No body when an earlier check refuses first: a Session restricted to setup, or on a state-changing call a wrong Origin or CSRF token. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    CreateApplication: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description The Tenant the page shows, its ten_ ID: it must equal {tenantId}, or 409 tenant_mismatch. It never selects a Tenant. */
+                "X-Gatekeep-Tenant": string;
+            };
+            path: {
+                /** @description The Tenant's public ID: ten_ and the UUID's 16 bytes in lowercase RFC 4648 base32 with no padding, whose last character carries two zero bits. Only this canonical spelling, after URL decoding, names a Tenant, and the empty UUID's never does; anything else is refused like a Tenant the Admin holds no role in. */
+                tenantId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateApplicationRequest"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApplicationResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description access_denied, with the problem body, when the capability is refused. No body when an earlier check refuses first: a Session restricted to setup, or on a state-changing call a wrong Origin or CSRF token. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description tenant_mismatch, with the problem body, when X-Gatekeep-Tenant is missing, sent twice or isn't {tenantId}, and nothing ran; or another conflict the operation's description names. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    GetApplication: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The Tenant's public ID: ten_ and the UUID's 16 bytes in lowercase RFC 4648 base32 with no padding, whose last character carries two zero bits. Only this canonical spelling, after URL decoding, names a Tenant, and the empty UUID's never does; anything else is refused like a Tenant the Admin holds no role in. */
+                tenantId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApplicationResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description access_denied, with the problem body, when the capability is refused. No body when an earlier check refuses first: a Session restricted to setup, or on a state-changing call a wrong Origin or CSRF token. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Not Found */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

@@ -452,6 +452,55 @@ export interface Messages {
   keyStatePrevious: string;
   keyStateRetired: string;
   keyStateRevoked: string;
+  /** The Applications page's heading and description (Story 3.1; design Applications). */
+  applicationsTitle: string;
+  applicationsDescription: string;
+  /** The Applications list's empty state (EXPERIENCE.md). */
+  applicationsEmpty: string;
+  /** The Applications list's columns. */
+  applicationsColumnName: string;
+  applicationsColumnType: string;
+  applicationsColumnClientId: string;
+  applicationsColumnCreated: string;
+  /** The action that reads the next, older page of Applications. */
+  applicationsLoadMore: string;
+  /** What a client ID's Copy copies, as its name says. Placeholder for `copyNamed`. */
+  applicationClientIdWhat: string;
+  /** The four Application types' names. */
+  applicationTypeSpa: string;
+  applicationTypeWeb: string;
+  applicationTypeNative: string;
+  applicationTypeMachine: string;
+  /** Each type's line in Create Application, which says whether it needs a credential. */
+  applicationTypeSpaDescription: string;
+  applicationTypeWebDescription: string;
+  applicationTypeNativeDescription: string;
+  applicationTypeMachineDescription: string;
+  /** Create Application: the page action, the modal's heading, its fields and its submit. */
+  createApplication: string;
+  createApplicationTitle: string;
+  createApplicationName: string;
+  createApplicationType: string;
+  createApplicationSubmit: string;
+  /** The browser's checks on the name, as feedback only: the server decides. */
+  createApplicationNameRequired: string;
+  createApplicationNameInvalid: string;
+  /** Create Application refused as malformed, or failed: nothing was created. */
+  createApplicationInvalid: string;
+  createApplicationFailed: string;
+  /** The toast once an Application is created. */
+  createApplicationCreated: string;
+  /** The Application detail page's client ID label, and its Credentials section. */
+  applicationClientId: string;
+  applicationCredentialsTitle: string;
+  /** Credentials for regular web and machine-to-machine: a secret is needed, which only a Tenant Owner creates. */
+  applicationCredentialsNeeded: string;
+  /** Credentials for single-page and native. */
+  applicationCredentialsNone: string;
+  /** The Application detail page when this Tenant has no such Application. */
+  applicationNotFound: string;
+  /** The Application detail page's breadcrumb trail, as its landmark's name. */
+  applicationBreadcrumb: string;
 }
 
 export const defaultMessages: Readonly<Messages> = Object.freeze({
@@ -715,6 +764,39 @@ export const defaultMessages: Readonly<Messages> = Object.freeze({
   keyStatePrevious: 'Previous',
   keyStateRetired: 'Retired',
   keyStateRevoked: 'Revoked',
+  applicationsTitle: 'Applications',
+  applicationsDescription: 'Apps that sign users in or call your APIs. Each gets its own client ID.',
+  applicationsEmpty: 'No applications yet',
+  applicationsColumnName: 'Name',
+  applicationsColumnType: 'Type',
+  applicationsColumnClientId: 'Client ID',
+  applicationsColumnCreated: 'Created',
+  applicationsLoadMore: 'Load more',
+  applicationClientIdWhat: 'client ID',
+  applicationTypeSpa: 'Single-page',
+  applicationTypeWeb: 'Regular web',
+  applicationTypeNative: 'Native',
+  applicationTypeMachine: 'Machine-to-machine',
+  applicationTypeSpaDescription: 'A JavaScript app running in the browser. No credential needed.',
+  applicationTypeWebDescription: 'A server-side web app. Needs a client secret.',
+  applicationTypeNativeDescription: 'A mobile or desktop app. No credential needed.',
+  applicationTypeMachineDescription: 'A backend service or job with no user. Needs a client secret.',
+  createApplication: 'Create application',
+  createApplicationTitle: 'Create application',
+  createApplicationName: 'Name',
+  createApplicationType: 'Type',
+  createApplicationSubmit: 'Create application',
+  createApplicationNameRequired: 'Enter a name.',
+  createApplicationNameInvalid: 'Use at most 200 characters, with no control characters.',
+  createApplicationInvalid: "That application isn't valid. Check the name and type.",
+  createApplicationFailed: "Couldn't create the application.",
+  createApplicationCreated: 'Application created',
+  applicationClientId: 'Client ID',
+  applicationCredentialsTitle: 'Credentials',
+  applicationCredentialsNeeded: 'Needs a client secret. A Tenant Owner creates it.',
+  applicationCredentialsNone: 'No secret needed.',
+  applicationNotFound: "This application doesn't exist in this Tenant.",
+  applicationBreadcrumb: 'Breadcrumb',
 });
 
 /**

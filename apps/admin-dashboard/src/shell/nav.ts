@@ -9,7 +9,8 @@
 // which only an Admin holding deployment.tenants.read sees, the Deployment Owner; Story 1.28 the
 // first Tenant one, Settings → Tenant, which any Tenant Role in the path Tenant sees; Story 7.4
 // Monitoring → Logs, for tenant.logs.read; Story 9.1 Security → Signing keys, which any Tenant Role
-// sees too; Epic 3 adds the Applications ones.
+// sees too; Story 3.1 Applications → Applications, which any Tenant Role sees, and later Epic 3
+// stories the other Applications ones.
 
 import type { AdminNavGroupId, AdminNavItem, Messages } from '@gatekeep/ui/admin';
 import type { Capability } from './capabilities';
@@ -32,6 +33,12 @@ export type NavEntry =
 
 export const NAV: readonly NavEntry[] = [
   { group: 'deployment', label: 'navTenants', href: '/deployment/tenants', requires: 'deployment.tenants.read' },
+  {
+    group: 'applications',
+    label: 'applicationsTitle',
+    href: (tenantId) => `/tenants/${encodeURIComponent(tenantId)}/applications`,
+    requires: 'tenant.configuration.read',
+  },
   {
     group: 'monitoring',
     label: 'navLogs',

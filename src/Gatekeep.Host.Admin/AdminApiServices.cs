@@ -75,6 +75,9 @@ internal sealed class AdminApiServices : IAsyncDisposable
     /// <summary>The Signing keys page's reads (Story 9.1): the path Tenant's keys and its public JWKS sample.</summary>
     public ISigningKeyManagement SigningKeys { get; } = ManagementContract.CreateSigningKeys(AuditContract.CreateAppender());
 
+    /// <summary>A Tenant's Applications (Story 3.1): listed, read and created in the path Tenant's scope.</summary>
+    public IApplicationManagement Applications { get; } = ManagementContract.CreateApplications(AuditContract.CreateAppender());
+
     public IRateLimiter Limiter { get; } = AdminsContract.CreateAttemptLimiter();
 
     public IAdminSessions Sessions { get; }

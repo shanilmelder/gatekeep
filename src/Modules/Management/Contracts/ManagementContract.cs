@@ -26,4 +26,20 @@ public static class ManagementContract
         ArgumentNullException.ThrowIfNull(appender);
         return new SigningKeyManagement(appender);
     }
+
+    /// <summary>The Application types an Admin creates (Story 3.1), in a fixed order: <c>spa</c>, <c>web</c>, <c>native</c>, <c>machine</c>.</summary>
+    public static IReadOnlyList<string> ApplicationTypes => Gatekeep.Modules.Directory.Contracts.DirectoryContract.CreatableKinds;
+
+    /// <summary>The longest Application name, after trimming: 200 characters.</summary>
+    public const int MaxApplicationNameLength = Gatekeep.Modules.Directory.Contracts.DirectoryContract.MaxNameLength;
+
+    /// <summary>
+    /// A Tenant's Applications (Story 3.1), as <c>gk_admin</c>, in the path Tenant's own scope, over
+    /// Directory's contract. A create writes its event through <paramref name="appender"/>.
+    /// </summary>
+    public static IApplicationManagement CreateApplications(IAuditAppender appender)
+    {
+        ArgumentNullException.ThrowIfNull(appender);
+        return new ApplicationManagement(appender);
+    }
 }
