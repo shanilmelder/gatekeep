@@ -869,11 +869,12 @@ public sealed class DirectoryTests(PostgresFixture postgres)
 
         var store = DirectoryContract.CreateApplicationStore(() => throw new InvalidOperationException("Only the getters run."));
 
-        // With no grant, a code-flow kind may not use the authorization endpoint.
+        // As created (Story 3.1): spa and native hold no grant, so may not use the authorization endpoint; web is
+        // created with authorization_code, so may.
         var bare = await ReadAsync();
         Assert.Equal(clientType, await store.GetClientTypeAsync(bare, Cancellation));
         Assert.Equal(applicationType, await store.GetApplicationTypeAsync(bare, Cancellation));
-        Assert.DoesNotContain("ept:authorization", await store.GetPermissionsAsync(bare, Cancellation));
+        Assert.Equal(kind == "web", (await store.GetPermissionsAsync(bare, Cancellation)).Contains("ept:authorization"));
         Assert.Equal(["ft:pkce"], await store.GetRequirementsAsync(bare, Cancellation));
 
         await InTenantAsync(database, TableRegistry.Admin, TenantA, c => _directory.UpdateApplicationSettingsAsync(
