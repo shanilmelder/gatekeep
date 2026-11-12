@@ -606,12 +606,25 @@ public static class TableRegistry
                 [Admin] = [new ColumnGrant(Update, ["redirect_uris", "post_logout_redirect_uris", "web_origins", "grant_types"])],
             },
             ["application_guard_delete", "application_guard_update", "tenant_row_guard"]),
-        new("client_secret", TableClass.Tenant, "Directory", TableUse.Configuration, new Dictionary<string, IReadOnlyList<string>>
-        {
-            [Hosted] = [Select],
-            [Admin] = [Select, Insert],
-            [Worker] = [Delete],
-        }, PurgeColumns, SystemApplicationGuard),
+        // Story 3.3: Host.Admin's rotation sets a secret's expiry and its revocation its revoked_at, and
+        // nothing else: never its hash, Application or creation time.
+        new(
+            "client_secret",
+            TableClass.Tenant,
+            "Directory",
+            TableUse.Configuration,
+            new Dictionary<string, IReadOnlyList<string>>
+            {
+                [Hosted] = [Select],
+                [Admin] = [Select, Insert],
+                [Worker] = [Delete],
+            },
+            new Dictionary<string, IReadOnlyList<ColumnGrant>>
+            {
+                [Worker] = [new ColumnGrant(Select, ["tenant_id"])],
+                [Admin] = [new ColumnGrant(Update, ["expires_at", "revoked_at"])],
+            },
+            SystemApplicationGuard),
 
         // Story 2.5 (AD-14): Tenant attempt counters, such as token requests per Tenant and per source,
         // and cross-Tenant mismatches per source. Host.Hosted counts; only a Tenant's deletion deletes.

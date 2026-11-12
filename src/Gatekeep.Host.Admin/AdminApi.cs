@@ -731,6 +731,76 @@ internal static class AdminApi
             .Produces<ApiProblem>(StatusCodes.Status409Conflict, AdminResponses.ProblemContentType)
             .Produces(StatusCodes.Status503ServiceUnavailable);
 
+        app.MapGet("/api/v1/tenants/{tenantId}/applications/{applicationId}/secrets", static (HttpContext context, AdminApiServices services) => ApplicationSecretsApi.ListAsync(context, services))
+            .WithMetadata(TenantApiEndpoint.Instance, new RequiresCapability(AdminCapabilities.TenantConfigurationRead))
+            .WithName("ListApplicationSecrets")
+            .WithTags(TenantTag)
+            .WithSummary("An Application's live client secrets: never a value or hash.")
+            .WithDescription(
+                "Any Tenant Role in the path Tenant. Read only, in the Tenant's own scope. The live secrets, newest first: not " +
+                "revoked and not past their expiry. Each has its sec_ ID, when it was created and, for a rotated-out secret still " +
+                "in its 24-hour overlap, when it stops working; expiresAt is null for the current secret. No value, hash or part " +
+                "of either is ever shown, and ended secrets are seen only in the Log. A spa or native Application always lists " +
+                "none. An applicationId that isn't an app_ ID, names no Application of this Tenant, another Tenant's or the " +
+                "hidden system Application is the same 404 not_found. A malformed, unknown or role-less Tenant is 403 " +
+                "access_denied, audited as every Tenant capability refusal is.")
+            .Produces<ApplicationSecretListResponse>(StatusCodes.Status200OK)
+            .Produces(StatusCodes.Status401Unauthorized)
+            .Produces<ApiProblem>(StatusCodes.Status403Forbidden, AdminResponses.ProblemContentType)
+            .Produces<ApiProblem>(StatusCodes.Status404NotFound, AdminResponses.ProblemContentType)
+            .Produces(StatusCodes.Status503ServiceUnavailable);
+
+        app.MapPost("/api/v1/tenants/{tenantId}/applications/{applicationId}/secrets", static (HttpContext context, AdminApiServices services) => ApplicationSecretsApi.CreateAsync(context, services))
+            .WithMetadata(
+                TenantApiEndpoint.Instance,
+                new RequiresCapability(AdminCapabilities.TenantClientSecretsManage),
+                new FreshAssertionTarget(ApplicationsApi.ApplicationRouteValue))
+            .WithName("CreateApplicationSecret")
+            .WithTags(TenantTag)
+            .WithSummary("Create or rotate a web or machine Application's client secret, shown in this response only.")
+            .WithDescription(
+                "Tenant Owners only; never a machine principal. Needs a fresh assertion for tenant.client_secrets.manage with " +
+                "this applicationId as its target, begun on POST /api/v1/tenants/{tenantId}/assertions, which the request " +
+                "checks use up before anything else, whatever follows, or 403 fresh_assertion_required. It takes no body. With " +
+                "no current secret it creates one and writes directory.client_secret.created. With one it rotates: the current " +
+                "secret keeps working for 24 hours, then stops, and directory.client_secret.rotated is written. The new secret " +
+                "is {tenantPublicId}.{43 base64url characters}, 256 random bits, stored only as its SHA-256 and shown in this " +
+                "201 alone, with Cache-Control: no-store, beside the live secrets after the write. An Application holds at most " +
+                "two live secrets, so while a rotated-out one still overlaps it is 409 client_secret_limit_reached, and a spa or " +
+                "native Application, which needs no secret, is 409 client_secret_not_applicable; neither writes anything. An " +
+                "applicationId that isn't an app_ ID, names no Application of this Tenant, another Tenant's or the hidden " +
+                "system Application is the same 404 not_found.")
+            .Produces<ApplicationSecretCreatedResponse>(StatusCodes.Status201Created)
+            .Produces(StatusCodes.Status401Unauthorized)
+            .Produces<ApiProblem>(StatusCodes.Status403Forbidden, AdminResponses.ProblemContentType)
+            .Produces<ApiProblem>(StatusCodes.Status404NotFound, AdminResponses.ProblemContentType)
+            .Produces<ApiProblem>(StatusCodes.Status409Conflict, AdminResponses.ProblemContentType)
+            .Produces(StatusCodes.Status503ServiceUnavailable);
+
+        app.MapPost("/api/v1/tenants/{tenantId}/applications/{applicationId}/secrets/{secretId}/revoke", static (HttpContext context, AdminApiServices services) => ApplicationSecretsApi.RevokeAsync(context, services))
+            .WithMetadata(
+                TenantApiEndpoint.Instance,
+                new RequiresCapability(AdminCapabilities.TenantClientSecretsManage),
+                new FreshAssertionTarget(ApplicationsApi.ApplicationRouteValue))
+            .WithName("RevokeApplicationSecret")
+            .WithTags(TenantTag)
+            .WithSummary("Revoke one of an Application's live client secrets, or end a rotated-out secret's overlap now.")
+            .WithDescription(
+                "Tenant Owners only; never a machine principal. Needs a fresh assertion for tenant.client_secrets.manage with " +
+                "this applicationId as its target, as a create does, or 403 fresh_assertion_required. It takes no body. The " +
+                "secret is refused at the token endpoint at once, and directory.client_secret.revoked is written. Revoking the " +
+                "current secret is allowed even when it leaves none, and then the Application can't get tokens until a new one " +
+                "is created. The answer is the live secrets after the write. A secretId that isn't a sec_ ID, names no secret " +
+                "of this Application, or names one already revoked or expired, and an applicationId that isn't an app_ ID, names " +
+                "no Application of this Tenant, another Tenant's or the hidden system Application, are the same 404 not_found.")
+            .Produces<ApplicationSecretListResponse>(StatusCodes.Status200OK)
+            .Produces(StatusCodes.Status401Unauthorized)
+            .Produces<ApiProblem>(StatusCodes.Status403Forbidden, AdminResponses.ProblemContentType)
+            .Produces<ApiProblem>(StatusCodes.Status404NotFound, AdminResponses.ProblemContentType)
+            // The request checks' tenant_mismatch: every state-changing Tenant route declares it (AdminOpenApi).
+            .Produces<ApiProblem>(StatusCodes.Status409Conflict, AdminResponses.ProblemContentType)
+            .Produces(StatusCodes.Status503ServiceUnavailable);
+
         app.MapPut("/api/v1/tenants/{tenantId}/label", static (HttpContext context, AdminApiServices services) => TenantLabelApi.SetAsync(context, services))
             .WithMetadata(
                 TenantApiEndpoint.Instance,

@@ -273,6 +273,14 @@ internal static class CanaryFlows
             ],
             TenantLogsAsync),
 
+        new(
+            "admin.application-secrets",
+            [
+                new(SurfaceKind.Route, "/api/v1/tenants/{tenantId}/applications/{applicationId}/secrets"),
+                new(SurfaceKind.Route, "/api/v1/tenants/{tenantId}/applications/{applicationId}/secrets/{secretId}/revoke"),
+            ],
+            ApplicationSecretsAsync),
+
         // No production type carries a credential yet, so this flow takes the runner's credential
         // path with a test type: enqueue, decrypt, run, retry and dead, as every one will.
         new("jobs.credential", [], CredentialJobAsync),
@@ -1357,6 +1365,161 @@ internal static class CanaryFlows
             Assert.Equal(HttpStatusCode.OK, read.StatusCode);
         }
 
+        await host.StopAsync();
+        run.Capture("Admin output", host.Output);
+        Assert.Matches(@"""LogLevel"":""(?:Trace|Debug)""", host.Output);
+    }
+
+    /// <summary>
+    /// Story 3.3: an Application's client secrets on the real Host.Admin at Trace and the real Protocol pipeline
+    /// through the hosts' scrubbing logging. Normally an Owner creates a secret, uses it for a token, rotates,
+    /// uses both, ends the old one now and revokes the new one; failing, a create with no fresh assertion, a
+    /// rotation over the limit, a refused revoked secret at the token endpoint, and a revoke of an unknown
+    /// secret. Each value and its random part must appear in no table, log or response but the 201 that shows
+    /// it, whose items only are captured; a token response holds its token by design, so only its other fields are.
+    /// </summary>
+    private static async Task ApplicationSecretsAsync(CanaryFlowContext context, FlowRun run, bool failing)
+    {
+        const string tenantHost = "canary.secrets.test";
+
+        var database = await Protocol.ProtocolDatabase.CreateAsync(context.Postgres);
+        run.Database = database.Name;
+        run.Plant("role-password", PostgresFixture.Password);
+        var tenant = (await database.AddTenantAsync(tenantHost)).TenantId;
+        Assert.True(await database.ProvisionAsync(context.Bao, tenant));
+
+        await using var host = await Admins.AdminHost.StartAsync(context.Postgres, database.Name, DebugArguments);
+        var (cookie, csrf, _, authenticators) = await Tenancy.TenantRequests.OwnerOfAsync(host, tenant);
+        run.Plant("admin-session-id", cookie);
+        run.Plant("admin-csrf-token", csrf);
+        var id = Tenancy.TenantRequests.Id(tenant);
+        IEnumerable<(string, string)> page = [(Tenancy.TenantRequests.Header, id)];
+
+        string app;
+        using (var created = await host.SendAsync(
+            HttpMethod.Post, $"/api/v1/tenants/{id}/applications", cookie, csrf, Admins.AdminHost.Origin, """{"name":"Canary worker","type":"machine"}""", page))
+        {
+            var text = await ResponseTextAsync(created);
+            run.Capture("application response", text);
+            Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+            using var json = System.Text.Json.JsonDocument.Parse(text);
+            app = json.RootElement.GetProperty("id").GetString()!;
+        }
+
+        var secrets = $"/api/v1/tenants/{id}/applications/{app}/secrets";
+
+        async Task ConfirmAsync()
+        {
+            var (begin, options) = await Tenancy.TenantRequests.BeginAsync(
+                host, cookie, csrf, tenant, System.Text.Json.JsonSerializer.Serialize(new { action = "tenant.client_secrets.manage", target = app }));
+            using (begin)
+            {
+                run.Capture("secret begin response", await ResponseTextAsync(begin));
+                Assert.Equal(HttpStatusCode.OK, begin.StatusCode);
+            }
+
+            using var complete = await host.CompleteAssertionAsync(cookie, csrf, authenticators[0].Assert(options, Admins.AdminHost.Origin));
+            run.Capture("secret complete response", await ResponseTextAsync(complete));
+            Assert.Equal(HttpStatusCode.NoContent, complete.StatusCode);
+        }
+
+        // Creates or rotates: plants the value and its random part, and captures only the items beside it.
+        async Task<(string Secret, string Id)> CreateAsync(string name)
+        {
+            await ConfirmAsync();
+            using var response = await host.SendAsync(HttpMethod.Post, secrets, cookie, csrf, Admins.AdminHost.Origin, headers: page);
+            Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+            using var json = System.Text.Json.JsonDocument.Parse(await response.Content.ReadAsStringAsync(CanaryFlowContext.Cancellation));
+            var secret = json.RootElement.GetProperty("secret").GetString()!;
+            run.Plant($"{name}-client-secret", secret);
+            run.Plant($"{name}-client-secret-random", secret[(secret.IndexOf('.', StringComparison.Ordinal) + 1)..]);
+            var items = json.RootElement.GetProperty("items");
+            run.Capture($"{name} secret items", items.GetRawText());
+            return (secret, items[0].GetProperty("id").GetString()!);
+        }
+
+        async Task<HttpStatusCode> RevokeAsync(string name, string secretId)
+        {
+            await ConfirmAsync();
+            using var response = await host.SendAsync(HttpMethod.Post, $"{secrets}/{secretId}/revoke", cookie, csrf, Admins.AdminHost.Origin, headers: page);
+            run.Capture($"{name} revoke response", await ResponseTextAsync(response));
+            return response.StatusCode;
+        }
+
+        var captured = new CapturedConsole();
+        await using (var protocol = await Protocol.ProtocolHost.StartAsync(database.Hosted, context.Bao, logging: logging =>
+        {
+            logging.AddGatekeepLogging().SetMinimumLevel(LogLevel.Trace);
+            logging.Services.AddSingleton<Microsoft.Extensions.Logging.Console.ConsoleFormatter>(captured);
+            logging.Services.Configure<Microsoft.Extensions.Logging.Console.ConsoleLoggerOptions>(options => options.FormatterName = captured.Name);
+        }))
+        {
+            async Task<string?> TokenAsync(string name, string secret)
+            {
+                using var token = await Protocol.ClientCredentialsTests.TokenAsync(protocol, tenantHost, app, secret);
+                if (token.Status == HttpStatusCode.OK)
+                {
+                    run.Plant($"{name}-access-token", token.AccessToken);
+                    run.Capture($"{name} token response", $"{token.Body.RootElement.GetProperty("token_type").GetString()} {token.Body.RootElement.GetProperty("expires_in").GetInt32()}");
+                }
+                else
+                {
+                    run.Capture($"{name} token response", token.Body.RootElement.GetRawText());
+                }
+
+                return token.Error;
+            }
+
+            if (failing)
+            {
+                using (var unconfirmed = await host.SendAsync(HttpMethod.Post, secrets, cookie, csrf, Admins.AdminHost.Origin, headers: page))
+                {
+                    run.Capture("unconfirmed create response", await ResponseTextAsync(unconfirmed));
+                    Assert.Equal(HttpStatusCode.Forbidden, unconfirmed.StatusCode);
+                }
+
+                var first = await CreateAsync("first");
+                await CreateAsync("second");
+                await ConfirmAsync();
+                using (var over = await host.SendAsync(HttpMethod.Post, secrets, cookie, csrf, Admins.AdminHost.Origin, headers: page))
+                {
+                    run.Capture("over-limit create response", await ResponseTextAsync(over));
+                    Assert.Equal(HttpStatusCode.Conflict, over.StatusCode);
+                }
+
+                Assert.Equal(HttpStatusCode.OK, await RevokeAsync("first", first.Id));
+                Assert.Equal("invalid_client", await TokenAsync("revoked", first.Secret));
+                var wrong = run.Plant("client-secret-wrong", first.Secret[..(first.Secret.IndexOf('.', StringComparison.Ordinal) + 1)] + Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(24)));
+                Assert.Equal("invalid_client", await TokenAsync("wrong", wrong.Value));
+                Assert.Equal(HttpStatusCode.NotFound, await RevokeAsync("unknown", "sec_aaaaaaaaaaaaaaaaaaaaaaaaaa"));
+            }
+            else
+            {
+                var first = await CreateAsync("first");
+                Assert.Null(await TokenAsync("first", first.Secret));
+                var second = await CreateAsync("second");
+                Assert.Null(await TokenAsync("overlapping", first.Secret));
+                Assert.Null(await TokenAsync("second", second.Secret));
+
+                using (var listed = await host.SendAsync(HttpMethod.Get, secrets, cookie))
+                {
+                    run.Capture("secrets list response", await ResponseTextAsync(listed));
+                    Assert.Equal(HttpStatusCode.OK, listed.StatusCode);
+                }
+
+                Assert.Equal(HttpStatusCode.OK, await RevokeAsync("end-now", first.Id));
+                Assert.Equal(HttpStatusCode.OK, await RevokeAsync("current", second.Id));
+                Assert.Equal("invalid_client", await TokenAsync("ended", second.Secret));
+            }
+        }
+
+        foreach (var authenticator in authenticators)
+        {
+            authenticator.Dispose();
+        }
+
+        run.Capture("Hosted log", captured.Text);
+        Assert.Contains("connect/token", captured.Text, StringComparison.Ordinal);
         await host.StopAsync();
         run.Capture("Admin output", host.Output);
         Assert.Matches(@"""LogLevel"":""(?:Trace|Debug)""", host.Output);

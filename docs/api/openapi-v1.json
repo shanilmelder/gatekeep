@@ -2476,6 +2476,278 @@
         }
       }
     },
+    "/api/v1/tenants/{tenantId}/applications/{applicationId}/secrets": {
+      "get": {
+        "tags": [
+          "Tenants"
+        ],
+        "summary": "An Application's live client secrets: never a value or hash.",
+        "description": "Any Tenant Role in the path Tenant. Read only, in the Tenant's own scope. The live secrets, newest first: not revoked and not past their expiry. Each has its sec_ ID, when it was created and, for a rotated-out secret still in its 24-hour overlap, when it stops working; expiresAt is null for the current secret. No value, hash or part of either is ever shown, and ended secrets are seen only in the Log. A spa or native Application always lists none. An applicationId that isn't an app_ ID, names no Application of this Tenant, another Tenant's or the hidden system Application is the same 404 not_found. A malformed, unknown or role-less Tenant is 403 access_denied, audited as every Tenant capability refusal is.",
+        "operationId": "ListApplicationSecrets",
+        "parameters": [
+          {
+            "name": "tenantId",
+            "in": "path",
+            "description": "The Tenant's public ID: ten_ and the UUID's 16 bytes in lowercase RFC 4648 base32 with no padding, whose last character carries two zero bits. Only this canonical spelling, after URL decoding, names a Tenant, and the empty UUID's never does; anything else is refused like a Tenant the Admin holds no role in.",
+            "required": true,
+            "schema": {
+              "pattern": "^ten_[a-z2-7]{25}[aeimquy4]$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApplicationSecretListResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "access_denied, with the problem body, when the capability is refused. No body when an earlier check refuses first: a Session restricted to setup, or on a state-changing call a wrong Origin or CSRF token.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "adminSession": [ ]
+          }
+        ],
+        "x-gatekeep-setup-allowed": false,
+        "x-gatekeep-access": {
+          "kind": "capability",
+          "capability": "tenant.configuration.read",
+          "scope": "tenant",
+          "machineAllowed": true,
+          "freshAssertion": "never"
+        },
+        "x-gatekeep-recovery-allowed": false
+      },
+      "post": {
+        "tags": [
+          "Tenants"
+        ],
+        "summary": "Create or rotate a web or machine Application's client secret, shown in this response only.",
+        "description": "Tenant Owners only; never a machine principal. Needs a fresh assertion for tenant.client_secrets.manage with this applicationId as its target, begun on POST /api/v1/tenants/{tenantId}/assertions, which the request checks use up before anything else, whatever follows, or 403 fresh_assertion_required. It takes no body. With no current secret it creates one and writes directory.client_secret.created. With one it rotates: the current secret keeps working for 24 hours, then stops, and directory.client_secret.rotated is written. The new secret is {tenantPublicId}.{43 base64url characters}, 256 random bits, stored only as its SHA-256 and shown in this 201 alone, with Cache-Control: no-store, beside the live secrets after the write. An Application holds at most two live secrets, so while a rotated-out one still overlaps it is 409 client_secret_limit_reached, and a spa or native Application, which needs no secret, is 409 client_secret_not_applicable; neither writes anything. An applicationId that isn't an app_ ID, names no Application of this Tenant, another Tenant's or the hidden system Application is the same 404 not_found.",
+        "operationId": "CreateApplicationSecret",
+        "parameters": [
+          {
+            "name": "tenantId",
+            "in": "path",
+            "description": "The Tenant's public ID: ten_ and the UUID's 16 bytes in lowercase RFC 4648 base32 with no padding, whose last character carries two zero bits. Only this canonical spelling, after URL decoding, names a Tenant, and the empty UUID's never does; anything else is refused like a Tenant the Admin holds no role in.",
+            "required": true,
+            "schema": {
+              "pattern": "^ten_[a-z2-7]{25}[aeimquy4]$",
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Gatekeep-Tenant",
+            "in": "header",
+            "description": "The Tenant the page shows, its ten_ ID: it must equal {tenantId}, or 409 tenant_mismatch. It never selects a Tenant.",
+            "required": true,
+            "schema": {
+              "pattern": "^ten_[a-z2-7]{25}[aeimquy4]$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApplicationSecretCreatedResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "fresh_assertion_required, with the problem body, when no fresh assertion for this action and target is bound to the Session; access_denied when the capability is refused. No body when an earlier check refuses first: a restricted Session, or a wrong Origin or CSRF token.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "tenant_mismatch, with the problem body, when X-Gatekeep-Tenant is missing, sent twice or isn't {tenantId}, and nothing ran; or another conflict the operation's description names.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "adminSession": [ ],
+            "csrf": [ ]
+          }
+        ],
+        "x-gatekeep-setup-allowed": false,
+        "x-gatekeep-access": {
+          "kind": "capability",
+          "capability": "tenant.client_secrets.manage",
+          "scope": "tenant",
+          "machineAllowed": false,
+          "freshAssertion": "always"
+        },
+        "x-gatekeep-recovery-allowed": false,
+        "x-gatekeep-fresh-assertion": {
+          "action": "tenant.client_secrets.manage",
+          "target": "applicationId",
+          "enforcedBy": "checks"
+        }
+      }
+    },
+    "/api/v1/tenants/{tenantId}/applications/{applicationId}/secrets/{secretId}/revoke": {
+      "post": {
+        "tags": [
+          "Tenants"
+        ],
+        "summary": "Revoke one of an Application's live client secrets, or end a rotated-out secret's overlap now.",
+        "description": "Tenant Owners only; never a machine principal. Needs a fresh assertion for tenant.client_secrets.manage with this applicationId as its target, as a create does, or 403 fresh_assertion_required. It takes no body. The secret is refused at the token endpoint at once, and directory.client_secret.revoked is written. Revoking the current secret is allowed even when it leaves none, and then the Application can't get tokens until a new one is created. The answer is the live secrets after the write. A secretId that isn't a sec_ ID, names no secret of this Application, or names one already revoked or expired, and an applicationId that isn't an app_ ID, names no Application of this Tenant, another Tenant's or the hidden system Application, are the same 404 not_found.",
+        "operationId": "RevokeApplicationSecret",
+        "parameters": [
+          {
+            "name": "tenantId",
+            "in": "path",
+            "description": "The Tenant's public ID: ten_ and the UUID's 16 bytes in lowercase RFC 4648 base32 with no padding, whose last character carries two zero bits. Only this canonical spelling, after URL decoding, names a Tenant, and the empty UUID's never does; anything else is refused like a Tenant the Admin holds no role in.",
+            "required": true,
+            "schema": {
+              "pattern": "^ten_[a-z2-7]{25}[aeimquy4]$",
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Gatekeep-Tenant",
+            "in": "header",
+            "description": "The Tenant the page shows, its ten_ ID: it must equal {tenantId}, or 409 tenant_mismatch. It never selects a Tenant.",
+            "required": true,
+            "schema": {
+              "pattern": "^ten_[a-z2-7]{25}[aeimquy4]$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApplicationSecretListResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "fresh_assertion_required, with the problem body, when no fresh assertion for this action and target is bound to the Session; access_denied when the capability is refused. No body when an earlier check refuses first: a restricted Session, or a wrong Origin or CSRF token.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "tenant_mismatch, with the problem body, when X-Gatekeep-Tenant is missing, sent twice or isn't {tenantId}, and nothing ran; or another conflict the operation's description names.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "adminSession": [ ],
+            "csrf": [ ]
+          }
+        ],
+        "x-gatekeep-setup-allowed": false,
+        "x-gatekeep-access": {
+          "kind": "capability",
+          "capability": "tenant.client_secrets.manage",
+          "scope": "tenant",
+          "machineAllowed": false,
+          "freshAssertion": "always"
+        },
+        "x-gatekeep-recovery-allowed": false,
+        "x-gatekeep-fresh-assertion": {
+          "action": "tenant.client_secrets.manage",
+          "target": "applicationId",
+          "enforcedBy": "checks"
+        }
+      }
+    },
     "/api/v1/tenants/{tenantId}/assertions": {
       "post": {
         "tags": [
@@ -2909,7 +3181,9 @@
               "invalid_request",
               "application_invalid",
               "not_found",
-              "custom_scheme_acknowledgement_required"
+              "custom_scheme_acknowledgement_required",
+              "client_secret_not_applicable",
+              "client_secret_limit_reached"
             ],
             "type": "string"
           },
@@ -3062,6 +3336,63 @@
               ],
               "type": "string"
             }
+          }
+        }
+      },
+      "ApplicationSecretCreatedResponse": {
+        "required": [
+          "secret",
+          "items"
+        ],
+        "type": "object",
+        "properties": {
+          "secret": {
+            "pattern": "^ten_[a-z2-7]{25}[aeimquy4]\\.[A-Za-z0-9_-]{43}$",
+            "type": "string",
+            "description": "The client secret: {tenantPublicId}.{base64url of 32 random bytes}. Shown in this response only, stored only as its SHA-256 and never shown again."
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ApplicationSecretResponse"
+            }
+          }
+        }
+      },
+      "ApplicationSecretListResponse": {
+        "required": [
+          "items"
+        ],
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ApplicationSecretResponse"
+            }
+          }
+        }
+      },
+      "ApplicationSecretResponse": {
+        "required": [
+          "id",
+          "createdAt",
+          "expiresAt"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "pattern": "^sec_[a-z2-7]{25}[aeimquy4]$",
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string"
+          },
+          "expiresAt": {
+            "type": [
+              "null",
+              "string"
+            ]
           }
         }
       },

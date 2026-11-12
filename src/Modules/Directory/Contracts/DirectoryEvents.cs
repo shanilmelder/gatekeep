@@ -28,4 +28,31 @@ public static class DirectoryEvents
         new AuditTypeCode("directory.application.prod_callback_added"),
         "A callback URL was added to an Application in a Prod Tenant, after a fresh assertion. Names the Application only, never the URL.",
         AuditOutcome.Success);
+
+    /// <summary>
+    /// Written when a Tenant Owner creates an Application's client secret while it holds no current one
+    /// (Story 3.3, FR-12). The target is the Application.
+    /// </summary>
+    public static readonly AuditEventDefinition ClientSecretCreated = new(
+        new AuditTypeCode("directory.client_secret.created"),
+        "A client secret was created for an Application. Names the Application only: the secret is shown once to its creator and stored only as its hash.",
+        AuditOutcome.Success);
+
+    /// <summary>
+    /// Written when a Tenant Owner rotates an Application's client secret (Story 3.3, FR-12): a new secret is
+    /// created and the current one keeps working for the fixed overlap. The target is the Application.
+    /// </summary>
+    public static readonly AuditEventDefinition ClientSecretRotated = new(
+        new AuditTypeCode("directory.client_secret.rotated"),
+        "An Application's client secret was rotated: a new secret was created, and the old one stays valid for 24 hours unless ended sooner. Names the Application only, never a secret.",
+        AuditOutcome.Success);
+
+    /// <summary>
+    /// Written when a Tenant Owner revokes one of an Application's live client secrets, or ends a rotated-out
+    /// secret's overlap now (Story 3.3, FR-12). It stops working at once. The target is the Application.
+    /// </summary>
+    public static readonly AuditEventDefinition ClientSecretRevoked = new(
+        new AuditTypeCode("directory.client_secret.revoked"),
+        "One of an Application's client secrets was revoked, or a rotated-out secret was ended early: it is refused at once. Names the Application only, never a secret.",
+        AuditOutcome.Success);
 }

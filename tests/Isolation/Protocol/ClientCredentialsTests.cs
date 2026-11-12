@@ -184,7 +184,7 @@ public sealed class ClientCredentialsTests(PostgresFixture postgres, OpenBaoFixt
 
     [Theory]
     [InlineData("revoked_at = now()")]
-    [InlineData("expires_at = now() - interval '1 second'")]
+    [InlineData("created_at = now() - interval '1 hour', expires_at = now() - interval '1 second'")]
     public async Task Revoked_or_expired_secret_is_invalid_client(string change)
     {
         var (database, a, _) = await TwoTenantsAsync();

@@ -2,8 +2,8 @@
 title: 'Story 3.3: Create, rotate and revoke client secrets'
 type: 'feature'
 created: '2026-11-13'
-baseline_revision: '95698ce8bdc718c2abbe23208955189da1317f88'
-status: 'ready-for-dev'
+baseline_revision: 'f796ab0770c069799014ce4c847bd67174435fbd'
+status: 'done'
 review_loop_iteration: 0
 followup_review_recommended: false
 context:
@@ -191,6 +191,54 @@ deferred: []
 
 ## Review Triage Log
 
+### 2026-11-13: Review pass
+
+- **Verdicts:** 30 findings. High 0, medium 2, low 21, false 7, maybe-false 0.
+- **Patched entries:** 7, from 10 findings. One entry is medium: the concurrent-rotation test.
+- **Rejected:** 20 findings: 13 low and 7 false.
+
+**Blind Hunter (13 findings)**
+
+- `[false]` `[reject]` **Concurrent revoke and create can trip the CHECK.** The claim is that a revoke waiting on a concurrent create gets an earlier `now()` than the new secret's `created_at`. That can't happen: a revoke names a `sec_` ID taken from a list, and the new secret's ID exists only after the create commits. So any revoke of it starts later, with a later `now()`. A rotation's expiry is `now()` + 24h, far after any `created_at`.
+- `[false]` `[reject]` **The revoke route declares a 409 it can never return.** The request checks answer 409 `tenant_mismatch` on it before the handler runs, and `AdminOpenApi` requires every state-changing Tenant route to declare that 409. A comment on the route now names the reason.
+- `[low]` `[reject]` **The revoked event doesn't name the secret, or whether it was current or old.** The spec fixes `detail` as null, as every Directory event has it. Field-level detail is a catalogue design change. The event, the actor and the target still answer "who ended a secret on which Application, and when".
+- `[low]` `[patch]` **`Rotated` is never sent, so the toast guesses from a stale list.** Grouped with Edge Case #7 and Verification Gap other #1. Patched: the toast now comes from the 201's `items` (a live old secret gives the overlap toast), and the dead `Rotated` properties are removed.
+- `[low]` `[patch]` **The revoke modal says no tokens until a new secret, which is wrong while an old secret overlaps.** Patched: that wording is used only when no other live secret exists. Otherwise the modal says the old secret works until it ends.
+- `[false]` `[reject]` **"End old secret now" has no confirmation.** Every write first gets 403 `fresh_assertion_required`, because the capability is `Always`. So `withFreshAssertion` always opens the passkey sheet first, and that is a deliberate confirmation step.
+- `[low]` `[reject]` **The list doesn't refresh when an overlap lapses.** It is fixed by a reload or any later action, which gets 404/409 and re-reads the list. A tab left open for 24 hours is rare, and the fix needs a timer.
+- `[low]` `[reject]` **The `TableRegistry` worker grant is inlined instead of referencing `PurgeColumns`.** The entry needed a merged column-grant dictionary. Sharing it would need a new merge helper. A drift would be caught by the schema-registry tests that compare grants with the database.
+- `[false]` `[reject]` **The migration's CHECK has no plan for existing rows.** Before this migration no role held UPDATE on `client_secret`. `InsertSecret` sets neither `expires_at` nor `revoked_at`. So every deployed row has both null and passes. Only test fixtures that set them by superuser SQL needed changes.
+- `[medium]` `[patch]` **No test races two creates.** Grouped with Verification Gap #1. Patched: a test races two rotations and asserts one Done, one LimitReached, at most two live rows and one rotated event.
+- `[low]` `[reject]` **A create after revoking the current secret, while an old one overlaps, writes `created`.** That matches the rule: no current secret means a create. The event's wording is accurate, and the cap still holds.
+- `[low]` `[reject]` **The OpenAPI secret schema is set in two places.** The regenerated `openapi-v1.json` shows the client-secret pattern on `secret` and the Recovery Code pattern unchanged. The contract diff in CI pins it.
+- `[low]` `[reject]` **The GK011 catch logs twice.** It follows the existing GK012 settings catch (`ApplicationsApi.cs:303-309`): `AdminRequestChecks.Log` for the exception, then the fixed-code refusal. The backstop is unreachable in normal flow.
+
+**Intent Alignment (5 findings)**
+
+- `[low]` `[reject]` **End-now and revoke share one event code.** Same as the Blind Hunter detail row. The spec deliberately makes end-now a revoke.
+- `[low]` `[reject]` **Token-endpoint checks use machine Applications only.** Web and machine authenticate through the same `VerifyClientSecretAsync` live-hash read. The kind isn't consulted there, so a web case exercises no new path.
+- `[false]` `[reject]` **Dashboard criteria are tested only against mocked APIs.** That is the browser suite's design for every Admin screen. The server half of each criterion has its own Isolation test against real hosts.
+- `[false]` `[reject]` **NFR-3 says Master-Key encryption, not a hash.** FR-12 allows "hashed or under the Master Key", and the AC says SHA-256. NFR-3 itself has one-time values stored hashed.
+- `[false]` `[reject]` **"Exports" isn't scanned.** No export surface exists; `tenant.configuration.export` is only a capability. The canary covers every table, log and response that does exist (Design Notes).
+
+**Edge Case Hunter (8 findings)**
+
+- `[low]` `[patch]` **App-clock `created_at` from the System path can be ahead of the database clock.** A quick revoke or rotation then fails the CHECK. Patched: `revoked_at = greatest(now(), created_at)` and `expires_at = greatest(now(), created_at) + overlap`.
+- `[low]` `[reject]` **"Newest first" with mixed clocks.** At most two live rows exist, and a mixed-clock order needs a System secret and an Admin secret created within the skew. Both rows still show correctly, by state.
+- `[low]` `[reject]` **A commit that fails after the server commits gives 503 for a live rotation.** A lost connection mid-commit is rare. The Owner recovers by ending the old secret and rotating, and an ambiguous-commit protocol is new machinery.
+- `[low]` `[reject]` **The panel unmounting while a create is in flight loses the reveal.** The passkey sheet is modal, so the window is only the resend's round trip after the assertion. Recovery is "End old secret now", then rotate. Keeping the panel mounted would change the shared `Tabs`.
+- `[low]` `[patch]` **The auto-create ask stays in the module Set if the panel unmounts before the list loads.** Patched: the ask is taken once on mount, and acted on when the list is ready.
+- `[low]` `[reject]` **The expired old secret stays listed and Rotate stays disabled.** Same as the Blind Hunter refresh row.
+- `[low]` `[patch]` **A stale list gives the wrong toast.** Grouped with the Blind Hunter `Rotated` row.
+- `[low]` `[patch]` **A 201 whose `items` fail the shape check drops the secret.** Patched: a 201 carrying a secret is revealed, independently of the items check.
+
+**Verification Gap (4 findings)**
+
+- `[medium]` `[patch]` **The row lock against concurrent rotations has no test.** Grouped with the Blind Hunter concurrent-create row.
+- `[low]` `[patch]` **The re-read after a 404/409 write refusal is never exercised in the browser.** Patched: a browser test answers 409 with a changed server list, then asserts the banner, a second GET, the old-secret row and the rotate-blocked note.
+- `[low]` `[patch]` **`Rotated` is dead as wired.** Grouped with the Blind Hunter `Rotated` row.
+- `[low]` `[reject]` **The GK011 catch is unreachable and untested.** It is a backstop behind the visibility filter, like 3.2's GK012 catch. The database still owns the guard.
+
 ## Design Notes
 
 - **Fresh assertion on every write.** The capability table encodes `tenant.client_secrets.manage` as `Always`, and a route declares one capability. So create, rotate, end-now and revoke all need a fresh assertion, not only rotation. That is stricter than the AC and consistent with the one capability table.
@@ -204,3 +252,79 @@ deferred: []
 - With `$env:MSYS_NO_PATHCONV=1`: `docker run --rm -v "D:/Projects/Personal/gatekeep:/src" -v gk-nuget:/root/.nuget -w /src mcr.microsoft.com/dotnet/sdk:10.0.403-noble sh -c 'dotnet build Gatekeep.slnx -p:NuGetAudit=false -v q'`. Expected: 0 warnings, 0 errors.
 - `pnpm -r build` and `pnpm -r --if-present typecheck` in `node:26.13.0-bookworm-slim` (`npm i -g pnpm@12.16.1`). Expected: clean.
 - Don't run the test suites locally. CI on the PR is the test run.
+
+## Auto Run Result
+
+**Summary.** A Tenant Owner can now create, rotate and revoke the client secret of a regular web or machine-to-machine Application (FR-12, NFR-3, AD-24).
+
+**API:** three routes under `/api/v1/tenants/{tenantId}/applications/{applicationId}/secrets`.
+- **List** (`GET`, any Tenant Role): the live secrets, by `sec_` ID, creation time and end time. Never a value or hash.
+- **Create or rotate** (`POST`):
+  - Tenant Owners only, never a machine principal, with a fresh assertion bound to the Application.
+  - With no current secret it creates one. With one it rotates: the old secret keeps working for 24 hours (`SecurityLimits.ClientSecretOverlap`, under the 7-day hard limit).
+  - At most two live secrets: a second rotation during an overlap is 409 `client_secret_limit_reached`.
+  - spa and native get 409 `client_secret_not_applicable`.
+  - The value (`{tenantPublicId}.{43 base64url}`, 256 random bits) is shown only in the 201, through `RevealOnce`, and stored only as SHA-256.
+- **Revoke** (`POST .../{secretId}/revoke`, same access): the secret is refused at the token endpoint at once. This is also the dashboard's "End old secret now".
+- **Audit:** `directory.client_secret.created`, `.rotated` and `.revoked`, each naming the Application only.
+
+**Database:** migration 31 (`ManageClientSecrets`) gives `gk_admin` UPDATE on `expires_at` and `revoked_at` only, and adds the CHECK `client_secret_ended_after_created`.
+
+**Dashboard:** the Credentials tab for web and machine Applications:
+- lists "Current secret" and "Old secret · Valid until …";
+- has Create/Rotate, "End old secret now", and Revoke behind a confirm modal;
+- runs every write through the passkey sheet, then shows the `OneTimeReveal`, gated on "I've copied this", and a toast;
+- shows Viewers and Editors disabled controls marked "Tenant Owner only", and "No client secret yet. A Tenant Owner must create one."
+
+An Owner who creates a web or machine Application is taken to Credentials, where the first secret is created and revealed.
+
+**Files changed (main ones)**
+- `src/Adapters/Postgres/Migrations/Migration20261115000000ManageClientSecrets.cs`, `Schema/TableRegistry.cs`: grant and CHECK.
+- `src/Gatekeep.Kernel/{Identifiers/PublicId.cs, Limits/SecurityLimits.cs}`: `sec_` and `MaxLiveClientSecrets`.
+- `src/Modules/Directory/{Contracts/IDirectory.cs, Contracts/DirectoryEvents.cs, Core/DirectoryService.cs}`: list, create-or-rotate and revoke under the row lock; events.
+- `src/Modules/Management/{Contracts/IApplicationManagement.cs, Core/ApplicationManagement.cs}`: capability re-check and actor mapping.
+- `src/Gatekeep.Host.Admin/{ApplicationSecretsApi.cs (new), AdminApi.cs, AdminResponses.cs, AdminOpenApi.cs, ApplicationsApi.cs}`: routes, problem codes, the client-secret schema.
+- `docs/api/openapi-v1.json`, `packages/api-client/*`, `docs/audit-events.md`, `LogCatalogue.Generated.cs`: regenerated contract and catalogue.
+- `apps/admin-dashboard/src/shell/{ApplicationCredentials.tsx (+ .module.css, new), ApplicationDetailPage.tsx, ApplicationsPage.tsx, CreateApplicationModal.tsx, applications.ts}`, `packages/ui/src/messages.tsx`: Credentials and the Owner create flow.
+- **Tests:**
+  - new `tests/Isolation/Applications/ApplicationSecretsApiTests.cs` (including a concurrent-rotation test) and `tests/Architecture/ClientSecretLimitTests.cs`;
+  - a new canary flow, `admin.application-secrets`;
+  - updated `RevealOnceRuleTests`, `CapabilityRuleTests`, `AdminApiRuleTests`, `RouteRegistry`, `DirectoryTests`, `MigrateCommandTests` (31), `ClientCredentialsTests` and `tests/browser/admin-applications.spec.ts`.
+
+**Review findings.** 30 findings: 7 entries patched (10 findings), none deferred, 20 rejected.
+
+Patched:
+- `greatest(now(), created_at)` for revoke and rotation, against app/database clock skew;
+- the create toast taken from the 201's items, and the dead `Rotated` flags removed;
+- the revoke-modal wording while an old secret overlaps;
+- the auto-create ask taken on mount;
+- the secret revealed from any 201;
+- a concurrent-rotation Isolation test;
+- a stale-list browser test.
+
+Rejected, with reasons in the triage log:
+- **7 false:** the concurrent revoke CHECK; the revoke 409, which `tenant_mismatch` needs; end-now confirmation, which the passkey sheet gives; CHECK on existing rows; mocked dashboard tests; NFR-3 hashing; exports.
+- **13 low:**
+  - revoked-event detail, and the end-now and revoke code it shares;
+  - the lapsed-overlap refresh, reported twice;
+  - the `PurgeColumns` inline;
+  - the create-after-revoke event;
+  - the double OpenAPI schema;
+  - the GK011 log, and that GK011 is untested;
+  - machine-only token checks;
+  - mixed-clock ordering;
+  - a commit-phase failure;
+  - the panel unmounting while a create is in flight.
+
+**Follow-up review recommended (`false`).** Patched counts by verdict: medium 1 (the concurrent-rotation test) and low 6. No high was patched.
+
+**Verification**
+- `dotnet build Gatekeep.slnx -p:NuGetAudit=false` (SDK 10.0.403 container): 0 warnings and 0 errors, before and after the patches.
+- `pnpm -r build` and typecheck (Node 26 container): clean, before and after the patches.
+- No suites were run locally. CI on the PR is the first run of the Isolation, Architecture, canary and browser tests.
+- **Matrix audit:** every I/O row has a named test in `ApplicationSecretsApiTests`, and the canary row has the `admin.application-secrets` flow. Whether they pass is judged from CI before merge.
+
+**Residual risks**
+- A secret is lost if the Credentials panel unmounts during the create's round trip after the passkey sheet (rejected low). Recovery: end the old secret, then rotate.
+- An open tab doesn't drop a lapsed old secret until a reload or the next action.
+- The browser tests use mocked API answers only.

@@ -39,6 +39,44 @@ public sealed class CreatedWebClient
 /// </summary>
 public sealed record DirectoryApplicationPage(IReadOnlyList<DirectoryApplication> Applications, Guid? NextAfter);
 
+/// <summary>
+/// One live client secret of an Application (Story 3.3): its row ID, when it was created and, for a
+/// rotated-out secret still in its overlap, when it stops working; null for the current secret. Never its
+/// value or its hash.
+/// </summary>
+public sealed record DirectoryClientSecret(Guid Id, DateTimeOffset CreatedAt, DateTimeOffset? ExpiresAt);
+
+/// <summary>How a client secret create, rotation or revocation ended (Story 3.3).</summary>
+public enum ClientSecretWriteStatus
+{
+    /// <summary>Written, with its event: the result holds the live secrets after the write.</summary>
+    Done,
+
+    /// <summary>The Tenant has no visible Application by that ID, or no live secret by that ID of it. Nothing was written.</summary>
+    NotFound,
+
+    /// <summary>The Application is a <c>spa</c> or <c>native</c> one, which holds no secret. Nothing was written.</summary>
+    NotApplicable,
+
+    /// <summary>The Application already holds <see cref="Gatekeep.Kernel.Limits.SecurityLimits.MaxLiveClientSecrets"/> live secrets. Nothing was written.</summary>
+    LimitReached,
+}
+
+/// <summary>
+/// A client secret write's result (Story 3.3): its status, the live secrets after it, newest first, and, for
+/// a create or rotation, the new secret, shown this once (AD-24) and stored only as its SHA-256.
+/// </summary>
+public sealed class ClientSecretWrite
+{
+    public required ClientSecretWriteStatus Status { get; init; }
+
+    /// <summary>The new secret, <c>{tenantPublicId}.{base64url of 32 random bytes}</c>, on a create or rotation only.</summary>
+    public RevealOnce<string>? Secret { get; init; }
+
+    /// <summary>The Application's live secrets after the write, newest first; empty when nothing was written.</summary>
+    public IReadOnlyList<DirectoryClientSecret> Secrets { get; init; } = [];
+}
+
 /// <summary>Applications and their client secrets (AD-8, AD-27). Directory owns <c>application</c> and <c>client_secret</c>.</summary>
 public interface IDirectory
 {
@@ -146,6 +184,41 @@ public interface IDirectory
         ApplicationSettings settings,
         bool prodCallbackAdded,
         CancellationToken cancellationToken);
+
+    /// <summary>
+    /// The live client secrets of the context Tenant's Application <paramref name="applicationId"/> (Story 3.3),
+    /// newest first: not revoked, and with no <c>expires_at</c> or one still ahead by the database's clock.
+    /// Always empty for a <c>spa</c> or <c>native</c> Application. Null when the Tenant has no visible
+    /// Application by that ID. It only reads, and never reads a hash.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The context has no Tenant.</exception>
+    Task<IReadOnlyList<DirectoryClientSecret>?> ListClientSecretsAsync(CommandContext context, Guid applicationId, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Creates a client secret for the context Tenant's <c>web</c> or <c>machine</c> Application
+    /// <paramref name="applicationId"/> (Story 3.3, FR-12, AD-24), under the Application's row lock, in the
+    /// caller's transaction. With no current secret it inserts one and writes
+    /// <c>directory.client_secret.created</c>. With one, it rotates: the current secret's <c>expires_at</c>
+    /// becomes the database's <c>now()</c> plus <see cref="Gatekeep.Kernel.Limits.SecurityLimits.ClientSecretOverlap"/>,
+    /// the new one is inserted, and <c>directory.client_secret.rotated</c> is written. Each event is by
+    /// <paramref name="actor"/> and names the Application only. Only the new secret's SHA-256 is stored.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The context has no Tenant. Nothing is written.</exception>
+    [StateChanging]
+    Task<ClientSecretWrite> CreateClientSecretAsync(CommandContext context, Actor actor, Guid applicationId, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Revokes the live client secret <paramref name="secretId"/> of the context Tenant's <c>web</c> or
+    /// <c>machine</c> Application <paramref name="applicationId"/> (Story 3.3, FR-12): its <c>revoked_at</c> becomes
+    /// the database's <c>now()</c>, so client authentication refuses it at once, and
+    /// <c>directory.client_secret.revoked</c> is written by <paramref name="actor"/>, in the caller's
+    /// transaction. It ends a rotated-out secret's overlap early and revokes the current one alike, even when
+    /// none is left. A secret that is unknown, another Application's, or already revoked or expired is
+    /// <see cref="ClientSecretWriteStatus.NotFound"/>.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The context has no Tenant. Nothing is written.</exception>
+    [StateChanging]
+    Task<ClientSecretWrite> RevokeClientSecretAsync(CommandContext context, Actor actor, Guid applicationId, Guid secretId, CancellationToken cancellationToken);
 
     /// <summary>
     /// Whether <paramref name="secret"/> is a live secret of the Application <paramref name="clientId"/>

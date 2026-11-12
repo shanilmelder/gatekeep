@@ -6,6 +6,12 @@ import { describe, it } from 'node:test';
 import {
   APPLICATION_KINDS,
   APPLICATION_NAME_MAX_LENGTH,
+  MAX_LIVE_SECRETS,
+  canAddSecret,
+  currentSecret,
+  requestSecretCreate,
+  secretCreateRequested,
+  takeSecretCreate,
   applicationOfPath,
   applicationPath,
   applicationsPath,
@@ -82,5 +88,33 @@ describe('applications', () => {
     ]);
     assert.equal(sameList(['a', 'b'], ['a', 'b']), true);
     assert.equal(sameList(['a', 'b'], ['b', 'a']), false);
+  });
+});
+
+describe('client secrets (Story 3.3)', () => {
+  const current = { id: 'sec_b', createdAt: '2026-11-13T10:00:00.000Z', expiresAt: null };
+  const old = { id: 'sec_a', createdAt: '2026-11-12T10:00:00.000Z', expiresAt: '2026-11-14T10:00:00.000Z' };
+
+  it('finds the current secret: the one with no expiry', () => {
+    assert.equal(currentSecret([current, old]), current);
+    assert.equal(currentSecret([old]), null);
+    assert.equal(currentSecret([]), null);
+  });
+
+  it('allows a create or rotation only below the live-secret limit', () => {
+    assert.equal(MAX_LIVE_SECRETS, 2);
+    assert.equal(canAddSecret([]), true);
+    assert.equal(canAddSecret([current]), true);
+    assert.equal(canAddSecret([old]), true);
+    assert.equal(canAddSecret([current, old]), false);
+  });
+
+  it("hands the Owner's first-secret ask over once", () => {
+    assert.equal(secretCreateRequested('app_x'), false);
+    requestSecretCreate('app_x');
+    assert.equal(secretCreateRequested('app_x'), true);
+    assert.equal(takeSecretCreate('app_x'), true);
+    assert.equal(takeSecretCreate('app_x'), false);
+    assert.equal(secretCreateRequested('app_x'), false);
   });
 });

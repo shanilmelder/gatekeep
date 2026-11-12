@@ -47,6 +47,12 @@ public enum PublicIdType
     /// formatted, never its <c>__Host-gk_session</c> value.
     /// </summary>
     Session,
+
+    /// <summary>
+    /// <c>sec_</c>: one of an Application's client secrets, by its row (Story 3.3), as <c>{secretId}</c> in a
+    /// path. Never the secret's value or hash, which no response carries but the one that creates it.
+    /// </summary>
+    ClientSecret,
 }
 
 /// <summary>
@@ -76,6 +82,7 @@ public static class PublicId
         PublicIdType.Admin => "adm",
         PublicIdType.User => "usr",
         PublicIdType.Session => "ses",
+        PublicIdType.ClientSecret => "sec",
         _ => throw new ArgumentOutOfRangeException(nameof(type)),
     };
 

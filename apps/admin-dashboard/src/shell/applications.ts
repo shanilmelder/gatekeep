@@ -112,3 +112,42 @@ export function newCustomSchemes(submitted: readonly string[], stored: readonly 
 export function sameList(a: readonly string[], b: readonly string[]): boolean {
   return a.length === b.length && a.every((value, index) => value === b[index]);
 }
+
+// Client secrets (Story 3.3): which Credentials controls apply, and the Owner's create flow's one hand-off.
+
+/** A live secret as the list shows it: `expiresAt` is null for the current secret, and set for an old one still overlapping. */
+export interface LiveSecret {
+  id: string;
+  createdAt: string;
+  expiresAt?: string | null;
+}
+
+/** The most live secrets an Application holds: the current one and one old one (the server's limit). */
+export const MAX_LIVE_SECRETS = 2;
+
+/** The current secret, if any: the one with no expiry. */
+export function currentSecret<T extends LiveSecret>(secrets: readonly T[]): T | null {
+  return secrets.find((secret) => secret.expiresAt == null) ?? null;
+}
+
+/** Whether a create or rotation may be sent: not while an old secret still overlaps the current one. */
+export function canAddSecret(secrets: readonly LiveSecret[]): boolean {
+  return secrets.length < MAX_LIVE_SECRETS;
+}
+
+const pendingSecretCreates = new Set<string>();
+
+/** Asks the Application's Credentials tab to create its first secret once it opens: the Owner's create flow. */
+export function requestSecretCreate(applicationId: string): void {
+  pendingSecretCreates.add(applicationId);
+}
+
+/** Whether a first secret was asked for the Application. Taking it ends the ask, so it runs once. */
+export function takeSecretCreate(applicationId: string): boolean {
+  return pendingSecretCreates.delete(applicationId);
+}
+
+/** Whether a first secret was asked for the Application, without taking it. */
+export function secretCreateRequested(applicationId: string): boolean {
+  return pendingSecretCreates.has(applicationId);
+}

@@ -604,6 +604,50 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/tenants/{tenantId}/applications/{applicationId}/secrets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * An Application's live client secrets: never a value or hash.
+         * @description Any Tenant Role in the path Tenant. Read only, in the Tenant's own scope. The live secrets, newest first: not revoked and not past their expiry. Each has its sec_ ID, when it was created and, for a rotated-out secret still in its 24-hour overlap, when it stops working; expiresAt is null for the current secret. No value, hash or part of either is ever shown, and ended secrets are seen only in the Log. A spa or native Application always lists none. An applicationId that isn't an app_ ID, names no Application of this Tenant, another Tenant's or the hidden system Application is the same 404 not_found. A malformed, unknown or role-less Tenant is 403 access_denied, audited as every Tenant capability refusal is.
+         */
+        get: operations["ListApplicationSecrets"];
+        put?: never;
+        /**
+         * Create or rotate a web or machine Application's client secret, shown in this response only.
+         * @description Tenant Owners only; never a machine principal. Needs a fresh assertion for tenant.client_secrets.manage with this applicationId as its target, begun on POST /api/v1/tenants/{tenantId}/assertions, which the request checks use up before anything else, whatever follows, or 403 fresh_assertion_required. It takes no body. With no current secret it creates one and writes directory.client_secret.created. With one it rotates: the current secret keeps working for 24 hours, then stops, and directory.client_secret.rotated is written. The new secret is {tenantPublicId}.{43 base64url characters}, 256 random bits, stored only as its SHA-256 and shown in this 201 alone, with Cache-Control: no-store, beside the live secrets after the write. An Application holds at most two live secrets, so while a rotated-out one still overlaps it is 409 client_secret_limit_reached, and a spa or native Application, which needs no secret, is 409 client_secret_not_applicable; neither writes anything. An applicationId that isn't an app_ ID, names no Application of this Tenant, another Tenant's or the hidden system Application is the same 404 not_found.
+         */
+        post: operations["CreateApplicationSecret"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tenants/{tenantId}/applications/{applicationId}/secrets/{secretId}/revoke": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Revoke one of an Application's live client secrets, or end a rotated-out secret's overlap now.
+         * @description Tenant Owners only; never a machine principal. Needs a fresh assertion for tenant.client_secrets.manage with this applicationId as its target, as a create does, or 403 fresh_assertion_required. It takes no body. The secret is refused at the token endpoint at once, and directory.client_secret.revoked is written. Revoking the current secret is allowed even when it leaves none, and then the Application can't get tokens until a new one is created. The answer is the live secrets after the write. A secretId that isn't a sec_ ID, names no secret of this Application, or names one already revoked or expired, and an applicationId that isn't an app_ ID, names no Application of this Tenant, another Tenant's or the hidden system Application, are the same 404 not_found.
+         */
+        post: operations["RevokeApplicationSecret"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/tenants/{tenantId}/assertions": {
         parameters: {
             query?: never;
@@ -702,7 +746,7 @@ export interface components {
         };
         ApiProblem: {
             /** @enum {string} */
-            code: "bootstrap_refused" | "credential_refused" | "signin_refused" | "rate_limited" | "access_denied" | "fresh_assertion_required" | "assertion_refused" | "credentials_minimum" | "credentials_maximum" | "recovery_code_refused" | "recovery_code_superseded" | "enrolment_refused" | "tenant_invalid" | "subdomain_refused" | "operation_not_failed" | "tenant_mismatch" | "tenant_not_active" | "tenant_deleted" | "tenant_busy" | "confirmation_mismatch" | "invalid_request" | "application_invalid" | "not_found" | "custom_scheme_acknowledgement_required";
+            code: "bootstrap_refused" | "credential_refused" | "signin_refused" | "rate_limited" | "access_denied" | "fresh_assertion_required" | "assertion_refused" | "credentials_minimum" | "credentials_maximum" | "recovery_code_refused" | "recovery_code_superseded" | "enrolment_refused" | "tenant_invalid" | "subdomain_refused" | "operation_not_failed" | "tenant_mismatch" | "tenant_not_active" | "tenant_deleted" | "tenant_busy" | "confirmation_mismatch" | "invalid_request" | "application_invalid" | "not_found" | "custom_scheme_acknowledgement_required" | "client_secret_not_applicable" | "client_secret_limit_reached";
             traceId: string;
             errors?: null | components["schemas"]["ApiProblemError"][];
         };
@@ -730,6 +774,19 @@ export interface components {
             logoutUrls: string[];
             webOrigins: string[];
             grantTypes: ("authorization_code" | "client_credentials" | "refresh_token")[];
+        };
+        ApplicationSecretCreatedResponse: {
+            /** @description The client secret: {tenantPublicId}.{base64url of 32 random bytes}. Shown in this response only, stored only as its SHA-256 and never shown again. */
+            secret: string;
+            items: components["schemas"]["ApplicationSecretResponse"][];
+        };
+        ApplicationSecretListResponse: {
+            items: components["schemas"]["ApplicationSecretResponse"][];
+        };
+        ApplicationSecretResponse: {
+            id: string;
+            createdAt: string;
+            expiresAt: null | string;
         };
         ApplicationSettingsRequest: {
             callbackUrls: string[];
@@ -2842,6 +2899,195 @@ export interface operations {
                 };
                 content: {
                     "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description fresh_assertion_required, with the problem body, when no fresh assertion for this action and target is bound to the Session; access_denied when the capability is refused. No body when an earlier check refuses first: a restricted Session, or a wrong Origin or CSRF token. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description tenant_mismatch, with the problem body, when X-Gatekeep-Tenant is missing, sent twice or isn't {tenantId}, and nothing ran; or another conflict the operation's description names. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    ListApplicationSecrets: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The Tenant's public ID: ten_ and the UUID's 16 bytes in lowercase RFC 4648 base32 with no padding, whose last character carries two zero bits. Only this canonical spelling, after URL decoding, names a Tenant, and the empty UUID's never does; anything else is refused like a Tenant the Admin holds no role in. */
+                tenantId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApplicationSecretListResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description access_denied, with the problem body, when the capability is refused. No body when an earlier check refuses first: a Session restricted to setup, or on a state-changing call a wrong Origin or CSRF token. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    CreateApplicationSecret: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description The Tenant the page shows, its ten_ ID: it must equal {tenantId}, or 409 tenant_mismatch. It never selects a Tenant. */
+                "X-Gatekeep-Tenant": string;
+            };
+            path: {
+                /** @description The Tenant's public ID: ten_ and the UUID's 16 bytes in lowercase RFC 4648 base32 with no padding, whose last character carries two zero bits. Only this canonical spelling, after URL decoding, names a Tenant, and the empty UUID's never does; anything else is refused like a Tenant the Admin holds no role in. */
+                tenantId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApplicationSecretCreatedResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description fresh_assertion_required, with the problem body, when no fresh assertion for this action and target is bound to the Session; access_denied when the capability is refused. No body when an earlier check refuses first: a restricted Session, or a wrong Origin or CSRF token. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description tenant_mismatch, with the problem body, when X-Gatekeep-Tenant is missing, sent twice or isn't {tenantId}, and nothing ran; or another conflict the operation's description names. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    RevokeApplicationSecret: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description The Tenant the page shows, its ten_ ID: it must equal {tenantId}, or 409 tenant_mismatch. It never selects a Tenant. */
+                "X-Gatekeep-Tenant": string;
+            };
+            path: {
+                /** @description The Tenant's public ID: ten_ and the UUID's 16 bytes in lowercase RFC 4648 base32 with no padding, whose last character carries two zero bits. Only this canonical spelling, after URL decoding, names a Tenant, and the empty UUID's never does; anything else is refused like a Tenant the Admin holds no role in. */
+                tenantId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApplicationSecretListResponse"];
                 };
             };
             /** @description Unauthorized */

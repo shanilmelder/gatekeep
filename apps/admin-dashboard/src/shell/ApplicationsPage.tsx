@@ -15,7 +15,7 @@ import {
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { navigate } from '../navigation';
 import { api } from '../session';
-import { applicationPath } from './applications';
+import { applicationPath, requestSecretCreate } from './applications';
 import { useCapabilities } from './capabilities';
 import { CreateApplicationModal, kindText } from './CreateApplicationModal';
 import type { ShellRequest } from './CredentialsPage';
@@ -219,7 +219,13 @@ export function ApplicationsPage({ request, tenantId }: ApplicationsPageProps) {
           onCreated={(application) => {
             setCreating(false);
             toast(messages.createApplicationCreated);
-            open(application);
+            // A Tenant Owner's Application that needs a secret opens on Credentials, which creates its first (Story 3.3).
+            if (application.credentialRequired && has('tenant.client_secrets.manage')) {
+              requestSecretCreate(application.id);
+              navigate(`${applicationPath(tenantId, application.id)}?tab=credentials`);
+            } else {
+              open(application);
+            }
           }}
         />
       )}

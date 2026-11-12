@@ -253,4 +253,11 @@ public static class SecurityLimits
 
     /// <summary>The longest a rotated-out client secret may overlap its replacement: 7 days (PRD §5.2).</summary>
     public static readonly TimeSpan HardClientSecretOverlap = TimeSpan.FromDays(7);
+
+    /// <summary>
+    /// The most live client secrets one Application holds: 2, its current secret and one rotated-out
+    /// secret still in its overlap (Story 3.3). A rotation while an old secret overlaps is refused, so
+    /// overlaps never pile up.
+    /// </summary>
+    public const int MaxLiveClientSecrets = 2;
 }

@@ -4,6 +4,7 @@ using System.Security.Cryptography;
 using System.Text;
 using Gatekeep.Kernel.Audit;
 using Gatekeep.Kernel.Identifiers;
+using Gatekeep.Kernel.Limits;
 using Gatekeep.Kernel.Persistence;
 using Gatekeep.Kernel.Secrets;
 using Gatekeep.Modules.Directory.Contracts;
@@ -59,6 +60,40 @@ internal sealed class DirectoryService(IAuditAppender audit, TimeProvider time) 
         """
         SELECT secret_hash FROM client_secret
         WHERE tenant_id = @tenant_id AND application_id = @application_id
+          AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at > now())
+        """;
+
+    // Story 3.3: an Admin's secret, created by the database's clock, which also judges its overlap and end.
+    private const string InsertAdminSecret =
+        """
+        INSERT INTO client_secret (tenant_id, id, application_id, secret_hash, created_at)
+        VALUES (@tenant_id, @id, @application_id, @secret_hash, now())
+        """;
+
+    // Story 3.3: the live secrets as a caller sees them, newest first: never a hash.
+    private const string LiveSecrets =
+        """
+        SELECT id, created_at, expires_at FROM client_secret
+        WHERE tenant_id = @tenant_id AND application_id = @application_id
+          AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at > now())
+        ORDER BY created_at DESC, id DESC
+        """;
+
+    // Story 3.3: a rotation's overlap, from the database's clock, on the current secret only. A System-path
+    // secret's created_at is the app's clock, so the start is never before it, whatever the skew.
+    private const string ExpireCurrentSecret =
+        """
+        UPDATE client_secret SET expires_at = greatest(now(), created_at) + @overlap
+        WHERE tenant_id = @tenant_id AND application_id = @application_id AND id = @id
+          AND revoked_at IS NULL AND expires_at IS NULL
+        """;
+
+    // Story 3.3: a revocation, or an overlap ended now, of a live secret of this Application only; never
+    // before its created_at, which a System-path secret takes from the app's clock.
+    private const string RevokeSecret =
+        """
+        UPDATE client_secret SET revoked_at = greatest(now(), created_at)
+        WHERE tenant_id = @tenant_id AND application_id = @application_id AND id = @id
           AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at > now())
         """;
 
@@ -275,6 +310,150 @@ internal sealed class DirectoryService(IAuditAppender audit, TimeProvider time) 
         }
 
         return updated;
+    }
+
+    public async Task<IReadOnlyList<DirectoryClientSecret>?> ListClientSecretsAsync(CommandContext context, Guid applicationId, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        _ = context.TenantId ?? throw new InvalidOperationException("Client secrets are read only in a Tenant context.");
+
+        if (await ApplicationRows.FindAsync(context, applicationId, cancellationToken) is not { } application)
+        {
+            return null;
+        }
+
+        // A spa or native Application holds no secret: whatever a row says, it lists none.
+        return application.CredentialRequired ? await LiveSecretsAsync(context, applicationId, cancellationToken) : [];
+    }
+
+    public async Task<ClientSecretWrite> CreateClientSecretAsync(CommandContext context, Actor actor, Guid applicationId, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        ArgumentNullException.ThrowIfNull(actor);
+        var tenantId = context.TenantId
+            ?? throw new InvalidOperationException("A client secret is created only in a Tenant context.");
+
+        // The overlap is a fixed default within its hard limit (PRD §5.2): never configurable.
+        if (SecurityLimits.ClientSecretOverlap > SecurityLimits.HardClientSecretOverlap)
+        {
+            throw new InvalidOperationException("The client secret overlap is over its hard limit.");
+        }
+
+        // Under the Application's row lock, held to the end of the caller's transaction: two creates decide in turn.
+        if (await ApplicationRows.FindAsync(context, applicationId, cancellationToken, locked: true) is not { } application)
+        {
+            return new ClientSecretWrite { Status = ClientSecretWriteStatus.NotFound };
+        }
+
+        if (!application.CredentialRequired)
+        {
+            return new ClientSecretWrite { Status = ClientSecretWriteStatus.NotApplicable };
+        }
+
+        var live = await LiveSecretsAsync(context, applicationId, cancellationToken);
+        if (live.Count >= SecurityLimits.MaxLiveClientSecrets)
+        {
+            return new ClientSecretWrite { Status = ClientSecretWriteStatus.LimitReached };
+        }
+
+        // The current secret, if any, is rotated out: it keeps working for the overlap, then stops.
+        var current = live.FirstOrDefault(s => s.ExpiresAt is null);
+        if (current is not null)
+        {
+            await using var command = context.CreateCommand();
+            command.CommandText = ExpireCurrentSecret;
+            Add(command, "tenant_id", tenantId);
+            Add(command, "application_id", applicationId);
+            Add(command, "id", current.Id);
+            Add(command, "overlap", SecurityLimits.ClientSecretOverlap);
+            await command.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        var secret = ClientSecrets.Create(tenantId);
+        await using (var command = context.CreateCommand())
+        {
+            command.CommandText = InsertAdminSecret;
+            Add(command, "tenant_id", tenantId);
+            Add(command, "id", Guid.CreateVersion7(_time.GetUtcNow()));
+            Add(command, "application_id", applicationId);
+            Add(command, "secret_hash", secret.Use(ClientSecrets.Hash));
+            await command.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        var definition = current is null ? DirectoryEvents.ClientSecretCreated : DirectoryEvents.ClientSecretRotated;
+        await _audit.AppendAsync(
+            context,
+            new AuditEvent(definition.Code, actor, AuditTargetKind.Client, applicationId),
+            detail: null,
+            cancellationToken);
+
+        return new ClientSecretWrite
+        {
+            Status = ClientSecretWriteStatus.Done,
+            Secret = secret.Use(static value => new RevealOnce<string>(value)),
+            Secrets = await LiveSecretsAsync(context, applicationId, cancellationToken),
+        };
+    }
+
+    public async Task<ClientSecretWrite> RevokeClientSecretAsync(
+        CommandContext context, Actor actor, Guid applicationId, Guid secretId, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        ArgumentNullException.ThrowIfNull(actor);
+        var tenantId = context.TenantId
+            ?? throw new InvalidOperationException("A client secret is revoked only in a Tenant context.");
+
+        // A spa or native Application lists no secret, so it has none to revoke either.
+        if (await ApplicationRows.FindAsync(context, applicationId, cancellationToken, locked: true) is not { CredentialRequired: true })
+        {
+            return new ClientSecretWrite { Status = ClientSecretWriteStatus.NotFound };
+        }
+
+        int revoked;
+        await using (var command = context.CreateCommand())
+        {
+            command.CommandText = RevokeSecret;
+            Add(command, "tenant_id", tenantId);
+            Add(command, "application_id", applicationId);
+            Add(command, "id", secretId);
+            revoked = await command.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        if (revoked == 0)
+        {
+            return new ClientSecretWrite { Status = ClientSecretWriteStatus.NotFound };
+        }
+
+        await _audit.AppendAsync(
+            context,
+            new AuditEvent(DirectoryEvents.ClientSecretRevoked.Code, actor, AuditTargetKind.Client, applicationId),
+            detail: null,
+            cancellationToken);
+
+        return new ClientSecretWrite
+        {
+            Status = ClientSecretWriteStatus.Done,
+            Secrets = await LiveSecretsAsync(context, applicationId, cancellationToken),
+        };
+    }
+
+    private static async Task<IReadOnlyList<DirectoryClientSecret>> LiveSecretsAsync(CommandContext context, Guid applicationId, CancellationToken cancellationToken)
+    {
+        await using var command = context.CreateCommand();
+        command.CommandText = LiveSecrets;
+        Add(command, "tenant_id", context.TenantId!.Value);
+        Add(command, "application_id", applicationId);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        var secrets = new List<DirectoryClientSecret>();
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            secrets.Add(new DirectoryClientSecret(
+                reader.GetGuid(0),
+                reader.GetFieldValue<DateTimeOffset>(1),
+                reader.IsDBNull(2) ? null : reader.GetFieldValue<DateTimeOffset>(2)));
+        }
+
+        return secrets;
     }
 
     public async Task<bool> VerifyClientSecretAsync(CommandContext context, string clientId, Secret<string> secret, CancellationToken cancellationToken)

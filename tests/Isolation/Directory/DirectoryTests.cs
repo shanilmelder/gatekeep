@@ -43,7 +43,10 @@ public sealed class DirectoryTests(PostgresFixture postgres)
 
     private static CancellationToken Cancellation => TestContext.Current.CancellationToken;
 
-    /// <summary>What no role may do to Applications and secrets, by role: Host.Hosted only reads, Host.Admin only creates.</summary>
+    /// <summary>
+    /// What no role may do to Applications and secrets, by role: Host.Hosted only reads; Host.Admin creates,
+    /// changes an Application's settings (Story 3.2) and ends a secret (Story 3.3), and nothing else.
+    /// </summary>
     public static TheoryData<string, string> Refusals => new()
     {
         { TableRegistry.Hosted, $"INSERT INTO application (tenant_id, id, name, kind, created_at) VALUES ('{TenantA}', gen_random_uuid(), 'x', 'machine', now())" },
@@ -53,7 +56,9 @@ public sealed class DirectoryTests(PostgresFixture postgres)
         { TableRegistry.Admin, "UPDATE application SET audiences = '{}'" },
         { TableRegistry.Admin, "UPDATE application SET name = 'x'" },
         { TableRegistry.Admin, "UPDATE application SET kind = 'spa'" },
-        { TableRegistry.Admin, "UPDATE client_secret SET expires_at = NULL" },
+        { TableRegistry.Admin, "UPDATE client_secret SET secret_hash = sha256('x'::bytea)" },
+        { TableRegistry.Admin, "UPDATE client_secret SET created_at = now()" },
+        { TableRegistry.Admin, "DELETE FROM client_secret" },
         { TableRegistry.Admin, "DELETE FROM application" },
         { TableRegistry.Worker, "SELECT name FROM application" },
         { TableRegistry.Worker, "SELECT grant_types FROM application" },
@@ -230,7 +235,7 @@ public sealed class DirectoryTests(PostgresFixture postgres)
         await PostgresFixture.ExecuteAsync(superuser, $"UPDATE client_secret SET expires_at = now() + interval '1 day' WHERE application_id = '{a.ApplicationId}'");
         Assert.True(await VerifyAsync(database, TenantA, a.ClientId, secret));
 
-        await PostgresFixture.ExecuteAsync(superuser, $"UPDATE client_secret SET expires_at = now() - interval '1 second' WHERE application_id = '{a.ApplicationId}'");
+        await PostgresFixture.ExecuteAsync(superuser, $"UPDATE client_secret SET created_at = now() - interval '1 hour', expires_at = now() - interval '1 second' WHERE application_id = '{a.ApplicationId}'");
         Assert.False(await VerifyAsync(database, TenantA, a.ClientId, secret));
 
         await PostgresFixture.ExecuteAsync(superuser, $"UPDATE client_secret SET expires_at = NULL, revoked_at = now() WHERE application_id = '{a.ApplicationId}'");
@@ -302,6 +307,9 @@ public sealed class DirectoryTests(PostgresFixture postgres)
     [InlineData("INSERT INTO application (tenant_id, id, name, kind, post_logout_redirect_uris, created_at) VALUES ('{0}', gen_random_uuid(), 'x', 'web', array_fill('https://app.test/'::text, ARRAY[11]), now())")]
     [InlineData("INSERT INTO application (tenant_id, id, name, kind, web_origins, created_at) VALUES ('{0}', gen_random_uuid(), 'x', 'spa', array_fill('https://app.test'::text, ARRAY[11]), now())")]
     [InlineData("INSERT INTO application (tenant_id, id, name, kind, created_at) VALUES ('{0}', gen_random_uuid(), 'x', 'implicit', now())")]
+    // Story 3.3: a secret never ends before it was created.
+    [InlineData("UPDATE client_secret SET revoked_at = created_at - interval '1 second' WHERE application_id = '{1}'")]
+    [InlineData("UPDATE client_secret SET expires_at = created_at - interval '1 second' WHERE application_id = '{1}'")]
     public async Task Each_check_refuses_a_row_that_breaks_it(string statement)
     {
         var database = await DatabaseAsync();
