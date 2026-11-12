@@ -1402,7 +1402,8 @@ internal static class CanaryFlows
             var text = await ResponseTextAsync(created);
             run.Capture("application response", text);
             Assert.Equal(HttpStatusCode.Created, created.StatusCode);
-            using var json = System.Text.Json.JsonDocument.Parse(text);
+            // The captured text leads with the status and headers: the body alone is the JSON.
+            using var json = System.Text.Json.JsonDocument.Parse(await created.Content.ReadAsStringAsync(CanaryFlowContext.Cancellation));
             app = json.RootElement.GetProperty("id").GetString()!;
         }
 

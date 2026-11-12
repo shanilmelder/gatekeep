@@ -593,20 +593,50 @@ public sealed class ApplicationSecretsApiTests(PostgresFixture postgres, OpenBao
     private static Task<TokenResponse> TokenAsync(ProtocolHost protocol, string app, string secret) =>
         ClientCredentialsTests.TokenAsync(protocol, TenantHost, app, secret);
 
-    /// <summary>One test's database, Admin host, Tenant and its Owner, whose writes confirm against <paramref name="Authenticators"/>.</summary>
-    private sealed record Setup(
-        ProtocolDatabase Database,
-        AdminHost Admin,
-        Guid Tenant,
-        string Cookie,
-        string Csrf,
-        Guid Owner,
-        SoftwareAuthenticator[] Authenticators,
-        OpenBaoFixture Bao) : IAsyncDisposable
+    /// <summary>
+    /// One test's database, Admin host, Tenant and its Owner, whose writes confirm against <see cref="Authenticators"/>.
+    /// A Session may make only <see cref="Gatekeep.Kernel.Limits.SecurityLimits.FreshAssertionAttempts"/> fresh-assertion
+    /// calls (a begin and a complete each), so a test confirming more often than that signs the Owner in again first.
+    /// </summary>
+    private sealed class Setup(
+        ProtocolDatabase database,
+        AdminHost admin,
+        Guid tenant,
+        string cookie,
+        string csrf,
+        Guid owner,
+        SoftwareAuthenticator[] authenticators,
+        OpenBaoFixture bao) : IAsyncDisposable
     {
+        private int _calls;
+
+        public ProtocolDatabase Database => database;
+
+        public AdminHost Admin => admin;
+
+        public Guid Tenant => tenant;
+
+        /// <summary>The Owner's current Session: every write sends this one, the Session its grant is bound to.</summary>
+        public string Cookie { get; private set; } = cookie;
+
+        public string Csrf { get; private set; } = csrf;
+
+        public Guid Owner => owner;
+
+        public SoftwareAuthenticator[] Authenticators => authenticators;
+
+        public OpenBaoFixture Bao => bao;
+
         /// <summary>Confirms tenant.client_secrets.manage in the Tenant, bound to <paramref name="app"/>: the Tenant begin, the sheet and the complete.</summary>
         public async Task ConfirmAsync(string app)
         {
+            if (_calls + 2 > Gatekeep.Kernel.Limits.SecurityLimits.FreshAssertionAttempts)
+            {
+                (Cookie, Csrf) = await Admin.SignInAsync(Authenticators[0]);
+                _calls = 0;
+            }
+
+            _calls += 2;
             var (begin, options) = await BeginAsync(Admin, Cookie, Csrf, Tenant, JsonSerializer.Serialize(new { action = Action, target = app }));
             using (begin)
             {
