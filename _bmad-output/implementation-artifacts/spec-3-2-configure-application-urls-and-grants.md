@@ -3,14 +3,21 @@ title: 'Story 3.2: Configure Application URLs and grants'
 type: 'feature'
 created: '2026-11-12'
 baseline_revision: 'e58fe4fb6d6beb92cc91cce031243e2ddddae22c'
-status: 'in-progress'
+status: 'done'
 review_loop_iteration: 0
-followup_review_recommended: false
+followup_review_recommended: true
 context:
   - '{project-root}/_bmad-output/implementation-artifacts/epic-3-context.md'
   - '{project-root}/_bmad-output/implementation-artifacts/spec-3-1-list-and-create-applications.md'
 warnings: ['oversized']
-deferred: []
+deferred:
+  - summary: >-
+      Allowed Web Origins are stored and validated but nothing consumes them; a single-page Application's browser token exchange needs CORS on Host.Hosted's token endpoint, which no story owns.
+    evidence: |-
+      No CORS handling exists in src/ or deploy/ (Story 3.2 recon). Story 3.2 makes spa a public client that redeems its code at /oauth/token, which a browser can only call cross-origin with CORS. The Design Delta removed the separate "Allowed Origins (CORS)" list, so web origins are the natural source. Origins are also stored as typed (no case or default-port canonicalization), which the CORS work must address when it compares them.
+    location: >-
+      src/Modules/Protocol/Core/ProtocolServer.cs (Host.Hosted endpoints)
+    severity: medium
 ---
 
 <intent-contract>
@@ -215,6 +222,46 @@ deferred: []
 
 ## Review Triage Log
 
+### 2026-11-12 — Review pass
+- verdicts: 32 findings — high 0, medium 7, low 14, false 10, maybe-false 1
+- findings:
+  - **Intent Alignment**
+    - `[medium]` `[defer]` Logout URLs and web origins are only validated and stored; nothing matches them at the protocol yet. Logout URLs feed `GetPostLogoutRedirectUrisAsync` for Story 4.13. Web origins have no consumer, and the browser token exchange of an spa needs CORS on Host.Hosted, which no story owns. Grouped with the Blind Hunter "web origins unused" row and deferred.
+    - `[low]` `[reject]` The grant-off refusal is tested through SQL `UPDATE`, never chained after a settings PUT. Each half is tested (the PUT stores the grant set; the protocol refuses the stored set), and a chained test adds no new path.
+    - `[false]` `[reject]` http loopback is allowed at save for every non-machine kind. The RFC 8252 exception is the port at match time, and that is native-only (`DirectoryContract.MatchesRedirectUri`). Allowing a loopback callback for web or spa is FR-11-compatible.
+    - `[false]` `[reject]` Machine refusal is tested only at the Management layer. No machine principal can reach HTTP until Epic 17 (`TestOnlyMachinePrincipal`). The capability is machine-denied, and `CapabilityRuleTests` pins the route as handler-enforced.
+    - `[false]` `[reject]` "Only three grants" is asserted in the UI. The server type table limits stored grants to those three as well, so there is no divergence.
+    - `[low]` `[reject]` Native setup guidance is a Settings-tab banner, not a Quickstart flow. The Quickstart tab is a later Design surface, and the banner meets the AC's "requires the system browser and offers no embedded view".
+    - `[false]` `[reject]` Acknowledgement only for a *new* custom scheme. That matches FR-11: acknowledgement is asked when a custom scheme is introduced, and re-saving an acknowledged URL needs none.
+    - `[false]` `[reject]` Public-client authentication goes beyond the ACs. It is required for spa and native to sign in at all (FR-13 PKCE for public clients; Design Notes). Its tests exist.
+  - **Verification Gap**
+    - `[medium]` `[patch]` No test saves an authorised Prod callback removal, so a wrong `prod_callback_added` (a false Story 11.1 alert) would go unnoticed. Patched: a test saves the removal with a fresh assertion and asserts no new `prod_callback_added`.
+    - `[low]` `[patch]` The no-op save is never given reordered grants. Patched: a test saves `[authorization_code, refresh_token]`, then resends the same grants reordered, and asserts no write and no event.
+    - `[low]` `[patch]` Nothing pins the refusal of a public client presenting a secret that verifies. Patched: a test inserts a live `client_secret` for the spa and asserts `invalid_client`.
+  - **Blind Hunter**
+    - `[medium]` `[patch]` The 16384-byte settings body cap is below the largest legal save (3×10×2000 characters), so a legal save gets a bare 400. Patched: the cap is raised to 131072.
+    - `[medium]` `[patch]` The dashboard dead-ends when it doesn't know the Tenant is Prod: there is no checkbox, and acknowledgement is never sent. Patched: the server's `custom_scheme_acknowledgement_required` brings up the checkbox and the resend carries it. A browser test covers this.
+    - `[low]` `[patch]` Text typed during a save is overwritten, and line numbers drift. Patched: the textareas are read-only while saving.
+    - `[medium]` `[defer]` Web origins have no consumer (CORS). Grouped with Intent Alignment's first row.
+    - `[low]` `[reject]` Web origins aren't canonicalized (case, default port). There is no consumer yet to mismatch. Canonicalizing belongs with the CORS work that will compare them, and adding it now means new normalization branches.
+    - `[low]` `[patch]` `127.1`, `2130706433` and `0177.0.0.1` pass because the check reads the normalized `uri.Host`. Such URLs are stored as typed, and the native port exception never applies to them. Patched: the literal text must start with `http://127.0.0.1` or `http://[::1]`. DirectoryTests cases cover it.
+    - `[false]` `[reject]` Prod step-up covers only callbacks. FR-46 lists "changing a Prod Tenant's callback URLs", not logout URLs, origins or grants. The behaviour matches the requirement.
+    - `[low]` `[reject]` Audit detail is null: changed fields and the acknowledgement aren't recorded. The event code plus `updated`/`prod_callback_added` separate the cases Story 11.1 needs. Field-level detail is a catalogue design change, not a defect anyone meets.
+    - `[low]` `[reject]` `authorization_code` with zero callbacks is accepted. Story 3.1 creates web that way, and `/authorize` refuses such a client with the static page. It is inert, not unsafe. Requiring a callback would break the create-then-configure flow.
+    - `[low]` `[patch]` The migration comment says the CHECK "encodes the type table", but per-URL rules live in C#. Patched: the comment now says the CHECK holds the kinds, counts and grant sets.
+    - `[false]` `[reject]` Public-client refusals skip failure accounting. Before this change, a request with no secret was refused the same way, uncounted (`TokenEndpoint.cs:313` baseline), and the answer is the same `invalid_client` for unknown or confidential IDs. Client IDs aren't secrets.
+    - `[low]` `[reject]` Duplicate lock, load and rule run, plus an extra `FindApplicationAsync` on the token path. These are one indexed row read each on a rare admin save and one on the token path. Not worth new plumbing.
+    - `[false]` `[reject]` The GK012 catch is dead code. The spec requires it as a backstop behind the `kind <> 'system'` filter, and it maps a guard the database still owns.
+  - **Edge Case Hunter**
+    - `[medium]` `[patch]` The acknowledgement checkbox never renders on the server's 400. Same root cause and fix as the Blind Hunter dead-end row.
+    - `[medium]` `[patch]` `prod` is derived from the switcher's possibly null or stale Tenant. Same root cause as above. The fix makes the server's answer authoritative.
+    - `[low]` `[patch]` Text typed during a save is overwritten. Same as the Blind Hunter row: read-only while saving.
+    - `[false]` `[reject]` `canLeave` can be re-entered while the unsaved modal is open. The modal is modal, so no tab can be activated beneath it to call `canLeave` again.
+    - `[low]` `[patch]` An unknown `field` in a server error makes `lines[field]` throw (`isProblemError` accepts any string). Patched: the lookup is guarded, and an unknown field falls back to the bare reason.
+    - `[low]` `[reject]` A save is possible while the Tenant is `creating`. Admin Tenant routes and the switcher don't offer a creating Tenant's Applications, and its only Application is the hidden system one. That is unreachable in everyday use.
+    - `[maybe-false]` `[reject]` `InertApplicationTests` is unchanged although the spec lists it. Its spa and native rows now pass client authentication and rely on OpenIddict refusing the grant before reading the dummy token. CI on PR #58 settles it; if it were true, it would only be low, a test expectation.
+    - `[false]` `[reject]` `CapabilityMatrixTests` is unmodified. It is driven by the capability table, which already holds `tenant.application_callbacks.manage`. The route is registered in `RouteRegistry` and `CapabilityRuleTests`.
+
 ## Design Notes
 
 - **One route, the callbacks capability.** AD-20 hangs the Prod predicate on `tenant.application_callbacks.manage` and says it covers creating or changing an Application, and a route declares one capability. So the whole settings write uses it. Editors and Owners hold it. Machine principals lose grant edits too, which is stricter and safe. Management API grants are Epic 17.
@@ -229,3 +276,60 @@ deferred: []
 - `MSYS_NO_PATHCONV=1 docker run --rm -v "D:/Projects/Personal/gatekeep:/src" -v gk-nuget:/root/.nuget -w /src mcr.microsoft.com/dotnet/sdk:10.0.403-noble sh -c 'dotnet build Gatekeep.slnx -p:NuGetAudit=false -v q'` -- expected: 0 warnings, 0 errors
 - `pnpm -r build` and `pnpm -r --if-present typecheck` in `node:26.13.0-bookworm-slim` (`npm i -g pnpm@12.16.1`) -- expected: clean
 - Don't run the test suites locally. CI on the PR is the test run.
+
+## Auto Run Result
+
+**Summary.** An Admin can now save an Application's callback, logout and web origin URLs and its grant types, and the protocol honours them (FR-11, FR-13, FR-46, UX-DR42, AD-20).
+
+**API:** `PUT /api/v1/tenants/{tenantId}/applications/{applicationId}/settings`, under `tenant.application_callbacks.manage`.
+- **Access:** machine principals are always refused. A Prod Tenant needs a fresh assertion bound to the Application, but only when the callback set changes.
+- **Validation:** rules per type, with per-line `errors` on 400 `application_invalid`.
+- **Prod acknowledgement:** a new custom scheme in Prod needs `acknowledgeCustomScheme`. Without it the answer is 400 `custom_scheme_acknowledgement_required`.
+- **Audit:** every change writes `directory.application.updated`. A Prod callback addition also writes `directory.application.prod_callback_added`, the event Story 11.1 turns into a Security Alert.
+- **No-op:** a save that changes nothing writes nothing.
+
+**Protocol:**
+- spa and native are public clients: `client_id` only, PKCE, and any secret is refused. native is a native application type.
+- `/authorize` requires the `authorization_code` grant and matches callbacks exactly. The only exception is the RFC 8252 loopback port, for native only. OpenIddict's own redirect check is removed in favour of Directory's.
+- A refresh or client-credentials grant that is turned off gives `unauthorized_client`.
+- Logout URLs are handed to OpenIddict for Story 4.13.
+
+**Database:** migration 30 (`ConfigureApplicationSettings`) adds `post_logout_redirect_uris` and `web_origins`, replaces the redirect CHECK with the per-type `application_settings`, and gives `gk_admin` a column UPDATE on the four settings columns.
+
+**Dashboard:**
+- The Application page has Settings and Credentials tabs.
+- Settings has the URL textareas with per-line errors, three grant toggles with disabled reasons, native system-browser guidance, the Prod custom-scheme checkbox (also brought up by the server's refusal), Save through the fresh-assertion flow with a "Changes saved" toast, an unsaved-changes guard, and read-only fields for Viewers.
+
+**Files changed (main ones)**
+- `src/Adapters/Postgres/Migrations/Migration20261114000000ConfigureApplicationSettings.cs`, `Schema/TableRegistry.cs`: columns, CHECK, grant.
+- `src/Modules/Directory/{Contracts/ApplicationSettings.cs, Core/ApplicationSettingsRules.cs, Core/LoopbackRedirects.cs, Core/DirectoryService.cs, Contracts/*}`: rules, update command, events, loopback match.
+- `src/Modules/Directory/Adapters/ApplicationStore.cs`: client and application type, permissions, logout URIs.
+- `src/Modules/Protocol/Core/{TokenEndpoint.cs, AuthorizeEndpoint.cs, ProtocolServer.cs}`: public clients, grant-off at authorize, Directory's redirect match.
+- `src/Modules/Management/{Contracts/IApplicationManagement.cs, Core/ApplicationManagement.cs}`: capability, label lock, acknowledgement, no-op, fresh assertion.
+- `src/Gatekeep.Host.Admin/{ApplicationsApi.cs, AdminApi.cs, AdminResponses.cs, AdminOpenApi.cs}`: route, `errors` problem extension, new code.
+- `docs/api/openapi-v1.json`, `packages/api-client/*`, `docs/audit-events.md`, `LogCatalogue.Generated.cs`: regenerated contract and catalogue.
+- `apps/admin-dashboard/src/shell/{ApplicationDetailPage, ApplicationSettings(.module.css), applications, Shell, TenantSettingsPage}.tsx`, `packages/ui/src/messages.tsx`: tabs and Settings.
+- Tests:
+  - new `tests/Isolation/Applications/{ApplicationSettingsApiTests, ApplicationSettingsProtocolTests}.cs`;
+  - updated `DirectoryTests`, `ApplicationsApiTests`, `RouteRegistry`, `CanaryFlows`, `MigrateCommandTests` (30), `CapabilityRuleTests` and `AdminApiRuleTests`;
+  - the extended `tests/browser/admin-applications.spec.ts`.
+
+**Review findings.** 32 findings: 12 patched (9 root causes), 2 deferred (1 entry: CORS for web origins) and 18 rejected.
+- Patched: the body cap raised to 131072; the acknowledgement dead end, where the server's refusal now shows the checkbox; read-only textareas while saving; a guarded error-field lookup; literal loopback text; the corrected migration comment; three tests (authorised Prod removal, reordered no-op, public client with a real secret).
+- Rejected, with reasons in the triage log:
+  - 10 false: the http loopback for web and spa, machine refusal over HTTP, the three grants, new-only acknowledgement, public clients beyond the ACs, the logout and origin step-up, failure accounting, the GK012 backstop, `canLeave` re-entry, `CapabilityMatrixTests`.
+  - 7 low: grant-off chained through the PUT, a Quickstart-style guidance flow, origin canonicalization, audit detail, auth code with zero callbacks, the duplicate row read, the Tenant `creating` state.
+  - 1 maybe-false: `InertApplicationTests` expectations, which CI settles.
+
+**Follow-up review recommended (`true`).** Patched counts by verdict: medium 3 (the body cap, the acknowledgement dead end, the Prod-removal test) and low 6. The unverified risk is the acknowledgement fallback: the server's `custom_scheme_acknowledgement_required` brings up the checkbox and the resend. That and the public-client token path have only been checked against mocked browser answers and unrun Isolation tests.
+
+**Verification**
+- `dotnet build Gatekeep.slnx -p:NuGetAudit=false` (SDK 10.0.403 container): 0 warnings and 0 errors, before and after the patches.
+- `pnpm -r build` and typecheck (Node 26 container): clean, as the implementer reported.
+- No suites were run locally. CI on PR #58 is the first run of the Isolation, Architecture and browser tests.
+- **Matrix audit:** every I/O row has a named test in `ApplicationSettingsApiTests`, `ApplicationSettingsProtocolTests` or `DirectoryTests`. Whether they pass is judged from CI before merge.
+
+**Residual risks**
+- `InertApplicationTests`: its spa and native rows now pass client authentication, so they depend on OpenIddict refusing the grant before reading the dummy token.
+- Removing OpenIddict's `ValidateClientRedirectUri` makes `TrustRedirectTarget` the only redirect check at authorize.
+- Web origins have no consumer until CORS is built (deferred).

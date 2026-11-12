@@ -8,11 +8,12 @@ namespace Gatekeep.Adapters.Postgres.Migrations;
 /// <list type="bullet">
 /// <item><c>application</c> gains <c>post_logout_redirect_uris</c> (the Allowed Logout URLs, for Story 4.13)
 /// and <c>web_origins</c> (the Allowed Web Origins), both empty by default.</item>
-/// <item><c>application_redirect_uris</c> is replaced by <c>application_settings</c>, which encodes the type
-/// table: <c>web</c>, <c>spa</c> and <c>native</c> hold up to 10 callback and 10 logout URLs and the grants
-/// <c>{}</c>, <c>{authorization_code}</c> or <c>{authorization_code, refresh_token}</c>, stored sorted;
-/// <c>native</c> holds no web origin, the others up to 10; <c>machine</c> holds no URL and <c>{}</c> or
-/// <c>{client_credentials}</c>; <c>system</c> holds nothing at all. Every earlier row meets it.</item>
+/// <item><c>application_redirect_uris</c> is replaced by <c>application_settings</c>, which holds each kind to its
+/// list counts and grant sets: <c>web</c>, <c>spa</c> and <c>native</c> hold up to 10 callback and 10 logout URLs
+/// and the grants <c>{}</c>, <c>{authorization_code}</c> or <c>{authorization_code, refresh_token}</c>, stored
+/// sorted; <c>native</c> holds no web origin, the others up to 10; <c>machine</c> holds no URL and <c>{}</c> or
+/// <c>{client_credentials}</c>; <c>system</c> holds nothing at all. Every earlier row meets it. The per-URL rules
+/// (absolute, scheme, length, no wildcard, distinct, non-empty) are Directory's, not the CHECK's.</item>
 /// <item><c>gk_admin</c> may update only those four columns, the settings save's. The <c>GK012</c> guard
 /// still refuses any edit of the <c>system</c> Application.</item>
 /// </list>

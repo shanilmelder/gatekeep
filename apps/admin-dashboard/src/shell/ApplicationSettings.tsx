@@ -117,6 +117,12 @@ export function ApplicationSettings({ request, fresh, tenantId, prod, applicatio
   const [draft, setDraft] = useState<Draft>(() => draftOf(application));
   const [errors, setErrors] = useState<Errors>({});
   const [ackError, setAckError] = useState(false);
+  // The server asked for the acknowledgement, whatever the page thought the label was (a stale or unlisted Tenant).
+  const [ackRequired, setAckRequired] = useState(false);
+  const [focusAcknowledgement, setFocusAcknowledgement] = useState(0);
+  useEffect(() => {
+    if (focusAcknowledgement > 0) acknowledgement.current?.focus();
+  }, [focusAcknowledgement]);
   const [refusal, setRefusal] = useState<Refusal>(null);
   const [saving, setSaving] = useState(false);
   // Set at once, before React re-renders, so a second press sends nothing.
@@ -154,7 +160,8 @@ export function ApplicationSettings({ request, fresh, tenantId, prod, applicatio
 
   // A Prod Tenant's new custom-scheme callback or logout URL is acknowledged before Save (the server still decides).
   const needsAcknowledgement =
-    prod && (newCustomSchemes(callbacks, application.callbackUrls).length > 0 || newCustomSchemes(logouts, application.logoutUrls).length > 0);
+    ackRequired ||
+    (prod && (newCustomSchemes(callbacks, application.callbackUrls).length > 0 || newCustomSchemes(logouts, application.logoutUrls).length > 0));
 
   function edit(change: Partial<Draft>) {
     setDraft((now) => ({ ...now, ...change }));
@@ -175,7 +182,7 @@ export function ApplicationSettings({ request, fresh, tenantId, prod, applicatio
     for (const error of list) {
       const reason = reasonText(error, messages);
       const field = error.field;
-      const line = field === 'grantTypes' || error.index === null ? undefined : lines[field].lines[error.index];
+      const line = field === 'grantTypes' || error.index === null ? undefined : lines[field as UrlField]?.lines[error.index];
       const text = line === undefined ? reason : formatMessage(messages.applicationUrlLine, { line, reason });
       (next[field] ??= []).push(text);
     }
@@ -224,6 +231,7 @@ export function ApplicationSettings({ request, fresh, tenantId, prod, applicatio
     const answer = outcome?.answer ?? null;
     if (answer?.ok && answer.data && typeof answer.data.id === 'string') {
       setErrors({});
+      setAckRequired(false);
       setDraft(draftOf(answer.data));
       onSaved(answer.data);
       toast(messages.applicationSaved);
@@ -239,8 +247,10 @@ export function ApplicationSettings({ request, fresh, tenantId, prod, applicatio
       return;
     }
     if (answer?.status === 400 && problem?.code === 'custom_scheme_acknowledgement_required') {
+      // The checkbox shows from now on, if it didn't, and the next save carries it; focus moves once it renders.
+      setAckRequired(true);
       setAckError(true);
-      acknowledgement.current?.focus();
+      setFocusAcknowledgement((n) => n + 1);
       return;
     }
     if (answer?.status === 409 && problem?.code === 'tenant_mismatch') {
@@ -271,7 +281,7 @@ export function ApplicationSettings({ request, fresh, tenantId, prod, applicatio
       <Textarea
         ref={fields[field]}
         value={draft[field]}
-        readOnly={!canManage}
+        readOnly={!canManage || saving}
         rows={4}
         spellCheck={false}
         autoCapitalize="off"

@@ -152,6 +152,16 @@ public sealed class ApplicationSettingsApiTests(PostgresFixture postgres)
         await FreshAssertionTests.AssertProblemAsync(removed, HttpStatusCode.Forbidden, "fresh_assertion_required");
         Assert.Equal(1L, await TenantEventsAsync(host, tenant, ProdCallbackAdded));
         Assert.Equal(2L, await TenantEventsAsync(host, tenant, Updated));
+
+        // Confirmed, the removal saves: one more update, and no callback was added.
+        await ConfirmAppAsync(host, cookie, csrf, authenticators[0], tenant, app);
+        using (var confirmed = await SaveAsync(host, cookie, csrf, tenant, app, Settings(["https://a.example/cb"], [], [], ["authorization_code"])))
+        {
+            Assert.Equal(["https://a.example/cb"], Strings(await ApplicationAsync(confirmed), "callbackUrls"));
+        }
+
+        Assert.Equal(3L, await TenantEventsAsync(host, tenant, Updated));
+        Assert.Equal(1L, await TenantEventsAsync(host, tenant, ProdCallbackAdded));
         Assert.All(authenticators, a => a.Dispose());
     }
 
@@ -235,7 +245,7 @@ public sealed class ApplicationSettingsApiTests(PostgresFixture postgres)
             ("""{"callbackUrls":"https://a.example/cb","logoutUrls":[],"webOrigins":[],"grantTypes":[]}""", "application/json"),
             ("not json", "application/json"),
             (Settings([], [], [], []), "text/plain"),
-            ($$"""{"callbackUrls":[],"logoutUrls":[],"webOrigins":[],"grantTypes":[],"pad":"{{new string('p', 16384)}}"}""", "application/json"),
+            ($$"""{"callbackUrls":[],"logoutUrls":[],"webOrigins":[],"grantTypes":[],"pad":"{{new string('p', 131072)}}"}""", "application/json"),
         })
         {
             using var response = await SaveBodyAsync(host, cookie, csrf, tenant, app, body, contentType: contentType);
@@ -303,14 +313,22 @@ public sealed class ApplicationSettingsApiTests(PostgresFixture postgres)
         var tenant = await InsertAsync(host, "prod");
         var (cookie, csrf, _, authenticators) = await OwnerOfAsync(host, tenant);
         var app = await CreateAppAsync(host, cookie, csrf, tenant, "web");
+
+        // Grants only, so no assertion: stored sorted.
+        using (var first = await SaveAsync(host, cookie, csrf, tenant, app, Settings([], [], [], ["authorization_code", "refresh_token"])))
+        {
+            await ApplicationAsync(first);
+        }
+
+        Assert.Equal(1L, await TenantEventsAsync(host, tenant, Updated));
         var xmin = await host.ScalarAsync<string>($"SELECT xmin::text FROM application WHERE id = '{IdOf(app)}'");
 
-        // As created: no URL and {authorization_code}, sent in any order.
-        using var response = await SaveAsync(host, cookie, csrf, tenant, app, Settings([], [], [], ["authorization_code"]));
+        // The same settings with the grants in another order change nothing.
+        using var response = await SaveAsync(host, cookie, csrf, tenant, app, Settings([], [], [], ["refresh_token", "authorization_code"]));
 
-        Assert.Equal(["authorization_code"], Strings(await ApplicationAsync(response), "grantTypes"));
+        Assert.Equal(["authorization_code", "refresh_token"], Strings(await ApplicationAsync(response), "grantTypes"));
         Assert.Equal(xmin, await host.ScalarAsync<string>($"SELECT xmin::text FROM application WHERE id = '{IdOf(app)}'"));
-        Assert.Equal(0L, await TenantEventsAsync(host, tenant, Updated));
+        Assert.Equal(1L, await TenantEventsAsync(host, tenant, Updated));
         Assert.All(authenticators, a => a.Dispose());
     }
 

@@ -768,6 +768,8 @@ public sealed class DirectoryTests(PostgresFixture postgres)
         { "machine", [], [], [], [], "" },
         { "web", ["https://*.a.example/cb", "/cb", "http://a.example/cb", "https://a.example/cb#x"], [], [], [], "callbackUrls 0 wildcard; callbackUrls 1 not_absolute; callbackUrls 2 scheme_not_allowed; callbackUrls 3 not_absolute" },
         { "web", ["https://user@a.example/cb", "http://localhost/cb", "https://a.example/a b", "", "https://a.example/cb", "https://a.example/cb"], [], [], [], "callbackUrls 0 not_absolute; callbackUrls 1 scheme_not_allowed; callbackUrls 2 not_absolute; callbackUrls 3 not_absolute; callbackUrls 5 duplicate" },
+        // Loopback by its literal spelling only: these parse to 127.0.0.1 but aren't what is stored and matched.
+        { "native", ["http://127.1/cb", "http://2130706433/cb", "http://0177.0.0.1/cb", "http://127.0.0.10/cb", "http://127.0.0.1:51004/cb"], [], [], [], "callbackUrls 0 scheme_not_allowed; callbackUrls 1 scheme_not_allowed; callbackUrls 2 scheme_not_allowed; callbackUrls 3 scheme_not_allowed" },
         { "spa", [.. Enumerable.Range(0, 11).Select(i => $"https://a.example/{i}")], [], [], [], "callbackUrls - too_many" },
         { "spa", ["https://a.example/" + new string('x', 1983)], [], [], [], "callbackUrls 0 too_long" },
         { "spa", ["https://a.example/" + new string('x', 1982)], [], [], [], "" },

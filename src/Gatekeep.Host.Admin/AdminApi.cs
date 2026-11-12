@@ -714,7 +714,7 @@ internal static class AdminApi
                 "or [client_credentials] for machine, and [], [authorization_code] or [authorization_code, refresh_token] " +
                 "otherwise, in any order, stored sorted. URLs are matched exactly; only a native Application's loopback " +
                 "redirect URI may differ in port. Any rule broken is 400 application_invalid with errors naming each field, line " +
-                "and reason; a body that isn't JSON, is over 16384 bytes, misses a list or holds a null is 400 " +
+                "and reason; a body that isn't JSON, is over 131072 bytes, misses a list or holds a null is 400 " +
                 "application_invalid with no errors. In a Prod Tenant a new custom-scheme URL needs acknowledgeCustomScheme: " +
                 "true, or it is 400 custom_scheme_acknowledgement_required, and a changed set of callback URLs needs a fresh " +
                 "assertion for tenant.application_callbacks.manage on this applicationId, begun on POST " +

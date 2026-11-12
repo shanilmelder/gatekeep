@@ -104,7 +104,7 @@ internal static class ApplicationsApi
     public const int MaxCreateBody = 4096;
 
     /// <summary>The largest settings body read (Story 3.2): anything bigger is 400 <c>application_invalid</c>, unread past it.</summary>
-    public const int MaxSettingsBody = 16384;
+    public const int MaxSettingsBody = 131072;
 
     /// <summary>The types an Admin creates, from Directory through Management, for the OpenAPI document.</summary>
     public static IReadOnlyList<string> Types => ManagementContract.ApplicationTypes;

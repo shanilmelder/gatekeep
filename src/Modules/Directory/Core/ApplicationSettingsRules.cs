@@ -146,8 +146,8 @@ internal static class ApplicationSettingsRules
                 return ApplicationSettingsReasons.NotAbsolute;
             }
 
-            if (scheme == "http"
-                && !(uri.HostNameType is UriHostNameType.IPv4 or UriHostNameType.IPv6 && uri.Host is "127.0.0.1" or "[::1]"))
+            // The literal text, not the parsed host: 127.1 or 2130706433 normalize to 127.0.0.1 but are stored as typed.
+            if (scheme == "http" && !IsLiteralLoopback(text))
             {
                 return ApplicationSettingsReasons.SchemeNotAllowed;
             }
@@ -204,6 +204,21 @@ internal static class ApplicationSettingsRules
                 problems.Add(new ApplicationSettingsProblem(field, i, reason));
             }
         }
+    }
+
+    /// <summary>Whether <paramref name="text"/> is <c>http://127.0.0.1</c> or <c>http://[::1]</c>, spelled exactly so, then a port, path, query or the end.</summary>
+    private static bool IsLiteralLoopback(string text)
+    {
+        foreach (var prefix in (string[])["http://127.0.0.1", "http://[::1]"])
+        {
+            if (text.StartsWith(prefix, StringComparison.Ordinal)
+                && (text.Length == prefix.Length || text[prefix.Length] is ':' or '/' or '?'))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>The scheme of <paramref name="text"/>, lowercased, when it starts with one by RFC 3986 §3.1's syntax.</summary>

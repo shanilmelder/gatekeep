@@ -61,7 +61,13 @@ public sealed class ApplicationSettingsProtocolTests(PostgresFixture postgres, O
         await using var host = await flow.StartHostAsync();
         var shaped = $"{PublicId.Format(PublicIdType.Tenant, flow.A.TenantId)}.{Base64UrlEncoder.Encode(RandomNumberGenerator.GetBytes(32))}";
 
-        foreach (var secret in new[] { shaped, "anything" })
+        // A live secret row for the public client, which nothing in the product writes: it verifies, and is still refused.
+        var live = $"{PublicId.Format(PublicIdType.Tenant, flow.A.TenantId)}.{Base64UrlEncoder.Encode(RandomNumberGenerator.GetBytes(32))}";
+        await flow.Database.ExecuteAsync(
+            "INSERT INTO client_secret (tenant_id, id, application_id, secret_hash, created_at) " +
+            $"VALUES ('{flow.A.TenantId}', gen_random_uuid(), '{IdOf(clientId)}', sha256(convert_to('{live}', 'UTF8')), now())");
+
+        foreach (var secret in new[] { live, shaped, "anything" })
         {
             var pkce = Pkce.New();
             var code = await CodeFlow.CodeAsync(host, HostA, clientId, Callback, pkce, flow.UserA);

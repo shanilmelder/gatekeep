@@ -795,6 +795,32 @@ test.describe('settings', () => {
     await expect(page.getByTestId('application-custom-scheme-error')).toBeVisible();
   });
 
+  test('when the page thinks the Tenant isn\'t Prod but the server asks for the acknowledgement, the checkbox shows and the ticked resend saves', async ({ page }) => {
+    const api = await answerApi(page, { label: 'dev' });
+    api.state.save = (route) => {
+      const body = route.request().postDataJSON() as { acknowledgeCustomScheme?: boolean; callbackUrls: string[] };
+      if (body.acknowledgeCustomScheme === true) return json(route, 200, { ...ROWS[2]!, callbackUrls: body.callbackUrls });
+      return problem(route, 400, 'custom_scheme_acknowledgement_required');
+    };
+    await page.goto(`${PAGE}/${app(2)}`);
+    await page.getByTestId('application-callbackUrls').fill('com.example.app:/cb');
+    await expect(page.getByTestId('application-custom-scheme')).toHaveCount(0);
+
+    await save(page).click();
+
+    const acknowledge = page.getByRole('checkbox', { name: /custom URL scheme/ });
+    await expect(acknowledge).toBeVisible();
+    await expect(acknowledge).toBeFocused();
+    await expect(page.getByTestId('application-custom-scheme-error')).toBeVisible();
+    await acknowledge.check();
+    await save(page).click();
+
+    await expect(toast(page)).toHaveText('Changes saved');
+    expect(api.puts).toHaveLength(2);
+    expect(api.puts[0]!.body).not.toHaveProperty('acknowledgeCustomScheme');
+    expect(api.puts[1]!.body).toMatchObject({ callbackUrls: ['com.example.app:/cb'], acknowledgeCustomScheme: true });
+  });
+
   test('a Viewer sees every field read-only, the switches off-limits, and no Save', async ({ page }) => {
     await answerApi(page, { capabilities: TENANT_VIEWER });
 
