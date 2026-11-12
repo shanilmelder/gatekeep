@@ -43,6 +43,11 @@ export type SigningKeysResponse = components['schemas']['SigningKeysResponse'];
 export type SigningKey = components['schemas']['SigningKeyResponse'];
 export type SigningKeysJwksResponse = components['schemas']['SigningKeysJwksResponse'];
 export type Jwk = components['schemas']['JwkResponse'];
+export type ApplicationResponse = components['schemas']['ApplicationResponse'];
+export type ApplicationListResponse = components['schemas']['ApplicationListResponse'];
+export type CreateApplicationRequest = components['schemas']['CreateApplicationRequest'];
+/** An Application's type (Story 3.1): single-page, regular web, native or machine-to-machine. */
+export type ApplicationType = ApplicationResponse['type'];
 
 /** A path the committed OpenAPI document has, so a removed endpoint fails to compile. */
 export type ApiPath = keyof paths;
@@ -284,6 +289,26 @@ export function createApiClient(options: ApiClientOptions = {}) {
         `/api/v1/tenants/${encodeURIComponent(tenantId)}/signing-keys/jwks` as '/api/v1/tenants/{tenantId}/signing-keys/jwks',
         'get',
       ),
+    /**
+     * One page of the Tenant's Applications (Story 3.1), newest first, 50 a page. `cursor` is the
+     * previous page's `nextCursor`; it and the Tenant's ID go into the URL encoded.
+     */
+    listApplications: (tenantId: string, cursor?: string) =>
+      request(
+        `/api/v1/tenants/${encodeURIComponent(tenantId)}/applications${
+          cursor === undefined ? '' : `?cursor=${encodeURIComponent(cursor)}`
+        }` as '/api/v1/tenants/{tenantId}/applications',
+        'get',
+      ),
+    /** One of the Tenant's Applications by its `app_` ID, which goes into the path encoded. Any other is a 404 `not_found`. */
+    getApplication: (tenantId: string, applicationId: string) =>
+      request(
+        `/api/v1/tenants/${encodeURIComponent(tenantId)}/applications/${encodeURIComponent(applicationId)}` as '/api/v1/tenants/{tenantId}/applications/{applicationId}',
+        'get',
+      ),
+    /** Creates an Application with a name and a type, and no secret: a 201 with it. Editors and Owners only. */
+    createApplication: (tenantId: string, body: CreateApplicationRequest) =>
+      request(`/api/v1/tenants/${encodeURIComponent(tenantId)}/applications` as '/api/v1/tenants/{tenantId}/applications', 'post', body),
     /** Begins a fresh assertion for a Tenant action, bound to the Tenant `tenantId` names. The Deployment complete finishes it. */
     beginTenantFreshAssertion: (tenantId: string, binding: FreshAssertionBeginRequest) =>
       request(`/api/v1/tenants/${encodeURIComponent(tenantId)}/assertions` as '/api/v1/tenants/{tenantId}/assertions', 'post', binding),

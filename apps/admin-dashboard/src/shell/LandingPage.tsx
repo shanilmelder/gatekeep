@@ -2,6 +2,7 @@ import type { AdminTenant } from '@gatekeep/api-client';
 import { Banner, EmptyState, ErrorReference, SectionPage, useMessages } from '@gatekeep/ui/admin';
 import { useEffect, useState } from 'react';
 import { navigate } from '../navigation';
+import { applicationsPath } from './applications';
 import { useCapabilities } from './capabilities';
 import type { ShellRequest } from './CredentialsPage';
 import { CreateTenantForm, TenantsReadState } from './CreateTenantPage';
@@ -9,8 +10,8 @@ import { TENANTS_PATH, readTenants, type TenantsRead } from './tenants';
 
 /**
  * The landing page (FR-44; Story 1.28). An Admin holding a Tenant Role lands on the current
- * Tenant's page: the remembered one, else the first listed, whose settings page is its landing
- * until Story 3.1's Applications list. Otherwise an Admin who can list Tenants has the first page
+ * Tenant's page: the remembered one, else the first listed, whose Applications list is its
+ * landing (Story 3.1). Otherwise an Admin who can list Tenants has the first page
  * read: with none, it is the Create Tenant form, in place; with any, the URL becomes the Tenants
  * page. Anyone else has no Tenant to reach. It is one Section page throughout, so its h1 stays
  * the same node as the read answers, and focus on it stays.
@@ -37,7 +38,7 @@ export function LandingPage({
   const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
-    if (target !== null) navigate(`/tenants/${encodeURIComponent(target.id)}/settings`, { replace: true });
+    if (target !== null) navigate(applicationsPath(target.id), { replace: true });
   }, [target]);
 
   useEffect(() => {

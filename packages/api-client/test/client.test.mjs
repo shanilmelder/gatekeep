@@ -256,6 +256,32 @@ describe('api-client', () => {
     assert.equal(sample.ok, true);
   });
 
+  it("lists, reads and creates a Tenant's Applications, the IDs and cursor encoded, the page Tenant on the create only", async () => {
+    const application = { id: 'app_a', clientId: 'app_a', name: 'Web', type: 'web', credentialRequired: true, createdAt: '2026-11-11T09:00:00.000Z' };
+    const { calls, fetch } = fakeFetch(200, JSON.stringify(application));
+    const client = createApiClient({ fetch, csrfToken: () => 'csrf-1', pageTenant: () => 'ten_a' });
+
+    await client.listApplications('ten_a/b');
+    await client.listApplications('ten_a', 'app_c&d');
+    const read = await client.getApplication('ten_a', 'app_e/f');
+    await client.createApplication('ten_a', { name: 'Web', type: 'web' });
+
+    assert.equal(calls[0].input, '/api/v1/tenants/ten_a%2Fb/applications');
+    assert.equal(calls[1].input, '/api/v1/tenants/ten_a/applications?cursor=app_c%26d');
+    assert.equal(calls[2].input, '/api/v1/tenants/ten_a/applications/app_e%2Ff');
+    for (const call of calls.slice(0, 3)) {
+      assert.equal(call.init.method, 'GET');
+      assert.equal(call.init.body, undefined);
+      assert.equal(TENANT_HEADER in call.init.headers, false);
+    }
+    assert.deepEqual(read.data, application);
+    assert.equal(calls[3].input, '/api/v1/tenants/ten_a/applications');
+    assert.equal(calls[3].init.method, 'POST');
+    assert.equal(calls[3].init.body, JSON.stringify({ name: 'Web', type: 'web' }));
+    assert.equal(calls[3].init.headers[CSRF_HEADER], 'csrf-1');
+    assert.equal(calls[3].init.headers[TENANT_HEADER], 'ten_a');
+  });
+
   it("reads a JWKS sample's 503 as a failure with no problem body", async () => {
     const { fetch } = fakeFetch(503);
     const client = createApiClient({ fetch });

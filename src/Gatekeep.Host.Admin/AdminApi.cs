@@ -634,6 +634,67 @@ internal static class AdminApi
             .Produces<ApiProblem>(StatusCodes.Status403Forbidden, AdminResponses.ProblemContentType)
             .Produces(StatusCodes.Status503ServiceUnavailable);
 
+        app.MapGet("/api/v1/tenants/{tenantId}/applications", static (HttpContext context, AdminApiServices services) => ApplicationsApi.ListAsync(context, services))
+            .WithMetadata(
+                TenantApiEndpoint.Instance,
+                new RequiresCapability(AdminCapabilities.TenantConfigurationRead),
+                new QueryParameter(ApplicationsApi.CursorQuery, "The previous page's nextCursor: an app_ public ID."))
+            .WithName("ListApplications")
+            .WithTags(TenantTag)
+            .WithSummary("The path Tenant's Applications: newest first, 50 a page.")
+            .WithDescription(
+                "Any Tenant Role in the path Tenant. Read only, in the Tenant's own scope: no other Tenant's Application is ever " +
+                "listed, and neither is the Tenant's hidden system Application. Each Application's ID, which is also its client ID, " +
+                "its name, its type, whether that type needs a client secret, and when it was created; never a secret. nextCursor " +
+                "is the last Application's ID when an older page follows, else null; pass it back as cursor. A cursor sent twice, " +
+                "empty or that isn't an app_ ID is 400 invalid_request. A malformed, unknown or role-less Tenant is 403 " +
+                "access_denied, audited as every Tenant capability refusal is.")
+            .Produces<ApplicationListResponse>(StatusCodes.Status200OK)
+            .Produces<ApiProblem>(StatusCodes.Status400BadRequest, AdminResponses.ProblemContentType)
+            .Produces(StatusCodes.Status401Unauthorized)
+            .Produces<ApiProblem>(StatusCodes.Status403Forbidden, AdminResponses.ProblemContentType)
+            .Produces(StatusCodes.Status503ServiceUnavailable);
+
+        app.MapGet("/api/v1/tenants/{tenantId}/applications/{applicationId}", static (HttpContext context, AdminApiServices services) => ApplicationsApi.GetAsync(context, services))
+            .WithMetadata(TenantApiEndpoint.Instance, new RequiresCapability(AdminCapabilities.TenantConfigurationRead))
+            .WithName("GetApplication")
+            .WithTags(TenantTag)
+            .WithSummary("One of the path Tenant's Applications.")
+            .WithDescription(
+                "Any Tenant Role in the path Tenant. Read only, in the Tenant's own scope. The same fields as the list, and never a " +
+                "secret. An applicationId that isn't an app_ ID, names no Application of this Tenant, names another Tenant's or " +
+                "names the hidden system Application is the same 404 not_found. A malformed, unknown or role-less Tenant is 403 " +
+                "access_denied, audited as every Tenant capability refusal is.")
+            .Produces<ApplicationResponse>(StatusCodes.Status200OK)
+            .Produces(StatusCodes.Status401Unauthorized)
+            .Produces<ApiProblem>(StatusCodes.Status403Forbidden, AdminResponses.ProblemContentType)
+            .Produces<ApiProblem>(StatusCodes.Status404NotFound, AdminResponses.ProblemContentType)
+            .Produces(StatusCodes.Status503ServiceUnavailable);
+
+        app.MapPost("/api/v1/tenants/{tenantId}/applications", static (HttpContext context, AdminApiServices services) => ApplicationsApi.CreateAsync(context, services))
+            .WithMetadata(
+                TenantApiEndpoint.Instance,
+                new RequiresCapability(AdminCapabilities.TenantApplicationsManage),
+                new JsonRequestBody(typeof(CreateApplicationRequest)))
+            .WithName("CreateApplication")
+            .WithTags(TenantTag)
+            .WithSummary("Create an Application in the path Tenant, with a name and a type and no secret.")
+            .WithDescription(
+                "Tenant Editors and Owners. The type is spa (single-page), web (regular web), native or machine " +
+                "(machine-to-machine); web and machine need a client secret, which isn't created here, so until one is the " +
+                "Application can't authenticate. It starts with no redirect URI and no audience; machine is allowed " +
+                "client_credentials and web authorization_code, and spa and native nothing yet. The name is trimmed, then 1 to 200 " +
+                "characters with no control character, and two Applications may share one. In one transaction it writes the " +
+                "Application and directory.application.created by the caller. A body that isn't JSON, is over 4096 bytes, misses " +
+                "a field or has the wrong type, and an invalid name or type, is 400 application_invalid, with nothing written. " +
+                "Location names the new Application.")
+            .Produces<ApplicationResponse>(StatusCodes.Status201Created)
+            .Produces<ApiProblem>(StatusCodes.Status400BadRequest, AdminResponses.ProblemContentType)
+            .Produces(StatusCodes.Status401Unauthorized)
+            .Produces<ApiProblem>(StatusCodes.Status403Forbidden, AdminResponses.ProblemContentType)
+            .Produces<ApiProblem>(StatusCodes.Status409Conflict, AdminResponses.ProblemContentType)
+            .Produces(StatusCodes.Status503ServiceUnavailable);
+
         app.MapPut("/api/v1/tenants/{tenantId}/label", static (HttpContext context, AdminApiServices services) => TenantLabelApi.SetAsync(context, services))
             .WithMetadata(
                 TenantApiEndpoint.Instance,

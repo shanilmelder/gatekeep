@@ -12,8 +12,7 @@ namespace Gatekeep.Modules.Directory.Core;
 
 internal sealed class DirectoryService(IAuditAppender audit, TimeProvider time) : IDirectory
 {
-    /// <summary>The longest Application name: 200 characters, as the table checks.</summary>
-    private const int MaxNameLength = 200;
+    private const int MaxNameLength = DirectoryContract.MaxNameLength;
 
     /// <summary>The random part of a client secret: 32 bytes, 256 bits (AD-9).</summary>
     private const int SecretBytes = 32;
@@ -30,6 +29,14 @@ internal sealed class DirectoryService(IAuditAppender audit, TimeProvider time) 
         """
         INSERT INTO application (tenant_id, id, name, kind, grant_types, audiences, redirect_uris, created_at)
         VALUES (@tenant_id, @id, @name, 'web', ARRAY['authorization_code', 'refresh_token']::text[], '{}', @redirect_uris, @created_at)
+        """;
+
+    // Story 3.1: an Admin's Application, with its kind's default grants and nothing else: no redirect URI,
+    // audience or secret. A web row may have no redirect URI from Story 3.1's migration.
+    private const string InsertAdminApplication =
+        """
+        INSERT INTO application (tenant_id, id, name, kind, grant_types, audiences, created_at)
+        VALUES (@tenant_id, @id, @name, @kind, @grant_types, '{}', @created_at)
         """;
 
     // grant_types and audiences take their empty defaults, which the system CHECK requires (Story 2.8).
@@ -127,7 +134,7 @@ internal sealed class DirectoryService(IAuditAppender audit, TimeProvider time) 
             await command.ExecuteNonQueryAsync(cancellationToken);
         }
 
-        // No Admin API calls this yet (Epic 3 passes its Admin): the System created it.
+        // Only tests and the system path call this (Story 3.1's Admin create is CreateApplicationAsync): the System created it.
         await _audit.AppendAsync(
             context,
             new AuditEvent(DirectoryEvents.ApplicationCreated.Code, Actor.System, AuditTargetKind.Client, applicationId),
@@ -138,6 +145,80 @@ internal sealed class DirectoryService(IAuditAppender audit, TimeProvider time) 
             applicationId,
             PublicId.Format(PublicIdType.Application, applicationId),
             secret);
+    }
+
+    public async Task<DirectoryApplication> CreateApplicationAsync(
+        CommandContext context,
+        Actor actor,
+        string name,
+        string kind,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        ArgumentNullException.ThrowIfNull(actor);
+        var tenantId = context.TenantId
+            ?? throw new InvalidOperationException("An Application is created only in a Tenant context.");
+
+        if (string.IsNullOrWhiteSpace(name) || name.Length > MaxNameLength || name.Any(char.IsControl))
+        {
+            throw new ArgumentException("An Application name is 1 to 200 characters, with no control character.", nameof(name));
+        }
+
+        string[] grantTypes = kind switch
+        {
+            DirectoryContract.MachineKind => ["client_credentials"],
+            DirectoryContract.WebKind => ["authorization_code"],
+            DirectoryContract.SpaKind or DirectoryContract.NativeKind => [],
+            _ => throw new ArgumentException("An Admin creates only a spa, web, native or machine Application.", nameof(kind)),
+        };
+
+        var now = _time.GetUtcNow();
+        var applicationId = Guid.CreateVersion7(now);
+
+        await using (var command = context.CreateCommand())
+        {
+            command.CommandText = InsertAdminApplication;
+            Add(command, "tenant_id", tenantId);
+            Add(command, "id", applicationId);
+            Add(command, "name", name);
+            Add(command, "kind", kind);
+            Add(command, "grant_types", grantTypes);
+            Add(command, "created_at", now);
+            await command.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        await _audit.AppendAsync(
+            context,
+            new AuditEvent(DirectoryEvents.ApplicationCreated.Code, actor, AuditTargetKind.Client, applicationId),
+            detail: null,
+            cancellationToken);
+
+        return new DirectoryApplication(
+            applicationId,
+            PublicId.Format(PublicIdType.Application, applicationId),
+            name,
+            kind,
+            [.. grantTypes],
+            [],
+            [],
+            now);
+    }
+
+    public Task<DirectoryApplicationPage> ListApplicationsPageAsync(
+        CommandContext context,
+        Guid? after,
+        int limit,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        ArgumentOutOfRangeException.ThrowIfLessThan(limit, 1);
+        return ApplicationRows.ListPageAsync(context, after, limit, cancellationToken);
+    }
+
+    public Task<DirectoryApplication?> FindApplicationAsync(CommandContext context, Guid id, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        return ApplicationRows.FindAsync(context, id, cancellationToken);
     }
 
     public async Task<bool> VerifyClientSecretAsync(CommandContext context, string clientId, Secret<string> secret, CancellationToken cancellationToken)
@@ -256,13 +337,20 @@ internal static class ApplicationRows
     /// <summary>The one predicate that hides the <c>system</c> Application from every caller-facing read.</summary>
     public const string Visible = "kind <> 'system'";
 
-    private const string Columns = "id, name, kind, grant_types, audiences, redirect_uris";
+    private const string Columns = "id, name, kind, grant_types, audiences, redirect_uris, created_at";
 
     private const string Select =
         $"SELECT {Columns} FROM application WHERE tenant_id = @tenant_id AND id = @id AND {Visible}";
 
     private const string List =
         $"SELECT {Columns} FROM application WHERE tenant_id = @tenant_id AND {Visible} ORDER BY created_at, id";
+
+    // Story 3.1: newest first by the UUIDv7 ID, keyset after the previous page's last.
+    private const string FirstPage =
+        $"SELECT {Columns} FROM application WHERE tenant_id = @tenant_id AND {Visible} ORDER BY id DESC LIMIT @limit";
+
+    private const string NextPage =
+        $"SELECT {Columns} FROM application WHERE tenant_id = @tenant_id AND {Visible} AND id < @after ORDER BY id DESC LIMIT @limit";
 
     private const string SelectSystem =
         "SELECT id FROM application WHERE tenant_id = @tenant_id AND kind = 'system'";
@@ -296,6 +384,36 @@ internal static class ApplicationRows
         return applications;
     }
 
+    public static async Task<DirectoryApplicationPage> ListPageAsync(CommandContext context, Guid? after, int limit, CancellationToken cancellationToken)
+    {
+        var tenantId = TenantOf(context);
+
+        await using var command = context.CreateCommand();
+        command.CommandText = after is null ? FirstPage : NextPage;
+        DirectoryService.Add(command, "tenant_id", tenantId);
+        if (after is { } cursor)
+        {
+            DirectoryService.Add(command, "after", cursor);
+        }
+
+        // One more than a page says whether another follows.
+        DirectoryService.Add(command, "limit", limit + 1);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        var applications = new List<DirectoryApplication>();
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            applications.Add(Read(reader));
+        }
+
+        if (applications.Count <= limit)
+        {
+            return new DirectoryApplicationPage(applications, null);
+        }
+
+        var page = applications.Take(limit).ToList();
+        return new DirectoryApplicationPage(page, page[^1].Id);
+    }
+
     public static async Task<Guid?> FindSystemAsync(CommandContext context, CancellationToken cancellationToken)
     {
         var tenantId = TenantOf(context);
@@ -321,7 +439,8 @@ internal static class ApplicationRows
             reader.GetString(2),
             [.. reader.GetFieldValue<string[]>(3)],
             [.. reader.GetFieldValue<string[]>(4)],
-            [.. reader.GetFieldValue<string[]>(5)]);
+            [.. reader.GetFieldValue<string[]>(5)],
+            reader.GetFieldValue<DateTimeOffset>(6));
 }
 
 /// <summary>

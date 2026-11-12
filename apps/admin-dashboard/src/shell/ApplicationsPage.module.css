@@ -1,0 +1,107 @@
+/*
+ * Applications (Story 3.1): the list across the page's whole grid with Load more under it, each
+ * client ID in the code type with its Copy beside it; Create Application's fields in one column,
+ * each type's name over its line; and the detail page's header and Credentials. Tokens only.
+ */
+
+.content {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--gk-space-16);
+  min-width: 0;
+}
+
+.content > * {
+  align-self: stretch;
+}
+
+.content > .more {
+  align-self: flex-start;
+}
+
+.clientId {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--gk-space-4);
+  min-width: 0;
+}
+
+.clientId > code {
+  font: var(--gk-font-code);
+  overflow-wrap: anywhere;
+}
+
+.name {
+  overflow-wrap: anywhere;
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gk-space-16);
+  margin: 0;
+}
+
+.option {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gk-space-4);
+}
+
+.optionName {
+  color: var(--gk-color-tx);
+}
+
+.optionDescription {
+  font: var(--gk-font-small);
+  color: var(--gk-color-tx2);
+}
+
+.crumbs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--gk-space-4);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.crumbs > li + li::before {
+  content: '/';
+  margin-inline-end: var(--gk-space-4);
+  color: var(--gk-color-tx3);
+}
+
+.crumbs a {
+  color: inherit;
+}
+
+.title {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--gk-space-8);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.section {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--gk-space-8);
+  min-width: 0;
+}
+
+.section > h2 {
+  margin: 0;
+  font: var(--gk-font-section);
+  font-weight: var(--gk-font-section-weight);
+}
+
+.section > p {
+  margin: 0;
+}

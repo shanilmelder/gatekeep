@@ -16,7 +16,8 @@ public sealed class DirectoryApplication
         string kind,
         ImmutableArray<string> grantTypes,
         ImmutableArray<string> audiences,
-        ImmutableArray<string> redirectUris)
+        ImmutableArray<string> redirectUris,
+        DateTimeOffset createdAt)
     {
         Id = id;
         ClientId = clientId;
@@ -25,6 +26,7 @@ public sealed class DirectoryApplication
         GrantTypes = grantTypes;
         Audiences = audiences;
         RedirectUris = redirectUris;
+        CreatedAt = createdAt;
     }
 
     public Guid Id { get; }
@@ -35,10 +37,14 @@ public sealed class DirectoryApplication
     public string Name { get; }
 
     /// <summary>
-    /// The row's kind: <c>machine</c> (Client Credentials, Story 2.5) or <c>web</c> (the code flow,
-    /// Story 2.9). The hidden <c>system</c> Application is never handed out.
+    /// The row's kind: <c>machine</c> (Client Credentials, Story 2.5), <c>web</c> (the code flow,
+    /// Story 2.9), or from Story 3.1 <c>spa</c> or <c>native</c>, which no flow serves yet. The hidden
+    /// <c>system</c> Application is never handed out.
     /// </summary>
     public string Kind { get; }
+
+    /// <summary>Whether its kind authenticates with a credential: <c>web</c> and <c>machine</c> do, <c>spa</c> and <c>native</c> don't (Story 3.1).</summary>
+    public bool CredentialRequired => DirectoryContract.CredentialRequired(Kind);
 
     /// <summary>Whether this is a <c>web</c> client, which signs Users in by the code flow with PKCE.</summary>
     public bool IsWeb => Kind == DirectoryContract.WebKind;
@@ -51,4 +57,7 @@ public sealed class DirectoryApplication
 
     /// <summary>A <c>web</c> client's registered redirect URIs, matched exactly. Empty for any other kind.</summary>
     public ImmutableArray<string> RedirectUris { get; }
+
+    /// <summary>When the row was written.</summary>
+    public DateTimeOffset CreatedAt { get; }
 }

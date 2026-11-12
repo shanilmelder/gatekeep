@@ -383,6 +383,19 @@ internal static class CanaryFlows
             + "the trace ID, never a key name or version.",
             "Story 9.1 build review",
             new DateOnly(2026, 11, 6)),
+        new(
+            new(SurfaceKind.Route, "/api/v1/tenants/{tenantId}/applications"),
+            "The list reads the path Tenant's Applications' IDs, names, types and creation times; the create takes a name and a "
+            + "type only, writes the row and an ID-only event, and creates no client secret. Neither returns or logs a credential: "
+            + "refusals are logged by fixed code only, never the name.",
+            "Story 3.1 build review",
+            new DateOnly(2026, 11, 11)),
+        new(
+            new(SurfaceKind.Route, "/api/v1/tenants/{tenantId}/applications/{applicationId}"),
+            "A read with no body: it returns one of the path Tenant's Applications' ID, name, type and creation time, never a "
+            + "secret or hash, and writes nothing. Refusals are logged by fixed code only.",
+            "Story 3.1 build review",
+            new DateOnly(2026, 11, 11)),
     ];
 
     /// <summary>Every production surface: the job and Operation registries, the Cli's commands and the hosts.</summary>

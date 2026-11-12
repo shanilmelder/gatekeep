@@ -52,8 +52,8 @@ type Answer = (route: Route) => Promise<void>;
 const ten = (n: number) => `ten_${String.fromCharCode(97 + n).repeat(25)}a`;
 const opr = (n: number) => `opr_${String.fromCharCode(97 + n).repeat(25)}a`;
 
-/** Story 1.28: a created Tenant's success opens it, whose landing is its settings page until Story 3.1. */
-const CREATED_LANDING = new RegExp(`/tenants/${ten(9)}/settings$`);
+/** Story 1.28: a created Tenant's success opens it, whose landing is its Applications list (Story 3.1). */
+const CREATED_LANDING = new RegExp(`/tenants/${ten(9)}/applications$`);
 
 interface TenantRow {
   id: string;
@@ -214,6 +214,7 @@ async function answerApi(page: Page, baseURL: string, initial: Partial<State> = 
         return json(route, 200, { capabilities: ['tenant.configuration.read', 'tenant.settings.manage', 'tenant.label.manage'] });
       }
       if (/^\/api\/v1\/tenants\/[^/]+\/label$/.test(pathname) && request.method() === 'GET') return json(route, 200, { label: 'dev', status: 'active' });
+      if (/^\/api\/v1\/tenants\/[^/]+\/applications$/.test(pathname)) return json(route, 200, { applications: [], nextCursor: null });
       if (/^\/api\/v1\/deployment\/operations\/[^/]+\/retry$/.test(pathname)) {
         if (state.retryAnswer) return state.retryAnswer(route);
         return json(route, 202, operation('running'));
@@ -565,7 +566,7 @@ test.describe('create', () => {
     api.state.mine = [{ id: ten(9), name: 'Acme Dev', host: `acme-dev.${ZONE}`, label: 'dev' }];
     await expect(page.getByTestId('toast')).toHaveText('Tenant created.');
     await expect(page).toHaveURL(CREATED_LANDING);
-    await expect(heading(page)).toHaveText('Tenant settings');
+    await expect(heading(page)).toHaveText('Applications');
     // The new Tenant is the current one in the top bar, as the next reads list it.
     await expect(page.getByTestId('tenant-switcher').locator('[data-menu-trigger]')).toHaveAccessibleName('Acme Dev DEV, switch Tenant');
     expect(api.count(`GET /api/v1/tenants/${ten(9)}/operations/${opr(0)}`)).toBe(2);

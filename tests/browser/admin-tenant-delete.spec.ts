@@ -197,11 +197,13 @@ async function answerApi(page: Page, baseURL: string, initial: Partial<State> = 
         state.mine = state.mine.filter((t) => t.id !== tenantId);
         return json(route, 202, deletionOperation(tenantId), { Location: `/api/v1/deployment/tenants/${tenantId}/deletion` });
       }
-      const tenantPath = /^\/api\/v1\/tenants\/([^/]+)\/(capabilities|label)$/.exec(pathname);
+      const tenantPath = /^\/api\/v1\/tenants\/([^/]+)\/(capabilities|label|applications)$/.exec(pathname);
       if (tenantPath) {
         const tenantId = decodeURIComponent(tenantPath[1]!);
         if (state.denied.includes(tenantId)) return problem(route, 403, 'access_denied');
         if (tenantPath[2] === 'capabilities') return json(route, 200, { capabilities: TENANT_OWNER });
+        // Story 3.1: a Tenant's landing reads its Applications, none here.
+        if (tenantPath[2] === 'applications') return json(route, 200, { applications: [], nextCursor: null });
         if (method === 'GET') return json(route, 200, { label: 'dev', status: 'active' });
         if (state.putAnswer) return state.putAnswer(route);
         const label = (JSON.parse(request.postData() ?? '{}') as { label: Label }).label;
@@ -493,7 +495,7 @@ test.describe('lost Tenant', () => {
     await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Tenant', exact: true }).click();
 
     // The landing's rules: the one Tenant left is opened, and the banner survives that redirect.
-    await expect(page).toHaveURL(new RegExp(`/tenants/${GAMMA.id}/settings$`));
+    await expect(page).toHaveURL(new RegExp(`/tenants/${GAMMA.id}/applications$`));
     const banner = page.getByTestId('tenant-lost');
     await expect(banner).toHaveText(LOST('Acme'));
     await expect(banner.locator('bdi')).toHaveText('Acme');
@@ -503,9 +505,9 @@ test.describe('lost Tenant', () => {
     expect(await page.evaluate((key) => window.localStorage.getItem(key), REMEMBERED)).not.toBe(ACME.id);
 
     // The Admin's next navigation clears it.
-    await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Tenant', exact: true }).click();
+    await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Applications', exact: true }).click();
     await expect(page.getByTestId('tenant-lost')).toHaveCount(0);
-    await expect(heading(page)).toHaveText('Tenant settings');
+    await expect(heading(page)).toHaveText('Applications');
   });
 
   test('a save refused with access_denied, once the lists lack the Tenant, returns to the landing with the banner and no unsaved prompt', async ({ page, baseURL }) => {
@@ -536,7 +538,7 @@ test.describe('lost Tenant', () => {
 
     await page.goto(`/tenants/${ACME.id}/settings`);
 
-    await expect(page).toHaveURL(new RegExp(`/tenants/${GAMMA.id}/settings$`));
+    await expect(page).toHaveURL(new RegExp(`/tenants/${GAMMA.id}/applications$`));
     const banner = page.getByTestId('tenant-lost');
     await expect(banner).toHaveText(LOST(ACME.id));
     await expect(banner.locator('code')).toHaveText(ACME.id);
@@ -635,7 +637,8 @@ for (const scheme of ['light', 'dark'] as const) {
       // At 768px the sidebar is the rail: the same item, found by its address.
       await page.getByTestId('sidebar').locator(`a[href="/tenants/${ACME.id}/settings"]:visible`).first().click();
       await expect(page.getByTestId('tenant-lost')).toBeVisible();
-      await expect(heading(page)).toHaveText('Tenant settings');
+      // The landing: the one Tenant left, on its Applications list (Story 3.1).
+      await expect(heading(page)).toHaveText('Applications');
       expect(await axe(page), 'lost banner').toEqual([]);
     });
   }

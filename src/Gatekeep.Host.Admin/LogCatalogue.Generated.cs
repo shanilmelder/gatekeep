@@ -34,7 +34,7 @@ internal static partial class LogCatalogue
         new("bootstrap.admin.created", AuditOutcome.Success, "The bootstrap token was claimed: the first Admin was created as Deployment Owner and bootstrap completed. Holds no token or hash."),
         new("bootstrap.token.issued", AuditOutcome.Success, "gatekeep init issued the first one-time bootstrap token. It expires 15 minutes after issue. Holds no token or hash."),
         new("bootstrap.token.reissued", AuditOutcome.Success, "gatekeep init reissued the bootstrap token, voiding the previous one. It expires 15 minutes after issue. Holds no token or hash."),
-        new("directory.application.created", AuditOutcome.Success, "An Application was created with its first client secret. Names the Application only: the secret is stored only as its hash."),
+        new("directory.application.created", AuditOutcome.Success, "An Application was created. Names the Application only: no client secret is created with it, and any secret is stored only as its hash."),
         new("keys.signing_key.created", AuditOutcome.Success, "A Tenant's replacement next Signing or Management key was created in key custody. Names no key."),
         new("keys.signing_key.destroyed", AuditOutcome.Success, "A Tenant's retired Signing or Management key was destroyed in key custody. Names no key."),
         new("keys.signing_key.destruction_failed", AuditOutcome.Failure, "Key custody failed to destroy a Tenant's retired Signing or Management key; the destruction retries. Names no key."),

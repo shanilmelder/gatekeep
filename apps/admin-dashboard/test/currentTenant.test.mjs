@@ -67,6 +67,11 @@ describe('switching', () => {
     assert.equal(switchHref('/', 'ten_c'), '/tenants/ten_c');
   });
 
+  it("goes from one Application's page to the other Tenant's Applications list", () => {
+    assert.equal(switchHref('/tenants/ten_a/applications', 'ten_c'), '/tenants/ten_c/applications');
+    assert.equal(switchHref('/tenants/ten_a/applications/app_x', 'ten_c'), '/tenants/ten_c/applications');
+  });
+
   it('is always same-origin and path-absolute, with the ID encoded', () => {
     assert.equal(switchHref('/deployment', 'ten_a/../../evil'), '/tenants/ten_a%2F..%2F..%2Fevil');
     assert.equal(switchHref('/deployment', '//evil.example'), '/tenants/%2F%2Fevil.example');

@@ -150,6 +150,8 @@ async function answerApi(page: Page, baseURL: string, initial: Partial<Api['stat
         if (state.expired) return route.fulfill({ status: 401 });
         return json(route, 200, { tenantZone: 'gatekeep.test', tenants: [], nextCursor: null });
       }
+      // Story 3.1: a Tenant's landing reads its Applications, none here.
+      if (/^\/api\/v1\/tenants\/[^/]+\/applications$/.test(pathname)) return json(route, 200, { applications: [], nextCursor: null });
       const tenant = /^\/api\/v1\/tenants\/([^/]+)\/capabilities$/.exec(pathname);
       if (tenant) {
         if (state.expired) return route.fulfill({ status: 401 });
@@ -310,7 +312,7 @@ test.describe('shell', () => {
   test('no Session at boot goes to sign in with no shell and no renewal', async ({ page, baseURL }) => {
     const api = await answerApi(page, baseURL!, { expired: true });
 
-    await page.goto('/tenants/ten_a/applications');
+    await page.goto('/tenants/ten_a/nope');
 
     await expect(page).toHaveURL(/\/signin$/);
     await expect(page.getByRole('heading', { level: 1, name: 'Sign in' })).toBeVisible();
@@ -494,10 +496,10 @@ test.describe('pages', () => {
     expect(api.count('GET /api/v1/tenants/NOT-AN-ID/capabilities')).toBe(1);
   });
 
-  test('an allowed Tenant path is not found, since no Tenant page exists yet, only after the server answers', async ({ page, baseURL }) => {
+  test('an allowed Tenant path with no page is not found, only after the server answers', async ({ page, baseURL }) => {
     const api = await answerApi(page, baseURL!);
 
-    await page.goto('/tenants/ten_a/applications');
+    await page.goto('/tenants/ten_a/nope');
 
     await expect(heading(page)).toHaveText('This no longer exists.');
     expect(api.log.indexOf('GET /api/v1/tenants/ten_a/capabilities')).toBeGreaterThan(-1);
@@ -565,9 +567,9 @@ test.describe('pages', () => {
     await expect(page.getByText("You don't have access to this page.")).toHaveCount(0);
     api.state.tenantAnswer = (route) => json(route, 200, { capabilities: ['tenant.configuration.read'] });
     await failedBanner(page).getByRole('button', { name: 'Retry' }).click();
-    // Story 1.28: an allowed Tenant's landing is its settings page, until Story 3.1.
-    await expect(page).toHaveURL(/\/tenants\/ten_a\/settings$/);
-    await expect(heading(page)).toHaveText('Tenant settings');
+    // Story 3.1: an allowed Tenant's landing is its Applications list.
+    await expect(page).toHaveURL(/\/tenants\/ten_a\/applications$/);
+    await expect(heading(page)).toHaveText('Applications');
   });
 
   test('a bodiless 403 on the Tenant read is a failure, never the forbidden page: that needs the server’s access_denied', async ({ page, baseURL }) => {
@@ -682,7 +684,7 @@ test.describe('navigation', () => {
   test("the browser's back and forward are in-shell navigations too, each reading again", async ({ page, baseURL }) => {
     const api = await answerApi(page, baseURL!);
 
-    await page.goto('/tenants/ten_a/applications');
+    await page.goto('/tenants/ten_a/nope');
     await expect(heading(page)).toHaveText('This no longer exists.');
     await page.getByRole('link', { name: 'Back to Admin Dashboard' }).click();
     await expect(heading(page)).toHaveText(LANDING);
@@ -1148,7 +1150,7 @@ test.describe('session renewal', () => {
     await authenticator(page, new URL(baseURL!).hostname);
     const api = await answerApi(page, baseURL!);
 
-    await page.goto('/tenants/ten_a/applications');
+    await page.goto('/tenants/ten_a/nope');
     await expect(heading(page)).toHaveText('This no longer exists.');
     await page.getByRole('link', { name: 'Back to Admin Dashboard' }).click();
     await expect(heading(page)).toHaveText(LANDING);

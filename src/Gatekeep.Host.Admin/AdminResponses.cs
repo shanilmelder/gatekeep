@@ -90,9 +90,23 @@ internal static class AdminResponses
 
     /// <summary>
     /// A Log search (Story 7.4) whose filter, cursor or range is malformed: an unknown parameter value,
-    /// one sent twice, or a range that ends before it starts. Nothing was read.
+    /// one sent twice, or a range that ends before it starts; from Story 3.1 also a malformed Applications
+    /// list cursor. Nothing was read.
     /// </summary>
     public const string InvalidRequest = "invalid_request";
+
+    /// <summary>
+    /// An Application create body (Story 3.1) that is malformed: not JSON, over 4096 bytes, a field missing
+    /// or of the wrong type, a name that is empty after trimming, longer than 200 characters or holds a
+    /// control character, or a type that isn't spa, web, native or machine. Nothing was written.
+    /// </summary>
+    public const string ApplicationInvalid = "application_invalid";
+
+    /// <summary>
+    /// An object the path Tenant has none of by that ID (Story 3.1): unknown, malformed, another Tenant's and
+    /// the hidden system Application alike, so nothing says which.
+    /// </summary>
+    public const string NotFound = "not_found";
 
     /// <summary>The Tenancy guard's SQLSTATE for a status change outside a Tenant's lifecycle (Story 1.29).</summary>
     public const string StatusRefused = "GK007";
@@ -146,6 +160,8 @@ internal static class AdminResponses
         TenantBusy,
         ConfirmationMismatch,
         InvalidRequest,
+        ApplicationInvalid,
+        NotFound,
     ];
 
     /// <summary>The Session cookie, expired: sent with a sign-out and a 401 for a stale cookie.</summary>

@@ -8,9 +8,9 @@ namespace Gatekeep.Modules.Directory.Contracts;
 /// </summary>
 public static class DirectoryEvents
 {
-    /// <summary>Written when an Application is created, with its first client secret. The target is the Application.</summary>
+    /// <summary>Written when an Application is created, by an Admin or the System. The target is the Application.</summary>
     public static readonly AuditEventDefinition ApplicationCreated = new(
         new AuditTypeCode("directory.application.created"),
-        "An Application was created with its first client secret. Names the Application only: the secret is stored only as its hash.",
+        "An Application was created. Names the Application only: no client secret is created with it, and any secret is stored only as its hash.",
         AuditOutcome.Success);
 }

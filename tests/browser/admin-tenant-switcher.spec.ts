@@ -166,6 +166,8 @@ async function answerApi(page: Page, baseURL: string, initial: Partial<State> = 
         state.grant = state.begunFor;
         return route.fulfill({ status: 204 });
       }
+      // Story 3.1: a Tenant's landing reads its Applications, none here.
+      if (/^\/api\/v1\/tenants\/[^/]+\/applications$/.test(pathname) && method === 'GET') return json(route, 200, { applications: [], nextCursor: null });
       const tenantPath = /^\/api\/v1\/tenants\/([^/]+)\/(capabilities|label|assertions)$/.exec(pathname);
       if (tenantPath) {
         const tenantId = decodeURIComponent(tenantPath[1]!);
@@ -438,12 +440,12 @@ test.describe('landing', () => {
     await answerApi(page, baseURL!);
 
     await page.goto('/');
-    await expect(page).toHaveURL(new RegExp(`/tenants/${A.id}/settings$`));
-    await expect(heading(page)).toHaveText('Tenant settings');
+    await expect(page).toHaveURL(new RegExp(`/tenants/${A.id}/applications$`));
+    await expect(heading(page)).toHaveText('Applications');
 
     await page.evaluate((key) => localStorage.setItem(key, 'ten_' + 'c'.repeat(25) + 'a'), REMEMBERED);
     await page.goto('/');
-    await expect(page).toHaveURL(new RegExp(`/tenants/${C.id}/settings$`));
+    await expect(page).toHaveURL(new RegExp(`/tenants/${C.id}/applications$`));
   });
 
   test('a Deployment Owner with Tenants but no role lands on Tenants', async ({ page, baseURL }) => {
@@ -468,13 +470,16 @@ test.describe('landing', () => {
     await expect(page.getByText(NO_ACCESS)).toBeVisible();
   });
 
-  test('/tenants/{tenantId} is replaced by its settings page, and the sidebar has Settings, Tenant', async ({ page, baseURL }) => {
+  test('/tenants/{tenantId} is replaced by its Applications list, and the sidebar has Applications and Settings, Tenant', async ({ page, baseURL }) => {
     await answerApi(page, baseURL!);
     await page.goto(`/tenants/${A.id}`);
-    await expect(page).toHaveURL(new RegExp(`/tenants/${A.id}/settings$`));
-    const link = page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Tenant' });
-    await expect(link).toHaveAttribute('href', `/tenants/${A.id}/settings`);
-    await expect(link).toHaveAttribute('aria-current', 'page');
+    await expect(page).toHaveURL(new RegExp(`/tenants/${A.id}/applications$`));
+    const nav = page.getByRole('navigation', { name: 'Main' });
+    const applications = nav.getByRole('link', { name: 'Applications' });
+    await expect(applications).toHaveAttribute('href', `/tenants/${A.id}/applications`);
+    await expect(applications).toHaveAttribute('aria-current', 'page');
+    await nav.getByRole('button', { name: 'Settings' }).click();
+    await expect(nav.getByRole('link', { name: 'Tenant' })).toHaveAttribute('href', `/tenants/${A.id}/settings`);
   });
 });
 
@@ -730,7 +735,7 @@ test.describe('review', () => {
       const before = api.count(`GET ${MY_TENANTS}`);
       api.state.mineAnswer = null;
       await banner.getByRole('button', { name: 'Retry' }).click();
-      await expect(page).toHaveURL(new RegExp(`/tenants/${A.id}/settings$`));
+      await expect(page).toHaveURL(new RegExp(`/tenants/${A.id}/applications$`));
       expect(api.count(`GET ${MY_TENANTS}`)).toBeGreaterThan(before);
     });
   }

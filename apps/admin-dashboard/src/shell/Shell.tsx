@@ -19,6 +19,9 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { navigate, useLocation } from '../navigation';
 import { api, setCsrfToken } from '../session';
 import { assertWithSheet } from '../webauthn';
+import { ApplicationDetailPage } from './ApplicationDetailPage';
+import { applicationOfPath, applicationsPath } from './applications';
+import { ApplicationsPage } from './ApplicationsPage';
 import { CapabilitiesProvider, capabilitiesOf, pathTenant, useCapabilityReads, type Answered, type ShellRead } from './capabilities';
 import { current as currentTenant, forget, remember, remembered, switchHref, tenantOfPath } from './currentTenant';
 import { CredentialsPage, type ShellRequest } from './CredentialsPage';
@@ -161,10 +164,13 @@ interface Mismatch {
   pageTenant: string | null;
 }
 
-/** A Tenant path's page (Story 1.28): the Tenant's landing, its settings, its Logs (Story 7.4) or its Signing keys (Story 9.1). */
-const TENANT_ROUTE = /^\/tenants\/[^/]+(\/settings|\/logs|\/signing-keys)?$/;
+/**
+ * A Tenant path's page (Story 1.28): the Tenant's landing, its settings, its Logs (Story 7.4), its
+ * Signing keys (Story 9.1), or its Applications and one Application (Story 3.1).
+ */
+const TENANT_ROUTE = /^\/tenants\/[^/]+(\/settings|\/logs|\/signing-keys|\/applications(\/[^/]+)?)?$/;
 
-/** Replaces the URL with `to` once mounted, as a redirect does: /tenants/{tenantId} is its settings until Story 3.1. */
+/** Replaces the URL with `to` once mounted, as a redirect does: /tenants/{tenantId} is its Applications list (Story 3.1). */
 function Redirect({ to }: { to: string }) {
   useEffect(() => navigate(to, { replace: true }), [to]);
   return null;
@@ -508,7 +514,12 @@ function ShellFrame({ adminId }: { adminId: string }) {
   else if (TENANT_ROUTE.test(answered.path) && answered.reads.kind === 'ready') {
     const tenant = pathTenant(answered.path);
     const tenantId = tenant !== null && tenant !== 'malformed' ? tenant.tenantId : null;
+    // One Application's page first (Story 3.1), so an Application ID such as "logs" names no other page.
+    const applicationId = applicationOfPath(answered.path);
     if (tenantId === null) page = <NotFoundPage />;
+    else if (applicationId !== null)
+      page = <ApplicationDetailPage key={`${tenantId} ${applicationId}`} request={shellRequest} tenantId={tenantId} applicationId={applicationId} />;
+    else if (/^\/tenants\/[^/]+\/applications\//.test(answered.path)) page = <NotFoundPage />;
     // Logs (Story 7.4): with tenant.logs.read only, which the path Tenant's read has answered.
     else if (answered.path.endsWith('/logs'))
       page = capabilities.has('tenant.logs.read') ? (
@@ -518,8 +529,10 @@ function ShellFrame({ adminId }: { adminId: string }) {
       );
     else if (answered.path.endsWith('/signing-keys'))
       page = <SigningKeysPage key={tenantId} request={shellRequest} tenantId={tenantId} />;
-    else if (!answered.path.endsWith('/settings'))
-      page = <Redirect to={`/tenants/${encodeURIComponent(tenantId)}/settings`} />;
+    // Applications (Story 3.1): any Tenant Role reads them, as the path Tenant's read has answered.
+    else if (answered.path.endsWith('/applications'))
+      page = <ApplicationsPage key={tenantId} request={shellRequest} tenantId={tenantId} />;
+    else if (!answered.path.endsWith('/settings')) page = <Redirect to={applicationsPath(tenantId)} />;
     else
       page = (
         <TenantSettingsPage
