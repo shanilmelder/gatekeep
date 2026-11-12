@@ -159,7 +159,7 @@ public class AdminApiRuleTests
         Assert.Equal("X-Gatekeep-CSRF", csrf.GetProperty("name").GetString());
 
         Assert.Equal(
-            ["code", "traceId"],
+            ["code", "traceId", "errors"],
             document.RootElement.GetProperty("components").GetProperty("schemas").GetProperty("ApiProblem")
                 .GetProperty("properties").EnumerateObject().Select(p => p.Name));
     }

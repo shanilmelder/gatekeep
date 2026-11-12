@@ -695,6 +695,42 @@ internal static class AdminApi
             .Produces<ApiProblem>(StatusCodes.Status409Conflict, AdminResponses.ProblemContentType)
             .Produces(StatusCodes.Status503ServiceUnavailable);
 
+        app.MapPut("/api/v1/tenants/{tenantId}/applications/{applicationId}/settings", static (HttpContext context, AdminApiServices services) => ApplicationsApi.UpdateSettingsAsync(context, services))
+            .WithMetadata(
+                TenantApiEndpoint.Instance,
+                new RequiresCapability(AdminCapabilities.TenantApplicationCallbacksManage),
+                EvaluatesFreshAssertion.Instance,
+                new FreshAssertionTarget(ApplicationsApi.ApplicationRouteValue),
+                new JsonRequestBody(typeof(ApplicationSettingsRequest)))
+            .WithName("UpdateApplicationSettings")
+            .WithTags(TenantTag)
+            .WithSummary("Save an Application's callback, logout and web origin URLs and its grant types.")
+            .WithDescription(
+                "Tenant Editors and Owners; never a machine principal. The body is the full settings, and every list is required " +
+                "and replaces what is stored. Every URL is absolute, at most 2000 characters, with no fragment, user info or " +
+                "wildcard, and https, or http on 127.0.0.1 or [::1] only; each list holds at most 10 distinct lines. A native " +
+                "Application may also register custom-scheme callback and logout URLs, such as com.example.app:/callback, and has " +
+                "no web origin; a machine Application has no URL at all. A web origin is scheme://host[:port] alone. Grants are [] " +
+                "or [client_credentials] for machine, and [], [authorization_code] or [authorization_code, refresh_token] " +
+                "otherwise, in any order, stored sorted. URLs are matched exactly; only a native Application's loopback " +
+                "redirect URI may differ in port. Any rule broken is 400 application_invalid with errors naming each field, line " +
+                "and reason; a body that isn't JSON, is over 131072 bytes, misses a list or holds a null is 400 " +
+                "application_invalid with no errors. In a Prod Tenant a new custom-scheme URL needs acknowledgeCustomScheme: " +
+                "true, or it is 400 custom_scheme_acknowledgement_required, and a changed set of callback URLs needs a fresh " +
+                "assertion for tenant.application_callbacks.manage on this applicationId, begun on POST " +
+                "/api/v1/tenants/{tenantId}/assertions and used up once the locked label is found to be Prod. A save that " +
+                "changes something writes directory.application.updated, and in a Prod Tenant that gains a callback " +
+                "directory.application.prod_callback_added; a save that changes nothing writes nothing and is 200. An " +
+                "applicationId that isn't an app_ ID, names no Application of this Tenant, another Tenant's or the hidden " +
+                "system Application is the same 404 not_found.")
+            .Produces<ApplicationResponse>(StatusCodes.Status200OK)
+            .Produces<ApiProblem>(StatusCodes.Status400BadRequest, AdminResponses.ProblemContentType)
+            .Produces(StatusCodes.Status401Unauthorized)
+            .Produces<ApiProblem>(StatusCodes.Status403Forbidden, AdminResponses.ProblemContentType)
+            .Produces<ApiProblem>(StatusCodes.Status404NotFound, AdminResponses.ProblemContentType)
+            .Produces<ApiProblem>(StatusCodes.Status409Conflict, AdminResponses.ProblemContentType)
+            .Produces(StatusCodes.Status503ServiceUnavailable);
+
         app.MapPut("/api/v1/tenants/{tenantId}/label", static (HttpContext context, AdminApiServices services) => TenantLabelApi.SetAsync(context, services))
             .WithMetadata(
                 TenantApiEndpoint.Instance,

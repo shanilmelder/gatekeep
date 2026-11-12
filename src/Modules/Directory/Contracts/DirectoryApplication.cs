@@ -17,6 +17,8 @@ public sealed class DirectoryApplication
         ImmutableArray<string> grantTypes,
         ImmutableArray<string> audiences,
         ImmutableArray<string> redirectUris,
+        ImmutableArray<string> postLogoutRedirectUris,
+        ImmutableArray<string> webOrigins,
         DateTimeOffset createdAt)
     {
         Id = id;
@@ -26,6 +28,8 @@ public sealed class DirectoryApplication
         GrantTypes = grantTypes;
         Audiences = audiences;
         RedirectUris = redirectUris;
+        PostLogoutRedirectUris = postLogoutRedirectUris;
+        WebOrigins = webOrigins;
         CreatedAt = createdAt;
     }
 
@@ -38,25 +42,43 @@ public sealed class DirectoryApplication
 
     /// <summary>
     /// The row's kind: <c>machine</c> (Client Credentials, Story 2.5), <c>web</c> (the code flow,
-    /// Story 2.9), or from Story 3.1 <c>spa</c> or <c>native</c>, which no flow serves yet. The hidden
-    /// <c>system</c> Application is never handed out.
+    /// Story 2.9), or from Story 3.1 <c>spa</c> or <c>native</c>, the code flow's public clients from
+    /// Story 3.2. The hidden <c>system</c> Application is never handed out.
     /// </summary>
     public string Kind { get; }
 
     /// <summary>Whether its kind authenticates with a credential: <c>web</c> and <c>machine</c> do, <c>spa</c> and <c>native</c> don't (Story 3.1).</summary>
     public bool CredentialRequired => DirectoryContract.CredentialRequired(Kind);
 
-    /// <summary>Whether this is a <c>web</c> client, which signs Users in by the code flow with PKCE.</summary>
+    /// <summary>Whether this is a <c>web</c> client, a confidential client of the code flow.</summary>
     public bool IsWeb => Kind == DirectoryContract.WebKind;
 
-    /// <summary>The OAuth grant types it may use, from the row's checked set.</summary>
+    /// <summary>Whether its kind may sign Users in by the code flow with PKCE: <c>web</c>, <c>spa</c> and <c>native</c> (Story 3.2).</summary>
+    public bool SignsUsersIn => DirectoryContract.SignsUsersIn(Kind);
+
+    /// <summary>Whether it is a public client, which holds no secret and authenticates by its <c>client_id</c> alone: <c>spa</c> and <c>native</c> (Story 3.2).</summary>
+    public bool IsPublic => DirectoryContract.IsPublic(Kind);
+
+    /// <summary>Whether it is a <c>native</c> Application, whose loopback redirect URIs may vary in port (RFC 8252 §7.3, Story 3.2).</summary>
+    public bool IsNative => Kind == DirectoryContract.NativeKind;
+
+    /// <summary>The OAuth grant types it may use, from the row's checked set, stored sorted.</summary>
     public ImmutableArray<string> GrantTypes { get; }
 
     /// <summary>The audiences its tokens carry. Empty until Story 3.7 adds APIs.</summary>
     public ImmutableArray<string> Audiences { get; }
 
-    /// <summary>A <c>web</c> client's registered redirect URIs, matched exactly. Empty for any other kind.</summary>
+    /// <summary>
+    /// Its Allowed Callback URLs, the OAuth redirect URIs, matched exactly but for a <c>native</c>
+    /// Application's loopback port (Story 3.2). Always empty for <c>machine</c>.
+    /// </summary>
     public ImmutableArray<string> RedirectUris { get; }
+
+    /// <summary>Its Allowed Logout URLs, the post-logout redirect URIs (Story 3.2; Story 4.13 uses them). Always empty for <c>machine</c>.</summary>
+    public ImmutableArray<string> PostLogoutRedirectUris { get; }
+
+    /// <summary>Its Allowed Web Origins, each <c>scheme://host[:port]</c> (Story 3.2). Always empty for <c>native</c> and <c>machine</c>.</summary>
+    public ImmutableArray<string> WebOrigins { get; }
 
     /// <summary>When the row was written.</summary>
     public DateTimeOffset CreatedAt { get; }

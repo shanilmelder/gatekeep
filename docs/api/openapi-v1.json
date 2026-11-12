@@ -2356,6 +2356,126 @@
         "x-gatekeep-recovery-allowed": false
       }
     },
+    "/api/v1/tenants/{tenantId}/applications/{applicationId}/settings": {
+      "put": {
+        "tags": [
+          "Tenants"
+        ],
+        "summary": "Save an Application's callback, logout and web origin URLs and its grant types.",
+        "description": "Tenant Editors and Owners; never a machine principal. The body is the full settings, and every list is required and replaces what is stored. Every URL is absolute, at most 2000 characters, with no fragment, user info or wildcard, and https, or http on 127.0.0.1 or [::1] only; each list holds at most 10 distinct lines. A native Application may also register custom-scheme callback and logout URLs, such as com.example.app:/callback, and has no web origin; a machine Application has no URL at all. A web origin is scheme://host[:port] alone. Grants are [] or [client_credentials] for machine, and [], [authorization_code] or [authorization_code, refresh_token] otherwise, in any order, stored sorted. URLs are matched exactly; only a native Application's loopback redirect URI may differ in port. Any rule broken is 400 application_invalid with errors naming each field, line and reason; a body that isn't JSON, is over 131072 bytes, misses a list or holds a null is 400 application_invalid with no errors. In a Prod Tenant a new custom-scheme URL needs acknowledgeCustomScheme: true, or it is 400 custom_scheme_acknowledgement_required, and a changed set of callback URLs needs a fresh assertion for tenant.application_callbacks.manage on this applicationId, begun on POST /api/v1/tenants/{tenantId}/assertions and used up once the locked label is found to be Prod. A save that changes something writes directory.application.updated, and in a Prod Tenant that gains a callback directory.application.prod_callback_added; a save that changes nothing writes nothing and is 200. An applicationId that isn't an app_ ID, names no Application of this Tenant, another Tenant's or the hidden system Application is the same 404 not_found.",
+        "operationId": "UpdateApplicationSettings",
+        "parameters": [
+          {
+            "name": "tenantId",
+            "in": "path",
+            "description": "The Tenant's public ID: ten_ and the UUID's 16 bytes in lowercase RFC 4648 base32 with no padding, whose last character carries two zero bits. Only this canonical spelling, after URL decoding, names a Tenant, and the empty UUID's never does; anything else is refused like a Tenant the Admin holds no role in.",
+            "required": true,
+            "schema": {
+              "pattern": "^ten_[a-z2-7]{25}[aeimquy4]$",
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Gatekeep-Tenant",
+            "in": "header",
+            "description": "The Tenant the page shows, its ten_ ID: it must equal {tenantId}, or 409 tenant_mismatch. It never selects a Tenant.",
+            "required": true,
+            "schema": {
+              "pattern": "^ten_[a-z2-7]{25}[aeimquy4]$",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApplicationSettingsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApplicationResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "fresh_assertion_required, with the problem body, when no fresh assertion for this action and target is bound to the Session; access_denied when the capability is refused. No body when an earlier check refuses first: a restricted Session, or a wrong Origin or CSRF token.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "tenant_mismatch, with the problem body, when X-Gatekeep-Tenant is missing, sent twice or isn't {tenantId}, and nothing ran; or another conflict the operation's description names.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "adminSession": [ ],
+            "csrf": [ ]
+          }
+        ],
+        "x-gatekeep-setup-allowed": false,
+        "x-gatekeep-access": {
+          "kind": "capability",
+          "capability": "tenant.application_callbacks.manage",
+          "scope": "tenant",
+          "machineAllowed": false,
+          "freshAssertion": "whenProdTenant"
+        },
+        "x-gatekeep-recovery-allowed": false,
+        "x-gatekeep-fresh-assertion": {
+          "action": "tenant.application_callbacks.manage",
+          "target": "applicationId",
+          "enforcedBy": "handler"
+        }
+      }
+    },
     "/api/v1/tenants/{tenantId}/assertions": {
       "post": {
         "tags": [
@@ -2788,11 +2908,59 @@
               "confirmation_mismatch",
               "invalid_request",
               "application_invalid",
-              "not_found"
+              "not_found",
+              "custom_scheme_acknowledgement_required"
             ],
             "type": "string"
           },
           "traceId": {
+            "type": "string"
+          },
+          "errors": {
+            "type": [
+              "null",
+              "array"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/ApiProblemError"
+            }
+          }
+        }
+      },
+      "ApiProblemError": {
+        "required": [
+          "field",
+          "index",
+          "reason"
+        ],
+        "type": "object",
+        "properties": {
+          "field": {
+            "enum": [
+              "callbackUrls",
+              "logoutUrls",
+              "webOrigins",
+              "grantTypes"
+            ],
+            "type": "string"
+          },
+          "index": {
+            "type": [
+              "null",
+              "integer"
+            ],
+            "format": "int32"
+          },
+          "reason": {
+            "enum": [
+              "not_absolute",
+              "wildcard",
+              "scheme_not_allowed",
+              "too_long",
+              "too_many",
+              "duplicate",
+              "not_allowed_for_type"
+            ],
             "type": "string"
           }
         }
@@ -2826,7 +2994,11 @@
           "name",
           "type",
           "credentialRequired",
-          "createdAt"
+          "createdAt",
+          "callbackUrls",
+          "logoutUrls",
+          "webOrigins",
+          "grantTypes"
         ],
         "type": "object",
         "properties": {
@@ -2855,6 +3027,87 @@
           },
           "createdAt": {
             "type": "string"
+          },
+          "callbackUrls": {
+            "maxItems": 10,
+            "type": "array",
+            "items": {
+              "maxLength": 2000,
+              "type": "string"
+            }
+          },
+          "logoutUrls": {
+            "maxItems": 10,
+            "type": "array",
+            "items": {
+              "maxLength": 2000,
+              "type": "string"
+            }
+          },
+          "webOrigins": {
+            "maxItems": 10,
+            "type": "array",
+            "items": {
+              "maxLength": 2000,
+              "type": "string"
+            }
+          },
+          "grantTypes": {
+            "type": "array",
+            "items": {
+              "enum": [
+                "authorization_code",
+                "client_credentials",
+                "refresh_token"
+              ],
+              "type": "string"
+            }
+          }
+        }
+      },
+      "ApplicationSettingsRequest": {
+        "required": [
+          "callbackUrls",
+          "logoutUrls",
+          "webOrigins",
+          "grantTypes"
+        ],
+        "type": "object",
+        "properties": {
+          "callbackUrls": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "logoutUrls": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "webOrigins": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "grantTypes": {
+            "type": "array",
+            "items": {
+              "enum": [
+                "authorization_code",
+                "client_credentials",
+                "refresh_token"
+              ],
+              "type": "string"
+            }
+          },
+          "acknowledgeCustomScheme": {
+            "type": [
+              "null",
+              "boolean"
+            ]
           }
         }
       },

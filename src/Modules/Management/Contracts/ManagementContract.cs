@@ -30,6 +30,21 @@ public static class ManagementContract
     /// <summary>The Application types an Admin creates (Story 3.1), in a fixed order: <c>spa</c>, <c>web</c>, <c>native</c>, <c>machine</c>.</summary>
     public static IReadOnlyList<string> ApplicationTypes => Gatekeep.Modules.Directory.Contracts.DirectoryContract.CreatableKinds;
 
+    /// <summary>The grant types an Application can hold (Story 3.2), in their stored order.</summary>
+    public static IReadOnlyList<string> ApplicationGrantTypes => Gatekeep.Modules.Directory.Contracts.DirectoryContract.GrantTypes;
+
+    /// <summary>The fields a settings save's errors name (Story 3.2).</summary>
+    public static IReadOnlyList<string> ApplicationSettingsFields => Gatekeep.Modules.Directory.Contracts.ApplicationSettingsFields.All;
+
+    /// <summary>The reasons a settings save's errors give (Story 3.2).</summary>
+    public static IReadOnlyList<string> ApplicationSettingsReasons => Gatekeep.Modules.Directory.Contracts.ApplicationSettingsReasons.All;
+
+    /// <summary>The most lines in each of an Application's URL lists (Story 3.2).</summary>
+    public const int MaxApplicationUrls = Gatekeep.Modules.Directory.Contracts.DirectoryContract.MaxRedirectUris;
+
+    /// <summary>The longest line in any of an Application's URL lists (Story 3.2).</summary>
+    public const int MaxApplicationUrlLength = Gatekeep.Modules.Directory.Contracts.DirectoryContract.MaxRedirectUriLength;
+
     /// <summary>The longest Application name, after trimming: 200 characters.</summary>
     public const int MaxApplicationNameLength = Gatekeep.Modules.Directory.Contracts.DirectoryContract.MaxNameLength;
 

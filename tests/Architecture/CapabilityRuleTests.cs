@@ -66,11 +66,13 @@ public class CapabilityRuleTests
     /// The reviewed routes whose handler, not the request checks, uses up their fresh assertion
     /// (Story 1.26): registration begin, whose need depends on the Session being full. A route
     /// declaring a <c>When…</c> capability joins this list with the story that maps it: Story 1.28's
-    /// label change, whose handler decides <c>WhenProdTenant</c> on the locked label.
+    /// label change, whose handler decides <c>WhenProdTenant</c> on the locked label, and Story 3.2's
+    /// Application settings save, whose handler decides it on the locked label and callbacks.
     /// </summary>
     private static readonly string[] HandlerEnforced =
     [
         "post /api/v1/deployment/credentials/registration",
+        "put /api/v1/tenants/{tenantId}/applications/{applicationId}/settings",
         "put /api/v1/tenants/{tenantId}/label",
     ];
 
@@ -190,6 +192,11 @@ public class CapabilityRuleTests
         Assert.Equal("handler", Fresh(operations["put /api/v1/tenants/{tenantId}/label"])!.EnforcedBy);
         Assert.Null(Fresh(operations["put /api/v1/tenants/{tenantId}/label"])!.Target);
         Assert.Equal("tenant.label.manage", Fresh(operations["put /api/v1/tenants/{tenantId}/label"])!.Action);
+        // Story 3.2: the settings save's handler decides WhenProdTenant, bound to the Application it changes.
+        const string Settings = "put /api/v1/tenants/{tenantId}/applications/{applicationId}/settings";
+        Assert.Equal("handler", Fresh(operations[Settings])!.EnforcedBy);
+        Assert.Equal("applicationId", Fresh(operations[Settings])!.Target);
+        Assert.Equal("tenant.application_callbacks.manage", Fresh(operations[Settings])!.Action);
         Assert.Equal(HandlerEnforced.Order(), operations.Where(o => Fresh(o.Value)?.EnforcedBy == "handler").Select(o => o.Key).Order());
 
         // Story 1.29: the first production Always routes, a deletion's start and retry, are

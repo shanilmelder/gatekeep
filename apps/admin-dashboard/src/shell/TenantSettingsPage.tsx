@@ -43,7 +43,7 @@ type Slot = { kind: 'none' } | { kind: 'prompt' } | { kind: 'failed'; text: stri
 const LABELS: ReadonlySet<string> = new Set(['dev', 'staging', 'prod']);
 
 /** The text a confirmation that didn't pass shows in the modal, as Your credentials shows it. */
-function confirmationText(confirmation: Exclude<Confirmation, { kind: 'confirmed' }>, messages: Messages): string {
+export function confirmationText(confirmation: Exclude<Confirmation, { kind: 'confirmed' }>, messages: Messages): string {
   switch (confirmation.kind) {
     case 'refused':
       return messages.signInRefused;

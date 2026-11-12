@@ -583,11 +583,12 @@ public static class TableRegistry
 
         // Story 2.5 (AD-8, AD-9, AD-24): each Tenant's Applications and their client secrets, a secret
         // only as its SHA-256. Host.Admin creates them (Epic 3 adds the API, rotation and revocation);
-        // Host.Hosted only reads them, to authenticate a client. No role updates one yet, and only a
-        // Tenant's deletion deletes (Story 1.29): its Operation's purges, reading only tenant_id.
+        // Host.Hosted only reads them, to authenticate a client. Only a Tenant's deletion deletes (Story
+        // 1.29): its Operation's purges, reading only tenant_id.
         // Story 2.8 (AD-12): each Tenant's one hidden system Application. Host.Worker writes it in Tenant
         // creation's completion, finding it by its kind first; the triggers refuse any edit of it, its
         // delete but with its Tenant's, and a secret naming it.
+        // Story 3.2: Host.Admin's settings save updates an Application's URLs and grants, and nothing else.
         new(
             "application",
             TableClass.Tenant,
@@ -602,6 +603,7 @@ public static class TableRegistry
             new Dictionary<string, IReadOnlyList<ColumnGrant>>
             {
                 [Worker] = [new ColumnGrant(Select, ["tenant_id", "id", "kind"])],
+                [Admin] = [new ColumnGrant(Update, ["redirect_uris", "post_logout_redirect_uris", "web_origins", "grant_types"])],
             },
             ["application_guard_delete", "application_guard_update", "tenant_row_guard"]),
         new("client_secret", TableClass.Tenant, "Directory", TableUse.Configuration, new Dictionary<string, IReadOnlyList<string>>

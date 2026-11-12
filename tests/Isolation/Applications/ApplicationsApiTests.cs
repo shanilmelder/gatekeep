@@ -27,7 +27,7 @@ public sealed class ApplicationsApiTests(PostgresFixture postgres)
 
     private const string Denied = "type_code = 'admin.access.denied'";
 
-    private static readonly string[] Members = ["clientId", "createdAt", "credentialRequired", "id", "name", "type"];
+    private static readonly string[] Members = ["callbackUrls", "clientId", "createdAt", "credentialRequired", "grantTypes", "id", "logoutUrls", "name", "type", "webOrigins"];
 
     private static CancellationToken Cancellation => TestContext.Current.CancellationToken;
 
@@ -56,6 +56,16 @@ public sealed class ApplicationsApiTests(PostgresFixture postgres)
         Assert.Equal("Web", application.GetProperty("name").GetString());
         Assert.Equal(type, application.GetProperty("type").GetString());
         Assert.Equal(type is "web" or "machine", application.GetProperty("credentialRequired").GetBoolean());
+
+        // Story 3.2: the settings, as created: no URL, and the type's default grants.
+        foreach (var urls in new[] { "callbackUrls", "logoutUrls", "webOrigins" })
+        {
+            Assert.Equal(0, application.GetProperty(urls).GetArrayLength());
+        }
+
+        Assert.Equal(
+            type switch { "machine" => new[] { "client_credentials" }, "web" => new[] { "authorization_code" }, _ => Array.Empty<string>() },
+            application.GetProperty("grantTypes").EnumerateArray().Select(g => g.GetString()));
         Assert.Matches(@"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$", application.GetProperty("createdAt").GetString()!);
         Assert.Equal($"{ApplicationsPath(tenant)}/{id}", response.Headers.Location?.ToString());
 

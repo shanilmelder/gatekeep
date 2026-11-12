@@ -518,7 +518,16 @@ function ShellFrame({ adminId }: { adminId: string }) {
     const applicationId = applicationOfPath(answered.path);
     if (tenantId === null) page = <NotFoundPage />;
     else if (applicationId !== null)
-      page = <ApplicationDetailPage key={`${tenantId} ${applicationId}`} request={shellRequest} tenantId={tenantId} applicationId={applicationId} />;
+      page = (
+        <ApplicationDetailPage
+          key={`${tenantId} ${applicationId}`}
+          request={shellRequest}
+          fresh={fresh}
+          tenantId={tenantId}
+          tenant={held.tenants.find((listed) => listed.id === tenantId) ?? null}
+          applicationId={applicationId}
+        />
+      );
     else if (/^\/tenants\/[^/]+\/applications\//.test(answered.path)) page = <NotFoundPage />;
     // Logs (Story 7.4): with tenant.logs.read only, which the path Tenant's read has answered.
     else if (answered.path.endsWith('/logs'))

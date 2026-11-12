@@ -10,6 +10,14 @@ import {
   applicationPath,
   applicationsPath,
   checkApplicationName,
+  grantAvailable,
+  hasUrls,
+  hasWebOrigins,
+  isCustomScheme,
+  newCustomSchemes,
+  sameList,
+  urlLines,
+  urlText,
 } from '../src/shell/applications.ts';
 
 describe('applications', () => {
@@ -38,5 +46,41 @@ describe('applications', () => {
     assert.equal(applicationOfPath('/tenants/ten_a/applications'), null);
     assert.equal(applicationOfPath('/tenants/ten_a/applications/a/b'), null);
     assert.equal(applicationOfPath('/tenants/ten_a/applications/%E0%A4%A'), '%E0%A4%A');
+  });
+
+  // Story 3.2: the Settings tab's lines and switches.
+  it('reads one URL per line, trimmed, blank lines dropped, each with its line in the textarea', () => {
+    assert.deepEqual(urlLines(''), { values: [], lines: [] });
+    assert.deepEqual(urlLines('  https://a.example/cb  \n\n\r\nhttps://b.example/cb\r\n'), {
+      values: ['https://a.example/cb', 'https://b.example/cb'],
+      lines: [1, 4],
+    });
+    assert.equal(urlText(['https://a.example/cb', 'https://b.example/cb']), 'https://a.example/cb\nhttps://b.example/cb');
+  });
+
+  it('offers each type only its own grants and fields', () => {
+    for (const kind of ['spa', 'web', 'native']) {
+      assert.equal(grantAvailable(kind, 'authorization_code'), true);
+      assert.equal(grantAvailable(kind, 'refresh_token'), true);
+      assert.equal(grantAvailable(kind, 'client_credentials'), false);
+      assert.equal(hasUrls(kind), true);
+    }
+    assert.equal(grantAvailable('machine', 'client_credentials'), true);
+    assert.equal(grantAvailable('machine', 'authorization_code'), false);
+    assert.equal(grantAvailable('machine', 'refresh_token'), false);
+    assert.equal(hasUrls('machine'), false);
+    assert.deepEqual(['spa', 'web', 'native', 'machine'].map(hasWebOrigins), [true, true, false, false]);
+  });
+
+  it('finds the custom-scheme URLs that are new', () => {
+    assert.equal(isCustomScheme('com.example.app:/callback'), true);
+    assert.equal(isCustomScheme('HTTPS://a.example/cb'), false);
+    assert.equal(isCustomScheme('http://127.0.0.1/cb'), false);
+    assert.equal(isCustomScheme('/cb'), false);
+    assert.deepEqual(newCustomSchemes(['com.example.app:/cb', 'com.example.app:/new', 'https://a.example/cb'], ['com.example.app:/cb']), [
+      'com.example.app:/new',
+    ]);
+    assert.equal(sameList(['a', 'b'], ['a', 'b']), true);
+    assert.equal(sameList(['a', 'b'], ['b', 'a']), false);
   });
 });

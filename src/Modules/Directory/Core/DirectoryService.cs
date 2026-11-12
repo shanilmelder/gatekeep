@@ -201,6 +201,8 @@ internal sealed class DirectoryService(IAuditAppender audit, TimeProvider time) 
             [.. grantTypes],
             [],
             [],
+            [],
+            [],
             now);
     }
 
@@ -219,6 +221,60 @@ internal sealed class DirectoryService(IAuditAppender audit, TimeProvider time) 
     {
         ArgumentNullException.ThrowIfNull(context);
         return ApplicationRows.FindAsync(context, id, cancellationToken);
+    }
+
+    public Task<DirectoryApplication?> LockApplicationAsync(CommandContext context, Guid id, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        return ApplicationRows.FindAsync(context, id, cancellationToken, locked: true);
+    }
+
+    public async Task<DirectoryApplication?> UpdateApplicationSettingsAsync(
+        CommandContext context,
+        Actor actor,
+        Guid id,
+        ApplicationSettings settings,
+        bool prodCallbackAdded,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        ArgumentNullException.ThrowIfNull(actor);
+        ArgumentNullException.ThrowIfNull(settings);
+        _ = context.TenantId ?? throw new InvalidOperationException("An Application is updated only in a Tenant context.");
+
+        // The kind the rules are decided on, under the row's lock: the same row the update then writes.
+        if (await ApplicationRows.FindAsync(context, id, cancellationToken, locked: true) is not { } current)
+        {
+            return null;
+        }
+
+        if (ApplicationSettingsRules.Check(current.Kind, settings).Count != 0)
+        {
+            throw new ArgumentException("The settings break a rule for the Application's type.", nameof(settings));
+        }
+
+        var updated = await ApplicationRows.UpdateSettingsAsync(context, id, settings, cancellationToken);
+        if (updated is null)
+        {
+            return null;
+        }
+
+        await _audit.AppendAsync(
+            context,
+            new AuditEvent(DirectoryEvents.ApplicationUpdated.Code, actor, AuditTargetKind.Client, id),
+            detail: null,
+            cancellationToken);
+
+        if (prodCallbackAdded)
+        {
+            await _audit.AppendAsync(
+                context,
+                new AuditEvent(DirectoryEvents.ApplicationProdCallbackAdded.Code, actor, AuditTargetKind.Client, id),
+                detail: null,
+                cancellationToken);
+        }
+
+        return updated;
     }
 
     public async Task<bool> VerifyClientSecretAsync(CommandContext context, string clientId, Secret<string> secret, CancellationToken cancellationToken)
@@ -337,7 +393,7 @@ internal static class ApplicationRows
     /// <summary>The one predicate that hides the <c>system</c> Application from every caller-facing read.</summary>
     public const string Visible = "kind <> 'system'";
 
-    private const string Columns = "id, name, kind, grant_types, audiences, redirect_uris, created_at";
+    private const string Columns = "id, name, kind, grant_types, audiences, redirect_uris, post_logout_redirect_uris, web_origins, created_at";
 
     private const string Select =
         $"SELECT {Columns} FROM application WHERE tenant_id = @tenant_id AND id = @id AND {Visible}";
@@ -355,14 +411,44 @@ internal static class ApplicationRows
     private const string SelectSystem =
         "SELECT id FROM application WHERE tenant_id = @tenant_id AND kind = 'system'";
 
-    public static async Task<DirectoryApplication?> FindAsync(CommandContext context, Guid id, CancellationToken cancellationToken)
+    // Story 3.2: the settings save's lock. FOR NO KEY UPDATE, so no foreign-key insert waits on it.
+    private const string SelectLocked = Select + " FOR NO KEY UPDATE";
+
+    // Story 3.2: the four settings columns only, and never the system Application, which GK012 refuses too.
+    private const string UpdateSettings =
+        $"""
+        UPDATE application
+        SET redirect_uris = @redirect_uris, post_logout_redirect_uris = @post_logout_redirect_uris,
+            web_origins = @web_origins, grant_types = @grant_types
+        WHERE tenant_id = @tenant_id AND id = @id AND {Visible}
+        RETURNING {Columns}
+        """;
+
+    public static async Task<DirectoryApplication?> FindAsync(CommandContext context, Guid id, CancellationToken cancellationToken, bool locked = false)
     {
         var tenantId = TenantOf(context);
 
         await using var command = context.CreateCommand();
-        command.CommandText = Select;
+        command.CommandText = locked ? SelectLocked : Select;
         DirectoryService.Add(command, "tenant_id", tenantId);
         DirectoryService.Add(command, "id", id);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        return await reader.ReadAsync(cancellationToken) ? Read(reader) : null;
+    }
+
+    public static async Task<DirectoryApplication?> UpdateSettingsAsync(
+        CommandContext context, Guid id, ApplicationSettings settings, CancellationToken cancellationToken)
+    {
+        var tenantId = TenantOf(context);
+
+        await using var command = context.CreateCommand();
+        command.CommandText = UpdateSettings;
+        DirectoryService.Add(command, "tenant_id", tenantId);
+        DirectoryService.Add(command, "id", id);
+        DirectoryService.Add(command, "redirect_uris", settings.CallbackUrls.ToArray());
+        DirectoryService.Add(command, "post_logout_redirect_uris", settings.LogoutUrls.ToArray());
+        DirectoryService.Add(command, "web_origins", settings.WebOrigins.ToArray());
+        DirectoryService.Add(command, "grant_types", ApplicationSettingsRules.Sorted(settings.GrantTypes));
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         return await reader.ReadAsync(cancellationToken) ? Read(reader) : null;
     }
@@ -440,52 +526,7 @@ internal static class ApplicationRows
             [.. reader.GetFieldValue<string[]>(3)],
             [.. reader.GetFieldValue<string[]>(4)],
             [.. reader.GetFieldValue<string[]>(5)],
-            reader.GetFieldValue<DateTimeOffset>(6));
-}
-
-/// <summary>
-/// A web client's redirect URIs (Story 2.9, RFC 9700 §2.1, RFC 8252 §8.3): each an absolute <c>https</c>
-/// URI, or <c>http</c> only on the loopback IP literal <c>127.0.0.1</c> or <c>[::1]</c>, never the name
-/// <c>localhost</c>; with no fragment, userinfo, white space or control character; at most
-/// <see cref="DirectoryContract.MaxRedirectUriLength"/> characters; 1 to
-/// <see cref="DirectoryContract.MaxRedirectUris"/> of them, none repeated. Each is kept exactly as given:
-/// OpenIddict matches a request's <c>redirect_uri</c> to it character for character, the port included,
-/// since every web client is confidential and none is a native app whose loopback port may vary.
-/// </summary>
-internal static class RedirectUris
-{
-    private static readonly string Rules = string.Create(
-        System.Globalization.CultureInfo.InvariantCulture,
-        $"A web client registers 1 to {DirectoryContract.MaxRedirectUris} distinct redirect URIs, each an absolute https URI, or http on 127.0.0.1 or [::1] only, with no fragment, userinfo, white space or control character, at most {DirectoryContract.MaxRedirectUriLength} characters.");
-
-    public static string[] Checked(IReadOnlyList<string>? redirectUris)
-    {
-        if (redirectUris is null
-            || redirectUris.Count is 0 or > DirectoryContract.MaxRedirectUris
-            || redirectUris.Distinct(StringComparer.Ordinal).Count() != redirectUris.Count
-            || !redirectUris.All(IsAllowed))
-        {
-            throw new ArgumentException(Rules, nameof(redirectUris));
-        }
-
-        return [.. redirectUris];
-    }
-
-    private static bool IsAllowed(string? text)
-    {
-        if (string.IsNullOrEmpty(text)
-            || text.Length > DirectoryContract.MaxRedirectUriLength
-            || text.Contains('#', StringComparison.Ordinal)
-            || text.Any(c => char.IsWhiteSpace(c) || char.IsControl(c))
-            || !Uri.TryCreate(text, UriKind.Absolute, out var uri)
-            || uri.UserInfo.Length > 0
-            || string.IsNullOrEmpty(uri.Host))
-        {
-            return false;
-        }
-
-        return uri.Scheme == Uri.UriSchemeHttps
-            || (uri.Scheme == Uri.UriSchemeHttp && uri.HostNameType is UriHostNameType.IPv4 or UriHostNameType.IPv6
-                && uri.Host is "127.0.0.1" or "[::1]");
-    }
+            [.. reader.GetFieldValue<string[]>(6)],
+            [.. reader.GetFieldValue<string[]>(7)],
+            reader.GetFieldValue<DateTimeOffset>(8));
 }

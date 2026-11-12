@@ -180,6 +180,21 @@ internal static class AdminOpenApi
                     Enumerate(schema, "type", ApplicationsApi.Types);
                     Bound(schema, "id", ApplicationIdPattern, maxLength: null);
                     Bound(schema, "clientId", ApplicationIdPattern, maxLength: null);
+                    EnumerateItems(schema, "grantTypes", ApplicationsApi.GrantTypes);
+                    foreach (var urls in new[] { "callbackUrls", "logoutUrls", "webOrigins" })
+                    {
+                        BoundItems(schema, urls, ManagementContract.MaxApplicationUrls, ManagementContract.MaxApplicationUrlLength);
+                    }
+                }
+                else if (type == typeof(ApplicationSettingsRequest))
+                {
+                    // Feedback for clients: the server decides each line and reports what it refuses.
+                    EnumerateItems(schema, "grantTypes", ApplicationsApi.GrantTypes);
+                }
+                else if (type == typeof(ApiProblemError))
+                {
+                    Enumerate(schema, "field", ManagementContract.ApplicationSettingsFields);
+                    Enumerate(schema, "reason", ManagementContract.ApplicationSettingsReasons);
                 }
                 else if (type == typeof(ApplicationListResponse))
                 {
@@ -505,6 +520,28 @@ internal static class AdminOpenApi
         if (schema.Properties?.TryGetValue(property, out var found) == true && found is OpenApiSchema target)
         {
             target.Enum = [.. values.Select(v => (JsonNode)JsonValue.Create(v))];
+        }
+    }
+
+    /// <summary>An array property's limits (Story 3.2): at most <paramref name="maxItems"/>, each at most <paramref name="maxLength"/> characters.</summary>
+    private static void BoundItems(OpenApiSchema schema, string property, int maxItems, int maxLength)
+    {
+        if (schema.Properties?.TryGetValue(property, out var found) == true && found is OpenApiSchema array)
+        {
+            array.MaxItems = maxItems;
+            if (array.Items is OpenApiSchema items)
+            {
+                items.MaxLength = maxLength;
+            }
+        }
+    }
+
+    /// <summary>An array property's closed set of item values (Story 3.2).</summary>
+    private static void EnumerateItems(OpenApiSchema schema, string property, IEnumerable<string> values)
+    {
+        if (schema.Properties?.TryGetValue(property, out var found) == true && found is OpenApiSchema array && array.Items is OpenApiSchema items)
+        {
+            items.Enum = [.. values.Select(v => (JsonNode)JsonValue.Create(v))];
         }
     }
 }

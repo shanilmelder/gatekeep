@@ -198,12 +198,15 @@ internal sealed class BeginAuthorizeTransaction(TokenRequestTransaction transact
 }
 
 /// <summary>
-/// Trusts a redirect target only once the client is known and the request's <c>redirect_uri</c> is one it
-/// registered, exactly (Story 2.9, RFC 9700 §4.1): right after OpenIddict's own form checks of the
-/// parameter, and before every other check, so that from here on every error, a missing PKCE challenge
-/// included, is sent back to that URI with <c>iss</c>. A missing redirect URI or one not registered is
-/// refused with <c>invalid_request</c>, and answered by <see cref="AnswerInvalidRequestPage"/>, never
-/// by a redirect.
+/// Trusts a redirect target only once the client is known, may use this endpoint, and the request's
+/// <c>redirect_uri</c> is one it registered (Story 2.9, RFC 9700 §4.1): right after OpenIddict's own form
+/// checks of the parameter, and before every other check, so that from here on every error, a missing PKCE
+/// challenge included, is sent back to that URI with <c>iss</c>. The match is exact, string for string, but
+/// for a <c>native</c> client's loopback port (Story 3.2, RFC 8252 §7.3, <see cref="DirectoryContract.MatchesRedirectUri"/>),
+/// and this is the only redirect URI check: OpenIddict's own, which would apply its own native rule, is
+/// removed. A missing redirect URI, one not registered, and a client without the authorization endpoint
+/// (a <c>machine</c> client, or one whose <c>authorization_code</c> grant is off, Story 3.2) are refused, and
+/// answered by <see cref="AnswerInvalidRequestPage"/>, never by a redirect.
 /// </summary>
 internal sealed class TrustRedirectTarget(IOpenIddictApplicationManager applications)
     : IOpenIddictServerHandler<ValidateAuthorizationRequestContext>
@@ -227,13 +230,20 @@ internal sealed class TrustRedirectTarget(IOpenIddictApplicationManager applicat
         }
 
         if (string.IsNullOrEmpty(context.ClientId)
-            || await applications.FindByClientIdAsync(context.ClientId, context.CancellationToken) is not { } application)
+            || await applications.FindByClientIdAsync(context.ClientId, context.CancellationToken) is not DirectoryApplication application)
         {
             context.Reject(Errors.InvalidClient, "The client is unknown.");
             return;
         }
 
-        if (!await applications.ValidateRedirectUriAsync(application, redirectUri, context.CancellationToken))
+        // A grant turned off is refused here, before any redirect is trusted (Story 3.2).
+        if (!await applications.HasPermissionAsync(application, Permissions.Endpoints.Authorization, context.CancellationToken))
+        {
+            context.Reject(Errors.UnauthorizedClient, "The client may not use the authorization endpoint.");
+            return;
+        }
+
+        if (!DirectoryContract.MatchesRedirectUri(application, redirectUri))
         {
             context.Reject(Errors.InvalidRequest, "The redirect_uri isn't registered for this client.");
             return;

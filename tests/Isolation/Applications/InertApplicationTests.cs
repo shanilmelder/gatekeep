@@ -63,7 +63,13 @@ public sealed class InertApplicationTests(PostgresFixture postgres, OpenBaoFixtu
             using var response = await ClientCredentialsTests.TokenAsync(host, TenantHost, clientId, secret, method, grant, extra);
 
             Assert.True(response.Status is HttpStatusCode.BadRequest or HttpStatusCode.Unauthorized, $"{kind} {grant} {method}: {response.Status}");
-            Assert.Contains(response.Error, new[] { "invalid_client", "unauthorized_client" });
+            // A confidential kind fails client authentication. From Story 3.2 a single-page or native one is a
+            // public client, known by its client_id alone, so the grant step refuses it instead: the grant it
+            // doesn't hold, a code or refresh token that was never issued, or client_credentials for a public client.
+            string[] refusals = kind is "spa" or "native"
+                ? ["invalid_client", "unauthorized_client", "invalid_grant", "invalid_request"]
+                : ["invalid_client", "unauthorized_client"];
+            Assert.Contains(response.Error, refusals);
             Assert.False(response.Body.RootElement.TryGetProperty("access_token", out _));
         }
 

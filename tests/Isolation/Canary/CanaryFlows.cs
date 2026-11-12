@@ -396,6 +396,13 @@ internal static class CanaryFlows
             + "secret or hash, and writes nothing. Refusals are logged by fixed code only.",
             "Story 3.1 build review",
             new DateOnly(2026, 11, 11)),
+        new(
+            new(SurfaceKind.Route, "/api/v1/tenants/{tenantId}/applications/{applicationId}/settings"),
+            "The save takes URLs and grant types only, writes them and ID-only events, and returns the Application's settings, "
+            + "never a secret or hash. A refused line is named by field, index and reason, never its value; refusals are logged "
+            + "by fixed code only, never a URL.",
+            "Story 3.2 build review",
+            new DateOnly(2026, 11, 12)),
     ];
 
     /// <summary>Every production surface: the job and Operation registries, the Cli's commands and the hosts.</summary>

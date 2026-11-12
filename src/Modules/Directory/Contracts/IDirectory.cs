@@ -119,6 +119,35 @@ public interface IDirectory
     Task<DirectoryApplication?> FindApplicationAsync(CommandContext context, Guid id, CancellationToken cancellationToken);
 
     /// <summary>
+    /// As <see cref="FindApplicationAsync"/>, under the row's lock (<c>FOR NO KEY UPDATE</c>), held to the end
+    /// of the caller's transaction (Story 3.2): a settings save decides on the settings it replaces. The
+    /// <c>system</c> Application is never found.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The context has no Tenant.</exception>
+    Task<DirectoryApplication?> LockApplicationAsync(CommandContext context, Guid id, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Replaces the context Tenant's Application <paramref name="id"/>'s settings (Story 3.2, FR-11, FR-13):
+    /// its callback, logout and web origin URLs exactly as given and its grants sorted, then writes
+    /// <c>directory.application.updated</c> by <paramref name="actor"/> and, when
+    /// <paramref name="prodCallbackAdded"/>, <c>directory.application.prod_callback_added</c>, all in the
+    /// caller's transaction. The caller has decided that something changes. The <c>system</c> Application is
+    /// never updated. Returns the updated Application, or null when the Tenant has no visible one by that ID.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The context has no Tenant. Nothing is written.</exception>
+    /// <exception cref="ArgumentException">
+    /// The settings break a rule of <see cref="DirectoryContract.CheckSettings"/> for the Application's kind. Nothing is written.
+    /// </exception>
+    [StateChanging]
+    Task<DirectoryApplication?> UpdateApplicationSettingsAsync(
+        CommandContext context,
+        Actor actor,
+        Guid id,
+        ApplicationSettings settings,
+        bool prodCallbackAdded,
+        CancellationToken cancellationToken);
+
+    /// <summary>
     /// Whether <paramref name="secret"/> is a live secret of the Application <paramref name="clientId"/>
     /// names, in the context's Tenant: not revoked, and with no <c>expires_at</c> or one still ahead. The
     /// stored hashes are compared in constant time. A malformed or unknown client ID is false, exactly
