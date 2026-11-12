@@ -482,7 +482,18 @@ test.describe('detail', () => {
     test(`/applications/${segment} is an Application's page, which says it doesn't exist`, async ({ page }) => {
       await answerApi(page);
 
-      await page.goto(`${PAGE}/${segment}`);
+      if (segment.startsWith('%')) {
+        // An escape that doesn't decode never reaches the host as a page load, so it arrives
+        // as the shell's own navigation, as admin-shell.spec.ts does for a Tenant segment.
+        await page.goto(PAGE);
+        await expect(heading(page)).toHaveText('Applications');
+        await page.evaluate((path) => {
+          history.pushState(null, '', path);
+          dispatchEvent(new PopStateEvent('popstate'));
+        }, `${PAGE}/${segment}`);
+      } else {
+        await page.goto(`${PAGE}/${segment}`);
+      }
 
       await expect(page.getByTestId('application-not-found')).toHaveText("This application doesn't exist in this Tenant.");
       await expect(page.getByTestId('logs-page')).toHaveCount(0);
