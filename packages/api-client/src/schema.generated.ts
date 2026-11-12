@@ -584,6 +584,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/tenants/{tenantId}/applications/{applicationId}/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Save an Application's callback, logout and web origin URLs and its grant types.
+         * @description Tenant Editors and Owners; never a machine principal. The body is the full settings, and every list is required and replaces what is stored. Every URL is absolute, at most 2000 characters, with no fragment, user info or wildcard, and https, or http on 127.0.0.1 or [::1] only; each list holds at most 10 distinct lines. A native Application may also register custom-scheme callback and logout URLs, such as com.example.app:/callback, and has no web origin; a machine Application has no URL at all. A web origin is scheme://host[:port] alone. Grants are [] or [client_credentials] for machine, and [], [authorization_code] or [authorization_code, refresh_token] otherwise, in any order, stored sorted. URLs are matched exactly; only a native Application's loopback redirect URI may differ in port. Any rule broken is 400 application_invalid with errors naming each field, line and reason; a body that isn't JSON, is over 16384 bytes, misses a list or holds a null is 400 application_invalid with no errors. In a Prod Tenant a new custom-scheme URL needs acknowledgeCustomScheme: true, or it is 400 custom_scheme_acknowledgement_required, and a changed set of callback URLs needs a fresh assertion for tenant.application_callbacks.manage on this applicationId, begun on POST /api/v1/tenants/{tenantId}/assertions and used up once the locked label is found to be Prod. A save that changes something writes directory.application.updated, and in a Prod Tenant that gains a callback directory.application.prod_callback_added; a save that changes nothing writes nothing and is 200. An applicationId that isn't an app_ ID, names no Application of this Tenant, another Tenant's or the hidden system Application is the same 404 not_found.
+         */
+        put: operations["UpdateApplicationSettings"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/tenants/{tenantId}/assertions": {
         parameters: {
             query?: never;
@@ -682,8 +702,17 @@ export interface components {
         };
         ApiProblem: {
             /** @enum {string} */
-            code: "bootstrap_refused" | "credential_refused" | "signin_refused" | "rate_limited" | "access_denied" | "fresh_assertion_required" | "assertion_refused" | "credentials_minimum" | "credentials_maximum" | "recovery_code_refused" | "recovery_code_superseded" | "enrolment_refused" | "tenant_invalid" | "subdomain_refused" | "operation_not_failed" | "tenant_mismatch" | "tenant_not_active" | "tenant_deleted" | "tenant_busy" | "confirmation_mismatch" | "invalid_request" | "application_invalid" | "not_found";
+            code: "bootstrap_refused" | "credential_refused" | "signin_refused" | "rate_limited" | "access_denied" | "fresh_assertion_required" | "assertion_refused" | "credentials_minimum" | "credentials_maximum" | "recovery_code_refused" | "recovery_code_superseded" | "enrolment_refused" | "tenant_invalid" | "subdomain_refused" | "operation_not_failed" | "tenant_mismatch" | "tenant_not_active" | "tenant_deleted" | "tenant_busy" | "confirmation_mismatch" | "invalid_request" | "application_invalid" | "not_found" | "custom_scheme_acknowledgement_required";
             traceId: string;
+            errors?: null | components["schemas"]["ApiProblemError"][];
+        };
+        ApiProblemError: {
+            /** @enum {string} */
+            field: "callbackUrls" | "logoutUrls" | "webOrigins" | "grantTypes";
+            /** Format: int32 */
+            index: null | number;
+            /** @enum {string} */
+            reason: "not_absolute" | "wildcard" | "scheme_not_allowed" | "too_long" | "too_many" | "duplicate" | "not_allowed_for_type";
         };
         ApplicationListResponse: {
             applications: components["schemas"]["ApplicationResponse"][];
@@ -697,6 +726,17 @@ export interface components {
             type: "spa" | "web" | "native" | "machine";
             credentialRequired: boolean;
             createdAt: string;
+            callbackUrls: string[];
+            logoutUrls: string[];
+            webOrigins: string[];
+            grantTypes: ("authorization_code" | "client_credentials" | "refresh_token")[];
+        };
+        ApplicationSettingsRequest: {
+            callbackUrls: string[];
+            logoutUrls: string[];
+            webOrigins: string[];
+            grantTypes: ("authorization_code" | "client_credentials" | "refresh_token")[];
+            acknowledgeCustomScheme?: null | boolean;
         };
         BootstrapClaimRequest: {
             token: string;
@@ -2751,6 +2791,86 @@ export interface operations {
             };
             /** @description Not Found */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    UpdateApplicationSettings: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description The Tenant the page shows, its ten_ ID: it must equal {tenantId}, or 409 tenant_mismatch. It never selects a Tenant. */
+                "X-Gatekeep-Tenant": string;
+            };
+            path: {
+                /** @description The Tenant's public ID: ten_ and the UUID's 16 bytes in lowercase RFC 4648 base32 with no padding, whose last character carries two zero bits. Only this canonical spelling, after URL decoding, names a Tenant, and the empty UUID's never does; anything else is refused like a Tenant the Admin holds no role in. */
+                tenantId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ApplicationSettingsRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApplicationResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description fresh_assertion_required, with the problem body, when no fresh assertion for this action and target is bound to the Session; access_denied when the capability is refused. No body when an earlier check refuses first: a restricted Session, or a wrong Origin or CSRF token. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description tenant_mismatch, with the problem body, when X-Gatekeep-Tenant is missing, sent twice or isn't {tenantId}, and nothing ran; or another conflict the operation's description names. */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

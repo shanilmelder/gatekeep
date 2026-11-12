@@ -14,6 +14,7 @@ const CAPABILITIES = '/api/v1/deployment/capabilities';
 const MY_TENANTS = '/api/v1/deployment/my-tenants';
 const BEGIN = '/api/v1/deployment/signin';
 const COMPLETE = '/api/v1/deployment/signin/complete';
+const ASSERTION_COMPLETE = '/api/v1/deployment/assertions/complete';
 const CSRF = 'W'.repeat(43);
 const ADMIN_ID = '01900000-0000-7000-8000-000000000901';
 const TENANT = `ten_${'a'.repeat(25)}a`;
@@ -22,7 +23,7 @@ const LIST = `/api/v1/tenants/${TENANT}/applications`;
 const TRACE = 'c'.repeat(32);
 
 const TENANT_VIEWER = ['tenant.configuration.read', 'tenant.users.read', 'tenant.logs.read'];
-const TENANT_EDITOR = [...TENANT_VIEWER, 'tenant.applications.manage', 'tenant.settings.manage'];
+const TENANT_EDITOR = [...TENANT_VIEWER, 'tenant.applications.manage', 'tenant.application_callbacks.manage', 'tenant.settings.manage'];
 
 const app = (n: number) => `app_${String.fromCharCode(97 + n).repeat(25)}a`;
 
@@ -35,6 +36,10 @@ interface Application {
   type: Type;
   credentialRequired: boolean;
   createdAt: string;
+  callbackUrls: string[];
+  logoutUrls: string[];
+  webOrigins: string[];
+  grantTypes: string[];
 }
 
 const application = (n: number, name: string, type: Type, createdAt = '2026-11-10T09:00:00.000Z'): Application => ({
@@ -44,6 +49,10 @@ const application = (n: number, name: string, type: Type, createdAt = '2026-11-1
   type,
   credentialRequired: type === 'web' || type === 'machine',
   createdAt,
+  callbackUrls: [],
+  logoutUrls: [],
+  webOrigins: [],
+  grantTypes: type === 'machine' ? ['client_credentials'] : type === 'web' ? ['authorization_code'] : [],
 });
 
 const ROWS: Application[] = [
@@ -76,11 +85,18 @@ interface State {
   create: ((route: Route) => Promise<void>) | null;
   /** The Session has expired: every read but the sign-in's is 401 until the renewal completes. */
   expired: boolean;
+  /** Story 3.2: the Tenant's label, the Application a fresh assertion was completed for, and the settings save's answer. */
+  label: 'dev' | 'staging' | 'prod';
+  grant: string | null;
+  begunFor: string | null;
+  save: ((route: Route) => Promise<void>) | null;
 }
 
 async function answerApi(page: Page, initial: Partial<State> = {}) {
   const log: string[] = [];
   const posts: { body: unknown; headers: Record<string, string> }[] = [];
+  const puts: { body: Record<string, unknown>; headers: Record<string, string> }[] = [];
+  const begins: unknown[] = [];
   const state: State = {
     capabilities: TENANT_EDITOR,
     applications: ROWS,
@@ -90,6 +106,10 @@ async function answerApi(page: Page, initial: Partial<State> = {}) {
     read: null,
     create: null,
     expired: false,
+    label: 'dev',
+    grant: null,
+    begunFor: null,
+    save: null,
     ...initial,
   };
   await page.route(
@@ -125,7 +145,46 @@ async function answerApi(page: Page, initial: Partial<State> = {}) {
         });
       }
       if (pathname === CAPABILITIES) return json(route, 200, { capabilities: [] });
-      if (pathname === MY_TENANTS) return json(route, 200, { tenants: [{ id: TENANT, name: 'Alpha', host: 'alpha.gatekeep.test', label: 'dev' }] });
+      if (pathname === MY_TENANTS) return json(route, 200, { tenants: [{ id: TENANT, name: 'Alpha', host: 'alpha.gatekeep.test', label: state.label }] });
+      if (pathname === `/api/v1/tenants/${TENANT}/assertions`) {
+        const binding = request.postDataJSON() as { target: string | null };
+        begins.push(binding);
+        state.begunFor = binding.target;
+        return json(route, 200, {
+          challenge: randomBytes(32).toString('base64url'),
+          rpId: url.hostname,
+          timeout: 300000,
+          userVerification: 'required',
+          allowCredentials: [],
+        });
+      }
+      if (pathname === ASSERTION_COMPLETE) {
+        state.grant = state.begunFor;
+        return route.fulfill({ status: 204 });
+      }
+      const settings = new RegExp(`^${LIST}/([^/]+)/settings$`).exec(pathname);
+      if (settings && request.method() === 'PUT') {
+        const body = request.postDataJSON() as Record<string, unknown> & { callbackUrls: string[]; logoutUrls: string[]; webOrigins: string[]; grantTypes: string[] };
+        puts.push({ body, headers: request.headers() });
+        if (state.save) return state.save(route);
+        const id = decodeURIComponent(settings[1]!);
+        const found = state.applications.find((row) => row.id === id);
+        if (!found) return problem(route, 404, 'not_found');
+        const changed = [...body.callbackUrls].sort().join('\n') !== [...found.callbackUrls].sort().join('\n');
+        if (state.label === 'prod' && changed) {
+          if (state.grant !== id) return problem(route, 403, 'fresh_assertion_required');
+          state.grant = null;
+        }
+        const saved: Application = {
+          ...found,
+          callbackUrls: body.callbackUrls,
+          logoutUrls: body.logoutUrls,
+          webOrigins: body.webOrigins,
+          grantTypes: [...body.grantTypes].sort(),
+        };
+        state.applications = state.applications.map((row) => (row.id === id ? saved : row));
+        return json(route, 200, saved);
+      }
       if (pathname === `/api/v1/tenants/${TENANT}/capabilities`) return json(route, 200, { capabilities: state.capabilities });
       if (pathname === LIST && request.method() === 'POST') {
         posts.push({ body: request.postDataJSON(), headers: request.headers() });
@@ -150,7 +209,7 @@ async function answerApi(page: Page, initial: Partial<State> = {}) {
       return route.fulfill({ status: 404 });
     },
   );
-  return { log, posts, state, count: (entry: string) => log.filter((line) => line === entry).length };
+  return { log, posts, puts, begins, state, count: (entry: string) => log.filter((line) => line === entry).length };
 }
 
 /** A virtual CTAP2 authenticator holding the Admin's resident credential, so the shell's renewal completes by itself. */
@@ -374,6 +433,9 @@ test.describe('create', () => {
       await expect(page.getByTestId('application-client-id')).toHaveText(app(9));
       await page.getByRole('button', { name: 'Copy client ID' }).click();
       expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(app(9));
+      // Settings is the tab it opens on (Story 3.2); Credentials is the next.
+      await expect(page.getByRole('tab', { name: 'Settings' })).toHaveAttribute('aria-selected', 'true');
+      await page.getByRole('tab', { name: 'Credentials' }).click();
       await expect(page.getByTestId('application-credentials')).toContainText(type === 'web' || type === 'machine' ? NEEDS_SECRET : NO_SECRET);
       await expect(page.getByTestId('application-credentials')).not.toContainText(type === 'web' || type === 'machine' ? NO_SECRET : NEEDS_SECRET);
 
@@ -522,6 +584,7 @@ test.describe('detail', () => {
     api.state.read = null;
     await banner.getByRole('button', { name: 'Retry' }).click();
     await expect(page.getByTestId('application-title')).toHaveText('Northwind Web');
+    await page.getByRole('tab', { name: 'Credentials' }).click();
     await expect(page.getByTestId('application-credentials')).toContainText(NEEDS_SECRET);
   });
 
@@ -532,6 +595,271 @@ test.describe('detail', () => {
 
     await expect(heading(page)).toHaveText("You don't have access to this page.");
     await expect(page.getByTestId('forbidden-reference')).toContainText(TRACE);
+  });
+});
+
+// Story 3.2: an Application's Settings tab. The server's rules are ApplicationSettingsApiTests'; here,
+// what the tab shows for each type and makes of the answers.
+test.describe('settings', () => {
+  const GRANTS = ['Authorization Code with PKCE', 'Refresh Token', 'Client Credentials'];
+  const grant = (page: Page, name: string) => page.getByRole('switch', { name });
+  const save = (page: Page) => page.getByTestId('application-save');
+  const toast = (page: Page) => page.getByTestId('toast');
+  const settingsPuts = (api: Awaited<ReturnType<typeof answerApi>>) => api.log.filter((line) => line.startsWith('PUT '));
+
+  for (const [n, type] of [[0, 'spa'], [1, 'web'], [2, 'native'], [3, 'machine']] as const) {
+    test(`a ${LABELS[type]} Application's Settings show its own fields and exactly the three grants`, async ({ page }) => {
+      await answerApi(page);
+
+      await page.goto(`${PAGE}/${app(n)}`);
+
+      await expect(page.getByRole('tab', { name: 'Settings' })).toHaveAttribute('aria-selected', 'true');
+      await expect(page.getByRole('switch')).toHaveCount(3);
+      for (const name of GRANTS) await expect(grant(page, name)).toHaveCount(1);
+      for (const removed of [/Implicit/, /Password/, /Device/, /CIBA/, /Token Exchange/, /CORS/, /Wildcards allowed/, /embedded/i]) {
+        await expect(page.getByRole('switch', { name: removed })).toHaveCount(0);
+        await expect(page.getByRole('checkbox', { name: removed })).toHaveCount(0);
+      }
+      await expect(page.getByText('Allowed Origins (CORS)')).toHaveCount(0);
+
+      if (type === 'machine') {
+        await expect(page.getByTestId('application-urls')).toHaveCount(0);
+        await expect(page.getByTestId('application-machine-no-urls')).toHaveText('Machine-to-machine applications have no URLs: they sign no users in.');
+        await expect(grant(page, 'Client Credentials')).toBeEnabled();
+        await expect(grant(page, 'Client Credentials')).toHaveAttribute('aria-checked', 'true');
+        for (const name of GRANTS.slice(0, 2)) await expect(grant(page, name)).toBeDisabled();
+        await expect(page.getByTestId('application-grants')).toContainText('Not available for Machine-to-machine.');
+      } else {
+        const urls = page.getByTestId('application-urls');
+        await expect(urls.getByRole('textbox', { name: 'Allowed Callback URLs' })).toBeVisible();
+        await expect(urls.getByRole('textbox', { name: 'Allowed Logout URLs' })).toBeVisible();
+        await expect(urls.getByRole('textbox', { name: 'Allowed Web Origins' })).toHaveCount(type === 'native' ? 0 : 1);
+        // With no URLs, the helper explains exact matching.
+        await expect(urls).toContainText('Matched exactly. One per line. No wildcards. Users are only sent back to a URL listed here');
+        await expect(grant(page, 'Client Credentials')).toBeDisabled();
+        await expect(page.getByTestId('application-grants')).toContainText(`Not available for ${LABELS[type]}.`);
+        await expect(grant(page, 'Authorization Code with PKCE')).toBeEnabled();
+      }
+      await expect(page.getByTestId('application-native-guidance')).toHaveCount(type === 'native' ? 1 : 0);
+      if (type === 'native') {
+        await expect(page.getByTestId('application-native-guidance')).toHaveText(
+          "Open sign-in in the system browser. Embedded web views aren't supported.",
+        );
+      }
+    });
+  }
+
+  test('Save sends the full settings once, with the page Tenant, then shows "Changes saved"', async ({ page }) => {
+    const api = await answerApi(page);
+    await page.goto(`${PAGE}/${app(0)}`);
+
+    await page.getByTestId('application-callbackUrls').fill('  https://store.example/cb  \n\nhttp://127.0.0.1:3000/cb');
+    await page.getByTestId('application-webOrigins').fill('https://store.example');
+    await expect(grant(page, 'Refresh Token')).toBeDisabled();
+    await grant(page, 'Authorization Code with PKCE').click();
+    await grant(page, 'Refresh Token').click();
+    await save(page).click();
+
+    await expect(toast(page)).toHaveText('Changes saved');
+    expect(api.puts).toHaveLength(1);
+    expect(api.puts[0]!.body).toEqual({
+      callbackUrls: ['https://store.example/cb', 'http://127.0.0.1:3000/cb'],
+      logoutUrls: [],
+      webOrigins: ['https://store.example'],
+      grantTypes: ['authorization_code', 'refresh_token'],
+    });
+    expect(api.puts[0]!.headers['x-gatekeep-tenant']).toBe(TENANT);
+    expect(api.puts[0]!.headers['x-gatekeep-csrf']).toBe(CSRF);
+    // Saved as the server answered, one URL per line.
+    await expect(page.getByTestId('application-callbackUrls')).toHaveValue('https://store.example/cb\nhttp://127.0.0.1:3000/cb');
+    await expect(page.getByTestId('application-urls')).toContainText('Matched exactly. One per line. No wildcards.');
+    expect(api.begins).toHaveLength(0);
+  });
+
+  test('Refresh Token turns off with Authorization Code, and stays disabled while it is off', async ({ page }) => {
+    const api = await answerApi(page);
+    await page.goto(`${PAGE}/${app(1)}`);
+
+    await expect(grant(page, 'Authorization Code with PKCE')).toHaveAttribute('aria-checked', 'true');
+    await grant(page, 'Refresh Token').click();
+    await expect(grant(page, 'Refresh Token')).toHaveAttribute('aria-checked', 'true');
+    await grant(page, 'Authorization Code with PKCE').click();
+    await expect(grant(page, 'Refresh Token')).toHaveAttribute('aria-checked', 'false');
+    await expect(grant(page, 'Refresh Token')).toBeDisabled();
+    await expect(page.getByTestId('application-grants')).toContainText('Turn on Authorization Code with PKCE first.');
+
+    await save(page).click();
+    await expect(toast(page)).toHaveText('Changes saved');
+    expect(api.puts[0]!.body).toMatchObject({ grantTypes: [] });
+  });
+
+  test("each refused line shows on its field by its line in the textarea, and focus moves to the first", async ({ page }) => {
+    const api = await answerApi(page, {
+      save: (route) =>
+        route.fulfill({
+          status: 400,
+          contentType: 'application/problem+json',
+          body: JSON.stringify({
+            code: 'application_invalid',
+            traceId: TRACE,
+            errors: [
+              { field: 'callbackUrls', index: 1, reason: 'not_absolute' },
+              { field: 'callbackUrls', index: 2, reason: 'scheme_not_allowed' },
+              { field: 'webOrigins', index: 0, reason: 'not_absolute' },
+              { field: 'grantTypes', index: null, reason: 'not_allowed_for_type' },
+            ],
+          }),
+        }),
+    });
+    await page.goto(`${PAGE}/${app(1)}`);
+    const callbacks = page.getByTestId('application-callbackUrls');
+
+    await callbacks.fill('https://ok.example/cb\n\n/cb\nhttp://a.example/cb');
+    await page.getByTestId('application-webOrigins').fill('https://a.example/path');
+    await save(page).click();
+
+    await expect(callbacks).toBeFocused();
+    await expect(page.getByTestId('application-urls')).toContainText('Line 3: Must be an absolute URL, with no fragment or user info.');
+    await expect(page.getByTestId('application-urls')).toContainText('Line 4: Use https, or http on 127.0.0.1 or [::1] only.');
+    await expect(page.getByTestId('application-urls')).toContainText('Line 1: Must be scheme://host[:port], with no path or query.');
+    await expect(page.getByTestId('application-grants-error')).toHaveText("This application type can't have these grants together.");
+    await expect(callbacks).toHaveAttribute('aria-invalid', 'true');
+    // What was typed is kept, and no toast.
+    await expect(callbacks).toHaveValue('https://ok.example/cb\n\n/cb\nhttp://a.example/cb');
+    await expect(toast(page)).toHaveCount(0);
+    expect(api.puts).toHaveLength(1);
+  });
+
+  test('a Prod callback change asks for a fresh assertion bound to the Application, is sent once more, and saves', async ({ page, baseURL }) => {
+    await authenticator(page, new URL(baseURL!).hostname);
+    const api = await answerApi(page, { label: 'prod' });
+    await page.goto(`${PAGE}/${app(1)}`);
+
+    await page.getByTestId('application-callbackUrls').fill('https://northwind.example/cb');
+    await save(page).click();
+
+    await expect(toast(page)).toHaveText('Changes saved');
+    expect(api.log.filter((line) => line.startsWith('PUT') || line.startsWith('POST'))).toEqual([
+      `PUT ${LIST}/${app(1)}/settings`,
+      `POST /api/v1/tenants/${TENANT}/assertions`,
+      `POST ${ASSERTION_COMPLETE}`,
+      `PUT ${LIST}/${app(1)}/settings`,
+    ]);
+    expect(api.begins).toEqual([{ action: 'tenant.application_callbacks.manage', target: app(1) }]);
+    expect(api.count('POST /api/v1/deployment/assertions')).toBe(0);
+
+    // A Prod save that keeps the callbacks asks nothing.
+    await page.getByTestId('application-logoutUrls').fill('https://northwind.example/');
+    await save(page).click();
+    await expect.poll(() => settingsPuts(api).length).toBe(3);
+    expect(api.begins).toHaveLength(1);
+  });
+
+  test('a new Prod custom-scheme URL needs the acknowledgement before Save, which the save then carries', async ({ page }) => {
+    const api = await answerApi(page, { label: 'prod' });
+    await page.goto(`${PAGE}/${app(2)}`);
+    await expect(page.getByTestId('application-custom-scheme')).toHaveCount(0);
+
+    await page.getByTestId('application-logoutUrls').fill('com.example.app:/logout');
+    const acknowledge = page.getByRole('checkbox', { name: /custom URL scheme/ });
+    await expect(acknowledge).toBeVisible();
+    await save(page).click();
+
+    await expect(page.getByTestId('application-custom-scheme-error')).toHaveText('Tick this to save a custom-scheme URL in a Prod Tenant.');
+    await expect(acknowledge).toBeFocused();
+    expect(api.puts).toHaveLength(0);
+
+    await acknowledge.check();
+    await save(page).click();
+    await expect(toast(page)).toHaveText('Changes saved');
+    expect(api.puts[0]!.body).toMatchObject({ logoutUrls: ['com.example.app:/logout'], acknowledgeCustomScheme: true });
+
+    // In Dev there is nothing to acknowledge.
+    api.state.label = 'dev';
+    await page.reload();
+    await page.getByTestId('application-callbackUrls').fill('com.example.app:/cb');
+    await expect(page.getByTestId('application-custom-scheme')).toHaveCount(0);
+  });
+
+  test("the server's acknowledgement refusal shows the checkbox's error", async ({ page }) => {
+    await answerApi(page, {
+      label: 'prod',
+      save: (route) => problem(route, 400, 'custom_scheme_acknowledgement_required'),
+    });
+    await page.goto(`${PAGE}/${app(2)}`);
+    await page.getByTestId('application-callbackUrls').fill('com.example.app:/cb');
+    await page.getByRole('checkbox', { name: /custom URL scheme/ }).check();
+
+    await save(page).click();
+
+    await expect(page.getByTestId('application-custom-scheme-error')).toBeVisible();
+  });
+
+  test('a Viewer sees every field read-only, the switches off-limits, and no Save', async ({ page }) => {
+    await answerApi(page, { capabilities: TENANT_VIEWER });
+
+    await page.goto(`${PAGE}/${app(1)}`);
+
+    await expect(page.getByTestId('application-callbackUrls')).toHaveAttribute('readonly', '');
+    await expect(page.getByTestId('application-logoutUrls')).toHaveAttribute('readonly', '');
+    for (const name of GRANTS) await expect(grant(page, name)).toBeDisabled();
+    await expect(save(page)).toHaveCount(0);
+    await expect(page.getByTestId('application-settings-read-only')).toHaveText('Only Tenant Editors and Owners can change these.');
+  });
+
+  test('leaving Settings with unsaved changes asks first: Keep editing stays, Discard and leave goes', async ({ page }) => {
+    await answerApi(page);
+    await page.goto(`${PAGE}/${app(1)}`);
+    await page.getByTestId('application-callbackUrls').fill('https://northwind.example/cb');
+
+    await page.getByRole('tab', { name: 'Credentials' }).click();
+    const prompt = page.getByRole('dialog', { name: 'Discard unsaved changes?' });
+    await expect(prompt).toBeVisible();
+    await prompt.getByRole('button', { name: 'Keep editing' }).click();
+    await expect(prompt).toBeHidden();
+    await expect(page.getByRole('tab', { name: 'Settings' })).toHaveAttribute('aria-selected', 'true');
+    await expect(page.getByTestId('application-callbackUrls')).toHaveValue('https://northwind.example/cb');
+
+    await page.getByRole('tab', { name: 'Credentials' }).click();
+    await page.getByRole('dialog', { name: 'Discard unsaved changes?' }).getByRole('button', { name: 'Discard and leave' }).click();
+    await expect(page.getByTestId('application-credentials')).toBeVisible();
+
+    // Back on Settings, the stored settings show.
+    await page.getByRole('tab', { name: 'Settings' }).click();
+    await expect(page.getByTestId('application-callbackUrls')).toHaveValue('');
+  });
+
+  test('a refused or failed save shows its banner and keeps what was typed', async ({ page }) => {
+    const api = await answerApi(page, { save: (route) => problem(route, 403, 'access_denied') });
+    await page.goto(`${PAGE}/${app(1)}`);
+    await page.getByTestId('application-callbackUrls').fill('https://northwind.example/cb');
+
+    await save(page).click();
+    await expect(page.getByTestId('application-save-forbidden')).toHaveText("You can't do this in this session.");
+
+    api.state.save = (route) => problem(route, 500, 'unavailable');
+    await save(page).click();
+    const failed = page.getByTestId('application-save-failed');
+    await expect(failed).toContainText("Couldn't save the changes. Try again.");
+    await expect(failed).toContainText(TRACE);
+    await expect(page.getByTestId('application-callbackUrls')).toHaveValue('https://northwind.example/cb');
+    expect(api.puts).toHaveLength(2);
+  });
+
+  test('a 401 the renewal answered keeps what was typed and is never resent', async ({ page, baseURL }) => {
+    await authenticator(page, new URL(baseURL!).hostname);
+    const api = await answerApi(page);
+    await page.goto(`${PAGE}/${app(1)}`);
+    await page.getByTestId('application-callbackUrls').fill('https://northwind.example/cb');
+    api.state.expired = true;
+
+    await save(page).click();
+
+    await expect.poll(() => api.count(`POST ${COMPLETE}`)).toBe(1);
+    await expect(page.getByTestId('application-callbackUrls')).toHaveValue('https://northwind.example/cb');
+    await expect(toast(page)).toHaveCount(0);
+    expect(api.puts).toHaveLength(0);
+    expect(settingsPuts(api)).toHaveLength(1);
   });
 });
 
@@ -578,6 +906,30 @@ for (const scheme of ['light', 'dark'] as const) {
       await modal(page).getByRole('button', { name: 'Cancel' }).click();
 
       await page.goto(`${PAGE}/${app(1)}`);
+      await expect(page.getByTestId('application-settings')).toBeVisible();
+      expect(await axe(page), 'settings').toEqual([]);
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+
+      // Story 3.2: a refused line on its field, a native Application's guidance, and Credentials.
+      api.state.save = (route) =>
+        route.fulfill({
+          status: 400,
+          contentType: 'application/problem+json',
+          body: JSON.stringify({ code: 'application_invalid', traceId: TRACE, errors: [{ field: 'callbackUrls', index: 0, reason: 'wildcard' }] }),
+        });
+      await page.getByTestId('application-callbackUrls').fill('https://*.a.example/cb');
+      await page.getByTestId('application-save').click();
+      await expect(page.getByText("Line 1: Wildcards aren't allowed.")).toBeVisible();
+      expect(await axe(page), 'settings error').toEqual([]);
+      api.state.save = null;
+      // Back to what is stored, so leaving asks nothing.
+      await page.getByTestId('application-callbackUrls').fill('');
+
+      await page.goto(`${PAGE}/${app(2)}`);
+      await expect(page.getByTestId('application-native-guidance')).toBeVisible();
+      expect(await axe(page), 'native').toEqual([]);
+
+      await page.getByRole('tab', { name: 'Credentials' }).click();
       await expect(page.getByTestId('application-credentials')).toBeVisible();
       expect(await axe(page), 'page').toEqual([]);
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);

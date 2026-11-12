@@ -11,6 +11,29 @@ public sealed class ApiProblem
 
     /// <summary>The request's W3C trace ID, which the host's log line for the refusal carries too.</summary>
     public required string TraceId { get; init; }
+
+    /// <summary>
+    /// Only on <c>application_invalid</c> from an Application settings save (Story 3.2): each refused line or
+    /// field, never its value. Absent on every other problem.
+    /// </summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<ApiProblemError>? Errors { get; init; }
+}
+
+/// <summary>One refused line or field of an Application settings save (Story 3.2).</summary>
+public sealed class ApiProblemError
+{
+    /// <summary><c>callbackUrls</c>, <c>logoutUrls</c>, <c>webOrigins</c> or <c>grantTypes</c>.</summary>
+    public required string Field { get; init; }
+
+    /// <summary>The line's 0-based position in the field's array, or null when the whole field is refused.</summary>
+    public required int? Index { get; init; }
+
+    /// <summary>
+    /// <c>not_absolute</c>, <c>wildcard</c>, <c>scheme_not_allowed</c>, <c>too_long</c>, <c>too_many</c>,
+    /// <c>duplicate</c> or <c>not_allowed_for_type</c>.
+    /// </summary>
+    public required string Reason { get; init; }
 }
 
 /// <summary>The responses every Admin API path shares, so equal cases are byte-identical.</summary>
@@ -103,6 +126,15 @@ internal static class AdminResponses
     public const string ApplicationInvalid = "application_invalid";
 
     /// <summary>
+    /// A Prod Tenant's Application settings save (Story 3.2) that adds a custom-scheme callback or logout URL
+    /// without <c>acknowledgeCustomScheme: true</c>. Nothing was written.
+    /// </summary>
+    public const string CustomSchemeAcknowledgementRequired = "custom_scheme_acknowledgement_required";
+
+    /// <summary>Directory's guard SQLSTATE for an edit of a Tenant's system Application (Story 2.8): a 404 on the settings save (Story 3.2).</summary>
+    public const string SystemApplicationEdited = "GK012";
+
+    /// <summary>
     /// An object the path Tenant has none of by that ID (Story 3.1): unknown, malformed, another Tenant's and
     /// the hidden system Application alike, so nothing says which.
     /// </summary>
@@ -162,6 +194,7 @@ internal static class AdminResponses
         InvalidRequest,
         ApplicationInvalid,
         NotFound,
+        CustomSchemeAcknowledgementRequired,
     ];
 
     /// <summary>The Session cookie, expired: sent with a sign-out and a 401 for a stale cookie.</summary>
@@ -266,12 +299,15 @@ internal static class AdminResponses
         return ProblemAsync(context, StatusCodes.Status429TooManyRequests, RateLimited);
     }
 
-    public static Task ProblemAsync(HttpContext context, int status, string code)
+    public static Task ProblemAsync(HttpContext context, int status, string code) => ProblemAsync(context, status, code, errors: null);
+
+    /// <summary>A problem with its <paramref name="errors"/>, when it carries any (Story 3.2's settings save).</summary>
+    public static Task ProblemAsync(HttpContext context, int status, string code, IReadOnlyList<ApiProblemError>? errors)
     {
         context.Response.StatusCode = status;
         context.Response.ContentType = ProblemContentType;
         context.Response.Headers.CacheControl = "no-store";
-        return JsonAsync(context, new ApiProblem { Code = code, TraceId = TraceId(context) }, setContentType: false);
+        return JsonAsync(context, new ApiProblem { Code = code, TraceId = TraceId(context), Errors = errors }, setContentType: false);
     }
 
     /// <summary>

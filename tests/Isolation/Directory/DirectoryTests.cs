@@ -51,6 +51,8 @@ public sealed class DirectoryTests(PostgresFixture postgres)
         { TableRegistry.Hosted, "UPDATE client_secret SET revoked_at = NULL" },
         { TableRegistry.Hosted, "DELETE FROM client_secret" },
         { TableRegistry.Admin, "UPDATE application SET audiences = '{}'" },
+        { TableRegistry.Admin, "UPDATE application SET name = 'x'" },
+        { TableRegistry.Admin, "UPDATE application SET kind = 'spa'" },
         { TableRegistry.Admin, "UPDATE client_secret SET expires_at = NULL" },
         { TableRegistry.Admin, "DELETE FROM application" },
         { TableRegistry.Worker, "SELECT name FROM application" },
@@ -286,8 +288,19 @@ public sealed class DirectoryTests(PostgresFixture postgres)
     [InlineData("INSERT INTO application (tenant_id, id, name, kind, grant_types, redirect_uris, created_at) VALUES ('{0}', gen_random_uuid(), 'x', 'web', ARRAY['authorization_code'], array_fill('https://app.test/cb'::text, ARRAY[11]), now())")]
     [InlineData("INSERT INTO application (tenant_id, id, name, kind, grant_types, redirect_uris, created_at) VALUES ('{0}', gen_random_uuid(), 'x', 'machine', ARRAY['client_credentials'], ARRAY['https://app.test/cb'], now())")]
     [InlineData("INSERT INTO application (tenant_id, id, name, kind, redirect_uris, created_at) VALUES ('{0}', gen_random_uuid(), 'x', 'system', ARRAY['https://app.test/cb'], now())")]
-    [InlineData("INSERT INTO application (tenant_id, id, name, kind, redirect_uris, created_at) VALUES ('{0}', gen_random_uuid(), 'x', 'spa', ARRAY['https://app.test/cb'], now())")]
-    [InlineData("INSERT INTO application (tenant_id, id, name, kind, redirect_uris, created_at) VALUES ('{0}', gen_random_uuid(), 'x', 'native', ARRAY['https://app.test/cb'], now())")]
+    // Story 3.2: the type table. A machine row has no URL and only {} or {client_credentials}; a native row
+    // no web origin; the system row nothing; every list at most 10; every other kind only the code flow's sets.
+    [InlineData("INSERT INTO application (tenant_id, id, name, kind, grant_types, post_logout_redirect_uris, created_at) VALUES ('{0}', gen_random_uuid(), 'x', 'machine', ARRAY['client_credentials'], ARRAY['https://app.test/'], now())")]
+    [InlineData("INSERT INTO application (tenant_id, id, name, kind, web_origins, created_at) VALUES ('{0}', gen_random_uuid(), 'x', 'machine', ARRAY['https://app.test'], now())")]
+    [InlineData("INSERT INTO application (tenant_id, id, name, kind, grant_types, created_at) VALUES ('{0}', gen_random_uuid(), 'x', 'machine', ARRAY['authorization_code'], now())")]
+    [InlineData("INSERT INTO application (tenant_id, id, name, kind, web_origins, created_at) VALUES ('{0}', gen_random_uuid(), 'x', 'native', ARRAY['https://app.test'], now())")]
+    [InlineData("INSERT INTO application (tenant_id, id, name, kind, post_logout_redirect_uris, created_at) VALUES ('{0}', gen_random_uuid(), 'x', 'system', ARRAY['https://app.test/'], now())")]
+    [InlineData("INSERT INTO application (tenant_id, id, name, kind, web_origins, created_at) VALUES ('{0}', gen_random_uuid(), 'x', 'system', ARRAY['https://app.test'], now())")]
+    [InlineData("INSERT INTO application (tenant_id, id, name, kind, grant_types, created_at) VALUES ('{0}', gen_random_uuid(), 'x', 'spa', ARRAY['refresh_token'], now())")]
+    [InlineData("INSERT INTO application (tenant_id, id, name, kind, grant_types, created_at) VALUES ('{0}', gen_random_uuid(), 'x', 'spa', ARRAY['client_credentials'], now())")]
+    [InlineData("INSERT INTO application (tenant_id, id, name, kind, grant_types, created_at) VALUES ('{0}', gen_random_uuid(), 'x', 'native', ARRAY['authorization_code', 'authorization_code'], now())")]
+    [InlineData("INSERT INTO application (tenant_id, id, name, kind, post_logout_redirect_uris, created_at) VALUES ('{0}', gen_random_uuid(), 'x', 'web', array_fill('https://app.test/'::text, ARRAY[11]), now())")]
+    [InlineData("INSERT INTO application (tenant_id, id, name, kind, web_origins, created_at) VALUES ('{0}', gen_random_uuid(), 'x', 'spa', array_fill('https://app.test'::text, ARRAY[11]), now())")]
     [InlineData("INSERT INTO application (tenant_id, id, name, kind, created_at) VALUES ('{0}', gen_random_uuid(), 'x', 'implicit', now())")]
     public async Task Each_check_refuses_a_row_that_breaks_it(string statement)
     {
@@ -726,6 +739,192 @@ public sealed class DirectoryTests(PostgresFixture postgres)
             $"SELECT count(*) FROM application WHERE id IN ('{webA.ApplicationId}', '{webB.ApplicationId}', '{refreshing.ApplicationId}') AND grant_types = ARRAY['authorization_code', 'refresh_token']"));
         Assert.Equal(1L, await PostgresFixture.ScalarAsync<long>(superuser,
             $"SELECT count(*) FROM application WHERE id = '{machine.ApplicationId}' AND grant_types = ARRAY['client_credentials']"));
+    }
+
+    // Story 3.2 (FR-11, FR-13): an Application's settings, by the type table.
+
+    [Theory]
+    [InlineData("INSERT INTO application (tenant_id, id, name, kind, grant_types, redirect_uris, post_logout_redirect_uris, web_origins, created_at) VALUES ('{0}', gen_random_uuid(), 'x', 'spa', ARRAY['authorization_code', 'refresh_token'], ARRAY['https://app.test/cb'], ARRAY['https://app.test/'], ARRAY['https://app.test'], now())")]
+    [InlineData("INSERT INTO application (tenant_id, id, name, kind, grant_types, redirect_uris, created_at) VALUES ('{0}', gen_random_uuid(), 'x', 'native', ARRAY['authorization_code'], ARRAY['com.example.app:/cb', 'http://127.0.0.1/cb'], now())")]
+    [InlineData("INSERT INTO application (tenant_id, id, name, kind, redirect_uris, created_at) VALUES ('{0}', gen_random_uuid(), 'x', 'web', ARRAY['https://app.test/cb'], now())")]
+    [InlineData("INSERT INTO application (tenant_id, id, name, kind, created_at) VALUES ('{0}', gen_random_uuid(), 'x', 'machine', now())")]
+    public async Task The_type_table_allows_each_types_own_settings(string statement)
+    {
+        var database = await DatabaseAsync();
+
+        await PostgresFixture.ExecuteAsync(
+            postgres.SuperuserConnection(database), string.Format(System.Globalization.CultureInfo.InvariantCulture, statement, TenantA));
+
+        Assert.Equal(1L, await PostgresFixture.ScalarAsync<long>(postgres.SuperuserConnection(database), "SELECT count(*) FROM application"));
+    }
+
+    public static TheoryData<string, string[], string[], string[], string[], string> SettingsProblems => new()
+    {
+        // kind, callbacks, logouts, origins, grants, then the problems as "field index reason", joined by "; ".
+        { "web", ["https://app.example/cb", "http://127.0.0.1:8080/cb", "http://[::1]/cb?x=1"], ["https://app.example/"], ["https://app.example", "http://127.0.0.1:3000"], ["refresh_token", "authorization_code"], "" },
+        { "spa", [], [], [], [], "" },
+        { "native", ["com.example.app:/callback", "http://127.0.0.1/cb"], ["com.example.app:/logout"], [], ["authorization_code"], "" },
+        { "machine", [], [], [], ["client_credentials"], "" },
+        { "machine", [], [], [], [], "" },
+        { "web", ["https://*.a.example/cb", "/cb", "http://a.example/cb", "https://a.example/cb#x"], [], [], [], "callbackUrls 0 wildcard; callbackUrls 1 not_absolute; callbackUrls 2 scheme_not_allowed; callbackUrls 3 not_absolute" },
+        { "web", ["https://user@a.example/cb", "http://localhost/cb", "https://a.example/a b", "", "https://a.example/cb", "https://a.example/cb"], [], [], [], "callbackUrls 0 not_absolute; callbackUrls 1 scheme_not_allowed; callbackUrls 2 not_absolute; callbackUrls 3 not_absolute; callbackUrls 5 duplicate" },
+        { "spa", [.. Enumerable.Range(0, 11).Select(i => $"https://a.example/{i}")], [], [], [], "callbackUrls - too_many" },
+        { "spa", ["https://a.example/" + new string('x', 1983)], [], [], [], "callbackUrls 0 too_long" },
+        { "spa", ["https://a.example/" + new string('x', 1982)], [], [], [], "" },
+        { "spa", ["com.example.app:/cb"], ["javascript:alert(1)"], [], [], "callbackUrls 0 scheme_not_allowed; logoutUrls 0 scheme_not_allowed" },
+        { "native", ["javascript:alert(1)", "data.x:/y", "file:///etc", "myapp:/cb"], [], [], [], "callbackUrls 0 scheme_not_allowed; callbackUrls 2 scheme_not_allowed; callbackUrls 3 scheme_not_allowed" },
+        { "spa", [], [], ["https://a.example/", "https://a.example?x", "https://a.example:8443", "com.example.app://x"], [], "webOrigins 0 not_absolute; webOrigins 1 not_absolute; webOrigins 3 scheme_not_allowed" },
+        { "native", [], [], ["https://a.example"], [], "webOrigins - not_allowed_for_type" },
+        { "machine", ["https://a.example/cb"], ["https://a.example/"], ["https://a.example"], [], "callbackUrls - not_allowed_for_type; logoutUrls - not_allowed_for_type; webOrigins - not_allowed_for_type" },
+        { "machine", [], [], [], ["authorization_code"], "grantTypes - not_allowed_for_type" },
+        { "web", [], [], [], ["client_credentials"], "grantTypes - not_allowed_for_type" },
+        { "spa", [], [], [], ["refresh_token"], "grantTypes - not_allowed_for_type" },
+        { "spa", [], [], [], ["authorization_code", "authorization_code"], "grantTypes - not_allowed_for_type" },
+        { "spa", [], [], [], ["password"], "grantTypes - not_allowed_for_type" },
+    };
+
+    [Theory]
+    [MemberData(nameof(SettingsProblems))]
+    public void The_settings_rules_name_each_refused_line(string kind, string[] callbacks, string[] logouts, string[] origins, string[] grants, string expected)
+    {
+        var problems = DirectoryContract.CheckSettings(kind, new ApplicationSettings(callbacks, logouts, origins, grants));
+
+        Assert.Equal(
+            expected,
+            string.Join("; ", problems.Select(p => $"{p.Field} {p.Index?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "-"} {p.Reason}")));
+    }
+
+    [Fact]
+    public async Task Saving_settings_writes_the_lists_as_given_the_grants_sorted_and_its_events()
+    {
+        var database = await DatabaseAsync();
+        var actor = Gatekeep.Kernel.Audit.Actor.Admin(Guid.CreateVersion7());
+        var settings = new ApplicationSettings(
+            ["https://app.example/cb", "http://127.0.0.1:8080/cb"], ["https://app.example/"], ["https://app.example"], ["refresh_token", "authorization_code"]);
+
+        var created = await InTenantAsync(database, TableRegistry.Admin, TenantA, c => _directory.CreateApplicationAsync(c, actor, "Web", "web", Cancellation));
+        var updated = await InTenantAsync(database, TableRegistry.Admin, TenantA, c =>
+            _directory.UpdateApplicationSettingsAsync(c, actor, created.Id, settings, prodCallbackAdded: true, Cancellation));
+
+        Assert.NotNull(updated);
+        Assert.Equal(["https://app.example/cb", "http://127.0.0.1:8080/cb"], updated.RedirectUris);
+        Assert.Equal(["https://app.example/"], updated.PostLogoutRedirectUris);
+        Assert.Equal(["https://app.example"], updated.WebOrigins);
+        Assert.Equal(["authorization_code", "refresh_token"], updated.GrantTypes);
+        var superuser = postgres.SuperuserConnection(database);
+        Assert.Equal(1L, await PostgresFixture.ScalarAsync<long>(superuser,
+            $"SELECT count(*) FROM application WHERE id = '{created.Id}' AND grant_types = ARRAY['authorization_code', 'refresh_token'] AND redirect_uris = ARRAY['https://app.example/cb', 'http://127.0.0.1:8080/cb'] AND post_logout_redirect_uris = ARRAY['https://app.example/'] AND web_origins = ARRAY['https://app.example']"));
+        foreach (var code in new[] { "directory.application.updated", "directory.application.prod_callback_added" })
+        {
+            Assert.Equal(1L, await PostgresFixture.ScalarAsync<long>(superuser,
+                $"SELECT count(*) FROM audit_event WHERE type_code = '{code}' AND actor_kind = 'admin' AND target_kind = 'client' AND target_id = '{created.Id}'"));
+        }
+
+        // Nothing of a URL reaches the Log.
+        Assert.Equal(0L, await PostgresFixture.ScalarAsync<long>(superuser, "SELECT count(*) FROM audit_event r WHERE strpos(to_jsonb(r)::text, 'app.example') > 0"));
+    }
+
+    [Fact]
+    public async Task Settings_that_break_the_type_table_or_name_the_system_Application_write_nothing()
+    {
+        var database = await DatabaseAsync();
+        var actor = Gatekeep.Kernel.Audit.Actor.Admin(Guid.CreateVersion7());
+        var system = await EnsureAsync(database, TenantA);
+        var machine = await InTenantAsync(database, TableRegistry.Admin, TenantA, c => _directory.CreateApplicationAsync(c, actor, "Job", "machine", Cancellation));
+        var urls = new ApplicationSettings(["https://app.example/cb"], [], [], []);
+
+        await Assert.ThrowsAsync<ArgumentException>(() => InTenantAsync(database, TableRegistry.Admin, TenantA, c =>
+            _directory.UpdateApplicationSettingsAsync(c, actor, machine.Id, urls, prodCallbackAdded: false, Cancellation)));
+        Assert.Null(await InTenantAsync(database, TableRegistry.Admin, TenantA, c =>
+            _directory.UpdateApplicationSettingsAsync(c, actor, system, urls, prodCallbackAdded: false, Cancellation)));
+
+        // Another Tenant's Application is no Application here.
+        Assert.Null(await InTenantAsync(database, TableRegistry.Admin, TenantB, c =>
+            _directory.UpdateApplicationSettingsAsync(c, actor, machine.Id, new ApplicationSettings([], [], [], []), prodCallbackAdded: false, Cancellation)));
+
+        var superuser = postgres.SuperuserConnection(database);
+        Assert.Equal(0L, await PostgresFixture.ScalarAsync<long>(superuser, "SELECT count(*) FROM application WHERE redirect_uris <> '{}'"));
+        Assert.Equal(0L, await PostgresFixture.ScalarAsync<long>(superuser, "SELECT count(*) FROM audit_event WHERE type_code = 'directory.application.updated'"));
+    }
+
+    [Theory]
+    [InlineData("spa", "public", "web")]
+    [InlineData("native", "public", "native")]
+    [InlineData("web", "confidential", "web")]
+    public async Task The_store_hands_OpenIddict_each_types_client_type_permissions_and_URLs(string kind, string clientType, string applicationType)
+    {
+        var database = await DatabaseAsync();
+        var actor = Gatekeep.Kernel.Audit.Actor.Admin(Guid.CreateVersion7());
+        var created = await InTenantAsync(database, TableRegistry.Admin, TenantA, c => _directory.CreateApplicationAsync(c, actor, "App", kind, Cancellation));
+
+        async Task<DirectoryApplication> ReadAsync()
+        {
+            await using var hosted = NpgsqlDataSource.Create(postgres.RoleConnection(TableRegistry.Hosted, database));
+            await using var read = await TenantScope.BeginAsync(hosted, TenantA, Cancellation);
+            var context = read.CreateCommandContext();
+            return (await DirectoryContract.CreateApplicationStore(() => context).FindByClientIdAsync(created.ClientId, Cancellation))!;
+        }
+
+        var store = DirectoryContract.CreateApplicationStore(() => throw new InvalidOperationException("Only the getters run."));
+
+        // With no grant, a code-flow kind may not use the authorization endpoint.
+        var bare = await ReadAsync();
+        Assert.Equal(clientType, await store.GetClientTypeAsync(bare, Cancellation));
+        Assert.Equal(applicationType, await store.GetApplicationTypeAsync(bare, Cancellation));
+        Assert.DoesNotContain("ept:authorization", await store.GetPermissionsAsync(bare, Cancellation));
+        Assert.Equal(["ft:pkce"], await store.GetRequirementsAsync(bare, Cancellation));
+
+        await InTenantAsync(database, TableRegistry.Admin, TenantA, c => _directory.UpdateApplicationSettingsAsync(
+            c, actor, created.Id, new ApplicationSettings(["https://app.example/cb"], ["https://app.example/"], [], ["authorization_code", "refresh_token"]), false, Cancellation));
+        var configured = await ReadAsync();
+        Assert.Equal(
+            ["ept:authorization", "ept:revocation", "ept:token", "gt:authorization_code", "gt:refresh_token", "rst:code"],
+            (await store.GetPermissionsAsync(configured, Cancellation)).Order(StringComparer.Ordinal));
+        Assert.Equal(["https://app.example/cb"], await store.GetRedirectUrisAsync(configured, Cancellation));
+        Assert.Equal(["https://app.example/"], await store.GetPostLogoutRedirectUrisAsync(configured, Cancellation));
+    }
+
+    [Fact]
+    public async Task Only_a_native_Applications_loopback_redirect_may_differ_in_port()
+    {
+        var database = await DatabaseAsync();
+        var actor = Gatekeep.Kernel.Audit.Actor.Admin(Guid.CreateVersion7());
+        var settings = new ApplicationSettings(
+            ["http://127.0.0.1/cb", "http://[::1]:8080/cb?x=1", "https://app.example/cb"], [], [], ["authorization_code"]);
+
+        async Task<DirectoryApplication> WithSettingsAsync(string kind)
+        {
+            var created = await InTenantAsync(database, TableRegistry.Admin, TenantA, c => _directory.CreateApplicationAsync(c, actor, kind, kind, Cancellation));
+            return (await InTenantAsync(database, TableRegistry.Admin, TenantA, c =>
+                _directory.UpdateApplicationSettingsAsync(c, actor, created.Id, settings, prodCallbackAdded: false, Cancellation)))!;
+        }
+
+        var native = await WithSettingsAsync("native");
+        var web = await WithSettingsAsync("web");
+        var spa = await WithSettingsAsync("spa");
+
+        foreach (var exact in settings.CallbackUrls)
+        {
+            Assert.True(DirectoryContract.MatchesRedirectUri(native, exact));
+            Assert.True(DirectoryContract.MatchesRedirectUri(web, exact));
+        }
+
+        foreach (var port in new[] { "http://127.0.0.1:51004/cb", "http://[::1]/cb?x=1", "http://[::1]:1/cb?x=1", "http://127.0.0.1:65535/cb" })
+        {
+            Assert.True(DirectoryContract.MatchesRedirectUri(native, port), port);
+            Assert.False(DirectoryContract.MatchesRedirectUri(web, port), port);
+            Assert.False(DirectoryContract.MatchesRedirectUri(spa, port), port);
+        }
+
+        foreach (var other in new[]
+        {
+            "http://localhost:51004/cb", "http://127.0.0.1:51004/cb/", "http://127.0.0.1:51004/CB", "http://127.0.0.1:0/cb",
+            "http://127.0.0.1:65536/cb", "http://127.0.0.1:/cb", "http://127.0.0.1:80@evil.example/cb", "http://127.0.0.1.evil.example/cb",
+            "https://127.0.0.1:51004/cb", "https://app.example:443/cb", "http://[::1]:8080/cb", "http://127.0.0.1:51004/cb#x",
+        })
+        {
+            Assert.False(DirectoryContract.MatchesRedirectUri(native, other), other);
+        }
     }
 
     private async Task<Guid> EnsureAsync(string database, Guid tenantId) =>

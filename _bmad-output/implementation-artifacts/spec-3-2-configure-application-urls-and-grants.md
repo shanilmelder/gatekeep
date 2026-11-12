@@ -2,7 +2,8 @@
 title: 'Story 3.2: Configure Application URLs and grants'
 type: 'feature'
 created: '2026-11-12'
-status: 'ready-for-dev'
+baseline_revision: 'e58fe4fb6d6beb92cc91cce031243e2ddddae22c'
+status: 'in-progress'
 review_loop_iteration: 0
 followup_review_recommended: false
 context:

@@ -195,6 +195,10 @@ internal static class ProtocolServer
             // redirect target.
             options.AddEventHandler(BeginAuthorizeTransaction.Descriptor);
             options.AddEventHandler(TrustRedirectTarget.Descriptor);
+
+            // TrustRedirectTarget is the one redirect URI check (Story 3.2): exact, but for a native client's
+            // loopback port as RFC 8252 §7.3 and Directory define it, never OpenIddict's own native rule.
+            options.RemoveEventHandler(OpenIddictServerHandlers.Authentication.ValidateClientRedirectUri.Descriptor);
             options.AddEventHandler(ValidateGatekeepAuthorizationRequest.Descriptor);
             options.AddEventHandler(EndAuthorizeTransaction.Descriptor);
             options.AddEventHandler(RedirectTrustedErrors.Descriptor);

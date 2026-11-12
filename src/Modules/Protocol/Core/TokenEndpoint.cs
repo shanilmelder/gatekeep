@@ -271,7 +271,9 @@ internal sealed class RefuseTokenTargets : IOpenIddictServerHandler<ValidateToke
 /// before anything is looked up here, then classified: when the prefix names another Tenant and the
 /// credential verifies there, read-only, the attempt is authenticated and always writes
 /// <c>protocol.client.cross_tenant_rejected</c> to this Tenant's Log; otherwise it is only counted per
-/// source, and logged at most once per source per hour. Both commit after the request's rollback.
+/// source, and logged at most once per source per hour. Both commit after the request's rollback. From
+/// Story 3.2 a public client (<c>spa</c>, <c>native</c>) sends no secret and is known by its <c>client_id</c>
+/// alone; one that sends any secret is <c>invalid_client</c>, as is a confidential client sending none.
 /// </summary>
 internal sealed class AuthenticateGatekeepClient(TokenRequestTransaction transaction, TokenEndpointServices services)
     : IOpenIddictServerHandler<ValidateTokenRequestContext>
@@ -306,7 +308,29 @@ internal sealed class AuthenticateGatekeepClient(TokenRequestTransaction transac
         var request = context.Transaction.Request ?? throw new InvalidOperationException("No request to authenticate.");
         var clientId = request.ClientId;
         var clientSecret = request.ClientSecret;
-        if (string.IsNullOrEmpty(clientId) || string.IsNullOrEmpty(clientSecret))
+        if (string.IsNullOrEmpty(clientId))
+        {
+            TokenEndpoint.RejectClient(context);
+            return;
+        }
+
+        // A public client (spa, native) authenticates by its client_id alone (Story 3.2); OpenIddict's own
+        // checks then hold it to its grants and to PKCE. A confidential one, or an unknown client, sending no
+        // secret gets the same invalid_client as before.
+        if (clientSecret is null)
+        {
+            if (!PublicId.TryParse(PublicIdType.Application, clientId, out var applicationId)
+                || await services.Directory.FindApplicationAsync(transaction.Context, applicationId, context.CancellationToken) is not { IsPublic: true })
+            {
+                TokenEndpoint.RejectClient(context);
+            }
+
+            return;
+        }
+
+        // Any secret, an empty one included, is a confidential client's: a public client sending one is refused,
+        // as it holds none to verify (Story 3.2), and OpenIddict refuses a public client's secret too.
+        if (clientSecret.Length == 0)
         {
             TokenEndpoint.RejectClient(context);
             return;
@@ -319,7 +343,9 @@ internal sealed class AuthenticateGatekeepClient(TokenRequestTransaction transac
 
         if (prefix == PublicId.Format(PublicIdType.Tenant, tenant.TenantId))
         {
-            if (!await services.Directory.VerifyClientSecretAsync(transaction.Context, clientId, secret, context.CancellationToken))
+            if (!await services.Directory.VerifyClientSecretAsync(transaction.Context, clientId, secret, context.CancellationToken)
+                || (PublicId.TryParse(PublicIdType.Application, clientId, out var verifiedId)
+                    && await services.Directory.FindApplicationAsync(transaction.Context, verifiedId, context.CancellationToken) is { IsPublic: true }))
             {
                 TokenEndpoint.RejectClient(context);
             }

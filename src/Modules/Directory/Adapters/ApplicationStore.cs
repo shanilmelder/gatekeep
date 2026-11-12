@@ -14,13 +14,14 @@ namespace Gatekeep.Modules.Directory.Adapters;
 /// <summary>
 /// OpenIddict's application store (AD-8), on the request's own context. It only reads: Directory
 /// writes Applications itself, never through OpenIddict's manager, so every write is refused, as are
-/// LINQ queries and listing, which nothing on the Hosted path calls. Every Application is a
-/// confidential client with no secret column: Gatekeep's client authentication calls
-/// <see cref="IDirectory.VerifyClientSecretAsync"/> in place of OpenIddict's secret check. Both lookups
-/// hide the Tenant's <c>system</c> Application (Story 2.8, AD-12): its ID and <c>client_id</c> find
-/// nothing, so OpenIddict refuses it as an unknown client and never issues a code or token for it.
-/// Story 2.9: a <c>web</c> client's redirect URIs, its authorization endpoint and <c>code</c> response
-/// type permissions and its PKCE requirement. Every Application stays confidential.
+/// LINQ queries and listing, which nothing on the Hosted path calls. No Application has a secret column:
+/// Gatekeep's client authentication calls <see cref="IDirectory.VerifyClientSecretAsync"/> in place of
+/// OpenIddict's secret check, and from Story 3.2 lets a public client (<c>spa</c>, <c>native</c>) in by its
+/// <c>client_id</c> alone. Both lookups hide the Tenant's <c>system</c> Application (Story 2.8, AD-12): its
+/// ID and <c>client_id</c> find nothing, so OpenIddict refuses it as an unknown client and never issues a
+/// code or token for it. Story 2.9: a code-flow client's redirect URIs, its authorization endpoint and
+/// <c>code</c> response type permissions and its PKCE requirement; from Story 3.2 for <c>web</c>,
+/// <c>spa</c> and <c>native</c> alike, the endpoint only while it holds <c>authorization_code</c>.
 /// </summary>
 internal sealed class ApplicationStore(Func<CommandContext> context) : IOpenIddictApplicationStore<DirectoryApplication>
 {
@@ -44,17 +45,13 @@ internal sealed class ApplicationStore(Func<CommandContext> context) : IOpenIddi
     public ValueTask<string?> GetClientSecretAsync(DirectoryApplication application, CancellationToken cancellationToken) =>
         new((string?)null);
 
-    public ValueTask<string?> GetClientTypeAsync(DirectoryApplication application, CancellationToken cancellationToken)
-    {
-        Checked(application);
-        return new(ClientTypes.Confidential);
-    }
+    /// <summary><c>spa</c> and <c>native</c> are public clients (Story 3.2); <c>web</c> and <c>machine</c> stay confidential.</summary>
+    public ValueTask<string?> GetClientTypeAsync(DirectoryApplication application, CancellationToken cancellationToken) =>
+        new(Checked(application).IsPublic ? ClientTypes.Public : ClientTypes.Confidential);
 
-    public ValueTask<string?> GetApplicationTypeAsync(DirectoryApplication application, CancellationToken cancellationToken)
-    {
-        Checked(application);
-        return new(ApplicationTypes.Web);
-    }
+    /// <summary><c>native</c> is a native application (RFC 8252); every other kind a web one (Story 3.2).</summary>
+    public ValueTask<string?> GetApplicationTypeAsync(DirectoryApplication application, CancellationToken cancellationToken) =>
+        new(Checked(application).IsNative ? ApplicationTypes.Native : ApplicationTypes.Web);
 
     public ValueTask<string?> GetConsentTypeAsync(DirectoryApplication application, CancellationToken cancellationToken)
     {
@@ -73,33 +70,42 @@ internal sealed class ApplicationStore(Func<CommandContext> context) : IOpenIddi
 
     /// <summary>
     /// The token endpoint, the revocation endpoint for a row allowed the <c>refresh_token</c> grant (Story 2.11:
-    /// only a client that can hold a refresh token has one to revoke), and a <c>gt:</c> permission for each grant type the row allows. A <c>web</c>
-    /// client also gets the authorization endpoint and the <c>code</c> response type, the only one
-    /// (Story 2.9). No <c>scp:</c> permission is given: <c>openid</c> and <c>offline_access</c>, the only
-    /// scopes, are protocol scopes that need none; <c>offline_access</c> is allowed only with the
+    /// only a client that can hold a refresh token has one to revoke), and a <c>gt:</c> permission for each grant type the row allows. A
+    /// <c>web</c>, <c>spa</c> or <c>native</c> client allowed <c>authorization_code</c> also gets the authorization
+    /// endpoint and the <c>code</c> response type, the only one (Stories 2.9 and 3.2): with the grant turned off,
+    /// <c>/authorize</c> refuses it. No <c>scp:</c> permission is given: <c>openid</c> and <c>offline_access</c>,
+    /// the only scopes, are protocol scopes that need none; <c>offline_access</c> is allowed only with the
     /// <c>gt:refresh_token</c> permission (Story 2.10).
     /// </summary>
     public ValueTask<ImmutableArray<string>> GetPermissionsAsync(DirectoryApplication application, CancellationToken cancellationToken)
     {
         var row = Checked(application);
-        string[] code = row.IsWeb ? [Permissions.Endpoints.Authorization, Permissions.ResponseTypes.Code] : [];
+        string[] code = SignsInByCode(row) ? [Permissions.Endpoints.Authorization, Permissions.ResponseTypes.Code] : [];
         string[] revocation = row.GrantTypes.Contains(GrantTypes.RefreshToken) ? [Permissions.Endpoints.Revocation] : [];
         return new([Permissions.Endpoints.Token, .. revocation, .. code, .. row.GrantTypes.Select(g => Permissions.Prefixes.GrantType + g)]);
     }
 
+    /// <summary>Its Allowed Logout URLs, from the row (Story 3.2), for the end-session endpoint Story 4.13 adds.</summary>
     public ValueTask<ImmutableArray<string>> GetPostLogoutRedirectUrisAsync(DirectoryApplication application, CancellationToken cancellationToken) =>
-        new(ImmutableArray<string>.Empty);
+        new(Checked(application).PostLogoutRedirectUris);
 
     public ValueTask<ImmutableDictionary<string, JsonElement>> GetPropertiesAsync(DirectoryApplication application, CancellationToken cancellationToken) =>
         new(ImmutableDictionary<string, JsonElement>.Empty);
 
-    /// <summary>A <c>web</c> client's registered redirect URIs, which OpenIddict matches exactly (Story 2.9).</summary>
+    /// <summary>
+    /// A code-flow client's registered callback URLs (Stories 2.9 and 3.2), matched exactly by the authorization
+    /// endpoint's <c>TrustRedirectTarget</c>, but for a <c>native</c> client's loopback port.
+    /// </summary>
     public ValueTask<ImmutableArray<string>> GetRedirectUrisAsync(DirectoryApplication application, CancellationToken cancellationToken) =>
         new(Checked(application).RedirectUris);
 
-    /// <summary>A <c>web</c> client must use PKCE (Story 2.9), as every client must on the Deployment.</summary>
+    /// <summary>A <c>web</c>, <c>spa</c> or <c>native</c> client must use PKCE (Stories 2.9 and 3.2, FR-13), as every client must on the Deployment.</summary>
     public ValueTask<ImmutableArray<string>> GetRequirementsAsync(DirectoryApplication application, CancellationToken cancellationToken) =>
-        new(Checked(application).IsWeb ? [Requirements.Features.ProofKeyForCodeExchange] : ImmutableArray<string>.Empty);
+        new(Checked(application).SignsUsersIn ? [Requirements.Features.ProofKeyForCodeExchange] : ImmutableArray<string>.Empty);
+
+    /// <summary>Whether the row may use the authorization endpoint: a code-flow kind that holds <c>authorization_code</c> (Story 3.2).</summary>
+    private static bool SignsInByCode(DirectoryApplication row) =>
+        row.SignsUsersIn && row.GrantTypes.Contains(GrantTypes.AuthorizationCode);
 
     public ValueTask<ImmutableDictionary<string, string>> GetSettingsAsync(DirectoryApplication application, CancellationToken cancellationToken) =>
         new(ImmutableDictionary<string, string>.Empty);

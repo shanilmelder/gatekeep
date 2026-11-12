@@ -50,3 +50,65 @@ export function applicationOfPath(path: string): string | null {
     return match[1]!;
   }
 }
+
+// Settings (Story 3.2): the URL textareas' lines, the grant switches, and which custom-scheme URLs
+// are new. Feedback only: the server checks every line again, decides, and names each it refuses.
+
+/** A grant type, as the API names it. */
+export type GrantType = 'authorization_code' | 'client_credentials' | 'refresh_token';
+
+/** The grants in the order the API stores them: sorted. */
+export const GRANT_TYPES: readonly GrantType[] = Object.freeze(['authorization_code', 'client_credentials', 'refresh_token']);
+
+/** Whether an Application of `kind` can ever hold `grant`: machine-to-machine only Client Credentials, the others the code flow's two. */
+export function grantAvailable(kind: ApplicationKind, grant: GrantType): boolean {
+  return kind === 'machine' ? grant === 'client_credentials' : grant !== 'client_credentials';
+}
+
+/** Whether an Application of `kind` has URL fields at all. */
+export function hasUrls(kind: ApplicationKind): boolean {
+  return kind !== 'machine';
+}
+
+/** Whether an Application of `kind` has Allowed Web Origins: single-page and regular web only. */
+export function hasWebOrigins(kind: ApplicationKind): boolean {
+  return kind === 'spa' || kind === 'web';
+}
+
+/** A textarea's URLs: one per line, each trimmed, blank lines dropped; and each URL's 1-based line in the textarea. */
+export function urlLines(text: string): { values: string[]; lines: number[] } {
+  const values: string[] = [];
+  const lines: number[] = [];
+  text.split('\n').forEach((raw, index) => {
+    const value = raw.trim();
+    if (value === '') return;
+    values.push(value);
+    lines.push(index + 1);
+  });
+  return { values, lines };
+}
+
+/** A stored list as its textarea shows it: one URL per line. */
+export function urlText(values: readonly string[]): string {
+  return values.join('\n');
+}
+
+const SCHEME = /^([A-Za-z][A-Za-z0-9+.-]*):/;
+
+/** Whether `url` has a scheme that isn't http or https, such as com.example.app:/callback. */
+export function isCustomScheme(url: string): boolean {
+  const match = SCHEME.exec(url);
+  if (!match) return false;
+  const scheme = match[1]!.toLowerCase();
+  return scheme !== 'http' && scheme !== 'https';
+}
+
+/** The custom-scheme URLs in `submitted` that `stored` doesn't hold: what a Prod Tenant must acknowledge. */
+export function newCustomSchemes(submitted: readonly string[], stored: readonly string[]): string[] {
+  return submitted.filter((url) => isCustomScheme(url) && !stored.includes(url));
+}
+
+/** Whether two lists hold the same strings in the same order. */
+export function sameList(a: readonly string[], b: readonly string[]): boolean {
+  return a.length === b.length && a.every((value, index) => value === b[index]);
+}

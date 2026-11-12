@@ -1,13 +1,27 @@
-import type { ApplicationResponse } from '@gatekeep/api-client';
-import { Banner, CopyButton, EmptyState, ErrorReference, ProtocolBadge, SectionPage, SkeletonRows, useMessages } from '@gatekeep/ui/admin';
-import { useEffect, useState, type MouseEvent } from 'react';
+import type { AdminTenant, ApplicationResponse } from '@gatekeep/api-client';
+import {
+  Banner,
+  ConfirmModal,
+  CopyButton,
+  EmptyState,
+  ErrorReference,
+  ProtocolBadge,
+  SectionPage,
+  SkeletonRows,
+  Tabs,
+  useMessages,
+} from '@gatekeep/ui/admin';
+import { useCallback, useEffect, useRef, useState, type MouseEvent } from 'react';
 import { navigate } from '../navigation';
 import { api } from '../session';
 import { applicationsPath } from './applications';
+import { ApplicationSettings } from './ApplicationSettings';
 import { failureOf } from './ApplicationsPage';
+import { useCapabilities } from './capabilities';
 import { kindText } from './CreateApplicationModal';
 import type { ShellRequest } from './CredentialsPage';
 import { ForbiddenPage } from './ForbiddenPage';
+import type { FreshAssertion } from './freshAssertion';
 import styles from './ApplicationsPage.module.css';
 
 type Failure = { code: string; traceId: string };
@@ -21,22 +35,26 @@ type Load =
 
 export interface ApplicationDetailPageProps {
   request: ShellRequest;
+  fresh: FreshAssertion;
   /** The path Tenant this page was mounted with. */
   tenantId: string;
+  /** The path Tenant as the switcher lists it, for its label, or null when unlisted. */
+  tenant: AdminTenant | null;
   /** The Application the path names, as decoded: the server decides whether it is this Tenant's. */
   applicationId: string;
 }
 
 /**
- * One Application (Story 3.1; design Application detail, its first pass): the breadcrumb back to
- * Applications, the name with its type badge, the client ID in the code type with Copy, and
- * Credentials, which says whether the type needs a secret. Regular web and machine-to-machine
- * need one, which only a Tenant Owner creates (Story 3.3); single-page and native need none. A 404
- * says the Tenant has no such Application, a 403 is the forbidden page, and any other failure a
- * banner with Retry. It only reads: URLs, grants and secrets come with Stories 3.2 and 3.3.
+ * One Application (Story 3.1; design Application detail): the breadcrumb back to Applications, the
+ * name with its type badge, the client ID in the code type with Copy, then the tabs. Settings, the
+ * default (Story 3.2), holds the URLs and grants; Credentials says whether the type needs a secret.
+ * Regular web and machine-to-machine need one, which only a Tenant Owner creates (Story 3.3);
+ * single-page and native need none. A 404 says the Tenant has no such Application, a 403 is the
+ * forbidden page, and any other failure a banner with Retry.
  */
-export function ApplicationDetailPage({ request, tenantId, applicationId }: ApplicationDetailPageProps) {
+export function ApplicationDetailPage({ request, fresh, tenantId, tenant, applicationId }: ApplicationDetailPageProps) {
   const messages = useMessages();
+  const { has } = useCapabilities();
   const [load, setLoad] = useState<Load>({ kind: 'loading' });
   const [attempt, setAttempt] = useState(0);
 
@@ -62,6 +80,27 @@ export function ApplicationDetailPage({ request, tenantId, applicationId }: Appl
 
     return () => controller.abort();
   }, [request, tenantId, applicationId, attempt]);
+
+  // Leaving Settings with unsaved changes asks first (Story 3.2): its panel goes, and its form with it.
+  const dirty = useRef(false);
+  const [leaving, setLeaving] = useState<((leave: boolean) => void) | null>(null);
+  const onDirtyChange = useCallback((now: boolean) => {
+    dirty.current = now;
+  }, []);
+  const canLeave = useCallback(
+    (from: string) =>
+      from !== 'settings' || !dirty.current
+        ? true
+        : new Promise<boolean>((resolve) => {
+            setLeaving(() => resolve);
+          }),
+    [],
+  );
+  const settleLeave = (leave: boolean) => {
+    leaving?.(leave);
+    if (leave) dirty.current = false;
+    setLeaving(null);
+  };
 
   if (load.kind === 'forbidden') return <ForbiddenPage code={load.failure.code} traceId={load.failure.traceId} />;
 
@@ -140,10 +179,54 @@ export function ApplicationDetailPage({ request, tenantId, applicationId }: Appl
           <CopyButton value={ready.clientId} what={messages.applicationClientIdWhat} />
         </span>
       </section>
-      <section className={styles.section} aria-labelledby="application-credentials-heading" data-testid="application-credentials">
-        <h2 id="application-credentials-heading">{messages.applicationCredentialsTitle}</h2>
-        <p>{needsSecret ? messages.applicationCredentialsNeeded : messages.applicationCredentialsNone}</p>
-      </section>
+      <div className={styles.section}>
+        <Tabs
+          label={messages.applicationTabsLabel}
+          param="tab"
+          defaultSelected="settings"
+          canLeave={canLeave}
+          tabs={[
+            {
+              id: 'settings',
+              label: messages.applicationTabSettings,
+              panel: (
+                <ApplicationSettings
+                  request={request}
+                  fresh={fresh}
+                  tenantId={tenantId}
+                  prod={tenant?.label === 'prod'}
+                  application={ready}
+                  canManage={has('tenant.application_callbacks.manage')}
+                  onSaved={(application) => setLoad({ kind: 'ready', application })}
+                  onDirtyChange={onDirtyChange}
+                />
+              ),
+            },
+            {
+              id: 'credentials',
+              label: messages.applicationTabCredentials,
+              panel: (
+                <section className={styles.section} aria-labelledby="application-credentials-heading" data-testid="application-credentials">
+                  <h2 id="application-credentials-heading">{messages.applicationCredentialsTitle}</h2>
+                  <p>{needsSecret ? messages.applicationCredentialsNeeded : messages.applicationCredentialsNone}</p>
+                </section>
+              ),
+            },
+          ]}
+        />
+      </div>
+      <ConfirmModal
+        open={leaving !== null}
+        onCancel={() => settleLeave(false)}
+        onConfirm={() => settleLeave(true)}
+        tone="destructive"
+        title={messages.unsavedTitle}
+        confirmLabel={messages.unsavedLeave}
+        cancelLabel={messages.unsavedKeep}
+        data-testid="application-unsaved"
+      >
+        <p>{messages.unsavedBody}</p>
+      </ConfirmModal>
     </SectionPage>
   );
 }

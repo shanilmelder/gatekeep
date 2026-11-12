@@ -501,6 +501,55 @@ export interface Messages {
   applicationNotFound: string;
   /** The Application detail page's breadcrumb trail, as its landmark's name. */
   applicationBreadcrumb: string;
+  /** The Application detail page's tabs (Story 3.2): their list's name, and each tab. */
+  applicationTabsLabel: string;
+  applicationTabSettings: string;
+  applicationTabCredentials: string;
+  /** The Application URLs card: its title, each field, and the helper with URLs and without. */
+  applicationUrlsTitle: string;
+  applicationCallbackUrls: string;
+  applicationLogoutUrls: string;
+  applicationWebOrigins: string;
+  applicationUrlsHelper: string;
+  applicationUrlsEmptyHelper: string;
+  /** A machine-to-machine Application's note in place of the URLs card. */
+  applicationMachineNoUrls: string;
+  /** A native Application's guidance: the system browser, never an embedded web view. */
+  applicationNativeGuidance: string;
+  /** The Grant types card: its title and description, each grant's name and line, and why a switch is off. */
+  applicationGrantsTitle: string;
+  applicationGrantsDescription: string;
+  applicationGrantAuthorizationCode: string;
+  applicationGrantAuthorizationCodeDescription: string;
+  applicationGrantRefreshToken: string;
+  applicationGrantRefreshTokenDescription: string;
+  applicationGrantClientCredentials: string;
+  applicationGrantClientCredentialsDescription: string;
+  /** A grant the type can't have. {type} is the type's name. */
+  applicationGrantNotAvailable: string;
+  /** Refresh Token while Authorization Code is off. */
+  applicationGrantNeedsCode: string;
+  /** A server error on one line of a field. {line} is the 1-based line, {reason} the reason's text. */
+  applicationUrlLine: string;
+  /** Each reason the server gives for a refused line or field. */
+  applicationUrlNotAbsolute: string;
+  applicationOriginNotAbsolute: string;
+  applicationUrlWildcard: string;
+  applicationUrlSchemeNotAllowed: string;
+  applicationUrlTooLong: string;
+  applicationUrlTooMany: string;
+  applicationUrlDuplicate: string;
+  applicationUrlNotAllowedForType: string;
+  applicationGrantsNotAllowed: string;
+  /** A Prod Tenant's acknowledgement of a new custom-scheme URL, and its error when Save is pressed unticked. */
+  applicationCustomSchemeAcknowledge: string;
+  applicationCustomSchemeRequired: string;
+  /** Save, its toast, and its failure. */
+  applicationSave: string;
+  applicationSaved: string;
+  applicationSaveFailed: string;
+  /** What a caller without tenant.application_callbacks.manage sees under the cards. */
+  applicationSettingsReadOnly: string;
 }
 
 export const defaultMessages: Readonly<Messages> = Object.freeze({
@@ -797,6 +846,45 @@ export const defaultMessages: Readonly<Messages> = Object.freeze({
   applicationCredentialsNone: 'No secret needed.',
   applicationNotFound: "This application doesn't exist in this Tenant.",
   applicationBreadcrumb: 'Breadcrumb',
+  applicationTabsLabel: 'Application sections',
+  applicationTabSettings: 'Settings',
+  applicationTabCredentials: 'Credentials',
+  applicationUrlsTitle: 'Application URLs',
+  applicationCallbackUrls: 'Allowed Callback URLs',
+  applicationLogoutUrls: 'Allowed Logout URLs',
+  applicationWebOrigins: 'Allowed Web Origins',
+  applicationUrlsHelper: 'Matched exactly. One per line. No wildcards.',
+  applicationUrlsEmptyHelper:
+    'Matched exactly. One per line. No wildcards. Users are only sent back to a URL listed here, character for character.',
+  applicationMachineNoUrls: 'Machine-to-machine applications have no URLs: they sign no users in.',
+  applicationNativeGuidance: "Open sign-in in the system browser. Embedded web views aren't supported.",
+  applicationGrantsTitle: 'Grant types',
+  applicationGrantsDescription: 'Only turn on the flows this app uses.',
+  applicationGrantAuthorizationCode: 'Authorization Code with PKCE',
+  applicationGrantAuthorizationCodeDescription: 'Signs users in through the hosted login.',
+  applicationGrantRefreshToken: 'Refresh Token',
+  applicationGrantRefreshTokenDescription: 'Keeps users signed in with rotating refresh tokens.',
+  applicationGrantClientCredentials: 'Client Credentials',
+  applicationGrantClientCredentialsDescription: 'Gets tokens for the app itself, with no user.',
+  applicationGrantNotAvailable: 'Not available for {type}.',
+  applicationGrantNeedsCode: 'Turn on Authorization Code with PKCE first.',
+  applicationUrlLine: 'Line {line}: {reason}',
+  applicationUrlNotAbsolute: 'Must be an absolute URL, with no fragment or user info.',
+  applicationOriginNotAbsolute: 'Must be scheme://host[:port], with no path or query.',
+  applicationUrlWildcard: "Wildcards aren't allowed.",
+  applicationUrlSchemeNotAllowed: 'Use https, or http on 127.0.0.1 or [::1] only.',
+  applicationUrlTooLong: 'Use at most 2000 characters.',
+  applicationUrlTooMany: 'Use at most 10 URLs.',
+  applicationUrlDuplicate: 'This URL is already listed.',
+  applicationUrlNotAllowedForType: "This application type can't have these.",
+  applicationGrantsNotAllowed: "This application type can't have these grants together.",
+  applicationCustomSchemeAcknowledge:
+    'I understand this Prod application uses a custom URL scheme, which another app on the device could also claim.',
+  applicationCustomSchemeRequired: 'Tick this to save a custom-scheme URL in a Prod Tenant.',
+  applicationSave: 'Save changes',
+  applicationSaved: 'Changes saved',
+  applicationSaveFailed: "Couldn't save the changes. Try again.",
+  applicationSettingsReadOnly: 'Only Tenant Editors and Owners can change these.',
 });
 
 /**

@@ -377,4 +377,44 @@ describe('api-client', () => {
     assert.equal(parseProblem({ code: '' }), null);
     assert.deepEqual(parseProblem({ code: 'rate_limited' }), { code: 'rate_limited', traceId: '' });
   });
+
+  it("keeps a settings save's well-formed errors and drops malformed ones", () => {
+    const problem = parseProblem({
+      code: 'application_invalid',
+      traceId: 't',
+      errors: [
+        { field: 'callbackUrls', index: 1, reason: 'wildcard', value: 'https://*.a.example/cb' },
+        { field: 'grantTypes', index: null, reason: 'not_allowed_for_type' },
+        { field: 'webOrigins', index: -1, reason: 'too_long' },
+        { field: 'logoutUrls', index: 1.5, reason: 'duplicate' },
+        { field: 5, index: 0, reason: 'duplicate' },
+        'nope',
+      ],
+    });
+
+    assert.deepEqual(problem, {
+      code: 'application_invalid',
+      traceId: 't',
+      errors: [
+        { field: 'callbackUrls', index: 1, reason: 'wildcard' },
+        { field: 'grantTypes', index: null, reason: 'not_allowed_for_type' },
+      ],
+    });
+  });
+
+  it("saves an Application's settings with both IDs encoded, the page Tenant and the CSRF header", async () => {
+    const { calls, fetch } = fakeFetch(400, JSON.stringify({ code: 'application_invalid', traceId: 't', errors: [{ field: 'callbackUrls', index: 0, reason: 'not_absolute' }] }), 'application/problem+json');
+    const client = createApiClient({ fetch, csrfToken: () => 'csrf-1', pageTenant: () => 'ten_a' });
+    const body = { callbackUrls: ['/cb'], logoutUrls: [], webOrigins: [], grantTypes: ['authorization_code'] };
+
+    const result = await client.updateApplicationSettings('ten_a', 'app_b/c', body);
+
+    assert.equal(calls[0].input, '/api/v1/tenants/ten_a/applications/app_b%2Fc/settings');
+    assert.equal(calls[0].init.method, 'PUT');
+    assert.equal(calls[0].init.body, JSON.stringify(body));
+    assert.equal(calls[0].init.headers[CSRF_HEADER], 'csrf-1');
+    assert.equal(calls[0].init.headers[TENANT_HEADER], 'ten_a');
+    assert.equal(result.ok, false);
+    assert.deepEqual(result.problem?.errors, [{ field: 'callbackUrls', index: 0, reason: 'not_absolute' }]);
+  });
 });

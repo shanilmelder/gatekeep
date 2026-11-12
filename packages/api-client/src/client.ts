@@ -48,6 +48,11 @@ export type ApplicationListResponse = components['schemas']['ApplicationListResp
 export type CreateApplicationRequest = components['schemas']['CreateApplicationRequest'];
 /** An Application's type (Story 3.1): single-page, regular web, native or machine-to-machine. */
 export type ApplicationType = ApplicationResponse['type'];
+export type ApplicationSettingsRequest = components['schemas']['ApplicationSettingsRequest'];
+/** One refused line or field of a settings save (Story 3.2). */
+export type ApiProblemError = components['schemas']['ApiProblemError'];
+/** A grant type an Application can hold (Story 3.2). */
+export type ApplicationGrantType = ApplicationResponse['grantTypes'][number];
 
 /** A path the committed OpenAPI document has, so a removed endpoint fails to compile. */
 export type ApiPath = keyof paths;
@@ -126,12 +131,30 @@ const STATE_CHANGING: ReadonlySet<string> = new Set(['post', 'put', 'patch', 'de
 /** A Log search's parameters, in the order the query string carries them. */
 const LOG_QUERY = ['type', 'user', 'application', 'outcome', 'from', 'to', 'cursor'] as const satisfies readonly (keyof TenantLogsQuery)[];
 
-/** `{ code, traceId }` from a problem body, or null for anything else. Nothing else in it is kept. */
+/**
+ * `{ code, traceId }` from a problem body, or null for anything else, with `errors` too when the body
+ * carries a well-formed list of them (Story 3.2's settings save). Nothing else in it is kept, and a
+ * malformed error entry is dropped.
+ */
 export function parseProblem(body: unknown): ApiProblem | null {
   if (typeof body !== 'object' || body === null) return null;
-  const { code, traceId } = body as Record<string, unknown>;
+  const { code, traceId, errors } = body as Record<string, unknown>;
   if (typeof code !== 'string' || code === '') return null;
-  return { code: code as ApiProblem['code'], traceId: typeof traceId === 'string' ? traceId : '' };
+  const problem: ApiProblem = { code: code as ApiProblem['code'], traceId: typeof traceId === 'string' ? traceId : '' };
+  if (Array.isArray(errors)) {
+    problem.errors = errors.filter(isProblemError).map(({ field, index, reason }) => ({ field, index, reason }));
+  }
+  return problem;
+}
+
+function isProblemError(value: unknown): value is ApiProblemError {
+  if (typeof value !== 'object' || value === null) return false;
+  const { field, index, reason } = value as Record<string, unknown>;
+  return (
+    typeof field === 'string' &&
+    typeof reason === 'string' &&
+    (index === null || (typeof index === 'number' && Number.isInteger(index) && index >= 0))
+  );
 }
 
 export function createApiClient(options: ApiClientOptions = {}) {
@@ -309,6 +332,17 @@ export function createApiClient(options: ApiClientOptions = {}) {
     /** Creates an Application with a name and a type, and no secret: a 201 with it. Editors and Owners only. */
     createApplication: (tenantId: string, body: CreateApplicationRequest) =>
       request(`/api/v1/tenants/${encodeURIComponent(tenantId)}/applications` as '/api/v1/tenants/{tenantId}/applications', 'post', body),
+    /**
+     * Saves an Application's full settings (Story 3.2): its callback, logout and web origin URLs and grants.
+     * Both IDs go into the path encoded. A Prod Tenant's changed callbacks need a fresh assertion for
+     * tenant.application_callbacks.manage with the Application's ID as its target.
+     */
+    updateApplicationSettings: (tenantId: string, applicationId: string, body: ApplicationSettingsRequest) =>
+      request(
+        `/api/v1/tenants/${encodeURIComponent(tenantId)}/applications/${encodeURIComponent(applicationId)}/settings` as '/api/v1/tenants/{tenantId}/applications/{applicationId}/settings',
+        'put',
+        body,
+      ),
     /** Begins a fresh assertion for a Tenant action, bound to the Tenant `tenantId` names. The Deployment complete finishes it. */
     beginTenantFreshAssertion: (tenantId: string, binding: FreshAssertionBeginRequest) =>
       request(`/api/v1/tenants/${encodeURIComponent(tenantId)}/assertions` as '/api/v1/tenants/{tenantId}/assertions', 'post', binding),

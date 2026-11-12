@@ -29,6 +29,8 @@ Every audit type code Gatekeep writes, declared in its module's contract. Codes 
 | `bootstrap.token.issued` | Admins | Success | gatekeep init issued the first one-time bootstrap token. It expires 15 minutes after issue. Holds no token or hash. | None |
 | `bootstrap.token.reissued` | Admins | Success | gatekeep init reissued the bootstrap token, voiding the previous one. It expires 15 minutes after issue. Holds no token or hash. | None |
 | `directory.application.created` | Directory | Success | An Application was created. Names the Application only: no client secret is created with it, and any secret is stored only as its hash. | None |
+| `directory.application.prod_callback_added` | Directory | Success | A callback URL was added to an Application in a Prod Tenant, after a fresh assertion. Names the Application only, never the URL. | None |
+| `directory.application.updated` | Directory | Success | An Application's callback, logout or web origin URLs or its grant types were changed. Names the Application only, never a URL. A save that changes nothing writes no event. | None |
 | `keys.signing_key.created` | Keys | Success | A Tenant's replacement next Signing or Management key was created in key custody. Names no key. | None |
 | `keys.signing_key.destroyed` | Keys | Success | A Tenant's retired Signing or Management key was destroyed in key custody. Names no key. | None |
 | `keys.signing_key.destruction_failed` | Keys | Failure | Key custody failed to destroy a Tenant's retired Signing or Management key; the destruction retries. Names no key. | None |

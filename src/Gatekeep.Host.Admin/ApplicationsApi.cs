@@ -35,6 +35,43 @@ public sealed class ApplicationResponse
 
     /// <summary>When it was created, ISO 8601 in UTC.</summary>
     public required string CreatedAt { get; init; }
+
+    /// <summary>Its Allowed Callback URLs, the OAuth redirect URIs, as stored and matched exactly. Always empty for <c>machine</c>.</summary>
+    public required IReadOnlyList<string> CallbackUrls { get; init; }
+
+    /// <summary>Its Allowed Logout URLs, as stored. Always empty for <c>machine</c>.</summary>
+    public required IReadOnlyList<string> LogoutUrls { get; init; }
+
+    /// <summary>Its Allowed Web Origins, each <c>scheme://host[:port]</c>. Always empty for <c>native</c> and <c>machine</c>.</summary>
+    public required IReadOnlyList<string> WebOrigins { get; init; }
+
+    /// <summary>Its grant types, sorted: <c>authorization_code</c>, <c>client_credentials</c> or <c>refresh_token</c>.</summary>
+    public required IReadOnlyList<string> GrantTypes { get; init; }
+}
+
+/// <summary>
+/// An Application's full settings (Story 3.2): every list is required and replaces what is stored. Each URL
+/// is one line of its field, kept exactly as sent; grant order doesn't matter.
+/// </summary>
+public sealed class ApplicationSettingsRequest
+{
+    /// <summary>Allowed Callback URLs: at most 10, each absolute, with no wildcard. None for <c>machine</c>.</summary>
+    public required IReadOnlyList<string> CallbackUrls { get; init; }
+
+    /// <summary>Allowed Logout URLs: the same rules as callbacks.</summary>
+    public required IReadOnlyList<string> LogoutUrls { get; init; }
+
+    /// <summary>Allowed Web Origins: at most 10, each <c>scheme://host[:port]</c>. None for <c>native</c> or <c>machine</c>.</summary>
+    public required IReadOnlyList<string> WebOrigins { get; init; }
+
+    /// <summary>
+    /// The grant types: <c>[]</c> or <c>[client_credentials]</c> for <c>machine</c>; <c>[]</c>,
+    /// <c>[authorization_code]</c> or <c>[authorization_code, refresh_token]</c> otherwise.
+    /// </summary>
+    public required IReadOnlyList<string> GrantTypes { get; init; }
+
+    /// <summary>In a Prod Tenant, true acknowledges a new custom-scheme callback or logout URL. It isn't stored.</summary>
+    public bool? AcknowledgeCustomScheme { get; init; }
 }
 
 /// <summary>A page of the Tenant's Applications, newest first.</summary>
@@ -66,8 +103,14 @@ internal static class ApplicationsApi
     /// <summary>The largest create body read: anything bigger is 400 <c>application_invalid</c>, unread past it.</summary>
     public const int MaxCreateBody = 4096;
 
+    /// <summary>The largest settings body read (Story 3.2): anything bigger is 400 <c>application_invalid</c>, unread past it.</summary>
+    public const int MaxSettingsBody = 16384;
+
     /// <summary>The types an Admin creates, from Directory through Management, for the OpenAPI document.</summary>
     public static IReadOnlyList<string> Types => ManagementContract.ApplicationTypes;
+
+    /// <summary>The grant types an Application can hold, sorted, for the OpenAPI document.</summary>
+    public static IReadOnlyList<string> GrantTypes => ManagementContract.ApplicationGrantTypes;
 
     public static async Task ListAsync(HttpContext context, AdminApiServices services)
     {
@@ -211,6 +254,100 @@ internal static class ApplicationsApi
         }
     }
 
+    public static async Task UpdateSettingsAsync(HttpContext context, AdminApiServices services)
+    {
+        var path = AdminRequestChecks.PathTenantGrant(context);
+        var principal = AdminRequestChecks.Principal(context);
+        var cancellationToken = context.RequestAborted;
+
+        // A malformed ID names no Application: the same 404 as an unknown one, after the capability.
+        if (!PublicId.TryParse(PublicIdType.Application, context.GetRouteValue(ApplicationRouteValue) as string, out var applicationId))
+        {
+            await RefuseAsync(context, StatusCodes.Status404NotFound, AdminResponses.NotFound);
+            return;
+        }
+
+        // Under a deadline and a size cap, as application/json only, every list given and no line null:
+        // anything else is malformed, and refused before anything is locked or any grant is used.
+        var body = await AdminApi.ReadJsonAsync<ApplicationSettingsRequest>(context.Request, MaxSettingsBody, cancellationToken);
+        if (body is null
+            || body.CallbackUrls is null || body.LogoutUrls is null || body.WebOrigins is null || body.GrantTypes is null
+            || body.CallbackUrls.Contains(null!) || body.LogoutUrls.Contains(null!) || body.WebOrigins.Contains(null!) || body.GrantTypes.Contains(null!))
+        {
+            await RefuseAsync(context, StatusCodes.Status400BadRequest, AdminResponses.ApplicationInvalid);
+            return;
+        }
+
+        var input = new ApplicationSettingsInput(body.CallbackUrls, body.LogoutUrls, body.WebOrigins, body.GrantTypes, body.AcknowledgeCustomScheme == true);
+
+        ApplicationSettingsResult result;
+        try
+        {
+            await using var scope = await TenantScope.BeginAsync(services.Source, AdminRequestChecks.PathTenant(context), cancellationToken);
+            result = await services.Applications.UpdateSettingsAsync(
+                scope.CreateCommandContext(),
+                principal,
+                path.Grant,
+                path.TenantId,
+                applicationId,
+                input,
+                gate => FreshAssertionGate.RequireAsync(context, services, gate),
+                cancellationToken);
+
+            if (result.Status == ApplicationSettingsStatus.Saved)
+            {
+                // The row and its events are written: a client gone now mustn't undo them.
+                await scope.CommitAsync(CancellationToken.None);
+            }
+        }
+        catch (DbException e) when (e.SqlState == AdminResponses.SystemApplicationEdited && !context.Response.HasStarted)
+        {
+            // The guard the visibility filter should have met first: the system Application is no Application here.
+            AdminRequestChecks.Log(context, e);
+            await RefuseAsync(context, StatusCodes.Status404NotFound, AdminResponses.NotFound);
+            return;
+        }
+        catch (DbException e) when (!context.Response.HasStarted)
+        {
+            AdminRequestChecks.Log(context, e);
+            await AdminResponses.UnavailableAsync(context);
+            return;
+        }
+
+        switch (result.Status)
+        {
+            case ApplicationSettingsStatus.Saved:
+            case ApplicationSettingsStatus.Unchanged:
+                await AdminResponses.JsonAsync(context, Response(result.Application!), cancellationToken: CancellationToken.None);
+                return;
+
+            case ApplicationSettingsStatus.FreshAssertionRequired:
+                // The gate has already answered 403 fresh_assertion_required.
+                return;
+
+            case ApplicationSettingsStatus.Invalid:
+                LogRefusal(context, AdminResponses.ApplicationInvalid);
+                await AdminResponses.ProblemAsync(
+                    context,
+                    StatusCodes.Status400BadRequest,
+                    AdminResponses.ApplicationInvalid,
+                    [.. (result.Errors ?? []).Select(e => new ApiProblemError { Field = e.Field, Index = e.Index, Reason = e.Reason })]);
+                return;
+
+            case ApplicationSettingsStatus.AcknowledgementRequired:
+                await RefuseAsync(context, StatusCodes.Status400BadRequest, AdminResponses.CustomSchemeAcknowledgementRequired);
+                return;
+
+            case ApplicationSettingsStatus.NotFound:
+                await RefuseAsync(context, StatusCodes.Status404NotFound, AdminResponses.NotFound);
+                return;
+
+            default:
+                await RefuseAsync(context, StatusCodes.Status403Forbidden, AdminResponses.AccessDenied);
+                return;
+        }
+    }
+
     private static ApplicationResponse Response(ManagedApplication application) => new()
     {
         Id = application.ClientId,
@@ -219,14 +356,21 @@ internal static class ApplicationsApi
         Type = application.Type,
         CredentialRequired = application.CredentialRequired,
         CreatedAt = application.CreatedAt.UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", CultureInfo.InvariantCulture),
+        CallbackUrls = application.CallbackUrls,
+        LogoutUrls = application.LogoutUrls,
+        WebOrigins = application.WebOrigins,
+        GrantTypes = application.GrantTypes,
     };
 
-    /// <summary>A refusal, logged under its fixed code only: never the name, the type or an ID.</summary>
+    /// <summary>A refusal, logged under its fixed code only: never the name, the type, a URL or an ID.</summary>
     private static Task RefuseAsync(HttpContext context, int status, string problem)
     {
+        LogRefusal(context, problem);
+        return AdminResponses.ProblemAsync(context, status, problem);
+    }
+
+    private static void LogRefusal(HttpContext context, string problem) =>
         context.RequestServices.GetRequiredService<ILoggerFactory>()
             .CreateLogger("Gatekeep.Host.Admin")
             .LogInformation("An Applications request was refused with {Problem}, trace {TraceId}.", problem, AdminResponses.TraceId(context));
-        return AdminResponses.ProblemAsync(context, status, problem);
-    }
 }
