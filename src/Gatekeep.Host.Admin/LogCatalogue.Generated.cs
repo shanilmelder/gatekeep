@@ -46,7 +46,7 @@ internal static partial class LogCatalogue
         new("keys.signing_key.destruction_failed", AuditOutcome.Failure, "Key custody failed to destroy a Tenant's retired Signing or Management key; the destruction retries. Names no key."),
         new("keys.signing_key.promoted", AuditOutcome.Success, "A Tenant's next Signing or Management key became current. Names no key."),
         new("keys.signing_key.retired", AuditOutcome.Success, "A Tenant's previous Signing or Management key retired and its destruction was queued. Names no key."),
-        new("keys.signing_key.rotated", AuditOutcome.Success, "A Tenant's current Signing or Management key reached its rotation age and became previous. Names no key."),
+        new("keys.signing_key.rotated", AuditOutcome.Success, "A Tenant's Signing or Management key was rotated, by the daily rotation or a Tenant Owner: current became previous. Names no key."),
         new("keys.tenant_keys.provisioned", AuditOutcome.Success, "A Tenant's missing Signing Keys, Management keys or token protection key were created in key custody. Names no key."),
         new("keys.transit_key.swept", AuditOutcome.Success, "A Signing or Management key at least 24 hours old, named by no row when checked, was deleted from key custody. Names no key."),
         new("operations.job.dead", AuditOutcome.Failure, "A job used its last attempt and went dead. Only its fixed failure code is kept."),

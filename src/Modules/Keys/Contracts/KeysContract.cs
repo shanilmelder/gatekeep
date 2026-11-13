@@ -138,6 +138,34 @@ public static class KeysContract
         SigningKeyLifecycle.RotateAsync(context, custody, appender, enqueuer, destroyJob, tenantId, cancellationToken);
 
     /// <summary>
+    /// The Tenant Owner's rotation of the Tenant's Signing Key now (Story 9.2, FR-37), in its own
+    /// <paramref name="context"/>, under the same per-Tenant lock as <see cref="RotateTenantKeysAsync"/>
+    /// and <see cref="EnsureTenantKeysAsync"/>. Only the <c>signing</c> purpose: once its <c>next</c> has
+    /// been published for at least 15 minutes by database time, a new <c>next</c> is created in Transit
+    /// first, then <c>current</c> becomes <c>previous</c>, <c>next</c> becomes <c>current</c> and the new
+    /// row is inserted, with <see cref="KeysEvents.SigningKeyRotated"/>, <see cref="KeysEvents.SigningKeyPromoted"/>
+    /// and <see cref="KeysEvents.SigningKeyCreated"/> written as <paramref name="actor"/>, and one
+    /// <see cref="SigningKeysChannel"/> notification. A younger <c>next</c> is
+    /// <see cref="SigningKeyRotationStatus.NotReady"/> with the time left, and nothing is written.
+    /// <c>current</c>'s age is never checked, and nothing is retired, destroyed or enqueued.
+    /// </summary>
+    /// <exception cref="KeyCustodyException">
+    /// Custody failed to create the replacement. Nothing may be committed: the caller rolls the command back.
+    /// </exception>
+    /// <exception cref="InvalidOperationException">
+    /// The context isn't <paramref name="tenantId"/>'s, or the Tenant has no signing <c>current</c> or <c>next</c>.
+    /// </exception>
+    [StateChanging]
+    public static Task<SigningKeyRotation> RotateSigningKeyNowAsync(
+        CommandContext context,
+        IKeyCustody custody,
+        IAuditAppender appender,
+        Actor actor,
+        Guid tenantId,
+        CancellationToken cancellationToken) =>
+        SigningKeyLifecycle.RotateNowAsync(context, custody, appender, actor, tenantId, cancellationToken);
+
+    /// <summary>
     /// Destroys a retired key's Transit key (Story 2.4), in its Tenant's own <paramref name="context"/>.
     /// The row is re-read and locked: only a <c>retired</c> row not yet destroyed is acted on, and
     /// then its Transit key is deleted, <c>destroyed_at</c> set and one event written. Any other row,

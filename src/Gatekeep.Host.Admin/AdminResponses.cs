@@ -18,6 +18,13 @@ public sealed class ApiProblem
     /// </summary>
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
     public IReadOnlyList<ApiProblemError>? Errors { get; init; }
+
+    /// <summary>
+    /// Only on <c>signing_key_not_ready</c> (Story 9.2): the whole seconds, rounded up, until the next Signing
+    /// Key has been published for 15 minutes, the same value as the <c>Retry-After</c> header. Absent otherwise.
+    /// </summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public int? RetryAfterSeconds { get; init; }
 }
 
 /// <summary>One refused line or field of an Application settings save (Story 3.2) or tokens save (Story 3.4).</summary>
@@ -155,6 +162,13 @@ internal static class AdminResponses
     /// </summary>
     public const string ClientSecretLimitReached = "client_secret_limit_reached";
 
+    /// <summary>
+    /// A Signing Key rotation on demand (Story 9.2) while the next key was published less than 15 minutes ago,
+    /// the JWKS cache limit. The body's <c>retryAfterSeconds</c> and the <c>Retry-After</c> header say how long
+    /// remains. Nothing was written.
+    /// </summary>
+    public const string SigningKeyNotReady = "signing_key_not_ready";
+
     /// <summary>Directory's guard SQLSTATE for a secret naming a Tenant's system Application (Story 2.8): a 404 on a secret create (Story 3.3).</summary>
     public const string SystemApplicationNamed = "GK011";
 
@@ -224,6 +238,7 @@ internal static class AdminResponses
         CustomSchemeAcknowledgementRequired,
         ClientSecretNotApplicable,
         ClientSecretLimitReached,
+        SigningKeyNotReady,
     ];
 
     /// <summary>The Session cookie, expired: sent with a sign-out and a 401 for a stale cookie.</summary>
@@ -331,12 +346,27 @@ internal static class AdminResponses
     public static Task ProblemAsync(HttpContext context, int status, string code) => ProblemAsync(context, status, code, errors: null);
 
     /// <summary>A problem with its <paramref name="errors"/>, when it carries any (Story 3.2's settings save).</summary>
-    public static Task ProblemAsync(HttpContext context, int status, string code, IReadOnlyList<ApiProblemError>? errors)
+    public static Task ProblemAsync(HttpContext context, int status, string code, IReadOnlyList<ApiProblemError>? errors) =>
+        ProblemAsync(context, status, code, errors, retryAfterSeconds: null);
+
+    /// <summary>
+    /// A problem with its <paramref name="errors"/> or its <paramref name="retryAfterSeconds"/>, when it carries
+    /// any; the seconds go in the <c>Retry-After</c> header too (Story 9.2).
+    /// </summary>
+    public static Task ProblemAsync(HttpContext context, int status, string code, IReadOnlyList<ApiProblemError>? errors, int? retryAfterSeconds)
     {
         context.Response.StatusCode = status;
         context.Response.ContentType = ProblemContentType;
         context.Response.Headers.CacheControl = "no-store";
-        return JsonAsync(context, new ApiProblem { Code = code, TraceId = TraceId(context), Errors = errors }, setContentType: false);
+        if (retryAfterSeconds is { } seconds)
+        {
+            context.Response.Headers.RetryAfter = seconds.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        }
+
+        return JsonAsync(
+            context,
+            new ApiProblem { Code = code, TraceId = TraceId(context), Errors = errors, RetryAfterSeconds = retryAfterSeconds },
+            setContentType: false);
     }
 
     /// <summary>

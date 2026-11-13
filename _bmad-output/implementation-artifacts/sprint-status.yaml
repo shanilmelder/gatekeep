@@ -160,7 +160,7 @@ development_status:
 
   epic-9: in-progress
   9-1-view-signing-keys: done
-  9-2-rotate-a-signing-key-on-demand: backlog
+  9-2-rotate-a-signing-key-on-demand: done
   9-3-revoke-a-signing-key: backlog
   epic-9-retrospective: optional
 

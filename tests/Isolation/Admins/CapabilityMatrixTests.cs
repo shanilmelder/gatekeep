@@ -161,11 +161,19 @@ public sealed class CapabilityMatrixTests(PostgresFixture postgres)
             AdminCapabilities.All.Where(c => c.FreshAssertion != FreshAssertion.Never || c.Scope == CapabilityScope.Deployment),
             c => Assert.False(c.MachineAllowed, c.Name));
 
-        // FR-42 literally: everything else is machine-allowed.
+        // FR-42 literally: everything else is machine-allowed, but for the reviewed Tenant Owner-only
+        // actions with no fresh assertion that Epic 9 refuses to machine principals.
         Assert.All(
-            AdminCapabilities.All.Where(c => c.FreshAssertion == FreshAssertion.Never && c.Scope == CapabilityScope.Tenant),
+            AdminCapabilities.All.Where(c => c.FreshAssertion == FreshAssertion.Never && c.Scope == CapabilityScope.Tenant && !MachineDenied.Contains(c.Name)),
             c => Assert.True(c.MachineAllowed, c.Name));
+        Assert.All(MachineDenied, name => Assert.False(AdminCapabilities.Find(name)!.MachineAllowed, name));
     }
+
+    /// <summary>
+    /// Story 9.2: Signing Key rotation on demand needs no fresh assertion, yet Epic 9 refuses it to machine
+    /// principals ("Given an Editor or machine principal … refused"), over Story 1.24's FR-42 default.
+    /// </summary>
+    private static readonly string[] MachineDenied = ["tenant.signing_keys.rotate"];
 
     public static TheoryData<string, CapabilityScope, TenantRole[], bool, FreshAssertion> BrokenInvariants => new()
     {
@@ -224,7 +232,9 @@ public sealed class CapabilityMatrixTests(PostgresFixture postgres)
 
         var expected = AdminCapabilities.All.Where(c => c.Scope == CapabilityScope.Tenant && c.MachineAllowed).Select(c => c.Name).ToList();
         Assert.Equal(expected, allowed);
-        Assert.Equal(18, expected.Count);
+        // 17 since Story 9.2: tenant.signing_keys.rotate is the Owner's own, never a machine principal's.
+        Assert.Equal(17, expected.Count);
+        Assert.DoesNotContain(AdminCapabilities.TenantSigningKeysRotate.Name, allowed);
         Assert.DoesNotContain(allowed, n => n.StartsWith("deployment.", StringComparison.Ordinal));
 
         Assert.Equal(expected, (await authorization.HeldAsync(context, machine, CapabilityScope.Tenant, TenantA, Cancellation)).Select(c => c.Name));

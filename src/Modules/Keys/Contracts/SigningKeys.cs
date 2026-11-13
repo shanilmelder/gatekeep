@@ -64,3 +64,20 @@ public sealed record ListedSigningKey(KeyName Key, int Version, SigningKeyState 
     /// <summary>The <c>kid</c> (AD-10): <c>{transit key name}.v{version}</c>, as JWKS publishes it.</summary>
     public string KeyId => $"{Key.Value}.v{Version.ToString(System.Globalization.CultureInfo.InvariantCulture)}";
 }
+
+/// <summary>How an on-demand rotation of a Tenant's Signing Key ended (Story 9.2).</summary>
+public enum SigningKeyRotationStatus
+{
+    /// <summary><c>next</c> became <c>current</c>, <c>current</c> became <c>previous</c>, and a new <c>next</c> was created.</summary>
+    Rotated,
+
+    /// <summary><c>next</c> was published less than 15 minutes ago: nothing was written.</summary>
+    NotReady,
+}
+
+/// <summary>
+/// An on-demand rotation's outcome (Story 9.2). <see cref="RetryAfter"/> is set only on
+/// <see cref="SigningKeyRotationStatus.NotReady"/>: how long until <c>next</c> has been published for
+/// 15 minutes, by database time, never under one second.
+/// </summary>
+public sealed record SigningKeyRotation(SigningKeyRotationStatus Status, TimeSpan? RetryAfter);

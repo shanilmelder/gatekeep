@@ -1,6 +1,8 @@
 /*
  * Signing keys (Story 9.1): the table and the JWKS sample under it, stacked across the page's
- * whole grid, and each key ID in the code type with its Copy beside it. Tokens only.
+ * whole grid, and each key ID in the code type with its Copy beside it. Story 9.2: Rotate now in
+ * the header's actions, with the note on why it is off beside it, and the view-only banner across
+ * the grid. Tokens only.
  */
 
 .content {
@@ -22,4 +24,21 @@
 .keyId > code {
   font: var(--gk-font-code);
   overflow-wrap: anywhere;
+}
+
+.rotate {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--gk-space-12);
+}
+
+.note {
+  margin: 0;
+  font: var(--gk-font-small);
+  color: var(--gk-color-tx2);
+}
+
+.viewOnly {
+  grid-column: 1 / -1;
 }
