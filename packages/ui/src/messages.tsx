@@ -430,6 +430,16 @@ export interface Messages {
   logsLoadMore: string;
   /** The banner when the server refused the search as malformed: nothing was read. */
   logsInvalid: string;
+  /** The event drawer's summary row labels (Story 7.5), beside the table's Time (UTC), User and Application. */
+  logsEventActor: string;
+  logsEventTarget: string;
+  logsEventIpAddress: string;
+  logsEventUserAgent: string;
+  logsEventEmail: string;
+  /** The event drawer's banner when the event couldn't be read; Retry reads it again. */
+  logsEventLoadFailed: string;
+  /** The event drawer's banner when the Tenant's Log has no such event: no Retry. */
+  logsEventNotFound: string;
   /** The Security group's Signing keys item (Story 9.1), which opens the Signing keys page. */
   navSigningKeys: string;
   /** The Signing keys page's heading and description (design GEN.keys). */
@@ -880,6 +890,13 @@ export const defaultMessages: Readonly<Messages> = Object.freeze({
   logsEmpty: 'No events in this range',
   logsLoadMore: 'Load more',
   logsInvalid: "That search isn't valid. Check the value and search again.",
+  logsEventActor: 'Actor',
+  logsEventTarget: 'Target',
+  logsEventIpAddress: 'IP address',
+  logsEventUserAgent: 'User-Agent',
+  logsEventEmail: 'Email',
+  logsEventLoadFailed: "We couldn't load this event.",
+  logsEventNotFound: "This event isn't in this Tenant's Log.",
   navSigningKeys: 'Signing keys',
   signingKeysTitle: 'Signing keys',
   signingKeysDescription: 'Keys used to sign ID and access tokens. Rotate regularly; revoke if compromised.',

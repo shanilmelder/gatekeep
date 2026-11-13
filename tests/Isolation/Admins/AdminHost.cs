@@ -83,8 +83,7 @@ internal sealed class AdminHost : IAsyncDisposable
         database ??= await postgres.NewMigratedDatabaseAsync();
         var directory = Directory.CreateTempSubdirectory("gatekeep-admin-host-").FullName;
         var socket = new FakeOpenBaoSocket { RespondToBody = Custody };
-        var health = HostProcess.FreePort();
-        var port = HostProcess.FreePort();
+        var (health, port) = HostProcess.FreePorts();
 
         var process = HostProcess.Start(
             "Admin",

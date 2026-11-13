@@ -399,6 +399,20 @@ describe('api-client', () => {
     assert.equal(TENANT_HEADER in calls[1].init.headers, false);
   });
 
+  it("opens one Tenant Log event as a read, both IDs encoded", async () => {
+    const event = { id: 'evt_a', occurredAt: '2026-11-14T09:30:00.000Z', type: 'a.b.c', outcome: 'success', summary: 'S', actor: { kind: 'system', id: null }, target: null, raw: null };
+    const { calls, fetch } = fakeFetch(200, JSON.stringify(event));
+    const client = createApiClient({ fetch, csrfToken: () => 'csrf-1', pageTenant: () => 'ten_a' });
+
+    const read = await client.getTenantLogEvent('ten_a/b', 'evt_c?d');
+
+    assert.equal(calls[0].input, '/api/v1/tenants/ten_a%2Fb/logs/evt_c%3Fd');
+    assert.equal(calls[0].init.method, 'GET');
+    assert.equal(CSRF_HEADER in calls[0].init.headers, false);
+    assert.equal(TENANT_HEADER in calls[0].init.headers, false);
+    assert.deepEqual(read.data, event);
+  });
+
   it('parses only a string code, and a missing trace ID as empty', () => {
     assert.equal(parseProblem(null), null);
     assert.equal(parseProblem('x'), null);

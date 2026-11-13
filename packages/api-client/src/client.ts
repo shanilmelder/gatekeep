@@ -36,6 +36,12 @@ export type TenantDeletion = components['schemas']['TenantDeletion'];
 export type TenantLogsResponse = components['schemas']['TenantLogsResponse'];
 export type TenantLogEvent = components['schemas']['TenantLogEventResponse'];
 export type LogReference = components['schemas']['LogReference'];
+/** One event of a Tenant's Log, opened (Story 7.5): a search row's fields, and `raw` for an Editor or Owner only. */
+export type TenantLogEventDetail = components['schemas']['TenantLogEventDetailResponse'];
+/** An event's raw detail: its envelope, its seal and its detail row. */
+export type TenantLogRaw = components['schemas']['TenantLogRawResponse'];
+export type TenantLogSeal = components['schemas']['TenantLogSealResponse'];
+export type TenantLogRawDetail = components['schemas']['TenantLogRawDetailResponse'];
 
 /** A Log search's filters (Story 7.4), each optional and sent at most once, and the next page's cursor. */
 export type TenantLogsQuery = NonNullable<operations['SearchTenantLogs']['parameters']['query']>;
@@ -316,6 +322,15 @@ export function createApiClient(options: ApiClientOptions = {}) {
         'get',
       );
     },
+    /**
+     * One event of the Tenant's Log (Story 7.5), by its `evt_` ID. `raw` is null unless the server
+     * finds the caller may read raw detail. Both IDs go into the path encoded.
+     */
+    getTenantLogEvent: (tenantId: string, eventId: string) =>
+      request(
+        `/api/v1/tenants/${encodeURIComponent(tenantId)}/logs/${encodeURIComponent(eventId)}` as '/api/v1/tenants/{tenantId}/logs/{eventId}',
+        'get',
+      ),
     /** Changes the Tenant's environment label. Removing Prod needs a fresh assertion bound to this Tenant. */
     setTenantLabel: (tenantId: string, body: SetTenantLabelRequest) =>
       request(`/api/v1/tenants/${encodeURIComponent(tenantId)}/label` as '/api/v1/tenants/{tenantId}/label', 'put', body),

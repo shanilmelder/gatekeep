@@ -600,6 +600,29 @@ internal static class AdminApi
             .Produces<ApiProblem>(StatusCodes.Status403Forbidden, AdminResponses.ProblemContentType)
             .Produces(StatusCodes.Status503ServiceUnavailable);
 
+        app.MapGet("/api/v1/tenants/{tenantId}/logs/{eventId}", static (HttpContext context, AdminApiServices services) => TenantLogsApi.GetAsync(context, services))
+            .WithMetadata(
+                TenantApiEndpoint.Instance,
+                new RequiresCapability(AdminCapabilities.TenantLogsRead),
+                new PathParameter(TenantLogsApi.EventRouteValue, "The event's public ID, as the search lists it: evt_ and 26 base32 characters."))
+            .WithName("GetTenantLogEvent")
+            .WithTags(TenantTag)
+            .WithSummary("One event of the path Tenant's Log, with its raw detail for an Editor or Owner.")
+            .WithDescription(
+                "Any Tenant Role in the path Tenant. Read only, in the Tenant's own scope, and the read isn't audited. The same " +
+                "fields as a search row. raw is set only when the caller holds tenant.log_detail.read in this Tenant (Editor and " +
+                "Owner): the envelope, the seal (seq, and prevHash and hash in lowercase hex; null while unsealed, prevHash null " +
+                "for a chain's first event) and the detail (IP address, User-Agent and email, each nullable; null when the event " +
+                "has none). For anyone else raw is null and no detail is read. An eventId that isn't an evt_ ID is 400 " +
+                "invalid_request. An event this Tenant doesn't have, including another Tenant's, is 404 not_found. A malformed, " +
+                "unknown or role-less Tenant is 403 access_denied, audited as every Tenant capability refusal is.")
+            .Produces<TenantLogEventDetailResponse>(StatusCodes.Status200OK)
+            .Produces<ApiProblem>(StatusCodes.Status400BadRequest, AdminResponses.ProblemContentType)
+            .Produces(StatusCodes.Status401Unauthorized)
+            .Produces<ApiProblem>(StatusCodes.Status403Forbidden, AdminResponses.ProblemContentType)
+            .Produces<ApiProblem>(StatusCodes.Status404NotFound, AdminResponses.ProblemContentType)
+            .Produces(StatusCodes.Status503ServiceUnavailable);
+
         app.MapGet("/api/v1/tenants/{tenantId}/signing-keys", static (HttpContext context, AdminApiServices services) => SigningKeysApi.ListAsync(context, services))
             .WithMetadata(TenantApiEndpoint.Instance, new RequiresCapability(AdminCapabilities.TenantConfigurationRead))
             .WithName("ListSigningKeys")

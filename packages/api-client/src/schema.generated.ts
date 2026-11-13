@@ -500,6 +500,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/tenants/{tenantId}/logs/{eventId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * One event of the path Tenant's Log, with its raw detail for an Editor or Owner.
+         * @description Any Tenant Role in the path Tenant. Read only, in the Tenant's own scope, and the read isn't audited. The same fields as a search row. raw is set only when the caller holds tenant.log_detail.read in this Tenant (Editor and Owner): the envelope, the seal (seq, and prevHash and hash in lowercase hex; null while unsealed, prevHash null for a chain's first event) and the detail (IP address, User-Agent and email, each nullable; null when the event has none). For anyone else raw is null and no detail is read. An eventId that isn't an evt_ ID is 400 invalid_request. An event this Tenant doesn't have, including another Tenant's, is 404 not_found. A malformed, unknown or role-less Tenant is 403 access_denied, audited as every Tenant capability refusal is.
+         */
+        get: operations["GetTenantLogEvent"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/tenants/{tenantId}/signing-keys": {
         parameters: {
             query?: never;
@@ -1037,6 +1057,17 @@ export interface components {
             tenants: components["schemas"]["TenantResponse"][];
             nextCursor: null | string;
         };
+        TenantLogEventDetailResponse: {
+            id: string;
+            /** Format: date-time */
+            occurredAt: string;
+            type: string;
+            outcome: null | string;
+            summary: null | string;
+            actor: components["schemas"]["LogReference"];
+            target: null | components["schemas"]["LogReference"];
+            raw: null | components["schemas"]["TenantLogRawResponse"];
+        };
         TenantLogEventResponse: {
             id: string;
             /** Format: date-time */
@@ -1046,6 +1077,27 @@ export interface components {
             summary: null | string;
             actor: components["schemas"]["LogReference"];
             target: null | components["schemas"]["LogReference"];
+        };
+        TenantLogRawDetailResponse: {
+            ipAddress: null | string;
+            userAgent: null | string;
+            email: null | string;
+        };
+        TenantLogRawResponse: {
+            id: string;
+            /** Format: date-time */
+            occurredAt: string;
+            type: string;
+            actor: components["schemas"]["LogReference"];
+            target: null | components["schemas"]["LogReference"];
+            seal: null | components["schemas"]["TenantLogSealResponse"];
+            detail: null | components["schemas"]["TenantLogRawDetailResponse"];
+        };
+        TenantLogSealResponse: {
+            /** Format: int64 */
+            seq: number;
+            prevHash: null | string;
+            hash: string;
         };
         TenantLogsResponse: {
             events: components["schemas"]["TenantLogEventResponse"][];
@@ -2638,6 +2690,72 @@ export interface operations {
             };
             /** @description access_denied, with the problem body, when the capability is refused. No body when an earlier check refuses first: a Session restricted to setup, or on a state-changing call a wrong Origin or CSRF token. */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    GetTenantLogEvent: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The Tenant's public ID: ten_ and the UUID's 16 bytes in lowercase RFC 4648 base32 with no padding, whose last character carries two zero bits. Only this canonical spelling, after URL decoding, names a Tenant, and the empty UUID's never does; anything else is refused like a Tenant the Admin holds no role in. */
+                tenantId: string;
+                /** @description The event's public ID, as the search lists it: evt_ and 26 base32 characters. */
+                eventId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TenantLogEventDetailResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description access_denied, with the problem body, when the capability is refused. No body when an earlier check refuses first: a Session restricted to setup, or on a state-changing call a wrong Origin or CSRF token. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Not Found */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

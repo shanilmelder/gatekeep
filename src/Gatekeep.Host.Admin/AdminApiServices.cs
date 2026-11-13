@@ -99,6 +99,9 @@ internal sealed class AdminApiServices : IAsyncDisposable
     /// <summary>A Tenant's Log search (Story 7.4), run in the path Tenant's scope only.</summary>
     public ITenantLogSearch LogSearch { get; } = AuditContract.CreateLogSearch();
 
+    /// <summary>One event of a Tenant's Log, opened (Story 7.5), in the path Tenant's scope only.</summary>
+    public ITenantLogEventReader LogEvents { get; } = AuditContract.CreateLogEventReader();
+
     /// <summary>Your credentials (Story 1.26): the Admin's own list, and removal under the floor.</summary>
     public IAdminCredentials Credentials { get; }
 

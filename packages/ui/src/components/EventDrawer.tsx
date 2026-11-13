@@ -23,6 +23,11 @@ interface EventDrawerBaseProps extends Omit<DrawerProps, 'title' | 'children' | 
   title: ReactNode;
   /** The summary, as label and value pairs in a description list. */
   summary: readonly EventSummaryRow[];
+  /**
+   * While the event is still being read, or its read failed: shown in place of the summary and
+   * the raw section, such as skeleton rows or a banner with Retry. Neither renders meanwhile.
+   */
+  status?: ReactNode;
 }
 
 /**
@@ -48,11 +53,12 @@ function toJson(value: unknown): string | null {
  * its title, the summary rows, and, for a role that can see it, the raw JSON with Copy JSON.
  * Without `canSeeRaw`, the raw section is never rendered, so nothing of it reaches the DOM.
  */
-export function EventDrawer({ code, outcome = 'success', title, summary, canSeeRaw, raw, ...rest }: EventDrawerProps) {
+export function EventDrawer({ code, outcome = 'success', title, summary, status, canSeeRaw, raw, ...rest }: EventDrawerProps) {
   const messages = useMessages();
+  const settled = status === undefined || status === null || status === false;
   // Read only for a role that may see it, whatever an untyped caller passes, so the JSON is
   // never even serialised otherwise.
-  const json = canSeeRaw ? toJson(raw) : null;
+  const json = canSeeRaw && settled ? toJson(raw) : null;
   return (
     <Drawer
       {...rest}
@@ -62,7 +68,8 @@ export function EventDrawer({ code, outcome = 'success', title, summary, canSeeR
         </>
       }
     >
-      {summary.length > 0 && (
+      {!settled && <div data-event-status="">{status}</div>}
+      {settled && summary.length > 0 && (
         <dl className={styles.summary}>
           {summary.map((row, index) => (
             <div key={row.key ?? index} className={styles.row}>
@@ -72,7 +79,7 @@ export function EventDrawer({ code, outcome = 'success', title, summary, canSeeR
           ))}
         </dl>
       )}
-      {canSeeRaw ? (
+      {!settled ? null : canSeeRaw ? (
         // A plain group: the JSON viewer is already the region named "Raw event".
         <div className={styles.raw} data-event-raw="">
           <div className={styles.rawHeader}>
