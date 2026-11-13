@@ -359,7 +359,8 @@ test.describe('rotate', () => {
     await expect(rotate(page)).toHaveAccessibleDescription('Tenant Owner only');
     await expect(page.getByTestId('tenant-view-only')).toHaveCount(0);
 
-    await rotate(page).click();
+    // aria-disabled keeps it focusable, so Playwright's actionability check would wait: press it anyway.
+    await rotate(page).click({ force: true });
     await expect(toast(page)).toHaveCount(0);
     expect(api.count(`POST ${ROTATE}`)).toBe(0);
   });
