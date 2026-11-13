@@ -50,4 +50,6 @@ echo "== architecture tests"
 dotnet test tests/Architecture --no-build
 
 echo "== isolation tests"
-dotnet test tests/Isolation --no-build
+# Detailed, so a fixture's cleanup failure prints its message and stack trace: at the
+# default verbosity xUnit shows only "Test Assembly Cleanup Failure" and the exception type.
+dotnet test tests/Isolation --no-build --logger "console;verbosity=detailed"
