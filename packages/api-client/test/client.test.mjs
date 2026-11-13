@@ -417,4 +417,28 @@ describe('api-client', () => {
     assert.equal(result.ok, false);
     assert.deepEqual(result.problem?.errors, [{ field: 'callbackUrls', index: 0, reason: 'not_absolute' }]);
   });
+
+  it("lists, creates and revokes an Application's secrets with every ID encoded, the page Tenant and the CSRF header", async () => {
+    const created = { secret: 'ten_a.value', items: [{ id: 'sec_n', createdAt: '2026-11-13T00:00:00.000Z', expiresAt: null }] };
+    const { calls, fetch } = fakeFetch(201, JSON.stringify(created));
+    const client = createApiClient({ fetch, csrfToken: () => 'csrf-1', pageTenant: () => 'ten_a' });
+
+    const list = await client.listApplicationSecrets('ten_a', 'app_b/c');
+    const create = await client.createApplicationSecret('ten_a', 'app_b/c');
+    await client.revokeApplicationSecret('ten_a', 'app_b/c', 'sec_d/e');
+
+    assert.equal(calls[0].input, '/api/v1/tenants/ten_a/applications/app_b%2Fc/secrets');
+    assert.equal(calls[0].init.method, 'GET');
+    assert.equal(calls[1].input, '/api/v1/tenants/ten_a/applications/app_b%2Fc/secrets');
+    assert.equal(calls[1].init.method, 'POST');
+    assert.equal(calls[1].init.body, undefined);
+    assert.equal(calls[1].init.headers[CSRF_HEADER], 'csrf-1');
+    assert.equal(calls[1].init.headers[TENANT_HEADER], 'ten_a');
+    assert.equal(calls[2].input, '/api/v1/tenants/ten_a/applications/app_b%2Fc/secrets/sec_d%2Fe/revoke');
+    assert.equal(calls[2].init.method, 'POST');
+    assert.equal(calls[2].init.headers[TENANT_HEADER], 'ten_a');
+    assert.equal(list.ok, true);
+    assert.equal(create.ok, true);
+    assert.deepEqual(create.data, created);
+  });
 });

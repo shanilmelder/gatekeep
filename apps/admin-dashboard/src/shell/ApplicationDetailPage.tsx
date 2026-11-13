@@ -14,6 +14,7 @@ import {
 import { useCallback, useEffect, useRef, useState, type MouseEvent } from 'react';
 import { navigate } from '../navigation';
 import { api } from '../session';
+import { ApplicationCredentials } from './ApplicationCredentials';
 import { applicationsPath } from './applications';
 import { ApplicationSettings } from './ApplicationSettings';
 import { failureOf } from './ApplicationsPage';
@@ -47,8 +48,8 @@ export interface ApplicationDetailPageProps {
 /**
  * One Application (Story 3.1; design Application detail): the breadcrumb back to Applications, the
  * name with its type badge, the client ID in the code type with Copy, then the tabs. Settings, the
- * default (Story 3.2), holds the URLs and grants; Credentials says whether the type needs a secret.
- * Regular web and machine-to-machine need one, which only a Tenant Owner creates (Story 3.3);
+ * default (Story 3.2), holds the URLs and grants; Credentials (Story 3.3) the client secrets a regular
+ * web or machine-to-machine Application needs, which only a Tenant Owner creates, rotates and revokes;
  * single-page and native need none. A 404 says the Tenant has no such Application, a 403 is the
  * forbidden page, and any other failure a banner with Retry.
  */
@@ -160,7 +161,6 @@ export function ApplicationDetailPage({ request, fresh, tenantId, tenant, applic
   }
 
   const { application: ready } = load;
-  const needsSecret = ready.credentialRequired;
   return (
     <SectionPage
       eyebrow={eyebrow}
@@ -206,10 +206,13 @@ export function ApplicationDetailPage({ request, fresh, tenantId, tenant, applic
               id: 'credentials',
               label: messages.applicationTabCredentials,
               panel: (
-                <section className={styles.section} aria-labelledby="application-credentials-heading" data-testid="application-credentials">
-                  <h2 id="application-credentials-heading">{messages.applicationCredentialsTitle}</h2>
-                  <p>{needsSecret ? messages.applicationCredentialsNeeded : messages.applicationCredentialsNone}</p>
-                </section>
+                <ApplicationCredentials
+                  request={request}
+                  fresh={fresh}
+                  tenantId={tenantId}
+                  application={ready}
+                  canManage={has('tenant.client_secrets.manage')}
+                />
               ),
             },
           ]}

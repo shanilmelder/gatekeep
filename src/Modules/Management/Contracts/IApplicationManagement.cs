@@ -1,4 +1,5 @@
 using Gatekeep.Kernel.Persistence;
+using Gatekeep.Kernel.Secrets;
 using Gatekeep.Modules.Admins.Contracts;
 
 namespace Gatekeep.Modules.Management.Contracts;
@@ -89,6 +90,46 @@ public sealed record ApplicationSettingsResult(
 public sealed record ApplicationPageResult(ApplicationStatus Status, IReadOnlyList<ManagedApplication> Applications, Guid? NextAfter);
 
 /// <summary>
+/// One live client secret of an Application as the Admin API shows it (Story 3.3): its row ID, when it was
+/// created and, for a rotated-out secret still in its overlap, when it stops; null for the current secret.
+/// Never its value or hash.
+/// </summary>
+public sealed record ManagedClientSecret(Guid Id, DateTimeOffset CreatedAt, DateTimeOffset? ExpiresAt);
+
+/// <summary>How a client secret list, create, rotation or revocation ended (Story 3.3).</summary>
+public enum ApplicationSecretStatus
+{
+    /// <summary>Done: the result holds the live secrets, and for a create the new secret.</summary>
+    Done,
+
+    /// <summary>The capability isn't held in the path Tenant, decided again here (AD-5). A machine principal never holds the write's.</summary>
+    Forbidden,
+
+    /// <summary>The path Tenant has no visible Application by that ID, or no live secret by that ID of it. Nothing was written.</summary>
+    NotFound,
+
+    /// <summary>The Application is a <c>spa</c> or <c>native</c> one, which needs no secret. Nothing was written.</summary>
+    NotApplicable,
+
+    /// <summary>The Application already holds the most live secrets: an old secret still overlaps. Nothing was written.</summary>
+    LimitReached,
+}
+
+/// <summary>
+/// A client secret call's result (Story 3.3): the live secrets when <see cref="Status"/> is
+/// <see cref="ApplicationSecretStatus.Done"/>, newest first, and on a create the new secret, shown this once (AD-24).
+/// </summary>
+public sealed class ApplicationSecretsResult
+{
+    public required ApplicationSecretStatus Status { get; init; }
+
+    /// <summary>The new secret, on a create or rotation only. Only its SHA-256 is stored.</summary>
+    public RevealOnce<string>? Secret { get; init; }
+
+    public IReadOnlyList<ManagedClientSecret> Secrets { get; init; } = [];
+}
+
+/// <summary>
 /// A Tenant's Applications (Story 3.1, FR-11, FR-44): listed and read with
 /// <c>tenant.configuration.read</c>, created with <c>tenant.applications.manage</c>. Each call runs in
 /// the path Tenant's own context and decides the capability again (AD-5) from the grant the request
@@ -155,5 +196,55 @@ public interface IApplicationManagement
         Guid applicationId,
         ApplicationSettingsInput input,
         Func<CancellationToken, Task<bool>> requireFreshAssertion,
+        CancellationToken cancellationToken);
+
+    /// <summary>
+    /// The live client secrets of the Application <paramref name="applicationId"/> (Story 3.3), newest first, with
+    /// <c>tenant.configuration.read</c>: never a value or hash. A <c>spa</c> or <c>native</c> Application lists none.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The context isn't <paramref name="tenantId"/>'s.</exception>
+    Task<ApplicationSecretsResult> ListSecretsAsync(
+        CommandContext tenantContext,
+        Principal principal,
+        TenantRoleGrant? grant,
+        Guid tenantId,
+        Guid applicationId,
+        CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Creates or rotates the client secret of the <c>web</c> or <c>machine</c> Application
+    /// <paramref name="applicationId"/> (Story 3.3, FR-12) with <c>tenant.client_secrets.manage</c>, which only Tenant
+    /// Owners hold and no machine principal; the request checks have used up its fresh assertion. With no
+    /// current secret it creates one and writes <c>directory.client_secret.created</c>; with one it rotates it
+    /// out for the 24-hour overlap and writes <c>directory.client_secret.rotated</c>, by the Admin, in the caller's
+    /// transaction. A <c>spa</c> or <c>native</c> Application is <see cref="ApplicationSecretStatus.NotApplicable"/>,
+    /// and one whose old secret still overlaps <see cref="ApplicationSecretStatus.LimitReached"/>, with nothing written.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The context isn't <paramref name="tenantId"/>'s.</exception>
+    [StateChanging]
+    Task<ApplicationSecretsResult> CreateSecretAsync(
+        CommandContext tenantContext,
+        Principal principal,
+        TenantRoleGrant? grant,
+        Guid tenantId,
+        Guid applicationId,
+        CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Revokes the live client secret <paramref name="secretId"/> of the Application <paramref name="applicationId"/>
+    /// (Story 3.3, FR-12) with <c>tenant.client_secrets.manage</c>: it is refused at once, and
+    /// <c>directory.client_secret.revoked</c> is written by the Admin, in the caller's transaction. It ends an old
+    /// secret's overlap now and revokes the current one alike. A secret that is unknown, another Application's or
+    /// already ended is <see cref="ApplicationSecretStatus.NotFound"/>.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The context isn't <paramref name="tenantId"/>'s.</exception>
+    [StateChanging]
+    Task<ApplicationSecretsResult> RevokeSecretAsync(
+        CommandContext tenantContext,
+        Principal principal,
+        TenantRoleGrant? grant,
+        Guid tenantId,
+        Guid applicationId,
+        Guid secretId,
         CancellationToken cancellationToken);
 }

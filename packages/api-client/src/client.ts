@@ -53,6 +53,12 @@ export type ApplicationSettingsRequest = components['schemas']['ApplicationSetti
 export type ApiProblemError = components['schemas']['ApiProblemError'];
 /** A grant type an Application can hold (Story 3.2). */
 export type ApplicationGrantType = ApplicationResponse['grantTypes'][number];
+/** One of an Application's live client secrets (Story 3.3): its `sec_` ID and times, never a value or hash. */
+export type ApplicationSecretResponse = components['schemas']['ApplicationSecretResponse'];
+/** An Application's live client secrets, newest first. */
+export type ApplicationSecretListResponse = components['schemas']['ApplicationSecretListResponse'];
+/** A client secret just created or rotated in: the value, shown in this response only, and the live secrets after it. */
+export type ApplicationSecretCreatedResponse = components['schemas']['ApplicationSecretCreatedResponse'];
 
 /** A path the committed OpenAPI document has, so a removed endpoint fails to compile. */
 export type ApiPath = keyof paths;
@@ -342,6 +348,31 @@ export function createApiClient(options: ApiClientOptions = {}) {
         `/api/v1/tenants/${encodeURIComponent(tenantId)}/applications/${encodeURIComponent(applicationId)}/settings` as '/api/v1/tenants/{tenantId}/applications/{applicationId}/settings',
         'put',
         body,
+      ),
+    /** An Application's live client secrets (Story 3.3), newest first: never a value or hash. Both IDs go into the path encoded. */
+    listApplicationSecrets: (tenantId: string, applicationId: string) =>
+      request(
+        `/api/v1/tenants/${encodeURIComponent(tenantId)}/applications/${encodeURIComponent(applicationId)}/secrets` as '/api/v1/tenants/{tenantId}/applications/{applicationId}/secrets',
+        'get',
+      ),
+    /**
+     * Creates or rotates a web or machine Application's client secret (Story 3.3): a 201 with the value, shown this
+     * once, and the live secrets. Tenant Owners only, after a fresh assertion for tenant.client_secrets.manage with
+     * the Application's ID as its target. Both IDs go into the path encoded.
+     */
+    createApplicationSecret: (tenantId: string, applicationId: string) =>
+      request(
+        `/api/v1/tenants/${encodeURIComponent(tenantId)}/applications/${encodeURIComponent(applicationId)}/secrets` as '/api/v1/tenants/{tenantId}/applications/{applicationId}/secrets',
+        'post',
+      ),
+    /**
+     * Revokes one of an Application's live client secrets, or ends a rotated-out one's overlap now (Story 3.3): the
+     * live secrets after it. The same access as a create. Every ID goes into the path encoded.
+     */
+    revokeApplicationSecret: (tenantId: string, applicationId: string, secretId: string) =>
+      request(
+        `/api/v1/tenants/${encodeURIComponent(tenantId)}/applications/${encodeURIComponent(applicationId)}/secrets/${encodeURIComponent(secretId)}/revoke` as '/api/v1/tenants/{tenantId}/applications/{applicationId}/secrets/{secretId}/revoke',
+        'post',
       ),
     /** Begins a fresh assertion for a Tenant action, bound to the Tenant `tenantId` names. The Deployment complete finishes it. */
     beginTenantFreshAssertion: (tenantId: string, binding: FreshAssertionBeginRequest) =>

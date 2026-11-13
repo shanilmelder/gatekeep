@@ -493,8 +493,6 @@ export interface Messages {
   /** The Application detail page's client ID label, and its Credentials section. */
   applicationClientId: string;
   applicationCredentialsTitle: string;
-  /** Credentials for regular web and machine-to-machine: a secret is needed, which only a Tenant Owner creates. */
-  applicationCredentialsNeeded: string;
   /** Credentials for single-page and native. */
   applicationCredentialsNone: string;
   /** The Application detail page when this Tenant has no such Application. */
@@ -550,6 +548,38 @@ export interface Messages {
   applicationSaveFailed: string;
   /** What a caller without tenant.application_callbacks.manage sees under the cards. */
   applicationSettingsReadOnly: string;
+  /** The Client secret card (Story 3.3): its title and description. */
+  applicationSecretTitle: string;
+  applicationSecretDescription: string;
+  /** A live secret's row. {date} is when the current one was created; {datetime} when the old one stops. */
+  applicationSecretCurrent: string;
+  applicationSecretOld: string;
+  /** No live secret: for a Tenant Owner, and for anyone else. */
+  applicationSecretNone: string;
+  applicationSecretNoneOwnerOnly: string;
+  /** The card's actions, and why Rotate is off while an old secret overlaps. */
+  applicationSecretCreate: string;
+  applicationSecretRotate: string;
+  applicationSecretRotateBlocked: string;
+  applicationSecretEndNow: string;
+  applicationSecretRevoke: string;
+  /** Revoking the current secret: the confirm modal's title, impact and button. */
+  applicationSecretRevokeTitle: string;
+  applicationSecretRevokeBody: string;
+  /** The impact while an old secret still overlaps: it keeps working until {datetime}. */
+  applicationSecretRevokeBodyOverlap: string;
+  applicationSecretRevokeConfirm: string;
+  /** The one-time reveal of a new secret: its title, what Copy copies, and where the secret is used. */
+  applicationSecretRevealTitle: string;
+  applicationSecretRevealWhat: string;
+  applicationSecretRevealBody: string;
+  /** The toasts after a create, a rotation, an old secret ended and a revocation. */
+  applicationSecretCreated: string;
+  applicationSecretRotated: string;
+  applicationSecretEnded: string;
+  applicationSecretRevoked: string;
+  /** A secret change that failed: nothing changed. */
+  applicationSecretFailed: string;
 }
 
 export const defaultMessages: Readonly<Messages> = Object.freeze({
@@ -842,7 +872,6 @@ export const defaultMessages: Readonly<Messages> = Object.freeze({
   createApplicationCreated: 'Application created',
   applicationClientId: 'Client ID',
   applicationCredentialsTitle: 'Credentials',
-  applicationCredentialsNeeded: 'Needs a client secret. A Tenant Owner creates it.',
   applicationCredentialsNone: 'No secret needed.',
   applicationNotFound: "This application doesn't exist in this Tenant.",
   applicationBreadcrumb: 'Breadcrumb',
@@ -885,6 +914,30 @@ export const defaultMessages: Readonly<Messages> = Object.freeze({
   applicationSaved: 'Changes saved',
   applicationSaveFailed: "Couldn't save the changes. Try again.",
   applicationSettingsReadOnly: 'Only Tenant Editors and Owners can change these.',
+  applicationSecretTitle: 'Client secret',
+  applicationSecretDescription: 'Your app sends this with its client ID to get tokens. Only a hash is stored, so it is never shown again.',
+  applicationSecretCurrent: 'Current secret · Created {date}',
+  applicationSecretOld: 'Old secret · Valid until {datetime}',
+  applicationSecretNone: 'No client secret yet.',
+  applicationSecretNoneOwnerOnly: 'No client secret yet. A Tenant Owner must create one.',
+  applicationSecretCreate: 'Create secret',
+  applicationSecretRotate: 'Rotate secret',
+  applicationSecretRotateBlocked: 'End the old secret before rotating again.',
+  applicationSecretEndNow: 'End old secret now',
+  applicationSecretRevoke: 'Revoke',
+  applicationSecretRevokeTitle: 'Revoke the current secret?',
+  applicationSecretRevokeBody:
+    "It stops working at once. The application can't get tokens until a new secret is created.",
+  applicationSecretRevokeBodyOverlap: 'It stops working at once. The old secret keeps working until {datetime}, then stops too.',
+  applicationSecretRevokeConfirm: 'Revoke secret',
+  applicationSecretRevealTitle: 'Client secret',
+  applicationSecretRevealWhat: 'client secret',
+  applicationSecretRevealBody: 'Your app sends this with its client ID at the token endpoint.',
+  applicationSecretCreated: 'Secret created',
+  applicationSecretRotated: 'New secret created. Old secret valid for 24h.',
+  applicationSecretEnded: 'Old secret ended',
+  applicationSecretRevoked: 'Secret revoked',
+  applicationSecretFailed: "Couldn't change the client secret. Nothing was changed.",
 });
 
 /**

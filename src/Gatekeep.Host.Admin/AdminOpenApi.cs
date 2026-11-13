@@ -75,9 +75,17 @@ internal static class AdminOpenApi
                         idSchema.Pattern = "^acr_[a-z2-7]{25}[aeimquy4]$";
                     }
                 }
+                else if (type == typeof(Gatekeep.Kernel.Secrets.RevealOnce<string>)
+                    && context.JsonPropertyInfo?.DeclaringType == typeof(ApplicationSecretCreatedResponse))
+                {
+                    // A client secret (Story 3.3): its own schema, not the Recovery Code's shared one.
+                    schema.Type = JsonSchemaType.String;
+                    schema.Pattern = ClientSecretPattern;
+                    schema.Description = ClientSecretDescription;
+                }
                 else if (type == typeof(Gatekeep.Kernel.Secrets.RevealOnce<string>))
                 {
-                    // Its converter writes the value itself: an Admin Recovery Code, the only one today.
+                    // Its converter writes the value itself: an Admin Recovery Code here.
                     schema.Type = JsonSchemaType.String;
                     schema.Pattern = "^[0-9A-HJKMNP-TV-Z]{4}(-[0-9A-HJKMNP-TV-Z]{4}){3}$";
                     schema.Description = "Shown in this response only, never stored and never shown again.";
@@ -195,6 +203,22 @@ internal static class AdminOpenApi
                 {
                     Enumerate(schema, "field", ManagementContract.ApplicationSettingsFields);
                     Enumerate(schema, "reason", ManagementContract.ApplicationSettingsReasons);
+                }
+                else if (type == typeof(ApplicationSecretCreatedResponse))
+                {
+                    // Its own schema, inline, not the shared one the Recovery Code's pattern is on (Story 3.3).
+                    // The property's own transform, the RevealOnce branch above, keeps it the client secret's.
+                    schema.Properties ??= new Dictionary<string, IOpenApiSchema>();
+                    schema.Properties["secret"] = new OpenApiSchema
+                    {
+                        Type = JsonSchemaType.String,
+                        Pattern = ClientSecretPattern,
+                        Description = ClientSecretDescription,
+                    };
+                }
+                else if (type == typeof(ApplicationSecretResponse))
+                {
+                    Bound(schema, "id", ClientSecretIdPattern, maxLength: null);
                 }
                 else if (type == typeof(ApplicationListResponse))
                 {
@@ -473,6 +497,15 @@ internal static class AdminOpenApi
     private const string EventIdPattern = "^evt_[a-z2-7]{25}[aeimquy4]$";
 
     private const string ApplicationIdPattern = "^app_[a-z2-7]{25}[aeimquy4]$";
+
+    private const string ClientSecretIdPattern = "^sec_[a-z2-7]{25}[aeimquy4]$";
+
+    /// <summary>A client secret's value (Story 3.3): the Tenant's public ID, a dot, then 32 bytes in base64url, unpadded.</summary>
+    private const string ClientSecretPattern = "^ten_[a-z2-7]{25}[aeimquy4]\\.[A-Za-z0-9_-]{43}$";
+
+    private const string ClientSecretDescription =
+        "The client secret: {tenantPublicId}.{base64url of 32 random bytes}. Shown in this response only, stored only as its " +
+        "SHA-256 and never shown again.";
 
     private const string TypeCodePattern = "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*$";
 

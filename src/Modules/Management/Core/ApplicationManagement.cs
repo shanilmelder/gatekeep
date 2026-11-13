@@ -187,6 +187,85 @@ internal sealed class ApplicationManagement(IAuditAppender appender) : IApplicat
             : new ApplicationSettingsResult(ApplicationSettingsStatus.Saved, Managed(updated));
     }
 
+    public async Task<ApplicationSecretsResult> ListSecretsAsync(
+        CommandContext tenantContext,
+        Principal principal,
+        TenantRoleGrant? grant,
+        Guid tenantId,
+        Guid applicationId,
+        CancellationToken cancellationToken)
+    {
+        RequireOwnContext(tenantContext, tenantId);
+        ArgumentNullException.ThrowIfNull(principal);
+
+        if (!AdminCapabilities.Allows(AdminCapabilities.TenantConfigurationRead, principal, grant, tenantId))
+        {
+            return new ApplicationSecretsResult { Status = ApplicationSecretStatus.Forbidden };
+        }
+
+        return await _directory.ListClientSecretsAsync(tenantContext, applicationId, cancellationToken) is { } secrets
+            ? new ApplicationSecretsResult { Status = ApplicationSecretStatus.Done, Secrets = [.. secrets.Select(Managed)] }
+            : new ApplicationSecretsResult { Status = ApplicationSecretStatus.NotFound };
+    }
+
+    public async Task<ApplicationSecretsResult> CreateSecretAsync(
+        CommandContext tenantContext,
+        Principal principal,
+        TenantRoleGrant? grant,
+        Guid tenantId,
+        Guid applicationId,
+        CancellationToken cancellationToken)
+    {
+        RequireOwnContext(tenantContext, tenantId);
+        ArgumentNullException.ThrowIfNull(principal);
+
+        // Authorization runs in the module too (AD-5). The capability is Owner-only and machine-denied.
+        if (!AdminCapabilities.Allows(AdminCapabilities.TenantClientSecretsManage, principal, grant, tenantId)
+            || principal is not AdminPrincipal admin)
+        {
+            return new ApplicationSecretsResult { Status = ApplicationSecretStatus.Forbidden };
+        }
+
+        // The checks have used up the fresh assertion already: nothing may stop the write a client going away.
+        return Secrets(await _directory.CreateClientSecretAsync(tenantContext, Actor.Admin(admin.AdminId), applicationId, CancellationToken.None));
+    }
+
+    public async Task<ApplicationSecretsResult> RevokeSecretAsync(
+        CommandContext tenantContext,
+        Principal principal,
+        TenantRoleGrant? grant,
+        Guid tenantId,
+        Guid applicationId,
+        Guid secretId,
+        CancellationToken cancellationToken)
+    {
+        RequireOwnContext(tenantContext, tenantId);
+        ArgumentNullException.ThrowIfNull(principal);
+
+        if (!AdminCapabilities.Allows(AdminCapabilities.TenantClientSecretsManage, principal, grant, tenantId)
+            || principal is not AdminPrincipal admin)
+        {
+            return new ApplicationSecretsResult { Status = ApplicationSecretStatus.Forbidden };
+        }
+
+        return Secrets(await _directory.RevokeClientSecretAsync(tenantContext, Actor.Admin(admin.AdminId), applicationId, secretId, CancellationToken.None));
+    }
+
+    private static ApplicationSecretsResult Secrets(ClientSecretWrite write) => new()
+    {
+        Status = write.Status switch
+        {
+            ClientSecretWriteStatus.Done => ApplicationSecretStatus.Done,
+            ClientSecretWriteStatus.NotApplicable => ApplicationSecretStatus.NotApplicable,
+            ClientSecretWriteStatus.LimitReached => ApplicationSecretStatus.LimitReached,
+            _ => ApplicationSecretStatus.NotFound,
+        },
+        Secret = write.Secret,
+        Secrets = [.. write.Secrets.Select(Managed)],
+    };
+
+    private static ManagedClientSecret Managed(DirectoryClientSecret secret) => new(secret.Id, secret.CreatedAt, secret.ExpiresAt);
+
     /// <summary>Whether <paramref name="submitted"/> holds a custom-scheme URL that <paramref name="stored"/> doesn't.</summary>
     private static bool AddsCustomScheme(IReadOnlyList<string> submitted, IReadOnlyList<string> stored) =>
         submitted.Any(url => DirectoryContract.IsCustomScheme(url) && !stored.Contains(url, StringComparer.Ordinal));

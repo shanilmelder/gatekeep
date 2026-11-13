@@ -44,7 +44,9 @@ export interface CreateApplicationModalProps {
 /**
  * Create Application (Story 3.1; EXPERIENCE.md, Create Application): a name and a type, each
  * type's line saying whether it needs a credential. No secret is created here: a regular web or
- * machine-to-machine Application gets one from a Tenant Owner (Story 3.3). The browser checks the
+ * machine-to-machine Application gets one from a Tenant Owner (Story 3.3). When the creator is one,
+ * the Applications page opens its Credentials tab, which creates the first secret through the
+ * fresh-assertion sheet and shows it once; an Editor's opens on Settings, with no secret. The browser checks the
  * name first, as feedback only; the server decides. A 401 is the shell's renewal, which keeps
  * everything typed and never sends the create again.
  */

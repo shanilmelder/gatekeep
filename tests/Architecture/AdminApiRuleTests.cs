@@ -211,7 +211,8 @@ public class AdminApiRuleTests
 
         // 403 carries a problem on capability operations, access_denied (Story 1.24), and on
         // fresh-assertion ones, fresh_assertion_required; 404 is a sub-resource the Tenant has none of,
-        // not_found (Story 3.1); 409 is the credential floor and maximum (Story 1.26).
+        // not_found (Story 3.1); 409 is the credential floor and maximum (Story 1.26), and from Story 3.3 a client
+        // secret that isn't applicable or over its limit.
         Assert.Equal(["400", "403", "404", "409", "429"], refusals.Select(r => r.Name).Distinct().Order(StringComparer.Ordinal));
         foreach (var refusal in refusals)
         {

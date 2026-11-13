@@ -355,15 +355,19 @@ internal static class ApplicationsApi
         Name = application.Name,
         Type = application.Type,
         CredentialRequired = application.CredentialRequired,
-        CreatedAt = application.CreatedAt.UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", CultureInfo.InvariantCulture),
+        CreatedAt = Timestamp(application.CreatedAt),
         CallbackUrls = application.CallbackUrls,
         LogoutUrls = application.LogoutUrls,
         WebOrigins = application.WebOrigins,
         GrantTypes = application.GrantTypes,
     };
 
-    /// <summary>A refusal, logged under its fixed code only: never the name, the type, a URL or an ID.</summary>
-    private static Task RefuseAsync(HttpContext context, int status, string problem)
+    /// <summary>An instant as the Applications responses write one: ISO 8601 in UTC, to the millisecond.</summary>
+    internal static string Timestamp(DateTimeOffset instant) =>
+        instant.UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", CultureInfo.InvariantCulture);
+
+    /// <summary>A refusal, logged under its fixed code only: never the name, the type, a URL, a secret or an ID.</summary>
+    internal static Task RefuseAsync(HttpContext context, int status, string problem)
     {
         LogRefusal(context, problem);
         return AdminResponses.ProblemAsync(context, status, problem);

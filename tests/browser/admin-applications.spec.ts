@@ -24,6 +24,8 @@ const TRACE = 'c'.repeat(32);
 
 const TENANT_VIEWER = ['tenant.configuration.read', 'tenant.users.read', 'tenant.logs.read'];
 const TENANT_EDITOR = [...TENANT_VIEWER, 'tenant.applications.manage', 'tenant.application_callbacks.manage', 'tenant.settings.manage'];
+// Story 3.3: only a Tenant Owner holds tenant.client_secrets.manage.
+const TENANT_OWNER = [...TENANT_EDITOR, 'tenant.client_secrets.manage', 'tenant.label.manage'];
 
 const app = (n: number) => `app_${String.fromCharCode(97 + n).repeat(25)}a`;
 
@@ -63,8 +65,21 @@ const ROWS: Application[] = [
 ];
 
 const LABELS: Record<Type, string> = { spa: 'Single-page', web: 'Regular web', native: 'Native', machine: 'Machine-to-machine' };
-const NEEDS_SECRET = 'Needs a client secret. A Tenant Owner creates it.';
+const NEEDS_SECRET = 'No client secret yet. A Tenant Owner must create one.';
 const NO_SECRET = 'No secret needed.';
+
+/** One live client secret (Story 3.3), as the list answers it. */
+interface Secret {
+  id: string;
+  createdAt: string;
+  expiresAt: string | null;
+}
+
+const sec = (n: number) => `sec_${String.fromCharCode(97 + n).repeat(25)}a`;
+const CURRENT: Secret = { id: sec(0), createdAt: '2026-11-12T09:00:00.000Z', expiresAt: null };
+const OLD: Secret = { id: sec(1), createdAt: '2026-11-01T09:00:00.000Z', expiresAt: '2026-11-13T09:00:00.000Z' };
+/** The value the n-th create answers: the Tenant's ID, a dot, and 43 base64url characters. */
+const secretValue = (n: number) => `${TENANT}.${'S'.repeat(42)}${n}`;
 
 const json = (route: Route, status: number, body: unknown, headers: Record<string, string> = {}) =>
   route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body), headers });
@@ -90,6 +105,11 @@ interface State {
   grant: string | null;
   begunFor: string | null;
   save: ((route: Route) => Promise<void>) | null;
+  /** Story 3.3: each Application's live secrets, the creates answered so far, and replacements for the list and a write. */
+  secrets: Record<string, Secret[]>;
+  created: number;
+  secretList: ((route: Route) => Promise<void>) | null;
+  secretWrite: ((route: Route) => Promise<void>) | null;
 }
 
 async function answerApi(page: Page, initial: Partial<State> = {}) {
@@ -97,6 +117,7 @@ async function answerApi(page: Page, initial: Partial<State> = {}) {
   const posts: { body: unknown; headers: Record<string, string> }[] = [];
   const puts: { body: Record<string, unknown>; headers: Record<string, string> }[] = [];
   const begins: unknown[] = [];
+  const secretWrites: { path: string; headers: Record<string, string> }[] = [];
   const state: State = {
     capabilities: TENANT_EDITOR,
     applications: ROWS,
@@ -110,6 +131,10 @@ async function answerApi(page: Page, initial: Partial<State> = {}) {
     grant: null,
     begunFor: null,
     save: null,
+    secrets: {},
+    created: 0,
+    secretList: null,
+    secretWrite: null,
     ...initial,
   };
   await page.route(
@@ -185,6 +210,29 @@ async function answerApi(page: Page, initial: Partial<State> = {}) {
         state.applications = state.applications.map((row) => (row.id === id ? saved : row));
         return json(route, 200, saved);
       }
+      // Story 3.3: every write needs a fresh assertion bound to the Application, used up by the write.
+      const secrets = new RegExp(`^${LIST}/([^/]+)/secrets(?:/([^/]+)/revoke)?$`).exec(pathname);
+      if (secrets) {
+        const id = decodeURIComponent(secrets[1]!);
+        const live = state.secrets[id] ?? [];
+        if (request.method() === 'GET') return state.secretList ? state.secretList(route) : json(route, 200, { items: live });
+        secretWrites.push({ path: pathname, headers: request.headers() });
+        if (state.grant !== id) return problem(route, 403, 'fresh_assertion_required');
+        state.grant = null;
+        if (state.secretWrite) return state.secretWrite(route);
+        if (secrets[2] === undefined) {
+          if (live.length >= 2) return problem(route, 409, 'client_secret_limit_reached');
+          state.created += 1;
+          const made: Secret = { id: sec(10 + state.created), createdAt: '2026-11-13T09:00:00.000Z', expiresAt: null };
+          const items = [made, ...live.map((secret) => (secret.expiresAt === null ? { ...secret, expiresAt: '2026-11-14T09:00:00.000Z' } : secret))];
+          state.secrets[id] = items;
+          return json(route, 201, { secret: secretValue(state.created), items });
+        }
+        const secretId = decodeURIComponent(secrets[2]);
+        if (!live.some((secret) => secret.id === secretId)) return problem(route, 404, 'not_found');
+        state.secrets[id] = live.filter((secret) => secret.id !== secretId);
+        return json(route, 200, { items: state.secrets[id] });
+      }
       if (pathname === `/api/v1/tenants/${TENANT}/capabilities`) return json(route, 200, { capabilities: state.capabilities });
       if (pathname === LIST && request.method() === 'POST') {
         posts.push({ body: request.postDataJSON(), headers: request.headers() });
@@ -209,7 +257,7 @@ async function answerApi(page: Page, initial: Partial<State> = {}) {
       return route.fulfill({ status: 404 });
     },
   );
-  return { log, posts, puts, begins, state, count: (entry: string) => log.filter((line) => line === entry).length };
+  return { log, posts, puts, begins, secretWrites, state, count: (entry: string) => log.filter((line) => line === entry).length };
 }
 
 /** A virtual CTAP2 authenticator holding the Admin's resident credential, so the shell's renewal completes by itself. */
@@ -887,6 +935,264 @@ test.describe('settings', () => {
     expect(api.puts).toHaveLength(0);
     expect(settingsPuts(api)).toHaveLength(1);
   });
+});
+
+test.describe('credentials (Story 3.3)', () => {
+  const toast = (page: Page) => page.getByTestId('toast');
+  const reveal = (page: Page) => page.getByRole('dialog', { name: 'Client secret' });
+  const credentials = (page: Page) => page.getByTestId('application-credentials');
+  const SECRETS = (id: string) => `${LIST}/${id}/secrets`;
+  const writes = (api: Awaited<ReturnType<typeof answerApi>>) => api.log.filter((line) => line.startsWith('POST'));
+
+  /** Closes the reveal: Close does nothing until "I've copied this" is ticked. */
+  async function closeReveal(page: Page) {
+    const dialog = reveal(page);
+    const close = dialog.getByRole('button', { name: 'Close' });
+    await expect(close).toHaveAttribute('aria-disabled', 'true');
+    await close.click({ force: true });
+    await expect(dialog).toBeVisible();
+    await dialog.getByRole('checkbox', { name: "I've copied this" }).check();
+    await expect(close).not.toHaveAttribute('aria-disabled', 'true');
+    await close.click();
+    await expect(dialog).toHaveCount(0);
+  }
+
+  test("an Owner creates the first secret: confirmed, shown once, Close waits for \"I've copied this\", and never shown again", async ({ page, baseURL }) => {
+    await authenticator(page, new URL(baseURL!).hostname);
+    const api = await answerApi(page, { capabilities: TENANT_OWNER });
+    await page.goto(`${PAGE}/${app(1)}?tab=credentials`);
+
+    await expect(page.getByTestId('application-secrets-none')).toHaveText('No client secret yet.');
+    await credentials(page).getByRole('button', { name: 'Create secret' }).click();
+
+    const dialog = reveal(page);
+    await expect(dialog).toBeVisible();
+    await expect(dialog.locator('code')).toHaveText(secretValue(1));
+    await expect(dialog).toContainText("This is the only time it's shown.");
+    await closeReveal(page);
+
+    await expect(toast(page)).toHaveText('Secret created');
+    await expect(page.getByTestId('application-secret-current')).toContainText('Current secret · Created');
+    await expect(page.locator('body')).not.toContainText(secretValue(1));
+    expect(writes(api)).toEqual([
+      `POST ${SECRETS(app(1))}`,
+      `POST /api/v1/tenants/${TENANT}/assertions`,
+      `POST ${ASSERTION_COMPLETE}`,
+      `POST ${SECRETS(app(1))}`,
+    ]);
+    expect(api.begins).toEqual([{ action: 'tenant.client_secrets.manage', target: app(1) }]);
+    expect(api.secretWrites[1]!.headers['x-gatekeep-tenant']).toBe(TENANT);
+    expect(api.secretWrites[1]!.headers['x-gatekeep-csrf']).toBe(CSRF);
+
+    // Read again, the list shows the secret's row and never its value.
+    await page.reload();
+    await expect(page.getByTestId('application-secret-current')).toBeVisible();
+    await expect(page.locator('body')).not.toContainText(secretValue(1));
+    await expect(page.getByRole('button', { name: /reveal/i })).toHaveCount(0);
+  });
+
+  test('rotating shows the new secret once, then the 24h toast; Rotate waits while the old one overlaps, and End old secret now ends it', async ({ page, baseURL }) => {
+    await authenticator(page, new URL(baseURL!).hostname);
+    const api = await answerApi(page, { capabilities: TENANT_OWNER, secrets: { [app(3)]: [CURRENT] } });
+    await page.goto(`${PAGE}/${app(3)}?tab=credentials`);
+
+    await credentials(page).getByRole('button', { name: 'Rotate secret' }).click();
+    await expect(reveal(page).locator('code')).toHaveText(secretValue(1));
+    await closeReveal(page);
+    await expect(toast(page)).toHaveText('New secret created. Old secret valid for 24h.');
+
+    const old = page.getByTestId('application-secret-old');
+    await expect(old).toContainText('Old secret · Valid until');
+    await expect(page.getByTestId('application-secret-current')).toContainText('Current secret · Created');
+    const rotate = credentials(page).getByRole('button', { name: 'Rotate secret' });
+    await expect(rotate).toHaveAttribute('aria-disabled', 'true');
+    await expect(page.getByTestId('application-secret-rotate-blocked')).toHaveText('End the old secret before rotating again.');
+    await rotate.click({ force: true });
+    expect(api.secretWrites).toHaveLength(2);
+
+    await old.getByRole('button', { name: 'End old secret now' }).click();
+    await expect(toast(page)).toHaveText('Old secret ended');
+    await expect(page.getByTestId('application-secret-old')).toHaveCount(0);
+    await expect(rotate).not.toHaveAttribute('aria-disabled', 'true');
+    expect(api.secretWrites.at(-1)!.path).toBe(`${SECRETS(app(3))}/${CURRENT.id}/revoke`);
+    expect(api.begins).toHaveLength(2);
+  });
+
+  test("Revoke opens a confirming modal that says what it stops, and revoking leaves no secret", async ({ page, baseURL }) => {
+    await authenticator(page, new URL(baseURL!).hostname);
+    const api = await answerApi(page, { capabilities: TENANT_OWNER, secrets: { [app(1)]: [CURRENT] } });
+    await page.goto(`${PAGE}/${app(1)}?tab=credentials`);
+
+    await page.getByTestId('application-secret-current').getByRole('button', { name: 'Revoke' }).click();
+    const confirm = page.getByRole('dialog', { name: 'Revoke the current secret?' });
+    await expect(confirm).toContainText("It stops working at once. The application can't get tokens until a new secret is created.");
+    await confirm.getByRole('button', { name: 'Cancel' }).click();
+    await expect(confirm).toHaveCount(0);
+    expect(api.secretWrites).toHaveLength(0);
+
+    await page.getByTestId('application-secret-current').getByRole('button', { name: 'Revoke' }).click();
+    await page.getByRole('dialog', { name: 'Revoke the current secret?' }).getByRole('button', { name: 'Revoke secret' }).click();
+
+    await expect(toast(page)).toHaveText('Secret revoked');
+    await expect(page.getByRole('dialog', { name: 'Revoke the current secret?' })).toHaveCount(0);
+    await expect(page.getByTestId('application-secrets-none')).toHaveText('No client secret yet.');
+    await expect(credentials(page).getByRole('button', { name: 'Create secret' })).toBeVisible();
+    expect(api.secretWrites.at(-1)!.path).toBe(`${SECRETS(app(1))}/${CURRENT.id}/revoke`);
+  });
+
+  test('a failed rotation shows the banner with its reference, and nothing changes', async ({ page, baseURL }) => {
+    await authenticator(page, new URL(baseURL!).hostname);
+    const api = await answerApi(page, {
+      capabilities: TENANT_OWNER,
+      secrets: { [app(1)]: [CURRENT] },
+      secretWrite: (route) => problem(route, 500, 'unavailable'),
+    });
+    await page.goto(`${PAGE}/${app(1)}?tab=credentials`);
+
+    await credentials(page).getByRole('button', { name: 'Rotate secret' }).click();
+
+    const failed = page.getByTestId('application-secret-failed');
+    await expect(failed).toContainText("Couldn't change the client secret. Nothing was changed.");
+    await expect(failed).toContainText(TRACE);
+    await expect(reveal(page)).toHaveCount(0);
+    await expect(page.getByTestId('application-secret-old')).toHaveCount(0);
+    expect(api.secretWrites).toHaveLength(2);
+  });
+
+  test('a rotation refused as over the limit shows the banner and reads the secrets again, which show the old one', async ({ page, baseURL }) => {
+    await authenticator(page, new URL(baseURL!).hostname);
+    const api = await answerApi(page, { capabilities: TENANT_OWNER, secrets: { [app(3)]: [CURRENT] } });
+    // Another tab rotated meanwhile: this rotation is over the limit, and the list now holds two.
+    api.state.secretWrite = (route) => {
+      api.state.secrets[app(3)] = [{ id: sec(5), createdAt: '2026-11-13T08:00:00.000Z', expiresAt: null }, { ...CURRENT, expiresAt: '2026-11-14T08:00:00.000Z' }];
+      return problem(route, 409, 'client_secret_limit_reached');
+    };
+    await page.goto(`${PAGE}/${app(3)}?tab=credentials`);
+    await expect(page.getByTestId('application-secret-current')).toBeVisible();
+    expect(api.count(`GET ${SECRETS(app(3))}`)).toBe(1);
+
+    await credentials(page).getByRole('button', { name: 'Rotate secret' }).click();
+
+    const failed = page.getByTestId('application-secret-failed');
+    await expect(failed).toContainText("Couldn't change the client secret. Nothing was changed.");
+    await expect(failed).toContainText('client_secret_limit_reached');
+    await expect.poll(() => api.count(`GET ${SECRETS(app(3))}`)).toBe(2);
+    await expect(page.getByTestId('application-secret-old')).toContainText('Old secret · Valid until');
+    await expect(page.getByTestId('application-secret-rotate-blocked')).toHaveText('End the old secret before rotating again.');
+    await expect(reveal(page)).toHaveCount(0);
+  });
+
+  test('an Editor reads that a Tenant Owner must create the secret, and every write control is Tenant Owner only', async ({ page }) => {
+    const api = await answerApi(page, { secrets: { [app(3)]: [CURRENT, OLD] } });
+    await page.goto(`${PAGE}/${app(1)}?tab=credentials`);
+
+    await expect(page.getByTestId('application-secrets-none')).toHaveText(NEEDS_SECRET);
+    const create = credentials(page).getByRole('button', { name: 'Create secret' });
+    await expect(create).toHaveAttribute('aria-disabled', 'true');
+    await expect(create).toHaveAccessibleDescription('Tenant Owner only');
+    await create.click({ force: true });
+
+    await page.goto(`${PAGE}/${app(3)}?tab=credentials`);
+    await expect(page.getByTestId('application-secret-current')).toBeVisible();
+    for (const name of ['Rotate secret', 'Revoke', 'End old secret now']) {
+      const control = credentials(page).getByRole('button', { name });
+      await expect(control).toHaveAttribute('aria-disabled', 'true');
+      await expect(control).toHaveAccessibleDescription('Tenant Owner only');
+      await control.click({ force: true });
+    }
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    expect(api.secretWrites).toHaveLength(0);
+    expect(api.begins).toHaveLength(0);
+  });
+
+  for (const n of [0, 2]) {
+    test(`a ${ROWS[n]!.type} Application needs no secret, and nothing is read`, async ({ page }) => {
+      const api = await answerApi(page, { capabilities: TENANT_OWNER });
+      await page.goto(`${PAGE}/${app(n)}?tab=credentials`);
+
+      await expect(page.getByTestId('application-credentials-none')).toHaveText(NO_SECRET);
+      await expect(credentials(page).getByRole('button')).toHaveCount(0);
+      expect(api.log.filter((line) => line.includes('/secrets'))).toEqual([]);
+    });
+  }
+
+  test("an Owner's create of a type that needs a secret opens Credentials, confirms, and shows the secret once", async ({ page, baseURL }) => {
+    await authenticator(page, new URL(baseURL!).hostname);
+    const api = await answerApi(page, { capabilities: TENANT_OWNER });
+    await page.goto(PAGE);
+
+    await createButton(page).click();
+    const dialog = modal(page);
+    await dialog.getByRole('textbox', { name: 'Name' }).fill('Payments worker');
+    await dialog.getByRole('group', { name: 'Type' }).getByRole('radio', { name: /^Machine-to-machine/ }).check();
+    await dialog.getByRole('button', { name: 'Create application' }).click();
+
+    await expect(page).toHaveURL(new RegExp(`${PAGE}/${app(9)}\\?tab=credentials$`));
+    await expect(page.getByRole('tab', { name: 'Credentials' })).toHaveAttribute('aria-selected', 'true');
+    await expect(reveal(page).locator('code')).toHaveText(secretValue(1));
+    await closeReveal(page);
+    await expect(page.getByTestId('application-secret-current')).toBeVisible();
+    expect(api.begins).toEqual([{ action: 'tenant.client_secrets.manage', target: app(9) }]);
+    expect(api.secretWrites).toHaveLength(2);
+
+    // Read again, the page asks for no second secret.
+    await page.reload();
+    await expect(page.getByTestId('application-secret-current')).toBeVisible();
+    await expect(reveal(page)).toHaveCount(0);
+    expect(api.secretWrites).toHaveLength(2);
+  });
+
+  test("an Owner's single-page Application opens on Settings, with no secret asked for", async ({ page }) => {
+    const api = await answerApi(page, { capabilities: TENANT_OWNER });
+    await page.goto(PAGE);
+
+    await createButton(page).click();
+    await modal(page).getByRole('textbox', { name: 'Name' }).fill('Storefront 2');
+    await modal(page).getByRole('button', { name: 'Create application' }).click();
+
+    await expect(page).toHaveURL(new RegExp(`${PAGE}/${app(9)}$`));
+    await expect(page.getByRole('tab', { name: 'Settings' })).toHaveAttribute('aria-selected', 'true');
+    expect(api.secretWrites).toHaveLength(0);
+  });
+
+  for (const scheme of ['light', 'dark'] as const) {
+    for (const width of [1100, 768]) {
+      test(`axe finds no violations at ${width}px, ${scheme}: the secrets, the reveal, the revoke modal and a failure`, async ({ page, baseURL }) => {
+        await authenticator(page, new URL(baseURL!).hostname);
+        await page.setViewportSize({ width, height: 900 });
+        await page.emulateMedia({ colorScheme: scheme });
+        const api = await answerApi(page, { capabilities: TENANT_OWNER, secrets: { [app(3)]: [CURRENT, OLD], [app(1)]: [] } });
+
+        await page.goto(`${PAGE}/${app(3)}?tab=credentials`);
+        await expect(page.getByTestId('application-secret-old')).toBeVisible();
+        expect(await axe(page), 'secrets').toEqual([]);
+        expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+
+        await page.getByTestId('application-secret-current').getByRole('button', { name: 'Revoke' }).click();
+        await expect(page.getByRole('dialog', { name: 'Revoke the current secret?' })).toBeVisible();
+        expect(await axe(page), 'revoke modal').toEqual([]);
+        await page.getByRole('dialog', { name: 'Revoke the current secret?' }).getByRole('button', { name: 'Cancel' }).click();
+
+        await page.goto(`${PAGE}/${app(1)}?tab=credentials`);
+        await credentials(page).getByRole('button', { name: 'Create secret' }).click();
+        await expect(reveal(page).locator('code')).toBeVisible();
+        expect(await axe(page), 'reveal').toEqual([]);
+        await closeReveal(page);
+
+        api.state.secretWrite = (route) => problem(route, 500, 'unavailable');
+        await credentials(page).getByRole('button', { name: 'Rotate secret' }).click();
+        await expect(page.getByTestId('application-secret-failed')).toBeVisible();
+        expect(await axe(page), 'failure').toEqual([]);
+        expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+
+        // An Editor's view.
+        api.state.capabilities = TENANT_EDITOR;
+        await page.goto(`${PAGE}/${app(3)}?tab=credentials`);
+        await expect(page.getByTestId('application-secrets-owner-only')).toBeVisible();
+        expect(await axe(page), 'editor').toEqual([]);
+      });
+    }
+  }
 });
 
 test.describe('landing and sidebar', () => {

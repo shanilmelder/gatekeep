@@ -212,7 +212,26 @@ public class CapabilityRuleTests
         Assert.Equal(
             DeletionRoutes.Order(StringComparer.Ordinal),
             operations.Where(o => Fresh(o.Value)?.Action == "deployment.tenants.delete").Select(o => o.Key).Order(StringComparer.Ordinal));
+
+        // Story 3.3: every client secret write is checks-enforced (Always) and bound to the Application it acts on.
+        foreach (var route in ClientSecretRoutes)
+        {
+            var fresh = Fresh(operations[route])!;
+            Assert.Equal("checks", fresh.EnforcedBy);
+            Assert.Equal("tenant.client_secrets.manage", fresh.Action);
+            Assert.Equal("applicationId", fresh.Target);
+        }
+
+        Assert.Equal(
+            ClientSecretRoutes.Order(StringComparer.Ordinal),
+            operations.Where(o => Fresh(o.Value)?.Action == "tenant.client_secrets.manage").Select(o => o.Key).Order(StringComparer.Ordinal));
     }
+
+    private static readonly string[] ClientSecretRoutes =
+    [
+        "post /api/v1/tenants/{tenantId}/applications/{applicationId}/secrets",
+        "post /api/v1/tenants/{tenantId}/applications/{applicationId}/secrets/{secretId}/revoke",
+    ];
 
     private static readonly string[] DeletionRoutes =
     [

@@ -28,6 +28,11 @@ public class RevealOnceRuleTests
         ("src/Modules/Directory/Contracts/IDirectory.cs", "CreatedMachineClient"),
         // Story 2.9: a web client's secret, the same way.
         ("src/Modules/Directory/Contracts/IDirectory.cs", "CreatedWebClient"),
+        // Story 3.3: an Application's created or rotated-in secret, from Directory through Management to the
+        // one 201 that shows it (AD-24).
+        ("src/Modules/Directory/Contracts/IDirectory.cs", "ClientSecretWrite"),
+        ("src/Modules/Management/Contracts/IApplicationManagement.cs", "ApplicationSecretsResult"),
+        ("src/Gatekeep.Host.Admin/ApplicationSecretsApi.cs", "ApplicationSecretCreatedResponse"),
     ];
 
     /// <summary>Where one may be built: the handler that sends the reviewed response.</summary>

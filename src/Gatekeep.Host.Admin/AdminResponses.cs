@@ -131,6 +131,21 @@ internal static class AdminResponses
     /// </summary>
     public const string CustomSchemeAcknowledgementRequired = "custom_scheme_acknowledgement_required";
 
+    /// <summary>
+    /// A client secret create for a <c>spa</c> or <c>native</c> Application (Story 3.3), which authenticates with
+    /// no secret. Nothing was written.
+    /// </summary>
+    public const string ClientSecretNotApplicable = "client_secret_not_applicable";
+
+    /// <summary>
+    /// A client secret create or rotation while the Application already holds the most live secrets (Story 3.3):
+    /// a rotated-out secret still overlaps, and must be ended or expire first. Nothing was written.
+    /// </summary>
+    public const string ClientSecretLimitReached = "client_secret_limit_reached";
+
+    /// <summary>Directory's guard SQLSTATE for a secret naming a Tenant's system Application (Story 2.8): a 404 on a secret create (Story 3.3).</summary>
+    public const string SystemApplicationNamed = "GK011";
+
     /// <summary>Directory's guard SQLSTATE for an edit of a Tenant's system Application (Story 2.8): a 404 on the settings save (Story 3.2).</summary>
     public const string SystemApplicationEdited = "GK012";
 
@@ -195,6 +210,8 @@ internal static class AdminResponses
         ApplicationInvalid,
         NotFound,
         CustomSchemeAcknowledgementRequired,
+        ClientSecretNotApplicable,
+        ClientSecretLimitReached,
     ];
 
     /// <summary>The Session cookie, expired: sent with a sign-out and a 401 for a stale cookie.</summary>
