@@ -51,7 +51,8 @@ public sealed class SigningKeyRevokeTests(PostgresFixture postgres, OpenBaoFixtu
         Assert.Equal(0, custody.Calls(KeyOperation.Create));
         Assert.Equal(open, await OpenSnapshotAsync(database, tenant));
         Assert.Equal(DestroyPayload(previous), await QueuedAsync(database));
-        Assert.Equal("1/0/0/0", await EventsAsync(database, tenant, Revoked, Promoted, PromotedUnaged, Created));
+        // The setup's rotation wrote one promoted and one created; revoking previous adds only revoked.
+        Assert.Equal("1/1/0/1", await EventsAsync(database, tenant, Revoked, Promoted, PromotedUnaged, Created));
         Assert.Equal(1L, await database.ScalarAsync<long>(
             $"SELECT count(*) FROM audit_event WHERE tenant_id = '{tenant}' AND type_code = '{Revoked}' AND actor_kind = 'admin' AND actor_id = '{admin}'"));
 

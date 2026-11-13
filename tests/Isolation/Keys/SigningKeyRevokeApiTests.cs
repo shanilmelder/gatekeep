@@ -313,7 +313,14 @@ public sealed class SigningKeyRevokeApiTests(PostgresFixture postgres, OpenBaoFi
         Assert.Equal(otherBefore, await SnapshotAsync(setup.Host, other));
         Assert.Equal("0/0/0/0", await EventsAsync(setup.Host, setup.Tenant));
         Assert.Equal(0L, await setup.Host.ScalarAsync<long>($"SELECT count(*) FROM job WHERE type = '{Destroy}'"));
-        Assert.Contains("Key custody couldn't create a Signing Key for a revocation", setup.Host.Output, StringComparison.Ordinal);
+        // The console logger writes from its own queue, so the line can land just after the answer.
+        const string Logged = "Key custody couldn't create a Signing Key for a revocation";
+        for (var waited = 0; waited < 50 && !setup.Host.Output.Contains(Logged, StringComparison.Ordinal); waited++)
+        {
+            await Task.Delay(100, Cancellation);
+        }
+
+        Assert.Contains(Logged, setup.Host.Output, StringComparison.Ordinal);
     }
 
     [Theory]
