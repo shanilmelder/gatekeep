@@ -3,6 +3,11 @@
 // interception: the field search, its URL, Load more, the empty state, a refused search and the
 // sidebar item. The URL-to-query mapping is apps/admin-dashboard/test/logs.test.mjs's; the
 // server's search and its Tenant isolation are tests/Isolation/Audit/TenantLogSearchTests.cs's.
+//
+// Story 7.5: a row opens the event drawer, read from the event endpoint: an Editor's answer
+// carries raw, shown as JSON with Copy JSON; a Viewer's raw is null, so only the limited note
+// shows. Esc closes it, a failed read offers Retry, and the keyboard opens a row. The server's
+// raw-detail decision is tests/Isolation/Audit/TenantLogEventTests.cs's.
 
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type Page, type Route } from '@playwright/test';
@@ -22,6 +27,10 @@ const USER = '7c9e6679-7425-40de-944b-e07fc1f90ae7';
 const CLIENT = '3f2504e0-4f89-41d3-9a0c-0305e82c3301';
 const REJECTED = 'admin.cross_tenant.rejected';
 const EMPTY = 'No events in this range';
+const LIMITED = "Raw detail is limited by role, and yours can't see it.";
+const DETAIL = { ipAddress: '198.51.100.23', userAgent: 'DetailAgent/7.5', email: 'detail-u1@example.test' };
+const HASH = 'b2'.repeat(32);
+const PREV_HASH = 'a1'.repeat(32);
 
 interface LogEvent {
   id: string;
@@ -70,18 +79,32 @@ interface State {
   events: LogEvent[];
   /** Answers a Log read before the default, such as a 400. */
   logsAnswer: ((route: Route, query: URLSearchParams) => Promise<void>) | null;
+  /** Whether an opened event's answer carries raw, as the server sends it to an Editor or Owner. */
+  raw: boolean;
+  /** Answers an event read before the default, such as a 503. */
+  eventAnswer: ((route: Route) => Promise<void>) | null;
 }
 
 interface Api {
   /** Each Log read's query string, as sent. */
   logReads: URLSearchParams[];
+  /** Each event read's evt_ ID, as sent. */
+  eventReads: string[];
   state: State;
+}
+
+/** An opened event as the server answers it: the row's fields, and raw only when `withRaw`. */
+function opened(event: LogEvent, withRaw: boolean) {
+  const { id, occurredAt, type, actor, target } = event;
+  const seal = { seq: 2, prevHash: PREV_HASH, hash: HASH };
+  return { ...event, raw: withRaw ? { id, occurredAt, type, actor, target, seal, detail: DETAIL } : null };
 }
 
 /** The Admin API for a Viewer of TENANT: the Log holds `state.events`, 50 a page, filtered as the server filters. */
 async function answerApi(page: Page, initial: Partial<State> = {}): Promise<Api> {
   const logReads: URLSearchParams[] = [];
-  const state: State = { tenantCapabilities: VIEWER, events: events(12), logsAnswer: null, ...initial };
+  const eventReads: string[] = [];
+  const state: State = { tenantCapabilities: VIEWER, events: events(12), logsAnswer: null, raw: false, eventAnswer: null, ...initial };
 
   await page.route(
     (url) => url.pathname.startsWith('/api/'),
@@ -122,11 +145,20 @@ async function answerApi(page: Page, initial: Partial<State> = {}): Promise<Api>
         const next = start + 50 < list.length ? slice[slice.length - 1]!.id : null;
         return json(route, 200, { events: slice, nextCursor: next });
       }
+      const eventPrefix = `/api/v1/tenants/${TENANT}/logs/`;
+      if (pathname.startsWith(eventPrefix)) {
+        const id = decodeURIComponent(pathname.slice(eventPrefix.length));
+        eventReads.push(id);
+        if (state.eventAnswer) return state.eventAnswer(route);
+        const event = state.events.find((e) => e.id === id);
+        if (!event) return problem(route, 404, 'not_found');
+        return json(route, 200, opened(event, state.raw));
+      }
       return route.fulfill({ status: 404 });
     },
   );
 
-  return { logReads, state };
+  return { logReads, eventReads, state };
 }
 
 /** Axe on the page, with DESIGN.md's one contrast exception, table heads, as admin-tenants.spec.ts runs it. */
@@ -151,6 +183,9 @@ async function openLogs(page: Page, path = LOGS) {
   await page.goto(path);
   await expect(heading(page)).toHaveText('Logs');
 }
+
+const drawer = (page: Page) => page.getByTestId('log-event');
+const isOpen = (page: Page) => drawer(page).evaluate((element) => (element as HTMLDialogElement).open);
 
 test.use({ viewport: { width: 1280, height: 720 } });
 watchCsp(test);
@@ -350,5 +385,127 @@ test.describe('Logs', () => {
     await page.goto(LOGS);
     await expect(page.getByTestId('forbidden')).toBeVisible();
     expect(api.logReads.length).toBe(reads);
+  });
+
+  test("an Editor's row opens the drawer: code badge, summary rows, the raw JSON and a Copy JSON that copies it", async ({ page, context }) => {
+    await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+    const api = await answerApi(page, { raw: true });
+    await openLogs(page);
+    const event = api.state.events[0]!;
+
+    // A click anywhere on the row opens it.
+    await rows(page).first().locator('td').first().click();
+    await expect.poll(() => isOpen(page)).toBe(true);
+    expect(api.eventReads).toEqual([event.id]);
+    await expect(rows(page).first()).toHaveAttribute('aria-current', 'true');
+
+    const badge = drawer(page).getByRole('heading', { level: 2 }).locator('[data-badge="code"]');
+    await expect(badge).toHaveText(event.type);
+    await expect(badge).toHaveAttribute('data-outcome', 'success');
+    await expect(drawer(page).getByRole('heading', { level: 2 })).toContainText(event.summary);
+    await expect(drawer(page).locator('dl dt')).toHaveText(['Time (UTC)', 'Actor', 'Target', 'User', 'Application', 'IP address', 'User-Agent', 'Email']);
+    await expect(drawer(page).locator('dl dd')).toHaveText([
+      '2026-11-06 09:00:12',
+      `user ${USER}`,
+      `client ${CLIENT}`,
+      USER,
+      CLIENT,
+      DETAIL.ipAddress,
+      DETAIL.userAgent,
+      DETAIL.email,
+    ]);
+
+    const viewer = drawer(page).getByRole('region', { name: 'Raw event' });
+    await expect(viewer).toContainText(HASH);
+    await expect(viewer).toContainText(DETAIL.email);
+    await expect(drawer(page).getByText(LIMITED)).toHaveCount(0);
+
+    await drawer(page).getByRole('button', { name: 'Copy JSON' }).click();
+    await expect(drawer(page).getByRole('button', { name: 'Copied JSON' })).toBeVisible();
+    const copied = JSON.parse(await page.evaluate(() => navigator.clipboard.readText()));
+    expect(copied).toEqual(opened(event, true).raw);
+
+    // The drawer isn't kept in the URL.
+    await expect(page).toHaveURL(new RegExp(`${LOGS}$`));
+    expect(await axe(page)).toEqual([]);
+  });
+
+  test('a Viewer sees the badge, the summary rows and the limited note, and no raw section', async ({ page }) => {
+    const api = await answerApi(page, { raw: false });
+    await openLogs(page);
+
+    await rows(page).first().locator('td').first().click();
+    await expect.poll(() => isOpen(page)).toBe(true);
+    await expect(drawer(page).getByText(LIMITED)).toBeVisible();
+    await expect(drawer(page).locator('[data-badge="code"]')).toHaveText(api.state.events[0]!.type);
+    await expect(drawer(page).locator('dl dt')).toHaveText(['Time (UTC)', 'Actor', 'Target', 'User', 'Application']);
+    await expect(drawer(page).locator('[data-event-raw]')).toHaveCount(0);
+    await expect(drawer(page).getByRole('button', { name: /JSON/ })).toHaveCount(0);
+    const html = await page.evaluate(() => document.documentElement.outerHTML);
+    expect(html).not.toContain(HASH);
+    expect(html).not.toContain(DETAIL.ipAddress);
+  });
+
+  test('Esc closes the drawer, and Close does too', async ({ page }) => {
+    await answerApi(page, { raw: true });
+    await openLogs(page);
+
+    await rows(page).first().locator('td').first().click();
+    await expect.poll(() => isOpen(page)).toBe(true);
+    await expect(drawer(page).locator('[data-event-raw]')).toHaveCount(1);
+    await page.keyboard.press('Escape');
+    await expect.poll(() => isOpen(page)).toBe(false);
+    await expect(rows(page).first()).not.toHaveAttribute('aria-current', 'true');
+
+    await rows(page).nth(1).locator('td').first().click();
+    await expect.poll(() => isOpen(page)).toBe(true);
+    await drawer(page).getByRole('button', { name: 'Close' }).click();
+    await expect.poll(() => isOpen(page)).toBe(false);
+  });
+
+  test('a failed read shows a banner with Retry, which reads again; a missing event offers no Retry', async ({ page }) => {
+    const api = await answerApi(page, { raw: true });
+    api.state.eventAnswer = (route) => route.fulfill({ status: 503 });
+    await openLogs(page);
+
+    await rows(page).first().locator('td').first().click();
+    const failed = drawer(page).getByTestId('log-event-failed');
+    await expect(failed).toContainText("We couldn't load this event.");
+    await expect(drawer(page).locator('[data-event-raw]')).toHaveCount(0);
+    await expect(drawer(page).getByText(LIMITED)).toHaveCount(0);
+    expect(api.eventReads).toHaveLength(1);
+
+    api.state.eventAnswer = null;
+    await failed.getByRole('button', { name: 'Retry' }).click();
+    await expect(drawer(page).locator('[data-event-raw]')).toHaveCount(1);
+    await expect(failed).toHaveCount(0);
+    expect(api.eventReads).toEqual([api.state.events[0]!.id, api.state.events[0]!.id]);
+
+    await page.keyboard.press('Escape');
+    await expect.poll(() => isOpen(page)).toBe(false);
+    api.state.eventAnswer = (route) => problem(route, 404, 'not_found');
+    await rows(page).nth(1).locator('td').first().click();
+    const missing = drawer(page).getByTestId('log-event-not-found');
+    await expect(missing).toContainText('not_found');
+    await expect(missing.getByRole('button', { name: 'Retry' })).toHaveCount(0);
+  });
+
+  test("the keyboard opens a row from its Description link", async ({ page }) => {
+    const api = await answerApi(page, { raw: false });
+    await openLogs(page);
+    const event = api.state.events[2]!;
+
+    const link = rows(page).nth(2).locator('[data-gk-row-link]');
+    await expect(link).toHaveText(event.summary);
+    await link.focus();
+    await page.keyboard.press('Enter');
+    await expect.poll(() => isOpen(page)).toBe(true);
+    expect(api.eventReads).toEqual([event.id]);
+    await expect(drawer(page).getByText(LIMITED)).toBeVisible();
+
+    // Closed, focus goes back to the row's link.
+    await page.keyboard.press('Escape');
+    await expect.poll(() => isOpen(page)).toBe(false);
+    await expect(link).toBeFocused();
   });
 });

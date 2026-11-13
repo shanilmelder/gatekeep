@@ -9,6 +9,7 @@ using Gatekeep.Adapters.Postgres.Schema;
 using Gatekeep.Cli;
 using Gatekeep.Kernel.Alerts;
 using Gatekeep.Kernel.Audit;
+using Gatekeep.Kernel.Identifiers;
 using Gatekeep.Kernel.Jobs;
 using Gatekeep.Kernel.Persistence;
 using Gatekeep.Kernel.Secrets;
@@ -270,6 +271,7 @@ internal static class CanaryFlows
             "admin.tenant-logs",
             [
                 new(SurfaceKind.Route, "/api/v1/tenants/{tenantId}/logs"),
+                new(SurfaceKind.Route, "/api/v1/tenants/{tenantId}/logs/{eventId}"),
             ],
             TenantLogsAsync),
 
@@ -1345,6 +1347,8 @@ internal static class CanaryFlows
     /// <summary>
     /// Story 7.4: a Viewer's Session reading the Tenant's Log by outcome; failing, a cross-Tenant read,
     /// which writes the rejection to the other Tenant's Log, and malformed filters, cursor and range.
+    /// Story 7.5: the Viewer and an Editor open one event, the Editor's with its raw detail; failing,
+    /// an unknown event, a malformed event ID and another Tenant's event.
     /// </summary>
     private static async Task TenantLogsAsync(CanaryFlowContext context, FlowRun run, bool failing)
     {
@@ -1356,11 +1360,35 @@ internal static class CanaryFlows
         run.Plant("admin-session-id", cookie);
         run.Plant("admin-csrf-token", csrf);
         var path = $"/api/v1/tenants/{Tenancy.TenantRequests.Id(tenant)}/logs";
+        var eventId = Guid.CreateVersion7();
+        await PostgresFixture.ExecuteAsync(
+            host.Superuser,
+            $"INSERT INTO audit_event (tenant_id, id, type_code, actor_kind) VALUES ('{tenant}', '{eventId}', 'operations.job.dead', 'system')");
+        var eventPath = $"{path}/{PublicId.Format(PublicIdType.AuditEvent, eventId)}";
 
         if (failing)
         {
+            // An unknown event, a malformed ID and another Tenant's event read nothing.
+            using (var unknown = await host.SendAsync(HttpMethod.Get, $"{path}/{PublicId.Format(PublicIdType.AuditEvent, Guid.CreateVersion7())}", cookie))
+            {
+                run.Capture("unknown event response", await ResponseTextAsync(unknown));
+                Assert.Equal(HttpStatusCode.NotFound, unknown.StatusCode);
+            }
+
+            using (var malformed = await host.SendAsync(HttpMethod.Get, $"{path}/evt_x", cookie))
+            {
+                run.Capture("malformed event response", await ResponseTextAsync(malformed));
+                Assert.Equal(HttpStatusCode.BadRequest, malformed.StatusCode);
+            }
+
             // A refused cross-Tenant read writes to the other Tenant's Log; malformed filters read nothing.
             var other = await host.InsertTenantAsync();
+            using (var refusedEvent = await host.SendAsync(HttpMethod.Get, $"/api/v1/tenants/{Tenancy.TenantRequests.Id(other)}/logs/{PublicId.Format(PublicIdType.AuditEvent, eventId)}", cookie))
+            {
+                run.Capture("cross-Tenant event response", await ResponseTextAsync(refusedEvent));
+                Assert.Equal(HttpStatusCode.Forbidden, refusedEvent.StatusCode);
+            }
+
             using (var refused = await host.SendAsync(HttpMethod.Get, $"/api/v1/tenants/{Tenancy.TenantRequests.Id(other)}/logs", cookie))
             {
                 run.Capture("cross-Tenant logs response", await ResponseTextAsync(refused));
@@ -1379,6 +1407,17 @@ internal static class CanaryFlows
             using var read = await host.SendAsync(HttpMethod.Get, path + "?outcome=failure", cookie);
             run.Capture("logs response", await ResponseTextAsync(read));
             Assert.Equal(HttpStatusCode.OK, read.StatusCode);
+
+            using var summary = await host.SendAsync(HttpMethod.Get, eventPath, cookie);
+            run.Capture("event summary response", await ResponseTextAsync(summary));
+            Assert.Equal(HttpStatusCode.OK, summary.StatusCode);
+
+            var (editorCookie, editorCsrf, _) = await Tenancy.TenantRequests.RoleSessionAsync(host, tenant, "editor");
+            run.Plant("editor-session-id", editorCookie);
+            run.Plant("editor-csrf-token", editorCsrf);
+            using var detail = await host.SendAsync(HttpMethod.Get, eventPath, editorCookie);
+            run.Capture("event detail response", await ResponseTextAsync(detail));
+            Assert.Equal(HttpStatusCode.OK, detail.StatusCode);
         }
 
         await host.StopAsync();

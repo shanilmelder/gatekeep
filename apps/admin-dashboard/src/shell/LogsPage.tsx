@@ -1,4 +1,4 @@
-import type { TenantLogEvent, TenantLogsQuery, TenantLogsResponse } from '@gatekeep/api-client';
+import type { TenantLogEvent, TenantLogEventDetail, TenantLogsQuery, TenantLogsResponse } from '@gatekeep/api-client';
 import {
   Banner,
   Button,
@@ -6,6 +6,7 @@ import {
   DataTable,
   EmptyState,
   ErrorReference,
+  EventDrawer,
   Field,
   Input,
   SectionPage,
@@ -14,11 +15,13 @@ import {
   useMessages,
   useUrlParams,
   type DataTableColumn,
+  type EventSummaryRow,
 } from '@gatekeep/ui/admin';
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import { api } from '../session';
 import type { ShellRequest } from './CredentialsPage';
 import styles from './LogsPage.module.css';
+import { eventSummary } from './logEvent';
 import {
   LOG_FIELDS,
   OUTCOMES,
@@ -49,6 +52,24 @@ interface LogsFailure {
 }
 
 type LogsRead = { kind: 'ready'; list: TenantLogsResponse } | { kind: 'failed'; failure: LogsFailure };
+
+type EventRead = { kind: 'ready'; event: TenantLogEventDetail } | { kind: 'failed'; failure: LogsFailure };
+
+/** One event, opened (Story 7.5). A 2xx without the event's fields is a failure. */
+export async function readLogEvent(request: ShellRequest, tenantId: string, eventId: string, signal?: AbortSignal): Promise<EventRead> {
+  try {
+    const result = await request('get', () => api.getTenantLogEvent(tenantId, eventId), signal);
+    if (result.ok) {
+      const event = result.data;
+      if (event && typeof event.id === 'string' && typeof event.type === 'string' && event.actor) return { kind: 'ready', event };
+      return { kind: 'failed', failure: { status: null, code: '', traceId: '' } };
+    }
+    return { kind: 'failed', failure: { status: result.status, code: result.problem?.code ?? '', traceId: result.problem?.traceId ?? '' } };
+  } catch {
+    // A lost connection, or a read abandoned with its drawer: the caller checks its signal.
+    return { kind: 'failed', failure: { status: null, code: '', traceId: '' } };
+  }
+}
 
 /** One page of the Log for `query`, after `cursor` when given. A 2xx without the list's fields is a failure. */
 export async function readLogs(
@@ -131,9 +152,14 @@ export interface LogsPageProps {
  * `field` and `value`, so a reload, a shared link and Back restore the search, and Search runs
  * it. The table lists the Log newest first, 50 at a time, with Load more for the next page:
  * Time (UTC), the type as a code badge toned by its outcome, the catalogue's description, and the
- * User and Application the event names. No Live view, Log streams, query bar, quick filters,
- * Location column or event drawer. Each read has its own AbortController, abandoned when a newer
- * one starts or the page leaves.
+ * User and Application the event names. No Live view, Log streams, query bar, quick filters or
+ * Location column. Each read has its own AbortController, abandoned when a newer one starts or
+ * the page leaves.
+ *
+ * Opening a row, by click or from its Description link with the keyboard (Story 7.5, UX-DR18),
+ * opens the event drawer, drawn selected, and reads that event: its code badge, its summary
+ * rows and, only when the server sent `raw`, the raw JSON with Copy JSON. Esc and Close shut it;
+ * the drawer isn't kept in the URL.
  */
 export function LogsPage({ request, tenantId }: LogsPageProps) {
   const messages = useMessages();
@@ -146,6 +172,10 @@ export function LogsPage({ request, tenantId }: LogsPageProps) {
   const [more, setMore] = useState<'idle' | 'loading' | 'failed'>('idle');
   // The page's own life: a late Load more answer after a new search or unmount lands nowhere.
   const alive = useRef(new AbortController());
+  // The open row, and its event read: each open, and each Retry, reads with its own controller.
+  const [opened, setOpened] = useState<TenantLogEvent | null>(null);
+  const [eventRead, setEventRead] = useState<EventRead | null>(null);
+  const [eventAttempt, setEventAttempt] = useState(0);
 
   // The URL is the search: on a reload, Back or Forward, the form shows what the URL holds.
   useEffect(() => setDraft(draftOf(search)), [search.field, search.value]);
@@ -158,11 +188,28 @@ export function LogsPage({ request, tenantId }: LogsPageProps) {
     setQuery(sent);
     setRead(null);
     setMore('idle');
+    setOpened(null);
     void readLogs(request, tenantId, sent, undefined, controller.signal).then((result) => {
       if (!controller.signal.aborted) setRead(result);
     });
     return () => controller.abort();
   }, [request, tenantId, search.field, search.value, attempt]);
+
+  const openedId = opened?.id ?? null;
+  useEffect(() => {
+    if (openedId === null) return;
+    const controller = new AbortController();
+    setEventRead(null);
+    void readLogEvent(request, tenantId, openedId, controller.signal).then((result) => {
+      if (!controller.signal.aborted) setEventRead(result);
+    });
+    return () => controller.abort();
+  }, [request, tenantId, openedId, eventAttempt]);
+
+  const closeEvent = useCallback(() => {
+    setOpened(null);
+    setEventRead(null);
+  }, []);
 
   const loadMore = useCallback(async () => {
     if (read?.kind !== 'ready' || read.list.nextCursor == null || more === 'loading') return;
@@ -199,12 +246,57 @@ export function LogsPage({ request, tenantId }: LogsPageProps) {
       header: messages.logsColumnType,
       cell: (row) => <CodeBadge outcome={row.outcome === 'failure' ? 'failure' : 'success'}>{row.type}</CodeBadge>,
     },
-    { key: 'description', header: messages.logsColumnDescription, rowHeader: true, cell: (row) => row.summary ?? row.type },
+    { key: 'description', header: messages.logsColumnDescription, rowHeader: true, rowLink: true, cell: (row) => row.summary ?? row.type },
     { key: 'user', header: messages.logsColumnUser, cell: (row) => <Reference id={referenceOf(row, 'user')} /> },
     { key: 'application', header: messages.logsColumnApplication, cell: (row) => <Reference id={referenceOf(row, 'client')} /> },
   ];
 
   const invalid = read?.kind === 'failed' && read.failure.status === 400;
+
+  // The drawer's header comes from the event once read, from its row until then.
+  const shown = eventRead?.kind === 'ready' ? eventRead.event : opened;
+  const summary: EventSummaryRow[] =
+    eventRead?.kind === 'ready'
+      ? eventSummary(eventRead.event, {
+          time: messages.logsColumnTime,
+          actor: messages.logsEventActor,
+          target: messages.logsEventTarget,
+          user: messages.logsColumnUser,
+          application: messages.logsColumnApplication,
+          ipAddress: messages.logsEventIpAddress,
+          userAgent: messages.logsEventUserAgent,
+          email: messages.logsEventEmail,
+        }).map((line) => ({
+          key: line.key,
+          label: line.label,
+          value: line.code ? <code className={styles.reference}>{line.value}</code> : line.value,
+        }))
+      : [];
+  const missing = eventRead?.kind === 'failed' && eventRead.failure.status === 404;
+  const eventStatus =
+    opened === null ? undefined : eventRead === null ? (
+      <SkeletonRows rows={4} columns={2} caption={false} />
+    ) : eventRead.kind === 'failed' ? (
+      <Banner
+        tone="bad"
+        action={missing ? undefined : { label: messages.retry, onClick: () => setEventAttempt((n) => n + 1) }}
+        data-testid={missing ? 'log-event-not-found' : 'log-event-failed'}
+      >
+        <p>{missing ? messages.logsEventNotFound : messages.logsEventLoadFailed}</p>
+        <ErrorReference code={eventRead.failure.code || 'unavailable'} traceId={eventRead.failure.traceId} />
+      </Banner>
+    ) : undefined;
+  const drawer = {
+    open: opened !== null,
+    onClose: closeEvent,
+    code: shown?.type ?? '',
+    outcome: shown?.outcome === 'failure' ? ('failure' as const) : ('success' as const),
+    title: shown ? (shown.summary ?? shown.type) : '',
+    summary,
+    status: eventStatus,
+    'data-testid': 'log-event',
+  };
+  const raw = eventRead?.kind === 'ready' ? eventRead.event.raw : null;
 
   return (
     <SectionPage eyebrow={messages.navMonitoring} title={messages.navLogs} data-testid="logs-page">
@@ -262,6 +354,8 @@ export function LogsPage({ request, tenantId }: LogsPageProps) {
               columns={columns}
               rows={read.list.events}
               rowKey={(row) => row.id}
+              onRowActivate={(row) => setOpened(row)}
+              selectedKey={opened?.id}
               // Every loaded row on one page: Load more reads the next 50.
               pageSize={Math.max(read.list.events.length, 1)}
               empty={<EmptyState message={messages.logsEmpty} />}
@@ -279,6 +373,7 @@ export function LogsPage({ request, tenantId }: LogsPageProps) {
           </div>
         )}
       </div>
+      {raw != null ? <EventDrawer {...drawer} canSeeRaw raw={raw} /> : <EventDrawer {...drawer} canSeeRaw={false} />}
     </SectionPage>
   );
 }

@@ -2,7 +2,8 @@
 title: "Story 7.5: Open an event's raw detail"
 type: 'feature'
 created: '2026-11-14'
-status: 'ready-for-dev'
+status: 'in-review'
+baseline_revision: '32ab16f3957465988058a012845b04ceb14a8f3b'
 review_loop_iteration: 0
 followup_review_recommended: false
 context:

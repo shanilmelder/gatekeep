@@ -1969,6 +1969,99 @@
         "x-gatekeep-recovery-allowed": false
       }
     },
+    "/api/v1/tenants/{tenantId}/logs/{eventId}": {
+      "get": {
+        "tags": [
+          "Tenants"
+        ],
+        "summary": "One event of the path Tenant's Log, with its raw detail for an Editor or Owner.",
+        "description": "Any Tenant Role in the path Tenant. Read only, in the Tenant's own scope, and the read isn't audited. The same fields as a search row. raw is set only when the caller holds tenant.log_detail.read in this Tenant (Editor and Owner): the envelope, the seal (seq, and prevHash and hash in lowercase hex; null while unsealed, prevHash null for a chain's first event) and the detail (IP address, User-Agent and email, each nullable; null when the event has none). For anyone else raw is null and no detail is read. An eventId that isn't an evt_ ID is 400 invalid_request. An event this Tenant doesn't have, including another Tenant's, is 404 not_found. A malformed, unknown or role-less Tenant is 403 access_denied, audited as every Tenant capability refusal is.",
+        "operationId": "GetTenantLogEvent",
+        "parameters": [
+          {
+            "name": "tenantId",
+            "in": "path",
+            "description": "The Tenant's public ID: ten_ and the UUID's 16 bytes in lowercase RFC 4648 base32 with no padding, whose last character carries two zero bits. Only this canonical spelling, after URL decoding, names a Tenant, and the empty UUID's never does; anything else is refused like a Tenant the Admin holds no role in.",
+            "required": true,
+            "schema": {
+              "pattern": "^ten_[a-z2-7]{25}[aeimquy4]$",
+              "type": "string"
+            }
+          },
+          {
+            "name": "eventId",
+            "in": "path",
+            "description": "The event's public ID, as the search lists it: evt_ and 26 base32 characters.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TenantLogEventDetailResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "access_denied, with the problem body, when the capability is refused. No body when an earlier check refuses first: a Session restricted to setup, or on a state-changing call a wrong Origin or CSRF token.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "adminSession": [ ]
+          }
+        ],
+        "x-gatekeep-setup-allowed": false,
+        "x-gatekeep-access": {
+          "kind": "capability",
+          "capability": "tenant.logs.read",
+          "scope": "tenant",
+          "machineAllowed": true,
+          "freshAssertion": "never"
+        },
+        "x-gatekeep-recovery-allowed": false
+      }
+    },
     "/api/v1/tenants/{tenantId}/signing-keys": {
       "get": {
         "tags": [
@@ -4451,6 +4544,69 @@
           }
         }
       },
+      "TenantLogEventDetailResponse": {
+        "required": [
+          "id",
+          "occurredAt",
+          "type",
+          "outcome",
+          "summary",
+          "actor",
+          "target",
+          "raw"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "pattern": "^evt_[a-z2-7]{25}[aeimquy4]$",
+            "type": "string"
+          },
+          "occurredAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "type": {
+            "maxLength": 128,
+            "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*$",
+            "type": "string"
+          },
+          "outcome": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "summary": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "actor": {
+            "$ref": "#/components/schemas/LogReference"
+          },
+          "target": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/LogReference"
+              }
+            ]
+          },
+          "raw": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/TenantLogRawResponse"
+              }
+            ]
+          }
+        }
+      },
       "TenantLogEventResponse": {
         "required": [
           "id",
@@ -4500,6 +4656,119 @@
                 "$ref": "#/components/schemas/LogReference"
               }
             ]
+          }
+        }
+      },
+      "TenantLogRawDetailResponse": {
+        "required": [
+          "ipAddress",
+          "userAgent",
+          "email"
+        ],
+        "type": "object",
+        "properties": {
+          "ipAddress": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "userAgent": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "email": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        }
+      },
+      "TenantLogRawResponse": {
+        "required": [
+          "id",
+          "occurredAt",
+          "type",
+          "actor",
+          "target",
+          "seal",
+          "detail"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "pattern": "^evt_[a-z2-7]{25}[aeimquy4]$",
+            "type": "string"
+          },
+          "occurredAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "type": {
+            "maxLength": 128,
+            "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*$",
+            "type": "string"
+          },
+          "actor": {
+            "$ref": "#/components/schemas/LogReference"
+          },
+          "target": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/LogReference"
+              }
+            ]
+          },
+          "seal": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/TenantLogSealResponse"
+              }
+            ]
+          },
+          "detail": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/TenantLogRawDetailResponse"
+              }
+            ]
+          }
+        }
+      },
+      "TenantLogSealResponse": {
+        "required": [
+          "seq",
+          "prevHash",
+          "hash"
+        ],
+        "type": "object",
+        "properties": {
+          "seq": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "prevHash": {
+            "pattern": "^[0-9a-f]{64}$",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "hash": {
+            "pattern": "^[0-9a-f]{64}$",
+            "type": "string"
           }
         }
       },

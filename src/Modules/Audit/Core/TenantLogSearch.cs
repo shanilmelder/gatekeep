@@ -193,7 +193,7 @@ internal sealed class TenantLogSearch : ITenantLogSearch
 
     private static string[] Codes(IEnumerable<AuditTypeCode> codes) => [.. codes.Select(c => c.Value).Distinct(StringComparer.Ordinal)];
 
-    private static ActorKind ActorKindOf(string stored) => stored switch
+    internal static ActorKind ActorKindOf(string stored) => stored switch
     {
         "system" => ActorKind.System,
         "anonymous" => ActorKind.Anonymous,
@@ -203,7 +203,7 @@ internal sealed class TenantLogSearch : ITenantLogSearch
         _ => throw new InvalidOperationException("An audit event has an unknown Actor kind."),
     };
 
-    private static AuditTargetKind TargetKindOf(string stored) => stored switch
+    internal static AuditTargetKind TargetKindOf(string stored) => stored switch
     {
         "tenant" => AuditTargetKind.Tenant,
         "admin" => AuditTargetKind.Admin,

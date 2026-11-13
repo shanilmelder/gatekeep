@@ -170,6 +170,16 @@ internal static class AdminOpenApi
                     Bound(schema, "id", EventIdPattern, maxLength: null);
                     Bound(schema, "type", TypeCodePattern, maxLength: 128);
                 }
+                else if (type == typeof(TenantLogEventDetailResponse) || type == typeof(TenantLogRawResponse))
+                {
+                    Bound(schema, "id", EventIdPattern, maxLength: null);
+                    Bound(schema, "type", TypeCodePattern, maxLength: 128);
+                }
+                else if (type == typeof(TenantLogSealResponse))
+                {
+                    Bound(schema, "prevHash", HashPattern, maxLength: null);
+                    Bound(schema, "hash", HashPattern, maxLength: null);
+                }
                 else if (type == typeof(TenantLogsResponse))
                 {
                     Bound(schema, "nextCursor", EventIdPattern, maxLength: null);
@@ -279,6 +289,25 @@ internal static class AdminOpenApi
                         "fresh_assertion_required, with the problem body, when no fresh assertion for this action and target is bound to " +
                         "the Session" + (declaration.Kind == AccessKind.Capability ? "; access_denied when the capability is refused" : string.Empty) +
                         ". No body when an earlier check refuses first: a restricted Session, or a wrong Origin or CSRF token.";
+                }
+
+                foreach (var segment in metadata.OfType<PathParameter>())
+                {
+                    // A sub-resource's own segment, described: it replaces the bare parameter the route implies.
+                    operation.Parameters ??= [];
+                    if (operation.Parameters.FirstOrDefault(p => p.Name == segment.Name) is { } implied)
+                    {
+                        operation.Parameters.Remove(implied);
+                    }
+
+                    operation.Parameters.Add(new OpenApiParameter
+                    {
+                        Name = segment.Name,
+                        In = ParameterLocation.Path,
+                        Required = true,
+                        Description = segment.Description,
+                        Schema = new OpenApiSchema { Type = JsonSchemaType.String },
+                    });
                 }
 
                 foreach (var query in metadata.OfType<QueryParameter>())
@@ -496,6 +525,9 @@ internal static class AdminOpenApi
 
     private const string EventIdPattern = "^evt_[a-z2-7]{25}[aeimquy4]$";
 
+    /// <summary>A SHA-256 hash in lowercase hex.</summary>
+    private const string HashPattern = "^[0-9a-f]{64}$";
+
     private const string ApplicationIdPattern = "^app_[a-z2-7]{25}[aeimquy4]$";
 
     private const string ClientSecretIdPattern = "^sec_[a-z2-7]{25}[aeimquy4]$";
@@ -581,6 +613,14 @@ internal static class AdminOpenApi
 
 /// <summary>An optional query parameter an endpoint reads itself, for the OpenAPI document only (Story 1.27).</summary>
 internal sealed class QueryParameter(string name, string description)
+{
+    public string Name { get; } = name;
+
+    public string Description { get; } = description;
+}
+
+/// <summary>A path segment an endpoint parses itself, described for the OpenAPI document only (Story 7.5).</summary>
+internal sealed class PathParameter(string name, string description)
 {
     public string Name { get; } = name;
 
