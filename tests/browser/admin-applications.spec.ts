@@ -90,6 +90,18 @@ const OLD: Secret = { id: sec(1), createdAt: '2026-11-01T09:00:00.000Z', expires
 /** The value the n-th create answers: the Tenant's ID, a dot, and 43 base64url characters. */
 const secretValue = (n: number) => `${TENANT}.${'S'.repeat(42)}${n}`;
 
+/** Story 3.5: the purge Operation a deletion answers with. */
+const PURGE = {
+  id: `op_${'p'.repeat(25)}a`,
+  type: 'directory.application.purge',
+  tenantId: TENANT,
+  status: 'running',
+  createdAt: '2026-11-14T09:00:00Z',
+  updatedAt: '2026-11-14T09:00:00Z',
+  finishedAt: null,
+  steps: [],
+};
+
 const json = (route: Route, status: number, body: unknown, headers: Record<string, string> = {}) =>
   route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body), headers });
 const problem = (route: Route, status: number, code: string) =>
@@ -121,6 +133,8 @@ interface State {
   secretWrite: ((route: Route) => Promise<void>) | null;
   /** Story 3.4: replaces the tokens save's answer. */
   tokensSave: ((route: Route) => Promise<void>) | null;
+  /** Story 3.5: replaces the deletion's answer. */
+  remove: ((route: Route) => Promise<void>) | null;
 }
 
 async function answerApi(page: Page, initial: Partial<State> = {}) {
@@ -130,6 +144,7 @@ async function answerApi(page: Page, initial: Partial<State> = {}) {
   const begins: unknown[] = [];
   const secretWrites: { path: string; headers: Record<string, string> }[] = [];
   const tokenPuts: { body: Record<string, number>; headers: Record<string, string> }[] = [];
+  const deletes: { path: string; body: string | null; headers: Record<string, string> }[] = [];
   const state: State = {
     capabilities: TENANT_EDITOR,
     applications: ROWS,
@@ -148,6 +163,7 @@ async function answerApi(page: Page, initial: Partial<State> = {}) {
     secretList: null,
     secretWrite: null,
     tokensSave: null,
+    remove: null,
     ...initial,
   };
   await page.route(
@@ -281,6 +297,15 @@ async function answerApi(page: Page, initial: Partial<State> = {}) {
           : json(route, 200, { applications: state.applications, nextCursor: state.nextCursor });
       }
       const one = new RegExp(`^${LIST}/([^/]+)$`).exec(pathname);
+      if (one && request.method() === 'DELETE') {
+        // Story 3.5: the deletion, no body and no fresh assertion; 202 with the Tenant's purge Operation.
+        deletes.push({ path: pathname, body: request.postData(), headers: request.headers() });
+        if (state.remove) return state.remove(route);
+        const id = decodeURIComponent(one[1]!);
+        if (!state.applications.some((row) => row.id === id)) return problem(route, 404, 'not_found');
+        state.applications = state.applications.filter((row) => row.id !== id);
+        return json(route, 202, PURGE, { Location: `/api/v1/tenants/${TENANT}/operations/${PURGE.id}` });
+      }
       if (one) {
         if (state.read) return state.read(route);
         const found = [...state.applications, ...state.later].find((row) => row.id === decodeURIComponent(one[1]!));
@@ -289,7 +314,7 @@ async function answerApi(page: Page, initial: Partial<State> = {}) {
       return route.fulfill({ status: 404 });
     },
   );
-  return { log, posts, puts, begins, secretWrites, tokenPuts, state, count: (entry: string) => log.filter((line) => line === entry).length };
+  return { log, posts, puts, begins, secretWrites, tokenPuts, deletes, state, count: (entry: string) => log.filter((line) => line === entry).length };
 }
 
 /** A virtual CTAP2 authenticator holding the Admin's resident credential, so the shell's renewal completes by itself. */
@@ -1452,6 +1477,112 @@ test.describe('tokens (Story 3.4)', () => {
         expect(await axe(page), 'viewer').toEqual([]);
       });
     }
+  }
+});
+
+test.describe('delete (Story 3.5)', () => {
+  const dangerZone = (page: Page) => page.getByTestId('application-danger-zone');
+  const deleteButton = (page: Page) => page.getByTestId('application-delete');
+  const dialog = (page: Page) => page.getByRole('dialog', { name: 'Delete Northwind Web?' });
+  const toast = (page: Page) => page.getByTestId('toast');
+  const BODY =
+    "Its refresh tokens and grants are revoked now, and it can't get new tokens. Access tokens it already holds stay valid until they expire. Users aren't affected.";
+
+  test('the danger zone opens a destructive modal that states the token effect and asks for nothing typed', async ({ page }) => {
+    const api = await answerApi(page);
+    await page.goto(`${PAGE}/${app(1)}`);
+
+    await expect(dangerZone(page)).toContainText('Delete application');
+    await expect(dangerZone(page)).not.toContainText('immediately');
+    await deleteButton(page).click();
+
+    await expect(dialog(page)).toBeVisible();
+    await expect(dialog(page)).toContainText(BODY);
+    await expect(dialog(page).getByRole('textbox')).toHaveCount(0);
+    await expect(dialog(page).getByRole('button', { name: 'Delete application' })).toBeEnabled();
+    await expect(dialog(page).getByRole('button', { name: 'Delete application' })).not.toHaveAttribute('aria-disabled', 'true');
+    expect(api.deletes).toHaveLength(0);
+  });
+
+  test('Cancel sends nothing; Delete application sends the DELETE once, then shows the list and "Application deleted."', async ({ page }) => {
+    const api = await answerApi(page);
+    await page.goto(`${PAGE}/${app(1)}`);
+
+    await deleteButton(page).click();
+    await dialog(page).getByRole('button', { name: 'Cancel' }).click();
+    await expect(dialog(page)).toBeHidden();
+    expect(api.deletes).toHaveLength(0);
+
+    await deleteButton(page).click();
+    await dialog(page).getByRole('button', { name: 'Delete application' }).click();
+
+    await expect(page).toHaveURL(new RegExp(`${PAGE}$`));
+    await expect(toast(page)).toHaveText('Application deleted.');
+    await expect(page.getByTestId('application-name')).toHaveText(ROWS.filter((row) => row.id !== app(1)).map((row) => row.name));
+    expect(api.deletes).toHaveLength(1);
+    expect(api.deletes[0]!.path).toBe(`${LIST}/${app(1)}`);
+    expect(api.deletes[0]!.body).toBeNull();
+    expect(api.deletes[0]!.headers['x-gatekeep-tenant']).toBe(TENANT);
+    expect(api.deletes[0]!.headers['x-gatekeep-csrf']).toBe(CSRF);
+    expect(api.begins).toHaveLength(0);
+  });
+
+  test('a failed deletion shows the banner with its reference in the modal, which stays open', async ({ page }) => {
+    const api = await answerApi(page, { remove: (route) => problem(route, 500, 'unavailable') });
+    await page.goto(`${PAGE}/${app(1)}`);
+
+    await deleteButton(page).click();
+    await dialog(page).getByRole('button', { name: 'Delete application' }).click();
+
+    const failed = dialog(page).getByTestId('delete-application-failed');
+    await expect(failed).toContainText("Couldn't delete the application. Try again.");
+    await expect(failed).toContainText(TRACE);
+    await expect(dialog(page)).toBeVisible();
+    await expect(page).toHaveURL(new RegExp(`${PAGE}/${app(1)}$`));
+    await expect(toast(page)).toHaveCount(0);
+    expect(api.deletes).toHaveLength(1);
+
+  });
+
+  test('a 404, such as one deleted meanwhile, counts as deleted: the list and "Application deleted."', async ({ page }) => {
+    const api = await answerApi(page, { remove: (route) => problem(route, 404, 'not_found') });
+    await page.goto(`${PAGE}/${app(1)}`);
+
+    await deleteButton(page).click();
+    await dialog(page).getByRole('button', { name: 'Delete application' }).click();
+
+    await expect(page).toHaveURL(new RegExp(`${PAGE}$`));
+    await expect(toast(page)).toHaveText('Application deleted.');
+    await expect(page.getByTestId('delete-application-failed')).toHaveCount(0);
+    expect(api.deletes).toHaveLength(1);
+  });
+
+  test('a Viewer sees no danger zone', async ({ page }) => {
+    await answerApi(page, { capabilities: TENANT_VIEWER });
+    await page.goto(`${PAGE}/${app(1)}`);
+
+    await expect(page.getByTestId('application-client-id')).toBeVisible();
+    await expect(dangerZone(page)).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Delete', exact: true })).toHaveCount(0);
+  });
+
+  for (const scheme of ['light', 'dark'] as const) {
+    test(`axe finds no violations, ${scheme}: the danger zone, the modal and its failure`, async ({ page }) => {
+      await page.emulateMedia({ colorScheme: scheme });
+      await answerApi(page, { remove: (route) => problem(route, 500, 'unavailable') });
+
+      await page.goto(`${PAGE}/${app(1)}`);
+      await expect(dangerZone(page)).toBeVisible();
+      expect(await axe(page), 'danger zone').toEqual([]);
+
+      await deleteButton(page).click();
+      await expect(dialog(page)).toBeVisible();
+      expect(await axe(page), 'modal').toEqual([]);
+
+      await dialog(page).getByRole('button', { name: 'Delete application' }).click();
+      await expect(dialog(page).getByTestId('delete-application-failed')).toBeVisible();
+      expect(await axe(page), 'failure').toEqual([]);
+    });
   }
 });
 

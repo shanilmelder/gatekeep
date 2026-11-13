@@ -30,6 +30,15 @@ public static class DirectoryEvents
         AuditOutcome.Success);
 
     /// <summary>
+    /// Written when an Editor, Owner or machine client deletes an Application (Story 3.5, FR-11), with the
+    /// <c>sessions.access.revoked</c> of its refresh tokens and grants. The target is the Application.
+    /// </summary>
+    public static readonly AuditEventDefinition ApplicationDeleted = new(
+        new AuditTypeCode("directory.application.deleted"),
+        "An Application was deleted: hidden at once, its secrets, refresh tokens and grants revoked. Access tokens it holds stay valid until they expire. Names the Application only.",
+        AuditOutcome.Success);
+
+    /// <summary>
     /// Written when a Tenant Owner creates an Application's client secret while it holds no current one
     /// (Story 3.3, FR-12). The target is the Application.
     /// </summary>

@@ -602,6 +602,18 @@ export interface Messages {
   /** A lifetime under 1 second, or not a whole number of seconds. */
   applicationTokensMinimum: string;
   applicationTokensNotWhole: string;
+  /** The detail page's danger zone (Story 3.5): its heading, its line on what deleting does, and its button. */
+  applicationDeleteTitle: string;
+  applicationDeleteDescription: string;
+  applicationDelete: string;
+  /** The Delete application modal. Placeholder in the title: {name}. The body states the token effect. */
+  deleteApplicationTitle: string;
+  deleteApplicationBody: string;
+  deleteApplicationConfirm: string;
+  /** The toast once an Application is deleted, on the Applications list. */
+  applicationDeleted: string;
+  /** In the modal when the request failed: nothing was deleted, or it was and the rest didn't start. */
+  deleteApplicationFailed: string;
   /** A duration's units, one and many; {count} is the number. Each further unit joins with durationJoin. */
   durationDay: string;
   durationDays: string;
@@ -986,6 +998,15 @@ export const defaultMessages: Readonly<Messages> = Object.freeze({
   applicationTokensMaximum: 'Maximum is {limit}.',
   applicationTokensMinimum: 'Use at least 1 second.',
   applicationTokensNotWhole: 'Enter a whole number of seconds.',
+  applicationDeleteTitle: 'Delete application',
+  applicationDeleteDescription: "Its refresh tokens and grants are revoked, and it can't get new tokens. Users aren't affected.",
+  applicationDelete: 'Delete',
+  deleteApplicationTitle: 'Delete {name}?',
+  deleteApplicationBody:
+    "Its refresh tokens and grants are revoked now, and it can't get new tokens. Access tokens it already holds stay valid until they expire. Users aren't affected.",
+  deleteApplicationConfirm: 'Delete application',
+  applicationDeleted: 'Application deleted.',
+  deleteApplicationFailed: "Couldn't delete the application. Try again.",
   durationDay: '1 day',
   durationDays: '{count} days',
   durationHour: '1 hour',

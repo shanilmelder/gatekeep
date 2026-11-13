@@ -35,6 +35,7 @@ internal static partial class LogCatalogue
         new("bootstrap.token.issued", AuditOutcome.Success, "gatekeep init issued the first one-time bootstrap token. It expires 15 minutes after issue. Holds no token or hash."),
         new("bootstrap.token.reissued", AuditOutcome.Success, "gatekeep init reissued the bootstrap token, voiding the previous one. It expires 15 minutes after issue. Holds no token or hash."),
         new("directory.application.created", AuditOutcome.Success, "An Application was created. Names the Application only: no client secret is created with it, and any secret is stored only as its hash."),
+        new("directory.application.deleted", AuditOutcome.Success, "An Application was deleted: hidden at once, its secrets, refresh tokens and grants revoked. Access tokens it holds stay valid until they expire. Names the Application only."),
         new("directory.application.prod_callback_added", AuditOutcome.Success, "A callback URL was added to an Application in a Prod Tenant, after a fresh assertion. Names the Application only, never the URL."),
         new("directory.application.updated", AuditOutcome.Success, "An Application's callback, logout or web origin URLs or its grant types were changed. Names the Application only, never a URL. A save that changes nothing writes no event."),
         new("directory.client_secret.created", AuditOutcome.Success, "A client secret was created for an Application. Names the Application only: the secret is shown once to its creator and stored only as its hash."),

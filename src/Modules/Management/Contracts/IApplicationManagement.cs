@@ -130,6 +130,35 @@ public sealed record ApplicationLifetimesResult(
     ManagedApplication? Application = null,
     IReadOnlyList<ApplicationLifetimesError>? Errors = null);
 
+/// <summary>How an Application's deletion ended (Story 3.5).</summary>
+public enum ApplicationDeleteStatus
+{
+    /// <summary>
+    /// The Application is marked deleted, its secrets, refresh tokens and grants are revoked and its events written in
+    /// the Tenant context; the result holds the purge Operation, started now in the Deployment context or already active
+    /// for the Tenant. The caller commits the Tenant context, then the Deployment one.
+    /// </summary>
+    Started,
+
+    /// <summary>The capability isn't held in the path Tenant, decided again here (AD-5). Nothing was written.</summary>
+    Forbidden,
+
+    /// <summary>
+    /// The path Tenant has no visible Application by that ID: an unknown one, one already deleted, another Tenant's and
+    /// the hidden <c>system</c> one alike. Nothing was written.
+    /// </summary>
+    NotFound,
+
+    /// <summary>
+    /// No purge Operation could be started or found: another kept winning the start and finishing before it was read.
+    /// The deletion is written but uncommitted; the caller commits nothing, and the route answers it as unavailable.
+    /// </summary>
+    PurgeNotStarted,
+}
+
+/// <summary>A deletion's result: the <c>directory.application.purge</c> Operation when <see cref="Status"/> is <see cref="ApplicationDeleteStatus.Started"/>.</summary>
+public sealed record ApplicationDeleteResult(ApplicationDeleteStatus Status, ManagedOperation? Operation = null);
+
 /// <summary>A page of Applications when <see cref="Status"/> is <see cref="ApplicationStatus.Done"/>, newest first, and the next page's cursor.</summary>
 public sealed record ApplicationPageResult(ApplicationStatus Status, IReadOnlyList<ManagedApplication> Applications, Guid? NextAfter);
 
@@ -308,5 +337,32 @@ public interface IApplicationManagement
         Guid tenantId,
         Guid applicationId,
         Guid secretId,
+        CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Deletes the Application <paramref name="applicationId"/> (Story 3.5, FR-11, AD-13, AD-30) with
+    /// <c>tenant.applications.manage</c>, which Editors, Owners and machine principals may hold, and no fresh assertion.
+    /// In <paramref name="tenantContext"/>, the path Tenant's own: the capability, then the Application under its row
+    /// lock; then its <c>deleted_at</c>, its live secrets revoked, its refresh tokens and grants revoked through
+    /// <c>ISessions.RevokeAccessAsync</c> with the Application scope (<c>sessions.access.revoked</c>), and
+    /// <c>directory.application.deleted</c> by the caller. Then, in <paramref name="deploymentContext"/>, the
+    /// <c>directory.application.purge</c> Operation is started for the Tenant; when one is already running or failed
+    /// for it, that one is returned, as its stages purge every deleted Application of the Tenant. The caller commits
+    /// the Tenant context first and the Deployment one only once that has committed, so no purge runs before the
+    /// deletion it purges is visible; a Deployment context left uncommitted after that leaves the Application deleted, hidden and
+    /// revoked, and the next deletion's Operation purges it. On any status but <see cref="ApplicationDeleteStatus.Started"/>
+    /// the caller commits neither.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">
+    /// <paramref name="tenantContext"/> isn't <paramref name="tenantId"/>'s, or <paramref name="deploymentContext"/> has a Tenant.
+    /// </exception>
+    [StateChanging]
+    Task<ApplicationDeleteResult> DeleteAsync(
+        CommandContext tenantContext,
+        CommandContext deploymentContext,
+        Principal principal,
+        TenantRoleGrant? grant,
+        Guid tenantId,
+        Guid applicationId,
         CancellationToken cancellationToken);
 }

@@ -8,6 +8,7 @@ using Gatekeep.Kernel.Limits;
 using Gatekeep.Kernel.Persistence;
 using Gatekeep.Kernel.Secrets;
 using Gatekeep.Modules.Directory.Contracts;
+using Gatekeep.Modules.Sessions.Contracts;
 
 namespace Gatekeep.Modules.Directory.Core;
 
@@ -56,11 +57,16 @@ internal sealed class DirectoryService(IAuditAppender audit, TimeProvider time) 
         """;
 
     // now() is the database's clock, so an expiry is judged the same way however the caller's clock runs.
+    // Story 3.5: only a visible Application's secrets, so a deleted confidential client is refused even
+    // before its secrets' revocation is seen, and the system Application never has one to match.
     private const string LiveSecretHashes =
-        """
+        $"""
         SELECT secret_hash FROM client_secret
         WHERE tenant_id = @tenant_id AND application_id = @application_id
           AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at > now())
+          AND EXISTS (
+            SELECT 1 FROM application
+            WHERE tenant_id = @tenant_id AND id = @application_id AND {ApplicationRows.Visible})
         """;
 
     // Story 3.3: an Admin's secret, created by the database's clock, which also judges its overlap and end.
@@ -97,8 +103,20 @@ internal sealed class DirectoryService(IAuditAppender audit, TimeProvider time) 
           AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at > now())
         """;
 
+    // Story 3.5: a deleted Application's every live secret, refused at once; never before a secret's created_at,
+    // which a System-path secret takes from the app's clock.
+    private const string RevokeLiveSecrets =
+        """
+        UPDATE client_secret SET revoked_at = greatest(now(), created_at)
+        WHERE tenant_id = @tenant_id AND application_id = @application_id
+          AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at > now())
+        """;
+
     private readonly IAuditAppender _audit = audit ?? throw new ArgumentNullException(nameof(audit));
     private readonly TimeProvider _time = time ?? throw new ArgumentNullException(nameof(time));
+
+    // Story 3.5: the one revocation path (AD-13), in the caller's transaction.
+    private readonly ISessions _sessions = SessionsContract.CreateSessions(audit, time);
 
     public async Task<CreatedMachineClient> CreateMachineClientAsync(CommandContext context, string name, CancellationToken cancellationToken)
     {
@@ -356,6 +374,48 @@ internal sealed class DirectoryService(IAuditAppender audit, TimeProvider time) 
         return new ApplicationLifetimesWrite(updated, Changed: true);
     }
 
+    public async Task<bool> DeleteApplicationAsync(CommandContext context, Actor actor, Guid id, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        ArgumentNullException.ThrowIfNull(actor);
+        var tenantId = context.TenantId
+            ?? throw new InvalidOperationException("An Application is deleted only in a Tenant context.");
+
+        // Under the row's lock, held to the end of the caller's transaction: two deletions take turns, and the
+        // second finds it hidden. The system Application is never found here; GK012 refuses it too.
+        if (await ApplicationRows.FindAsync(context, id, cancellationToken, locked: true) is null
+            || !await ApplicationRows.MarkDeletedAsync(context, id, cancellationToken))
+        {
+            return false;
+        }
+
+        await using (var command = context.CreateCommand())
+        {
+            command.CommandText = RevokeLiveSecrets;
+            Add(command, "tenant_id", tenantId);
+            Add(command, "application_id", id);
+            await command.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        // AD-13: its refresh tokens and grants end by the one revocation path, which writes sessions.access.revoked.
+        // Access tokens are not revocable beyond their row's status: they stay valid until they expire.
+        await _sessions.RevokeAccessAsync(
+            context,
+            new RevocationScope.Application(id),
+            exceptSessionId: null,
+            RevocationReason.ApplicationDeleted,
+            actor,
+            cancellationToken);
+
+        await _audit.AppendAsync(
+            context,
+            new AuditEvent(DirectoryEvents.ApplicationDeleted.Code, actor, AuditTargetKind.Client, id),
+            detail: null,
+            cancellationToken);
+
+        return true;
+    }
+
     public async Task<IReadOnlyList<DirectoryClientSecret>?> ListClientSecretsAsync(CommandContext context, Guid applicationId, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(context);
@@ -609,12 +669,13 @@ internal static class ClientSecrets
 /// Reads Applications (AD-8). Every query that hands Applications to a caller, OpenIddict's store
 /// included, holds to <see cref="Visible"/>, so the hidden <c>system</c> Application (AD-12, Story 2.8)
 /// is an unknown <c>client_id</c> to OpenIddict and is never listed. Only <see cref="FindSystemAsync"/>
-/// selects it, and returns only its ID.
+/// selects it, and returns only its ID. From Story 3.5 it hides a deleted Application the same way, until
+/// the <c>directory.application.purge</c> Operation removes its row.
 /// </summary>
 internal static class ApplicationRows
 {
-    /// <summary>The one predicate that hides the <c>system</c> Application from every caller-facing read.</summary>
-    public const string Visible = "kind <> 'system'";
+    /// <summary>The one predicate that hides the <c>system</c> Application, and from Story 3.5 a deleted one, from every caller-facing read.</summary>
+    public const string Visible = "kind <> 'system' AND deleted_at IS NULL";
 
     private const string Columns =
         "id, name, kind, grant_types, audiences, redirect_uris, post_logout_redirect_uris, web_origins, created_at, "
@@ -659,6 +720,22 @@ internal static class ApplicationRows
         WHERE tenant_id = @tenant_id AND id = @id AND {Visible}
         RETURNING {Columns}
         """;
+
+    // Story 3.5: the deletion's mark, once, and never on the system Application, which GK012 refuses too.
+    private const string MarkDeleted =
+        $"UPDATE application SET deleted_at = now() WHERE tenant_id = @tenant_id AND id = @id AND {Visible}";
+
+    /// <summary>Marks a visible Application deleted (Story 3.5). Whether a row changed.</summary>
+    public static async Task<bool> MarkDeletedAsync(CommandContext context, Guid id, CancellationToken cancellationToken)
+    {
+        var tenantId = TenantOf(context);
+
+        await using var command = context.CreateCommand();
+        command.CommandText = MarkDeleted;
+        DirectoryService.Add(command, "tenant_id", tenantId);
+        DirectoryService.Add(command, "id", id);
+        return await command.ExecuteNonQueryAsync(cancellationToken) == 1;
+    }
 
     public static async Task<DirectoryApplication?> FindAsync(CommandContext context, Guid id, CancellationToken cancellationToken, bool locked = false)
     {

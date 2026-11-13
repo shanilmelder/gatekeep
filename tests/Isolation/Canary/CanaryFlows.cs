@@ -372,6 +372,13 @@ internal static class CanaryFlows
             "Story 2.3 build review",
             new DateOnly(2026, 11, 5)),
         new(
+            new(SurfaceKind.OperationType, "directory.application.purge"),
+            "Its one Tenant stage deletes the rows of the Tenant's deleted Applications by their IDs, in each owning module, "
+            + "and stores fixed result codes. It reads only row IDs and Application and family references, never a secret, "
+            + "hash, payload or token value, and has no completion.",
+            "Story 3.5 build review",
+            new DateOnly(2026, 11, 14)),
+        new(
             new(SurfaceKind.OperationType, "tenancy.tenant.delete"),
             "Its two Tenant stages delete the Tenant's rows by its ID and destroy its six secret class keys and its Signing and "
             + "Management keys by name only, and store fixed result codes; its completion sets the status, writes an ID-only event "
@@ -400,10 +407,12 @@ internal static class CanaryFlows
             new DateOnly(2026, 11, 11)),
         new(
             new(SurfaceKind.Route, "/api/v1/tenants/{tenantId}/applications/{applicationId}"),
-            "A read with no body: it returns one of the path Tenant's Applications' ID, name, type and creation time, never a "
-            + "secret or hash, and writes nothing. Refusals are logged by fixed code only.",
-            "Story 3.1 build review",
-            new DateOnly(2026, 11, 11)),
+            "The read has no body: it returns one of the path Tenant's Applications' ID, name, type and creation time, never a "
+            + "secret or hash, and writes nothing. The delete (Story 3.5) has no body: it sets deleted_at, revokes the secrets, "
+            + "families and tokens by status and time only, writes ID-only events and starts an ID-only purge Operation, and "
+            + "answers that Operation's codes and IDs. Refusals are logged by fixed code only.",
+            "Story 3.5 build review",
+            new DateOnly(2026, 11, 14)),
         new(
             new(SurfaceKind.Route, "/api/v1/tenants/{tenantId}/applications/{applicationId}/settings"),
             "The save takes URLs and grant types only, writes them and ID-only events, and returns the Application's settings, "

@@ -467,6 +467,88 @@ internal static class ApplicationsApi
         }
     }
 
+    /// <summary>
+    /// Deletes an Application (Story 3.5): in the Tenant's own scope it is marked deleted and its secrets, refresh
+    /// tokens and grants are revoked; in a Deployment scope the Tenant's <c>directory.application.purge</c> Operation is
+    /// started, or the active one found. The Tenant scope commits first, then the Deployment one, so the purge never
+    /// runs before the deletion is visible. 202 with that Operation, and its Tenant-path Location.
+    /// </summary>
+    public static async Task DeleteAsync(HttpContext context, AdminApiServices services)
+    {
+        var path = AdminRequestChecks.PathTenantGrant(context);
+        var cancellationToken = context.RequestAborted;
+
+        // A malformed ID names no Application: the same 404 as an unknown one, after the capability.
+        if (!PublicId.TryParse(PublicIdType.Application, context.GetRouteValue(ApplicationRouteValue) as string, out var applicationId))
+        {
+            await RefuseAsync(context, StatusCodes.Status404NotFound, AdminResponses.NotFound);
+            return;
+        }
+
+        ApplicationDeleteResult result;
+        try
+        {
+            await using var scope = await TenantScope.BeginAsync(services.Source, AdminRequestChecks.PathTenant(context), cancellationToken);
+            await using var deployment = await services.BeginAsync(cancellationToken);
+            result = await services.Applications.DeleteAsync(
+                scope.CreateCommandContext(),
+                deployment.CreateCommandContext(),
+                AdminRequestChecks.Principal(context),
+                path.Grant,
+                path.TenantId,
+                applicationId,
+                cancellationToken);
+
+            if (result.Status == ApplicationDeleteStatus.Started)
+            {
+                // The deletion first, then its purge: a client gone now mustn't undo either.
+                await scope.CommitAsync(CancellationToken.None);
+                await deployment.CommitAsync(CancellationToken.None);
+            }
+        }
+        catch (DbException e) when (e.SqlState == AdminResponses.SystemApplicationEdited && !context.Response.HasStarted)
+        {
+            // The guard the visibility filter should have met first: the system Application is no Application here.
+            AdminRequestChecks.Log(context, e);
+            await RefuseAsync(context, StatusCodes.Status404NotFound, AdminResponses.NotFound);
+            return;
+        }
+        catch (DbException e) when (!context.Response.HasStarted)
+        {
+            // Nothing is kept, or, once the deletion has committed, its purge didn't start: the next deletion's purges it.
+            AdminRequestChecks.Log(context, e);
+            await AdminResponses.UnavailableAsync(context);
+            return;
+        }
+
+        switch (result.Status)
+        {
+            case ApplicationDeleteStatus.Started:
+                var operation = result.Operation!;
+                context.Response.StatusCode = StatusCodes.Status202Accepted;
+                context.Response.Headers.Location =
+                    $"/api/v1/tenants/{PublicId.Format(PublicIdType.Tenant, path.TenantId)}/operations/{PublicId.Format(PublicIdType.Operation, operation.Id)}";
+                await AdminResponses.JsonAsync(context, TenantsApi.Operation(operation), cancellationToken: CancellationToken.None);
+                return;
+
+            case ApplicationDeleteStatus.NotFound:
+                await RefuseAsync(context, StatusCodes.Status404NotFound, AdminResponses.NotFound);
+                return;
+
+            case ApplicationDeleteStatus.PurgeNotStarted:
+                LogRefusal(context, "purge_not_started");
+                await AdminResponses.UnavailableAsync(context);
+                return;
+
+            case ApplicationDeleteStatus.Forbidden:
+                await RefuseAsync(context, StatusCodes.Status403Forbidden, AdminResponses.AccessDenied);
+                return;
+
+            default:
+                throw new System.Diagnostics.UnreachableException($"Unhandled deletion status {result.Status}.");
+        }
+    }
+
     private static ApplicationResponse Response(ManagedApplication application) => new()
     {
         Id = application.ClientId,

@@ -105,3 +105,39 @@
 .section > p {
   margin: 0;
 }
+
+/* Story 3.5: the detail page's danger zone, at its foot: what deleting does, and Delete, which only opens the modal. */
+.danger {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--gk-space-12);
+  min-width: 0;
+  padding: var(--gk-space-12) var(--gk-space-16);
+  background: var(--gk-color-sf);
+  border: 1px solid var(--gk-color-bad);
+  border-radius: var(--gk-radius-card);
+}
+
+.dangerText {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gk-space-4);
+  min-width: 0;
+  flex: 1 1 16rem;
+}
+
+.dangerText > h2 {
+  margin: 0;
+  font: var(--gk-font-section);
+  font-weight: var(--gk-font-section-weight);
+  color: var(--gk-color-bad);
+}
+
+.dangerText > p {
+  margin: 0;
+  font: var(--gk-font-small);
+  color: var(--gk-color-tx2);
+}

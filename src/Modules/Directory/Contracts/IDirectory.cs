@@ -151,7 +151,7 @@ public interface IDirectory
 
     /// <summary>
     /// The context Tenant's Application <paramref name="id"/>, or null when it has none by that ID, the
-    /// <c>system</c> Application's included (AD-12). It only reads.
+    /// <c>system</c> Application's included (AD-12), and from Story 3.5 a deleted one's. It only reads.
     /// </summary>
     /// <exception cref="InvalidOperationException">The context has no Tenant.</exception>
     Task<DirectoryApplication?> FindApplicationAsync(CommandContext context, Guid id, CancellationToken cancellationToken);
@@ -205,6 +205,21 @@ public interface IDirectory
         CancellationToken cancellationToken);
 
     /// <summary>
+    /// Deletes the context Tenant's Application <paramref name="id"/> (Story 3.5, FR-11, AD-13), under the row's
+    /// lock, in the caller's transaction: sets its <c>deleted_at</c>, so every read hides it at once and client
+    /// authentication refuses it; revokes its live client secrets; revokes every Token Family and token of it
+    /// through <c>ISessions.RevokeAccessAsync</c> with the Application scope and the <c>application_deleted</c>
+    /// reason, which writes <c>sessions.access.revoked</c>; then writes <c>directory.application.deleted</c>, all by
+    /// <paramref name="actor"/>. Access tokens already issued stay valid until they expire. No row is deleted: the
+    /// <c>directory.application.purge</c> Operation does that. The <c>system</c> Application is never deleted.
+    /// Returns false, with nothing written, when the Tenant has no visible Application by that ID: an unknown one,
+    /// one already deleted and the <c>system</c> one alike.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The context has no Tenant. Nothing is written.</exception>
+    [StateChanging]
+    Task<bool> DeleteApplicationAsync(CommandContext context, Actor actor, Guid id, CancellationToken cancellationToken);
+
+    /// <summary>
     /// The live client secrets of the context Tenant's Application <paramref name="applicationId"/> (Story 3.3),
     /// newest first: not revoked, and with no <c>expires_at</c> or one still ahead by the database's clock.
     /// Always empty for a <c>spa</c> or <c>native</c> Application. Null when the Tenant has no visible
@@ -242,8 +257,8 @@ public interface IDirectory
     /// <summary>
     /// Whether <paramref name="secret"/> is a live secret of the Application <paramref name="clientId"/>
     /// names, in the context's Tenant: not revoked, and with no <c>expires_at</c> or one still ahead. The
-    /// stored hashes are compared in constant time. A malformed or unknown client ID is false, exactly
-    /// like a wrong secret. It only reads.
+    /// stored hashes are compared in constant time. A malformed or unknown client ID, the <c>system</c> Application's
+    /// and from Story 3.5 a deleted Application's, is false, exactly like a wrong secret. It only reads.
     /// </summary>
     /// <exception cref="InvalidOperationException">The context has no Tenant.</exception>
     Task<bool> VerifyClientSecretAsync(CommandContext context, string clientId, Secret<string> secret, CancellationToken cancellationToken);

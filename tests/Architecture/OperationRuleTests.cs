@@ -56,6 +56,33 @@ public class OperationRuleTests
         Assert.Contains(types, t => t.Type == "tenancy.tenant.delete" && t.HasCompletion);
         Assert.Contains(types, t => t.Type == "audit.chain.purge" && !t.HasCompletion);
         Assert.Equal(2, types.Count(t => t.HasCompletion));
+
+        // Story 3.5: a deleted Application's purge, one Tenant stage calling every owning module in one transaction, and no completion.
+        Assert.Contains(types, t => t.Type == "directory.application.purge" && !t.HasCompletion && t.StageKinds.SequenceEqual(["Tenant"]));
+        Assert.Equal(
+            ["audit.chain.purge", "directory.application.purge", "tenancy.tenant.create", "tenancy.tenant.delete"],
+            types.Select(t => t.Type).Order(StringComparer.Ordinal));
+    }
+
+    /// <summary>
+    /// Story 3.5: the Application purge is one stage, so its modules can't run out of order as separate step jobs can,
+    /// and it purges them in owning-module order, Sessions, Authentication, then Directory, as Tenant deletion's purge
+    /// list orders the same modules: each one's rows reference the next one's.
+    /// </summary>
+    [Fact]
+    public void Application_purge_is_one_stage_purging_in_the_Tenant_purge_order()
+    {
+        var assembly = Assembly.LoadFrom(Path.Combine(Root, "src/Modules/Operations", Output(), "Gatekeep.Modules.Operations.dll"));
+        var contract = assembly.GetType("Gatekeep.Modules.Operations.Contracts.OperationsContract", throwOnError: true)!;
+        var stages = ((IEnumerable)contract.GetProperty("ApplicationPurgeStages")!.GetValue(null)!).Cast<object>().Select(s => s.ToString()!).ToList();
+        var owners = ((IEnumerable)contract.GetProperty("ApplicationPurgeModules")!.GetValue(null)!).Cast<string>().ToList();
+
+        Assert.Equal(["directory.application.purge"], stages);
+        Assert.Equal(["Sessions", "Authentication", "Directory"], owners);
+
+        var modules = PurgeModules();
+        Assert.All(owners, o => Assert.Contains(o, modules));
+        Assert.Equal(owners, owners.OrderBy(o => modules.IndexOf(o)));
     }
 
     /// <summary>
