@@ -366,6 +366,16 @@ export function createApiClient(options: ApiClientOptions = {}) {
         'put',
         body,
       ),
+    /**
+     * Deletes an Application (Story 3.5): it is hidden and its secrets, refresh tokens and grants are revoked at once;
+     * access tokens it holds stay valid until they expire. A 202 with the Tenant's purge Operation, which removes its
+     * rows. Tenant Editors and Owners; no fresh assertion and no body. Both IDs go into the path encoded.
+     */
+    deleteApplication: (tenantId: string, applicationId: string) =>
+      request(
+        `/api/v1/tenants/${encodeURIComponent(tenantId)}/applications/${encodeURIComponent(applicationId)}` as '/api/v1/tenants/{tenantId}/applications/{applicationId}',
+        'delete',
+      ),
     /** An Application's live client secrets (Story 3.3), newest first: never a value or hash. Both IDs go into the path encoded. */
     listApplicationSecrets: (tenantId: string, applicationId: string) =>
       request(

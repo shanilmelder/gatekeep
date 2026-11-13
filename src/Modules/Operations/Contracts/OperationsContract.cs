@@ -101,8 +101,23 @@ public static class OperationsContract
     public static IReadOnlyList<string> TenantPurgeModules => TenantDeletion.PurgeModules;
 
     /// <summary>
+    /// Removes the rows of a Tenant's deleted Applications from each owning module (Story 3.5, AD-30): Sessions' tokens and
+    /// Token Families, Authentication's sign-in transactions, then Directory's client secrets and the Applications, all in
+    /// its one Tenant stage's transaction, for the deleted Applications that stage reads once. An Application's deletion
+    /// starts it scoped to the Tenant, with one step for <see cref="ApplicationPurgeStages"/>. It purges every deleted
+    /// Application of the Tenant, so one active Operation serves every deletion; one deleted after its read is left for the next.
+    /// </summary>
+    public static OperationType ApplicationPurgeOperation => ApplicationPurge.Type;
+
+    /// <summary>The Application purge's stages: its one Tenant stage, <c>directory.application.purge</c>.</summary>
+    public static IReadOnlyList<OperationCode> ApplicationPurgeStages => ApplicationPurge.Stages;
+
+    /// <summary>The modules the Application purge's stage purges, in order: Sessions, Authentication, then Directory.</summary>
+    public static IReadOnlyList<string> ApplicationPurgeModules => ApplicationPurge.PurgeModules;
+
+    /// <summary>
     /// The code-owned production Operation types: <see cref="PurgeChainOperation"/>,
-    /// <see cref="TenantCreationOperation"/> and <see cref="TenantDeletionOperation"/>.
+    /// <see cref="TenantCreationOperation"/>, <see cref="TenantDeletionOperation"/> and <see cref="ApplicationPurgeOperation"/>.
     /// </summary>
     public static OperationRegistry ProductionOperationRegistry => ProductionOperations.Registry;
 

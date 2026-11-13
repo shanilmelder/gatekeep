@@ -240,6 +240,14 @@ public sealed class DirectoryTests(PostgresFixture postgres)
 
         await PostgresFixture.ExecuteAsync(superuser, $"UPDATE client_secret SET expires_at = NULL, revoked_at = now() WHERE application_id = '{a.ApplicationId}'");
         Assert.False(await VerifyAsync(database, TenantA, a.ClientId, secret));
+
+        // Story 3.5: a deleted Application's still-live secret verifies no more, whatever the secret row says.
+        var b = await CreateAsync(database, TenantA);
+        var live = new Secret<string>(b.Secret.Use(static s => s));
+        Assert.True(await VerifyAsync(database, TenantA, b.ClientId, live));
+        await PostgresFixture.ExecuteAsync(superuser, $"UPDATE application SET deleted_at = now() WHERE id = '{b.ApplicationId}'");
+        Assert.Equal(1L, await PostgresFixture.ScalarAsync<long>(superuser, $"SELECT count(*) FROM client_secret WHERE application_id = '{b.ApplicationId}' AND revoked_at IS NULL"));
+        Assert.False(await VerifyAsync(database, TenantA, b.ClientId, live));
     }
 
     [Theory]

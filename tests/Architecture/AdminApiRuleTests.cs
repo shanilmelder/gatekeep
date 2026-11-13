@@ -127,6 +127,44 @@ public class AdminApiRuleTests
     private static bool UpdatesOrDeletes(IEnumerable<string> grants) =>
         grants.Any(g => g.EndsWith(" UPDATE", StringComparison.Ordinal) || g.EndsWith(" DELETE", StringComparison.Ordinal));
 
+    /// <summary>
+    /// Story 3.5: an Application's deletion, as gk_admin, sets only <c>deleted_at</c> and revokes by status alone,
+    /// reading only the references the revocation's WHERE names; its purge, as gk_worker, reads only the references
+    /// its deletes name. Never a secret, hash, subject, payload or token reference.
+    /// </summary>
+    [Theory]
+    [InlineData(
+        "application",
+        new[]
+        {
+            "gk_admin UPDATE access_token_lifetime,deleted_at,grant_types,id_token_lifetime,post_logout_redirect_uris,redirect_uris,refresh_token_absolute_lifetime,refresh_token_inactivity_lifetime,web_origins",
+            "gk_worker SELECT deleted_at,id,kind,tenant_id",
+        })]
+    [InlineData("client_secret", new[] { "gk_admin UPDATE expires_at,revoked_at", "gk_worker SELECT application_id,tenant_id" })]
+    [InlineData(
+        "authorization",
+        new[]
+        {
+            "gk_admin SELECT application_id,id,status,tenant_id",
+            "gk_admin UPDATE concurrency_token,status",
+            "gk_hosted UPDATE concurrency_token,status",
+            "gk_worker SELECT application_id,id,tenant_id",
+        })]
+    [InlineData(
+        "token",
+        new[]
+        {
+            "gk_admin SELECT application_id,authorization_id,status,tenant_id",
+            "gk_admin UPDATE concurrency_token,status",
+            "gk_hosted UPDATE concurrency_token,payload,redemption_date,reference_id,status",
+            "gk_worker SELECT application_id,authorization_id,tenant_id",
+        })]
+    [InlineData("signin_transaction", new[] { "gk_worker SELECT application_id,tenant_id" })]
+    public void Registry_holds_an_Application_deletion_and_its_purge_to_their_columns(string table, string[] columns)
+    {
+        Assert.Equal(columns, ColumnGrants(Entry(table)));
+    }
+
     private static IEnumerable<string> TableGrants(object entry) =>
         ((IEnumerable)Get(entry, "Grants")!)
             .Cast<object>()

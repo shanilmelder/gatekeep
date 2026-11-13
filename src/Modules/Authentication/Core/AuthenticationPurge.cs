@@ -31,4 +31,33 @@ internal sealed class AuthenticationPurge : ITenantPurge
             await command.ExecuteNonQueryAsync(cancellationToken);
         }
     }
+
+    /// <summary>
+    /// Story 3.5 (AD-30): the pending sign-in transactions of the given deleted Applications only, which Directory
+    /// names, so this reads nothing of its tables. A second run deletes nothing.
+    /// </summary>
+    public static async Task PurgeApplicationsAsync(CommandContext context, IReadOnlyCollection<Guid> applicationIds, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        ArgumentNullException.ThrowIfNull(applicationIds);
+        var tenantId = context.TenantId
+            ?? throw new InvalidOperationException("An Application purge runs in its Tenant's own scope.");
+
+        if (applicationIds.Count == 0)
+        {
+            return;
+        }
+
+        await using var command = context.CreateCommand();
+        command.CommandText = "DELETE FROM signin_transaction WHERE tenant_id = @tenant_id AND application_id = ANY (@application_ids)";
+        var tenant = command.CreateParameter();
+        tenant.ParameterName = "tenant_id";
+        tenant.Value = tenantId;
+        command.Parameters.Add(tenant);
+        var ids = command.CreateParameter();
+        ids.ParameterName = "application_ids";
+        ids.Value = applicationIds.ToArray();
+        command.Parameters.Add(ids);
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
 }

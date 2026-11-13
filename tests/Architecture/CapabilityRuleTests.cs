@@ -234,6 +234,15 @@ public class CapabilityRuleTests
         Assert.Equal("tenant.applications.manage", access.GetProperty("capability").GetString());
         Assert.True(access.GetProperty("machineAllowed").GetBoolean());
         Assert.Equal("never", access.GetProperty("freshAssertion").GetString());
+
+        // Story 3.5: the deletion is tenant.applications.manage too, open to machine principals, with no fresh assertion.
+        const string Delete = "delete /api/v1/tenants/{tenantId}/applications/{applicationId}";
+        Assert.Null(Fresh(operations[Delete]));
+        var deletion = operations[Delete].GetProperty("x-gatekeep-access");
+        Assert.Equal("capability", deletion.GetProperty("kind").GetString());
+        Assert.Equal("tenant.applications.manage", deletion.GetProperty("capability").GetString());
+        Assert.True(deletion.GetProperty("machineAllowed").GetBoolean());
+        Assert.Equal("never", deletion.GetProperty("freshAssertion").GetString());
     }
 
     private static readonly string[] ClientSecretRoutes =

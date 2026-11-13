@@ -653,7 +653,7 @@ internal static class TenantsApi
             : null,
     };
 
-    private static OperationResponse Operation(ManagedOperation operation) => new()
+    internal static OperationResponse Operation(ManagedOperation operation) => new()
     {
         Id = PublicId.Format(PublicIdType.Operation, operation.Id),
         Type = operation.Type,

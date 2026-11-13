@@ -450,6 +450,43 @@ describe('api-client', () => {
     ]);
   });
 
+  it('deletes an Application with both IDs encoded, no body, the page Tenant and the CSRF header, and reads its Operation', async () => {
+    const operation = {
+      id: 'op_a',
+      type: 'directory.application.purge',
+      tenantId: 'ten_a',
+      status: 'running',
+      createdAt: '2026-11-14T00:00:00Z',
+      updatedAt: '2026-11-14T00:00:00Z',
+      finishedAt: null,
+      steps: [],
+    };
+    const { calls, fetch } = fakeFetch(202, JSON.stringify(operation));
+    const client = createApiClient({ fetch, csrfToken: () => 'csrf-1', pageTenant: () => 'ten_a' });
+
+    const result = await client.deleteApplication('ten_a', 'app_b/c');
+
+    assert.equal(calls[0].input, '/api/v1/tenants/ten_a/applications/app_b%2Fc');
+    assert.equal(calls[0].init.method, 'DELETE');
+    assert.equal(calls[0].init.body, undefined);
+    assert.equal('Content-Type' in calls[0].init.headers, false);
+    assert.equal(calls[0].init.headers[CSRF_HEADER], 'csrf-1');
+    assert.equal(calls[0].init.headers[TENANT_HEADER], 'ten_a');
+    assert.equal(result.ok, true);
+    assert.equal(result.status, 202);
+    assert.equal(result.data.type, 'directory.application.purge');
+  });
+
+  it('reads an Application deletion refusal as its problem code', async () => {
+    const { fetch } = fakeFetch(404, JSON.stringify({ code: 'not_found', traceId: 't' }), 'application/problem+json');
+    const client = createApiClient({ fetch, csrfToken: () => 'csrf-1', pageTenant: () => 'ten_a' });
+
+    const result = await client.deleteApplication('ten_a', 'app_b');
+
+    assert.equal(result.ok, false);
+    assert.equal(result.problem?.code, 'not_found');
+  });
+
   it("lists, creates and revokes an Application's secrets with every ID encoded, the page Tenant and the CSRF header", async () => {
     const created = { secret: 'ten_a.value', items: [{ id: 'sec_n', createdAt: '2026-11-13T00:00:00.000Z', expiresAt: null }] };
     const { calls, fetch } = fakeFetch(201, JSON.stringify(created));

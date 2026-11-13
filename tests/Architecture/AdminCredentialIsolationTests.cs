@@ -7,7 +7,8 @@ namespace Gatekeep.Tests.Architecture;
 /// <summary>
 /// Story 1.23, FR-46: a Tenant User's credential can't authenticate an Admin, because no table or
 /// flow is shared. <c>gk_admin</c>, the role Admin sign-in runs as, holds no grant on any table
-/// Identity, Authentication or Sessions owns; and neither Admins nor the Fido2 adapter reaches
+/// Identity, Authentication or Sessions owns, but Story 3.5's revocation columns on <c>token</c> and
+/// <c>"authorization"</c>, which hold no credential; and neither Admins nor the Fido2 adapter reaches
 /// those modules, directly or through another module, in the edge list the build enforces.
 /// </summary>
 public class AdminCredentialIsolationTests
@@ -28,10 +29,40 @@ public class AdminCredentialIsolationTests
 
         foreach (var table in tables)
         {
-            var roles = Roles(Get(table, "Grants")).Concat(Roles(Get(table, "ColumnGrants")));
-            Assert.DoesNotContain("gk_admin", roles);
+            var name = (string)Get(table, "Name")!;
+            Assert.DoesNotContain("gk_admin", Roles(Get(table, "Grants")));
+
+            // Story 3.5: an Application's deletion revokes its Token Families and tokens through the one revocation
+            // path, in Host.Admin's transaction. That is the only column grant gk_admin holds here: it reads the
+            // references the revocation's WHERE names and sets a row's status, never a credential, subject or payload.
+            if (RevocationReads.TryGetValue(name, out var reads))
+            {
+                Assert.Equal(
+                    [$"SELECT {reads}", "UPDATE concurrency_token,status"],
+                    ColumnGrants(Get(table, "ColumnGrants"), "gk_admin"));
+            }
+            else
+            {
+                Assert.DoesNotContain("gk_admin", Roles(Get(table, "ColumnGrants")));
+            }
         }
     }
+
+    /// <summary>The columns an Application's revocation reads on each table it revokes on (Story 3.5), sorted.</summary>
+    private static readonly Dictionary<string, string> RevocationReads = new(StringComparer.Ordinal)
+    {
+        ["authorization"] = "application_id,id,status,tenant_id",
+        ["token"] = "application_id,authorization_id,status,tenant_id",
+    };
+
+    private static List<string> ColumnGrants(object? grants, string role) =>
+        grants is IEnumerable entries
+            ? [.. entries.Cast<object>()
+                .Where(g => (string)Get(g, "Key")! == role)
+                .SelectMany(g => ((IEnumerable)Get(g, "Value")!).Cast<object>())
+                .Select(c => $"{Get(c, "Privilege")} {string.Join(",", ((IEnumerable<string>)Get(c, "Columns")!).Order(StringComparer.Ordinal))}")
+                .Order(StringComparer.Ordinal)]
+            : [];
 
     [Theory]
     [InlineData("Admins")]

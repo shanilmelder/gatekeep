@@ -2,13 +2,31 @@
 title: 'Story 3.5: Delete an Application'
 type: 'feature'
 created: '2026-11-14'
-status: 'ready-for-dev'
+status: 'done'
+baseline_revision: '7f126857dfb3f7ece05c957d01fac85867334aeb'
 review_loop_iteration: 0
 followup_review_recommended: false
 context:
   - '{project-root}/_bmad-output/implementation-artifacts/epic-3-context.md'
 warnings: ['oversized']
-deferred: []
+deferred:
+  - summary: >-
+      Deleting a busy Application revokes every refresh family and token inside the request, holding its row lock.
+    evidence: |-
+      DeleteApplicationAsync calls ISessions.RevokeAccessAsync (Application scope) in the Tenant transaction, the only
+      revocation path (AD-13). Unmeasured: settle with a load test seeding many families and timing the DELETE and
+      concurrent token-endpoint calls.
+    location: >-
+      src/Modules/Directory/Core/DirectoryService.cs (DeleteApplicationAsync)
+    severity: medium (unverified)
+  - summary: >-
+      The OpenAPI DELETE (like every Application sub-route) lists no applicationId path parameter.
+    evidence: |-
+      docs/api/openapi-v1.json and schema.generated.ts declare only tenantId and X-Gatekeep-Tenant. Pre-existing since
+      Story 3.2 and already deferred in Story 3.4; the fix belongs in AdminOpenApi for every such route.
+    location: >-
+      src/Gatekeep.Host.Admin/AdminOpenApi.cs
+    severity: low
 ---
 
 <intent-contract>
@@ -164,6 +182,40 @@ deferred: []
 
 ## Review Triage Log
 
+### 2026-11-14 — Review pass
+- verdicts: 30 findings — high 0, medium 0, low 24, false 5, maybe-false 1
+- findings:
+  - `false` `reject` (intent) Access tokens already issued survive deletion, against "can't keep tokens" — AD-13 makes access tokens irrevocable and the AC names only refresh tokens and grants; the modal states this honestly.
+  - `low` `reject` (intent) No test follows a deletion end to end from the modal to the refusal — each AC clause is tested on its real surface (route, Operation, protocol), all through the same `DeleteApplicationAsync`; an end-to-end test adds little.
+  - `low` `reject` (intent, group P) One purge per Tenant, not per deletion, so some deletions wait for a later Operation — the left rows are hidden, revoked and inert; it needs a concurrent or failed purge, and a fix needs new Operation semantics.
+  - `low` `reject` (intent) An authorization code issued before deletion isn't tested at exchange — the same visibility predicate refuses the client at authorize, refresh and client_credentials, all tested.
+  - `false` `reject` (intent) gk_admin's new grants on `token` and `"authorization"` relax the FR-46 isolation rule — the spec and AC require revocation in the deletion's commit through `RevokeAccess`; the grants are the minimum columns, and the test pins exactly them.
+  - `false` `reject` (intent) The danger zone isn't in the screen spec — `design/Gatekeep Admin.dc.html:342` draws the "Delete application" danger-zone row.
+  - `low` `patch` (blind, group M) A 404 on retrying (after a concurrent deletion or a post-commit 503) keeps the modal on "Couldn't delete" forever — patched: the modal treats 404 as deleted and goes to the list with the toast; the browser test asserts it.
+  - `low` `reject` (blind, group P) A deletion joining a purge that already read its IDs may never be purged — see group P.
+  - `low` `reject` (blind, group P) A failed purge Operation is handed back and never retried automatically — see group P; `purge_conflict` needs a reference written to a deleted Application, which every endpoint now refuses.
+  - `maybe-false` `defer` (blind) Revocation of a busy Application runs unbounded inside the request while holding the row lock — would need a load test with many families; medium if true. `RevokeAccess` is the only revocation path (AD-13).
+  - `low` `defer` (blind) The OpenAPI DELETE lists no `applicationId` path parameter — pre-existing for every Application sub-route since Story 3.2, already deferred in Story 3.4.
+  - `low` `reject` (blind) The 202 doesn't document its `Location` header, and 503 and 401 have no descriptions — same as the existing Tenant deletion route; generated clients don't use it.
+  - `low` `reject` (blind) The modal doesn't say the deletion is permanent or mention secrets — the copy is fixed by the spec's intent contract; changing it edits the spec.
+  - `low` `reject` (blind) No tests for PurgeNotStarted, concurrent deletion of one Application, machine over HTTP, or old access tokens still working — rare or not yet reachable (no Management API tokens until Epic 17); the row lock and the status mapping are simple.
+  - `false` `reject` (blind) The purge queries have no index — `token_application`, `authorization_application` and `signin_transaction_application` index `(tenant_id, application_id)`; a Tenant's Applications are few.
+  - `low` `patch` (blind) `RevocationColumns` duplicates `AuthorizationUpdateColumns` — patched: reuse the one list.
+  - `low` `patch` (blind) Canary reason has "store" for "stores" and claims it reads no reference — patched wording.
+  - `low` `patch` (blind) The DELETE result switch sends every unhandled status to 403 — patched: `Forbidden` explicit, unknown throws.
+  - `low` `patch` (blind) A stray blank line in the browser spec — removed.
+  - `low` `patch` (verification-gap) `VerifyClientSecretAsync`'s visibility check is masked by secret revocation in every test — patched: `DirectoryTests` marks an Application deleted with a live secret and asserts it doesn't verify.
+  - `low` `reject` (verification-gap) The route's 503 paths have no test — reaching them needs a fault injection hook the tests don't have; filed as defer, but it is caused by this change and low.
+  - `low` `reject` (verification-gap) The spec's "Why two scopes" note is stale: a failed start rolls back the deletion too — the fix edits this build's spec; the OpenAPI text matches the code, and the Auto Run Result records the real behavior.
+  - `low` `reject` (verification-gap) The modal's 401, 403, 409 and double-press branches aren't browser-tested — the spec asks only for the failure banner; the branches copy DeleteTenantModal's tested ones.
+  - `low` `reject` (edge, group P) A deletion attached to an active purge past its ID read isn't purged by it — see group P.
+  - `low` `reject` (edge, group M) A failed Deployment commit after the Tenant commit answers 503 for a kept deletion — needs a commit failure between two commits; the modal now treats the retry's 404 as deleted.
+  - `low` `patch` (edge, group M) The modal's 404 retry loop — patched as above.
+  - `low` `reject` (edge) A network failure shows ErrorReference with code `unavailable` and an empty trace — the same as DeleteTenantModal's tested behavior; changing it is a cross-modal UI decision.
+  - `false` `reject` (edge) The purge's family-token branch could delete another Application's tokens — a token's authorization belongs to the same client; `SessionRevocation`'s Application scope uses the same filter.
+  - `low` `reject` (edge, group P) A failed purge attaches every later deletion until a manual Retry — see group P.
+  - `low` `reject` (edge, group P) "When it commits … an Operation purges its rows" holds only eventually — see group P; recorded as a residual risk.
+
 ## Design Notes
 
 - **Why a Tenant-wide purge:** Operations store no subject ID, and only one is allowed per type and Tenant. So the purge removes every deleted Application of the Tenant, and a second deletion reuses the active Operation. A deletion marked after that Operation's Directory stage has run is purged by the next deletion's Operation. Until then its rows stay hidden and revoked, which is safe.
@@ -177,3 +229,62 @@ deferred: []
 - **.NET build:** with `MSYS_NO_PATHCONV=1`, run `docker run --rm -v "D:/Projects/Personal/gatekeep:/src" -v gk-nuget:/root/.nuget -w /src mcr.microsoft.com/dotnet/sdk:10.0.403-noble sh -c 'dotnet build Gatekeep.slnx -p:NuGetAudit=false -v q'`. Expected: 0 warnings and 0 errors.
 - **Contract:** `deploy/docker/api-contract.sh --write`. Then run `pnpm -r build`, `pnpm -r --if-present typecheck`, and the dashboard and api-client unit tests in `node:26.13.0-bookworm-slim`. Expected: all clean.
 - **Suites:** the Isolation, Architecture and browser suites run on CI. Before handing back, grep for pinned lists as in the task above.
+
+## Auto Run Result
+
+**Summary.** An Editor, Owner or machine principal can delete an Application (FR-11, AD-1, AD-30).
+- `DELETE /api/v1/tenants/{tenantId}/applications/{applicationId}` marks it deleted, revokes its live secrets, revokes its refresh tokens and grants through `ISessions.RevokeAccessAsync` (Application scope, `application_deleted`), and writes `directory.application.deleted`, in one Tenant transaction.
+- It answers `202` with a `directory.application.purge` Operation and a `Location` to it. That Operation's one Tenant stage reads the Tenant's deleted Application IDs once and purges Sessions, Authentication, then Directory rows for them, under one savepoint.
+- Every reader skips a deleted Application. The token endpoint refuses it with `invalid_client`, and so do authorize and revocation.
+- The Dashboard has a danger zone on the detail page and a destructive `ConfirmModal` with no typed confirmation, stating the token effect.
+
+**Files changed (main ones)**
+- `src/Adapters/Postgres/Migrations/Migration20261117000000DeleteApplications.cs`, `Schema/TableRegistry.cs`: `deleted_at`, the gk_admin revocation column grants on `token` and `"authorization"`, and the gk_worker purge reads (migration 33).
+- `src/Modules/Directory/{Contracts,Core}`: `DeleteApplicationAsync`, the visibility predicate, the secret check join, the per-ID purge, and the `ApplicationDeleted` event.
+- `src/Modules/Sessions/Core/SessionsApplicationPurge.cs`, `src/Modules/Authentication/Core/AuthenticationPurge.cs`: Application-scoped purges.
+- `src/Modules/Operations/{Core/ApplicationPurge.cs, Core/OperationStore.cs, Contracts/OperationsContract.cs}`: the Operation type, its one stage, and its registration.
+- `src/Modules/Management/{Contracts/IApplicationManagement.cs, Core/ApplicationManagement.cs}`: `DeleteAsync` with the capability re-check and the purge start, which falls back to the active Operation.
+- `src/Gatekeep.Host.Admin/{AdminApi.cs, ApplicationsApi.cs, TenantsApi.cs, LogCatalogue.Generated.cs}`, `docs/{api/openapi-v1.json, audit-events.md}`, `packages/api-client/*`: the route, the contract and `deleteApplication`.
+- `apps/admin-dashboard/src/shell/{DeleteApplicationModal.tsx (new), ApplicationDetailPage.tsx}`, `packages/ui/src/messages.tsx`: the danger zone, the modal and the copy.
+- **Tests:**
+  - New: `tests/Isolation/Applications/{ApplicationDeleteApiTests.cs, ApplicationDeletionProtocolTests.cs}`, `tests/Isolation/Operations/ApplicationPurgeOperationTests.cs`, and the browser "delete (Story 3.5)" block.
+  - Updated: `RouteRegistry`, `CanaryFlows`, `CapabilityRuleTests`, `OperationRuleTests`, `AdminApiRuleTests`, `AdminCredentialIsolationTests`, `TenantTablesTests`, `MigrateCommandTests` (33) and `DirectoryTests`.
+
+**Deviations from the plan**
+- The purge is one stage, not three: Operation stages run as separate jobs in either order. A pre-review fix also reads the deleted IDs once, so all three module purges use the same list.
+- The contract takes two contexts, because contracts may not name scopes. A failed purge start rolls the deletion back and answers 503. Only a failure of the Deployment commit after the Tenant commit keeps the deletion. The Design Note "Why two scopes" describes the earlier plan.
+- The purge also maps SQLSTATE `23001` (`ON DELETE RESTRICT`) to `purge_conflict`.
+
+**Review findings.** 30 findings: 7 patched in 6 entries, 2 deferred, 21 rejected (reasons in the triage log).
+- **Patched (all low):**
+  - The modal treats a 404 as deleted.
+  - The DELETE status switch handles `Forbidden` explicitly and throws on an unknown status.
+  - One revocation column list, not two.
+  - The canary wording.
+  - A stray blank line.
+  - A test that a deleted Application's live secret no longer verifies.
+- **Deferred:**
+  - Revocation time for a busy Application (medium, unverified).
+  - The missing `applicationId` OpenAPI parameter (pre-existing).
+
+**Follow-up review recommended (`false`).** Patched counts by verdict: high 0, medium 0, low 6 entries.
+
+**Verification**
+- `dotnet build Gatekeep.slnx -p:NuGetAudit=false` (SDK 10.0.403 container): 0 warnings and 0 errors, after the patches.
+- `sh deploy/docker/api-contract.sh`: the contract matches. `pnpm -r build` and typecheck are clean. The api-client unit tests passed 26/26 and the dashboard 105/105.
+- Run by the implementer:
+  - The new Isolation classes and the purge, delete and directory tests: all passed (22, then 17, then 29 after the patches).
+  - `OperationRuleTests` 12/12.
+  - `AdminApiRuleTests` and `AdminCredentialIsolationTests` 31/31.
+  - The browser `admin-applications` project: 75/75, then the delete block 7/7.
+- **Not run locally:** the full Isolation suite. The implementer's broad run was stopped for low memory, so CI on the PR is its first run.
+- **Matrix audit:** every row has a named test.
+  - The API rows are in `ApplicationDeleteApiTests`.
+  - The refusal rows are in `ApplicationDeletionProtocolTests`.
+  - The purge rows are in `ApplicationPurgeOperationTests`.
+  - The modal row is in the browser block.
+
+**Residual risks**
+- A deletion that joins a purge Operation that has already read its IDs, or has failed, waits for a later purge. With no later deletion, its rows stay. They are hidden, revoked and inert, but "an Operation purges its rows" holds only eventually.
+- A failed Deployment commit after the Tenant commit answers 503 for a deletion that was kept.
+- The unrelated Isolation classes were not run locally.
