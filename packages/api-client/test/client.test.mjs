@@ -256,6 +256,35 @@ describe('api-client', () => {
     assert.equal(sample.ok, true);
   });
 
+  it("rotates a Tenant's Signing Key with a POST, the ID encoded, the CSRF header and the page Tenant, and no body", async () => {
+    const keys = { keys: [{ keyId: 'sig-b.v1', algorithm: 'RS256', state: 'next', createdAt: '2026-11-14T09:00:00.000Z' }] };
+    const { calls, fetch } = fakeFetch(200, JSON.stringify(keys));
+    const client = createApiClient({ fetch, csrfToken: () => 'csrf-1', pageTenant: () => 'ten_a' });
+
+    const rotated = await client.rotateSigningKeys('ten_a/b');
+
+    assert.equal(calls[0].input, '/api/v1/tenants/ten_a%2Fb/signing-keys/rotate');
+    assert.equal(calls[0].init.method, 'POST');
+    assert.equal(calls[0].init.body, undefined);
+    assert.equal(calls[0].init.headers[CSRF_HEADER], 'csrf-1');
+    assert.equal(calls[0].init.headers[TENANT_HEADER], 'ten_a');
+    assert.equal(rotated.ok, true);
+    assert.deepEqual(rotated.data, keys);
+  });
+
+  it("keeps a not-ready rotation's retryAfterSeconds, and only a positive whole number", async () => {
+    const { fetch } = fakeFetch(409, JSON.stringify({ code: 'signing_key_not_ready', traceId: 't-1', retryAfterSeconds: 600 }), 'application/problem+json');
+    const client = createApiClient({ fetch, csrfToken: () => 'csrf-1', pageTenant: () => 'ten_a' });
+
+    const refused = await client.rotateSigningKeys('ten_a');
+
+    assert.equal(refused.ok, false);
+    assert.deepEqual(refused.problem, { code: 'signing_key_not_ready', traceId: 't-1', retryAfterSeconds: 600 });
+    for (const retryAfterSeconds of [0, -5, 1.5, '600', null]) {
+      assert.deepEqual(parseProblem({ code: 'signing_key_not_ready', traceId: 't', retryAfterSeconds }), { code: 'signing_key_not_ready', traceId: 't' });
+    }
+  });
+
   it("lists, reads and creates a Tenant's Applications, the IDs and cursor encoded, the page Tenant on the create only", async () => {
     const application = { id: 'app_a', clientId: 'app_a', name: 'Web', type: 'web', credentialRequired: true, createdAt: '2026-11-11T09:00:00.000Z' };
     const { calls, fetch } = fakeFetch(200, JSON.stringify(application));

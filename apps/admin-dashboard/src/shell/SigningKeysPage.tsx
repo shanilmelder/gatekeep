@@ -1,6 +1,7 @@
 import type { SigningKey, SigningKeysJwksResponse } from '@gatekeep/api-client';
 import {
   Banner,
+  Button,
   CodeBlock,
   CopyButton,
   DataTable,
@@ -10,11 +11,13 @@ import {
   SkeletonRows,
   formatMessage,
   useMessages,
+  useToast,
   type DataTableColumn,
   type KeyState,
 } from '@gatekeep/ui/admin';
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { api } from '../session';
+import { useCapabilities } from './capabilities';
 import type { ShellRequest } from './CredentialsPage';
 import { ForbiddenPage } from './ForbiddenPage';
 import styles from './SigningKeysPage.module.css';
@@ -29,12 +32,20 @@ type ListLoad =
 
 type JwksLoad = { kind: 'loading' } | { kind: 'ready'; sample: SigningKeysJwksResponse } | { kind: 'failed'; failure: Failure };
 
+/** Why the last Rotate didn't rotate: the next key too young, with the whole minutes left; refused; or failed. */
+type Refusal = { kind: 'notReady'; minutes: number; failure: Failure } | { kind: 'forbidden' } | { kind: 'failed'; failure: Failure } | null;
+
 const DATE = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' });
 
 /** A date, in the browser's own time zone and locale. */
 function day(iso: string): string {
   const date = new Date(iso);
   return Number.isNaN(date.getTime()) ? iso : DATE.format(date);
+}
+
+/** The whole minutes a not-ready rotation must wait, rounded up and at least one, from its seconds. */
+function minutesLeft(seconds: unknown): number {
+  return typeof seconds === 'number' && Number.isFinite(seconds) && seconds > 0 ? Math.ceil(seconds / 60) : 1;
 }
 
 /** A refusal's code and trace ID, as far as the answer carries them: a bodiless 503 has neither. */
@@ -54,16 +65,31 @@ export interface SigningKeysPageProps {
  * state, each key ID in the code type with its own Copy, and below them the public JWKS sample
  * its Tenant host serves, with its URI and its own Copy. The two are read apart: the table is the
  * database's and the sample needs key custody, so a sample that can't be read says so in its
- * place and the table stays. A 403 on the list is the forbidden page. It only reads: Rotate and
- * Revoke arrive with Stories 9.2 and 9.3, and the server decides every request.
+ * place and the table stays. A 403 on the list is the forbidden page.
+ *
+ * Story 9.2: the page's one action, Rotate now, with tenant.signing_keys.rotate, which only Tenant
+ * Owners hold. Without it, an Admin who manages anything else in the Tenant sees it read-only,
+ * "Tenant Owner only", and one who manages nothing sees no action and the view-only banner. A
+ * rotation replaces the table with the keys it left and reads the sample again; a next key too young
+ * to promote, or any failure, shows a banner with its reference. Revoke arrives with Story 9.3, and
+ * the server decides every request: the page follows the capability lists, never a role (AD-20).
  */
 export function SigningKeysPage({ request, tenantId }: SigningKeysPageProps) {
   const messages = useMessages();
+  const toast = useToast();
+  const { has, tenantCapabilities } = useCapabilities();
+  const ownerOnlyId = useId();
   const [list, setList] = useState<ListLoad>({ kind: 'loading' });
   const [jwks, setJwks] = useState<JwksLoad>({ kind: 'loading' });
   const [attempt, setAttempt] = useState(0);
   const [jwksAttempt, setJwksAttempt] = useState(0);
+  const [rotating, setRotating] = useState(false);
+  const [refusal, setRefusal] = useState<Refusal>(null);
+  // Set at once, before React re-renders, so a second press sends nothing.
+  const inFlight = useRef(false);
   const listed = list.kind === 'ready';
+  const canRotate = has('tenant.signing_keys.rotate');
+  const viewOnly = ![...tenantCapabilities].some((capability) => capability.startsWith('tenant.') && capability.endsWith('.manage'));
 
   useEffect(() => {
     const controller = new AbortController();
@@ -108,6 +134,53 @@ export function SigningKeysPage({ request, tenantId }: SigningKeysPageProps) {
 
     return () => controller.abort();
   }, [request, tenantId, listed, jwksAttempt]);
+
+  /** Rotates now, once at a time, and shows what it came to. */
+  async function rotate() {
+    if (!canRotate || !listed || inFlight.current) return;
+    inFlight.current = true;
+    setRotating(true);
+    setRefusal(null);
+
+    let answer;
+    try {
+      answer = await request('post', () => api.rotateSigningKeys(tenantId));
+    } catch {
+      answer = null;
+    }
+    inFlight.current = false;
+    setRotating(false);
+
+    if (answer?.ok) {
+      // The keys as the rotation left them, or, if they can't be read, the list read again; the sample changed too.
+      const keys = answer.data?.keys;
+      if (Array.isArray(keys)) setList({ kind: 'ready', keys });
+      else setAttempt((n) => n + 1);
+      setJwksAttempt((n) => n + 1);
+      toast(messages.signingKeysRotated);
+      return;
+    }
+    if (answer?.status === 401) {
+      // The renewal brought the Admin back and didn't send it again.
+      return;
+    }
+    const problem = answer && !answer.ok ? (answer.problem ?? null) : null;
+    if (answer?.status === 409 && problem?.code === 'tenant_mismatch') {
+      // The shell's banner names both Tenants: nothing was changed.
+      return;
+    }
+    const failure = { code: problem?.code ?? 'unavailable', traceId: problem?.traceId ?? '' };
+    if (answer?.status === 409 && problem?.code === 'signing_key_not_ready') {
+      const seconds = problem.retryAfterSeconds ?? Number(answer.headers.get('Retry-After'));
+      setRefusal({ kind: 'notReady', minutes: minutesLeft(seconds), failure });
+      return;
+    }
+    if (answer?.status === 403) {
+      setRefusal({ kind: 'forbidden' });
+      return;
+    }
+    setRefusal({ kind: 'failed', failure });
+  }
 
   if (list.kind === 'forbidden') return <ForbiddenPage code={list.failure.code} traceId={list.failure.traceId} />;
 
@@ -168,6 +241,23 @@ export function SigningKeysPage({ request, tenantId }: SigningKeysPageProps) {
 
     body = (
       <div className={styles.content} data-testid="signing-keys">
+        {refusal?.kind === 'notReady' && (
+          <Banner tone="warn" data-testid="signing-keys-rotate-not-ready">
+            <p>{formatMessage(messages.signingKeysRotateNotReady, { minutes: refusal.minutes })}</p>
+            <ErrorReference code={refusal.failure.code} traceId={refusal.failure.traceId} />
+          </Banner>
+        )}
+        {refusal?.kind === 'failed' && (
+          <Banner tone="bad" data-testid="signing-keys-rotate-failed">
+            <p>{messages.signingKeysRotateFailed}</p>
+            <ErrorReference code={refusal.failure.code} traceId={refusal.failure.traceId} />
+          </Banner>
+        )}
+        {refusal?.kind === 'forbidden' && (
+          <Banner tone="bad" data-testid="signing-keys-rotate-forbidden">
+            {messages.actionForbidden}
+          </Banner>
+        )}
         <DataTable
           caption={messages.signingKeysTitle}
           hideCaption
@@ -182,8 +272,41 @@ export function SigningKeysPage({ request, tenantId }: SigningKeysPageProps) {
     );
   }
 
+  // A Viewer, who manages nothing in the Tenant, gets no action at all; anyone else sees Rotate, off without the capability.
+  const actions = viewOnly ? undefined : (
+    <div className={styles.rotate}>
+      <Button
+        variant="primary"
+        pending={rotating}
+        aria-disabled={!canRotate || !listed || undefined}
+        aria-describedby={!canRotate ? ownerOnlyId : undefined}
+        onClick={() => void rotate()}
+        data-testid="signing-keys-rotate"
+      >
+        {messages.signingKeysRotate}
+      </Button>
+      {!canRotate && (
+        <p id={ownerOnlyId} className={styles.note} data-testid="signing-keys-owner-only">
+          {messages.tenantOwnerOnly}
+        </p>
+      )}
+    </div>
+  );
+
   return (
-    <SectionPage title={messages.signingKeysTitle} description={messages.signingKeysDescription} data-testid="signing-keys-page">
+    <SectionPage
+      title={messages.signingKeysTitle}
+      description={messages.signingKeysDescription}
+      actions={actions}
+      data-testid="signing-keys-page"
+    >
+      {viewOnly && (
+        <div className={styles.viewOnly}>
+          <Banner tone="info" live={false} data-testid="tenant-view-only">
+            {messages.tenantViewOnly}
+          </Banner>
+        </div>
+      )}
       {body}
     </SectionPage>
   );

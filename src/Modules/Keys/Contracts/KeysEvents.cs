@@ -20,25 +20,35 @@ public static class KeysEvents
         AuditOutcome.Success);
 
     /// <summary>
-    /// Written on the Tenant's chain, with a <c>system</c> Actor, by the daily rotation (Story 2.4) in the
-    /// transaction that moves a <c>current</c> key to <c>previous</c>.
+    /// Written on the Tenant's chain in the transaction that moves a <c>current</c> key to <c>previous</c>:
+    /// by the daily rotation (Story 2.4), with a <c>system</c> Actor, once the key reached its rotation
+    /// age, or by a Tenant Owner's rotation on demand (Story 9.2), with that Admin as Actor.
     /// </summary>
     public static readonly AuditEventDefinition SigningKeyRotated = new(
         new AuditTypeCode("keys.signing_key.rotated"),
-        "A Tenant's current Signing or Management key reached its rotation age and became previous. Names no key.",
-        AuditOutcome.Success);
+        "A Tenant's Signing or Management key was rotated, by the daily rotation or a Tenant Owner: current became previous. Names no key.",
+        AuditOutcome.Success,
+        TenantLogClass.KeyOperation);
 
-    /// <summary>Written by the daily rotation in the same transaction, as the <c>next</c> key becomes <c>current</c>.</summary>
+    /// <summary>
+    /// Written by either rotation in the same transaction, with the same Actor, as the <c>next</c> key
+    /// becomes <c>current</c>.
+    /// </summary>
     public static readonly AuditEventDefinition SigningKeyPromoted = new(
         new AuditTypeCode("keys.signing_key.promoted"),
         "A Tenant's next Signing or Management key became current. Names no key.",
-        AuditOutcome.Success);
+        AuditOutcome.Success,
+        TenantLogClass.KeyOperation);
 
-    /// <summary>Written by the daily rotation in the same transaction, for the new <c>next</c> key it created.</summary>
+    /// <summary>
+    /// Written by either rotation in the same transaction, with the same Actor, for the new <c>next</c>
+    /// key it created.
+    /// </summary>
     public static readonly AuditEventDefinition SigningKeyCreated = new(
         new AuditTypeCode("keys.signing_key.created"),
         "A Tenant's replacement next Signing or Management key was created in key custody. Names no key.",
-        AuditOutcome.Success);
+        AuditOutcome.Success,
+        TenantLogClass.KeyOperation);
 
     /// <summary>
     /// Written by the daily rotation when a <c>previous</c> key's signed tokens have all expired: it

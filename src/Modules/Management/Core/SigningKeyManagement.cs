@@ -11,14 +11,17 @@ using Gatekeep.Modules.Tenancy.Contracts;
 namespace Gatekeep.Modules.Management.Core;
 
 /// <summary>
-/// The Signing keys page's reads (Story 9.1): the rows from PostgreSQL, and the public JWKS sample
-/// from the public halves custody returns. Only <c>signing</c> rows are read, so no Management key
-/// can reach either. Nothing is written, and no event appended.
+/// The Signing keys page (Stories 9.1 and 9.2): the rows from PostgreSQL, and the public JWKS sample
+/// from the public halves custody returns, which write nothing; and the Tenant Owner's rotation on
+/// demand, through the Keys contract. Only <c>signing</c> rows are read or rotated, so no Management
+/// key can reach either.
 /// </summary>
 internal sealed class SigningKeyManagement(IAuditAppender appender) : ISigningKeyManagement
 {
     /// <summary>Every Signing Key is RSA-3072 (AD-9): a modulus of 384 bytes. Any other is never published, as on Host.Hosted.</summary>
     private const int RsaModulusBytes = 3072 / 8;
+
+    private readonly IAuditAppender _appender = appender;
 
     private readonly ITenants _tenants = TenancyContract.CreateTenants(appender);
 
@@ -144,6 +147,45 @@ internal sealed class SigningKeyManagement(IAuditAppender appender) : ISigningKe
         }
 
         return new SigningKeyJwk("RSA", "sig", ISigningKeyManagement.Algorithm, key.KeyId, Base64Url.EncodeToString(modulus), Base64Url.EncodeToString(exponent));
+    }
+
+    public async Task<SigningKeyRotateResult> RotateAsync(
+        CommandContext tenantContext,
+        IKeyCustody? custody,
+        AdminPrincipal principal,
+        TenantRoleGrant? grant,
+        Guid tenantId,
+        CancellationToken cancellationToken)
+    {
+        RequireOwnContext(tenantContext, tenantId);
+        ArgumentNullException.ThrowIfNull(principal);
+
+        // Authorization runs in the module too (AD-5), from the grant the checks read: no second read.
+        if (!AdminCapabilities.Allows(AdminCapabilities.TenantSigningKeysRotate, principal, grant, tenantId))
+        {
+            return new SigningKeyRotateResult(SigningKeyRotateStatus.Forbidden, RetryAfter: null);
+        }
+
+        if (custody is null)
+        {
+            return new SigningKeyRotateResult(SigningKeyRotateStatus.Unavailable, RetryAfter: null);
+        }
+
+        SigningKeyRotation rotation;
+        try
+        {
+            rotation = await KeysContract.RotateSigningKeyNowAsync(
+                tenantContext, custody, _appender, Actor.Admin(principal.AdminId), tenantId, cancellationToken);
+        }
+        catch (KeyCustodyException)
+        {
+            // Transit first: nothing of this rotation is in a row yet, and the caller doesn't commit.
+            return new SigningKeyRotateResult(SigningKeyRotateStatus.Unavailable, RetryAfter: null);
+        }
+
+        return rotation.Status == SigningKeyRotationStatus.Rotated
+            ? new SigningKeyRotateResult(SigningKeyRotateStatus.Rotated, RetryAfter: null)
+            : new SigningKeyRotateResult(SigningKeyRotateStatus.NotReady, rotation.RetryAfter);
     }
 
     private static SigningKeyJwksRead Refused(SigningKeyReadStatus status) => new(status, null, []);

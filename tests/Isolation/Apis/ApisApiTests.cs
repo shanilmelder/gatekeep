@@ -33,7 +33,7 @@ public sealed class ApisApiTests(PostgresFixture postgres)
     private static CancellationToken Cancellation => TestContext.Current.CancellationToken;
 
     [Fact]
-    public async Task The_list_shows_the_built_in_Management_API_first_with_its_18_Permissions()
+    public async Task The_list_shows_the_built_in_Management_API_first_with_its_17_Permissions()
     {
         await using var host = await AdminHost.StartAsync(postgres);
         var tenant = await TenantAsync(host);
@@ -380,7 +380,7 @@ public sealed class ApisApiTests(PostgresFixture postgres)
             Assert.Equal("api_built_in", await CodeAsync(remove));
         }
 
-        Assert.Equal(18L, await host.ScalarAsync<long>($"SELECT count(*) FROM permission WHERE api_id = '{IdOf(builtIn)}'"));
+        Assert.Equal(17L, await host.ScalarAsync<long>($"SELECT count(*) FROM permission WHERE api_id = '{IdOf(builtIn)}'"));
         Assert.Equal(0L, await TenantEventsAsync(host, tenant, Added) + await TenantEventsAsync(host, tenant, Removed));
 
         using var saved = await SaveAsync(host, cookie, csrf, tenant, builtIn, Settings(false, true, 600, 900, 2592000, 604800));

@@ -46,7 +46,7 @@ public class ManagementPermissionTests
     {
         var permissions = Derived();
 
-        Assert.Equal(18, permissions.Count);
+        Assert.Equal(17, permissions.Count);
         Assert.Equal(permissions.Count, permissions.Distinct(StringComparer.Ordinal).Count());
 
         // Each has a short description, which the Permissions table shows and the column's CHECK allows.

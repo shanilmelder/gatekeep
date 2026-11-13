@@ -113,7 +113,6 @@ public static class DirectoryContract
         "configuration:export",
         "password_policy:manage",
         "connection_credentials:manage",
-        "signing_keys:rotate",
         "user_data:export",
         "user_data:erase",
     ];
@@ -139,7 +138,6 @@ public static class DirectoryContract
         ["configuration:export"] = "Export Tenant configuration",
         ["password_policy:manage"] = "Manage the password policy",
         ["connection_credentials:manage"] = "Manage Connection credentials",
-        ["signing_keys:rotate"] = "Rotate Signing Keys",
         ["user_data:export"] = "Export User data",
         ["user_data:erase"] = "Erase User data",
     };

@@ -446,6 +446,14 @@ export interface Messages {
   signingKeysJwksTitle: string;
   /** In place of the JWKS sample when it couldn't be read: the table stays. */
   signingKeysJwksFailed: string;
+  /** The Signing keys page's action (Story 9.2): rotate the Signing Key now. */
+  signingKeysRotate: string;
+  /** The toast once a rotation is done. */
+  signingKeysRotated: string;
+  /** The banner when the next key is too young to promote. Placeholder: {minutes}, the whole minutes left, rounded up. */
+  signingKeysRotateNotReady: string;
+  /** The banner when a rotation failed: nothing was changed. */
+  signingKeysRotateFailed: string;
   /** A Signing Key's state badges: the text carries the state. */
   keyStateNext: string;
   keyStateCurrent: string;
@@ -941,6 +949,10 @@ export const defaultMessages: Readonly<Messages> = Object.freeze({
   signingKeyIdWhat: 'key ID',
   signingKeysJwksTitle: 'JWKS · {uri}',
   signingKeysJwksFailed: "Couldn't load the public keys.",
+  signingKeysRotate: 'Rotate now',
+  signingKeysRotated: 'Signing key rotated.',
+  signingKeysRotateNotReady: 'The next key was published less than 15 minutes ago. Try again in {minutes} min.',
+  signingKeysRotateFailed: "Couldn't rotate the signing key. Nothing was changed.",
   keyStateNext: 'Next',
   keyStateCurrent: 'Current',
   keyStatePrevious: 'Previous',

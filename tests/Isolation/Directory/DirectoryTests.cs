@@ -726,7 +726,7 @@ public sealed class DirectoryTests(PostgresFixture postgres)
 
     /// <summary>
     /// Story 3.6's backfills, rendered through the same <c>ForEachTenant</c> the migration calls and run twice as the
-    /// migrator: each creating or active Tenant gets exactly one built-in Management API with its 18 Permissions, a
+    /// migrator: each creating or active Tenant gets exactly one built-in Management API with its 17 Permissions, a
     /// deleting one none, and a rerun adds nothing.
     /// </summary>
     [Fact]

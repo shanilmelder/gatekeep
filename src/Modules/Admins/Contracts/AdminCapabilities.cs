@@ -167,7 +167,8 @@ public static class AdminCapabilities
     public static readonly Capability TenantLabelManage = Tenant("tenant.label.manage", Owners, false, FreshAssertion.WhenProdTenant);
 
     // FR-39: Rotate or revoke Signing Keys; grant Management API access.
-    public static readonly Capability TenantSigningKeysRotate = Tenant("tenant.signing_keys.rotate", Owners, true, FreshAssertion.Never);
+    /// <summary>Story 9.2: rotating on demand is for Tenant Owners only; a machine principal is refused, as Epic 9 says.</summary>
+    public static readonly Capability TenantSigningKeysRotate = Tenant("tenant.signing_keys.rotate", Owners, false, FreshAssertion.Never);
     public static readonly Capability TenantSigningKeysRevoke = Tenant("tenant.signing_keys.revoke", Owners, false, FreshAssertion.Always);
     public static readonly Capability TenantManagementAccessGrant = Tenant("tenant.management_access.grant", Owners, false, FreshAssertion.Always);
 

@@ -634,6 +634,29 @@ internal static class AdminApi
             .Produces<ApiProblem>(StatusCodes.Status403Forbidden, AdminResponses.ProblemContentType)
             .Produces(StatusCodes.Status503ServiceUnavailable);
 
+        app.MapPost("/api/v1/tenants/{tenantId}/signing-keys/rotate", static (HttpContext context, AdminApiServices services) => SigningKeysApi.RotateAsync(context, services))
+            .WithMetadata(TenantApiEndpoint.Instance, new RequiresCapability(AdminCapabilities.TenantSigningKeysRotate))
+            .WithName("RotateSigningKeys")
+            .WithTags(TenantTag)
+            .WithSummary("Rotate the path Tenant's Signing Key now: next becomes current, and a new next is created.")
+            .WithDescription(
+                "Tenant Owners only; never a machine principal. It takes no body and needs no fresh assertion. Once the " +
+                "Tenant's next signing key has been published for at least 15 minutes, the JWKS cache limit, it becomes " +
+                "current, the current key becomes previous and stays published, and a new next key is created in key custody " +
+                "first and then published, in one transaction that writes keys.signing_key.rotated, keys.signing_key.promoted " +
+                "and keys.signing_key.created on the Tenant's own Log with the Admin as Actor. Management keys are never " +
+                "rotated here, and nothing is retired. The answer is the Tenant's Signing Keys after the rotation, as the list " +
+                "gives them. A next key published less than 15 minutes ago is 409 signing_key_not_ready, with retryAfterSeconds " +
+                "and a Retry-After header saying how many seconds remain, and nothing is written. Key custody down is 503 and " +
+                "nothing is written. A malformed, unknown or role-less Tenant, and a Viewer or Editor, is 403 access_denied, " +
+                "audited as every Tenant capability refusal is.")
+            .Produces<SigningKeysResponse>(StatusCodes.Status200OK)
+            .Produces(StatusCodes.Status401Unauthorized)
+            .Produces<ApiProblem>(StatusCodes.Status403Forbidden, AdminResponses.ProblemContentType)
+            // signing_key_not_ready, and the request checks' tenant_mismatch, which every state-changing Tenant route declares.
+            .Produces<ApiProblem>(StatusCodes.Status409Conflict, AdminResponses.ProblemContentType)
+            .Produces(StatusCodes.Status503ServiceUnavailable);
+
         app.MapGet("/api/v1/tenants/{tenantId}/applications", static (HttpContext context, AdminApiServices services) => ApplicationsApi.ListAsync(context, services))
             .WithMetadata(
                 TenantApiEndpoint.Instance,

@@ -574,7 +574,9 @@ public static class TableRegistry
         // rotates, retires and destroys keys through their state and lifecycle times only, the trigger
         // holds every change to AD-11's transitions. Only a Tenant's deletion deletes a row (Story 1.29), which
         // the triggers allow only while the Tenant is deleting, and no row reaches a Tenant past creating or active.
-        // Story 9.1: Host.Admin reads the path Tenant's rows for the Signing keys page, and changes none.
+        // Story 9.1: Host.Admin reads the path Tenant's rows for the Signing keys page. Story 9.2: a Tenant
+        // Owner's rotation on demand inserts the new next row and moves state, promoted_at and rotated_at,
+        // and nothing else: Host.Admin never retires, destroys or deletes a key row.
         new(
             "signing_key",
             TableClass.Tenant,
@@ -582,13 +584,14 @@ public static class TableRegistry
             TableUse.Configuration,
             new Dictionary<string, IReadOnlyList<string>>
             {
-                [Admin] = [Select],
+                [Admin] = [Select, Insert],
                 [Hosted] = [Select],
                 // Story 1.29: the deletion Operation's Keys purge deletes a deleting Tenant's rows.
                 [Worker] = [Select, Insert, Delete],
             },
             new Dictionary<string, IReadOnlyList<ColumnGrant>>
             {
+                [Admin] = [new ColumnGrant(Update, ["state", "promoted_at", "rotated_at"])],
                 [Worker] = [new ColumnGrant(Update, ["state", "promoted_at", "rotated_at", "retired_at", "destroyed_at"])],
             },
             ["signing_key_guard_delete", "signing_key_guard_update", "tenant_row_guard"]),

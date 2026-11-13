@@ -59,7 +59,7 @@ public sealed class TenantCreationOperationTests(PostgresFixture postgres)
         Assert.Equal(0L, await database.ScalarAsync<long>($"SELECT count(*) FROM client_secret WHERE tenant_id = '{tenant}'"));
         Assert.Equal(0L, await database.ScalarAsync<long>($"SELECT count(*) FROM audit_event WHERE target_id = '{system}'"));
 
-        // Story 3.6: the built-in Management API with its 18 Permissions, and no event of its own.
+        // Story 3.6: the built-in Management API with its 17 Permissions, and no event of its own.
         await AssertBuiltInApiAsync(database, tenant);
     }
 

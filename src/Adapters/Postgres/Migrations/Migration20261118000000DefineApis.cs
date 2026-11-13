@@ -66,7 +66,6 @@ public sealed class Migration20261118000000DefineApis : Migration
           ('configuration:export', 'Export Tenant configuration'),
           ('password_policy:manage', 'Manage the password policy'),
           ('connection_credentials:manage', 'Manage Connection credentials'),
-          ('signing_keys:rotate', 'Rotate Signing Keys'),
           ('user_data:export', 'Export User data'),
           ('user_data:erase', 'Erase User data')
         ) AS v(value, description)

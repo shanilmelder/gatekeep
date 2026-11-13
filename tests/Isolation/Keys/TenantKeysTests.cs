@@ -211,7 +211,7 @@ public sealed class TenantKeysTests(PostgresFixture postgres, OpenBaoFixture bao
     }
 
     /// <summary>
-    /// Story 3.6: an active Tenant with no built-in Management API gets exactly one with its 18 Permissions, and no event;
+    /// Story 3.6: an active Tenant with no built-in Management API gets exactly one with its 17 Permissions, and no event;
     /// a rerun adds nothing, and one after a Permission went missing puts back only that one.
     /// </summary>
     [Fact]
@@ -358,6 +358,23 @@ public sealed class TenantKeysTests(PostgresFixture postgres, OpenBaoFixture bao
         var (database, tenant) = await ProvisionedAsync();
 
         var refused = await Assert.ThrowsAsync<PostgresException>(() => RunAsync(database, TableRegistry.Worker, tenant, sql));
+        Assert.Equal(PostgresErrorCodes.InsufficientPrivilege, refused.SqlState);
+    }
+
+    // Story 9.2 lets Host.Admin rotate on demand: insert a next row and move state, promoted_at and
+    // rotated_at. Never a retirement, a destruction, a deletion or a key row's identity.
+    [Theory]
+    [InlineData("DELETE FROM signing_key")]
+    [InlineData("UPDATE signing_key SET retired_at = now()")]
+    [InlineData("UPDATE signing_key SET destroyed_at = now()")]
+    [InlineData("UPDATE signing_key SET transit_name = transit_name")]
+    [InlineData("UPDATE signing_key SET published_at = now()")]
+    [InlineData("UPDATE protection_key_wrap SET ciphertext = ciphertext")]
+    public async Task Admin_never_retires_destroys_or_deletes_a_key_row(string sql)
+    {
+        var (database, tenant) = await ProvisionedAsync();
+
+        var refused = await Assert.ThrowsAsync<PostgresException>(() => RunAsync(database, TableRegistry.Admin, tenant, sql));
         Assert.Equal(PostgresErrorCodes.InsufficientPrivilege, refused.SqlState);
     }
 

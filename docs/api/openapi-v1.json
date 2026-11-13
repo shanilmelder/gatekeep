@@ -2097,6 +2097,91 @@
         "x-gatekeep-recovery-allowed": false
       }
     },
+    "/api/v1/tenants/{tenantId}/signing-keys/rotate": {
+      "post": {
+        "tags": [
+          "Tenants"
+        ],
+        "summary": "Rotate the path Tenant's Signing Key now: next becomes current, and a new next is created.",
+        "description": "Tenant Owners only; never a machine principal. It takes no body and needs no fresh assertion. Once the Tenant's next signing key has been published for at least 15 minutes, the JWKS cache limit, it becomes current, the current key becomes previous and stays published, and a new next key is created in key custody first and then published, in one transaction that writes keys.signing_key.rotated, keys.signing_key.promoted and keys.signing_key.created on the Tenant's own Log with the Admin as Actor. Management keys are never rotated here, and nothing is retired. The answer is the Tenant's Signing Keys after the rotation, as the list gives them. A next key published less than 15 minutes ago is 409 signing_key_not_ready, with retryAfterSeconds and a Retry-After header saying how many seconds remain, and nothing is written. Key custody down is 503 and nothing is written. A malformed, unknown or role-less Tenant, and a Viewer or Editor, is 403 access_denied, audited as every Tenant capability refusal is.",
+        "operationId": "RotateSigningKeys",
+        "parameters": [
+          {
+            "name": "tenantId",
+            "in": "path",
+            "description": "The Tenant's public ID: ten_ and the UUID's 16 bytes in lowercase RFC 4648 base32 with no padding, whose last character carries two zero bits. Only this canonical spelling, after URL decoding, names a Tenant, and the empty UUID's never does; anything else is refused like a Tenant the Admin holds no role in.",
+            "required": true,
+            "schema": {
+              "pattern": "^ten_[a-z2-7]{25}[aeimquy4]$",
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Gatekeep-Tenant",
+            "in": "header",
+            "description": "The Tenant the page shows, its ten_ ID: it must equal {tenantId}, or 409 tenant_mismatch. It never selects a Tenant.",
+            "required": true,
+            "schema": {
+              "pattern": "^ten_[a-z2-7]{25}[aeimquy4]$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SigningKeysResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "access_denied, with the problem body, when the capability is refused. No body when an earlier check refuses first: a Session restricted to setup, or on a state-changing call a wrong Origin or CSRF token.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "tenant_mismatch, with the problem body, when X-Gatekeep-Tenant is missing, sent twice or isn't {tenantId}, and nothing ran; or another conflict the operation's description names.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "adminSession": [ ],
+            "csrf": [ ]
+          }
+        ],
+        "x-gatekeep-setup-allowed": false,
+        "x-gatekeep-access": {
+          "kind": "capability",
+          "capability": "tenant.signing_keys.rotate",
+          "scope": "tenant",
+          "machineAllowed": false,
+          "freshAssertion": "never"
+        },
+        "x-gatekeep-recovery-allowed": false
+      }
+    },
     "/api/v1/tenants/{tenantId}/applications": {
       "get": {
         "tags": [
@@ -4009,7 +4094,8 @@
               "api_identifier_taken",
               "permission_taken",
               "permission_limit_reached",
-              "api_built_in"
+              "api_built_in",
+              "signing_key_not_ready"
             ],
             "type": "string"
           },
@@ -4024,6 +4110,13 @@
             "items": {
               "$ref": "#/components/schemas/ApiProblemError"
             }
+          },
+          "retryAfterSeconds": {
+            "type": [
+              "null",
+              "integer"
+            ],
+            "format": "int32"
           }
         }
       },

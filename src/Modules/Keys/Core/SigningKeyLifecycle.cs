@@ -67,6 +67,14 @@ internal static class SigningKeyLifecycle
 
     private const string Notify ="SELECT pg_notify(@channel, @tenant_id::text)";
 
+    // Story 9.2: how long until a next key has been published for the promotion wait, by database time.
+    private const string SelectPublicationRemaining =
+        """
+        SELECT extract(epoch FROM published_at + make_interval(secs => @published_seconds) - now())::float8
+        FROM signing_key
+        WHERE tenant_id = @tenant_id AND id = @id
+        """;
+
     private const string SelectForDestroy =
         """
         SELECT purpose, state, transit_name, destroyed_at IS NOT NULL FROM signing_key
@@ -98,35 +106,9 @@ internal static class SigningKeyLifecycle
         TenantKeys.RequireTenant(context, tenantId);
 
         // The provisioning lock: rotation and the backfill never both see a Tenant half-changed.
-        await using (var command = context.CreateCommand())
-        {
-            command.CommandText = TenantKeys.Lock;
-            TenantKeys.Add(command, "namespace", TenantKeys.LockNamespace);
-            TenantKeys.Add(command, "tenant_id", tenantId);
-            await command.ExecuteNonQueryAsync(cancellationToken);
-        }
+        await LockAsync(context, tenantId, cancellationToken);
 
-        var rows = new List<OpenRow>();
-        await using (var command = context.CreateCommand())
-        {
-            command.CommandText = SelectOpen;
-            TenantKeys.Add(command, "tenant_id", tenantId);
-            TenantKeys.Add(command, "due_seconds", (SecurityLimits.SigningKeyMaxAge - SecurityLimits.SigningKeyRotationMargin).TotalSeconds);
-            TenantKeys.Add(command, "published_seconds", SecurityLimits.SigningKeyPublicationBeforePromotion.TotalSeconds);
-            TenantKeys.Add(command, "retire_seconds", SecurityLimits.SigningKeyRetirementDelay.TotalSeconds);
-
-            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-            while (await reader.ReadAsync(cancellationToken))
-            {
-                rows.Add(new OpenRow(
-                    reader.GetGuid(0),
-                    TenantKeys.ParsePurpose(reader.GetString(1)),
-                    reader.GetString(2),
-                    reader.GetBoolean(3),
-                    reader.GetBoolean(4),
-                    reader.GetBoolean(5)));
-            }
-        }
+        var rows = await ReadOpenAsync(context, tenantId, cancellationToken);
 
         var changed = false;
 
@@ -148,34 +130,7 @@ internal static class SigningKeyLifecycle
                 continue;
             }
 
-            // Transit first (AD-10): the replacement exists before any row moves, and a custody failure
-            // throws before anything is written. The caller's whole command then rolls back.
-            var id = Guid.CreateVersion7();
-            var key = purpose == SigningKeyPurpose.Signing ? KeyName.Signing(tenantId, id) : KeyName.Management(tenantId, id);
-            var versions = await custody.CreateKeyAsync(key, cancellationToken);
-            var version = versions.Count == 0
-                ? throw new InvalidOperationException("Key custody returned no version for a new Signing Key.")
-                : versions.Max(v => v.KeyVersion);
-
-            // In this order, so neither one-current nor one-next index ever sees two.
-            await ChangeAsync(context, Rotate, tenantId, current.Id, cancellationToken);
-            await ChangeAsync(context, Promote, tenantId, next.Id, cancellationToken);
-
-            await using (var command = context.CreateCommand())
-            {
-                command.CommandText = TenantKeys.InsertKey;
-                TenantKeys.Add(command, "id", id);
-                TenantKeys.Add(command, "tenant_id", tenantId);
-                TenantKeys.Add(command, "purpose", TenantKeys.Stored(purpose));
-                TenantKeys.Add(command, "state", "next");
-                TenantKeys.Add(command, "transit_name", key.Value);
-                TenantKeys.Add(command, "transit_version", version);
-                await command.ExecuteNonQueryAsync(cancellationToken);
-            }
-
-            await AppendAsync(context, appender, KeysEvents.SigningKeyRotated, cancellationToken);
-            await AppendAsync(context, appender, KeysEvents.SigningKeyPromoted, cancellationToken);
-            await AppendAsync(context, appender, KeysEvents.SigningKeyCreated, cancellationToken);
+            await ReplaceAsync(context, custody, appender, Actor.System, tenantId, purpose, current.Id, next.Id, cancellationToken);
             changed = true;
         }
 
@@ -192,7 +147,7 @@ internal static class SigningKeyLifecycle
                 runAfter: null,
                 cancellationToken);
 
-            await AppendAsync(context, appender, KeysEvents.SigningKeyRetired, cancellationToken);
+            await AppendAsync(context, appender, Actor.System, KeysEvents.SigningKeyRetired, cancellationToken);
             changed = true;
         }
 
@@ -226,16 +181,61 @@ internal static class SigningKeyLifecycle
 
         if (changed)
         {
-            // Delivered only at commit: a rolled-back rotation evicts nothing in Host.Hosted.
-            await using var command = context.CreateCommand();
-            command.CommandText = Notify;
-            TenantKeys.Add(command, "channel", Channel);
-            TenantKeys.Add(command, "tenant_id", tenantId);
-            await command.ExecuteNonQueryAsync(cancellationToken);
+            await NotifyAsync(context, tenantId, cancellationToken);
         }
 
         // A re-queued destruction changes no key row, but it still has to commit.
         return changed || undestroyed.Count > 0;
+    }
+
+    /// <summary>
+    /// Story 9.2 (FR-37): the Tenant Owner's rotation, now, of the <c>signing</c> purpose only. Its one
+    /// gate is <c>next</c>'s publication, never <c>current</c>'s age (the daily rule), and it retires,
+    /// destroys and enqueues nothing.
+    /// </summary>
+    public static async Task<SigningKeyRotation> RotateNowAsync(
+        CommandContext context,
+        IKeyCustody custody,
+        IAuditAppender appender,
+        Actor actor,
+        Guid tenantId,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        ArgumentNullException.ThrowIfNull(custody);
+        ArgumentNullException.ThrowIfNull(appender);
+        ArgumentNullException.ThrowIfNull(actor);
+        TenantKeys.RequireTenant(context, tenantId);
+
+        // The same lock as the daily rotation and the backfill: none of them sees this Tenant half-changed.
+        await LockAsync(context, tenantId, cancellationToken);
+
+        var rows = await ReadOpenAsync(context, tenantId, cancellationToken);
+        var current = rows.SingleOrDefault(r => r.Purpose == SigningKeyPurpose.Signing && r.State == "current");
+        var next = rows.SingleOrDefault(r => r.Purpose == SigningKeyPurpose.Signing && r.State == "next");
+
+        // AD-11: at every commit a Tenant has one of each, so a gap is a broken invariant, not a refusal.
+        if (current is null || next is null)
+        {
+            throw new InvalidOperationException("A Tenant's signing keys have no current or no next key.");
+        }
+
+        // Relying parties cache JWKS for 15 minutes, so a younger next isn't promoted. The time left is
+        // the database's, the clock the gate reads, so the answer and the gate never disagree.
+        if (!next.Aged)
+        {
+            await using var command = context.CreateCommand();
+            command.CommandText = SelectPublicationRemaining;
+            TenantKeys.Add(command, "tenant_id", tenantId);
+            TenantKeys.Add(command, "id", next.Id);
+            TenantKeys.Add(command, "published_seconds", SecurityLimits.SigningKeyPublicationBeforePromotion.TotalSeconds);
+            var remaining = await command.ExecuteScalarAsync(cancellationToken) is double seconds ? seconds : 0;
+            return new SigningKeyRotation(SigningKeyRotationStatus.NotReady, TimeSpan.FromSeconds(Math.Max(1, remaining)));
+        }
+
+        await ReplaceAsync(context, custody, appender, actor, tenantId, SigningKeyPurpose.Signing, current.Id, next.Id, cancellationToken);
+        await NotifyAsync(context, tenantId, cancellationToken);
+        return new SigningKeyRotation(SigningKeyRotationStatus.Rotated, RetryAfter: null);
     }
 
     public static async Task<bool> DestroyAsync(
@@ -296,7 +296,7 @@ internal static class SigningKeyLifecycle
         }
 
         await ChangeAsync(context, MarkDestroyed, tenantId, signingKeyId, cancellationToken);
-        await AppendAsync(context, appender, KeysEvents.SigningKeyDestroyed, cancellationToken);
+        await AppendAsync(context, appender, Actor.System, KeysEvents.SigningKeyDestroyed, cancellationToken);
         return true;
     }
 
@@ -310,7 +310,7 @@ internal static class SigningKeyLifecycle
             throw new InvalidOperationException("A destruction failure is written on its Tenant's own chain.");
         }
 
-        return AppendAsync(context, appender, KeysEvents.SigningKeyDestructionFailed, cancellationToken);
+        return AppendAsync(context, appender, Actor.System, KeysEvents.SigningKeyDestructionFailed, cancellationToken);
     }
 
     /// <summary>Whether <paramref name="listed"/> is a row key old enough for the sweep to consider.</summary>
@@ -355,7 +355,7 @@ internal static class SigningKeyLifecycle
         }
 
         await custody.DeleteAsync(key, cancellationToken);
-        await AppendAsync(context, appender, KeysEvents.OrphanKeySwept, cancellationToken);
+        await AppendAsync(context, appender, Actor.System, KeysEvents.OrphanKeySwept, cancellationToken);
     }
 
     /// <summary>The owning Tenant of a <c>sig-</c> or <c>mgmt-</c> key; any other name is refused.</summary>
@@ -377,6 +377,95 @@ internal static class SigningKeyLifecycle
         }
     }
 
+    private static async Task LockAsync(CommandContext context, Guid tenantId, CancellationToken cancellationToken)
+    {
+        await using var command = context.CreateCommand();
+        command.CommandText = TenantKeys.Lock;
+        TenantKeys.Add(command, "namespace", TenantKeys.LockNamespace);
+        TenantKeys.Add(command, "tenant_id", tenantId);
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    private static async Task<List<OpenRow>> ReadOpenAsync(CommandContext context, Guid tenantId, CancellationToken cancellationToken)
+    {
+        var rows = new List<OpenRow>();
+        await using var command = context.CreateCommand();
+        command.CommandText = SelectOpen;
+        TenantKeys.Add(command, "tenant_id", tenantId);
+        TenantKeys.Add(command, "due_seconds", (SecurityLimits.SigningKeyMaxAge - SecurityLimits.SigningKeyRotationMargin).TotalSeconds);
+        TenantKeys.Add(command, "published_seconds", SecurityLimits.SigningKeyPublicationBeforePromotion.TotalSeconds);
+        TenantKeys.Add(command, "retire_seconds", SecurityLimits.SigningKeyRetirementDelay.TotalSeconds);
+
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            rows.Add(new OpenRow(
+                reader.GetGuid(0),
+                TenantKeys.ParsePurpose(reader.GetString(1)),
+                reader.GetString(2),
+                reader.GetBoolean(3),
+                reader.GetBoolean(4),
+                reader.GetBoolean(5)));
+        }
+
+        return rows;
+    }
+
+    /// <summary>
+    /// One purpose's rotation: <paramref name="currentId"/> becomes <c>previous</c>, <paramref name="nextId"/>
+    /// becomes <c>current</c>, and a new <c>next</c> is created, with its three events written as <paramref name="actor"/>.
+    /// </summary>
+    private static async Task ReplaceAsync(
+        CommandContext context,
+        IKeyCustody custody,
+        IAuditAppender appender,
+        Actor actor,
+        Guid tenantId,
+        SigningKeyPurpose purpose,
+        Guid currentId,
+        Guid nextId,
+        CancellationToken cancellationToken)
+    {
+        // Transit first (AD-10): the replacement exists before any row moves, and a custody failure
+        // throws before anything is written. The caller's whole command then rolls back.
+        var id = Guid.CreateVersion7();
+        var key = purpose == SigningKeyPurpose.Signing ? KeyName.Signing(tenantId, id) : KeyName.Management(tenantId, id);
+        var versions = await custody.CreateKeyAsync(key, cancellationToken);
+        var version = versions.Count == 0
+            ? throw new InvalidOperationException("Key custody returned no version for a new Signing Key.")
+            : versions.Max(v => v.KeyVersion);
+
+        // In this order, so neither one-current nor one-next index ever sees two.
+        await ChangeAsync(context, Rotate, tenantId, currentId, cancellationToken);
+        await ChangeAsync(context, Promote, tenantId, nextId, cancellationToken);
+
+        await using (var command = context.CreateCommand())
+        {
+            command.CommandText = TenantKeys.InsertKey;
+            TenantKeys.Add(command, "id", id);
+            TenantKeys.Add(command, "tenant_id", tenantId);
+            TenantKeys.Add(command, "purpose", TenantKeys.Stored(purpose));
+            TenantKeys.Add(command, "state", "next");
+            TenantKeys.Add(command, "transit_name", key.Value);
+            TenantKeys.Add(command, "transit_version", version);
+            await command.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        await AppendAsync(context, appender, actor, KeysEvents.SigningKeyRotated, cancellationToken);
+        await AppendAsync(context, appender, actor, KeysEvents.SigningKeyPromoted, cancellationToken);
+        await AppendAsync(context, appender, actor, KeysEvents.SigningKeyCreated, cancellationToken);
+    }
+
+    /// <summary>Delivered only at commit: a rolled-back change evicts nothing in Host.Hosted.</summary>
+    private static async Task NotifyAsync(CommandContext context, Guid tenantId, CancellationToken cancellationToken)
+    {
+        await using var command = context.CreateCommand();
+        command.CommandText = Notify;
+        TenantKeys.Add(command, "channel", Channel);
+        TenantKeys.Add(command, "tenant_id", tenantId);
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
     private static async Task ChangeAsync(CommandContext context, string sql, Guid tenantId, Guid id, CancellationToken cancellationToken)
     {
         await using var command = context.CreateCommand();
@@ -391,8 +480,8 @@ internal static class SigningKeyLifecycle
         }
     }
 
-    private static Task AppendAsync(CommandContext context, IAuditAppender appender, AuditEventDefinition definition, CancellationToken cancellationToken) =>
-        appender.AppendAsync(context, new AuditEvent(definition.Code, Actor.System), detail: null, cancellationToken);
+    private static Task AppendAsync(CommandContext context, IAuditAppender appender, Actor actor, AuditEventDefinition definition, CancellationToken cancellationToken) =>
+        appender.AppendAsync(context, new AuditEvent(definition.Code, actor), detail: null, cancellationToken);
 
     private sealed record OpenRow(Guid Id, SigningKeyPurpose Purpose, string State, bool Due, bool Aged, bool Retire);
 }
