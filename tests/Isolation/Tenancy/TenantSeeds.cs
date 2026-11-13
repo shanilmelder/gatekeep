@@ -29,6 +29,12 @@ internal static class TenantSeeds
         ("client_secret", (t, n) =>
             "INSERT INTO client_secret (tenant_id, id, application_id, secret_hash, created_at) " +
             $"VALUES ('{t}', '{n}', '{n}', sha256(convert_to('{t}{n}', 'UTF8')), now())"),
+        ("api", (t, n) =>
+            "INSERT INTO api (tenant_id, id, name, identifier, created_at) " +
+            $"VALUES ('{t}', '{n}', 'Seeded API', 'https://seeded.example/{n}', now())"),
+        ("permission", (t, n) =>
+            "INSERT INTO permission (tenant_id, api_id, value, description, created_at) " +
+            $"VALUES ('{t}', '{n}', 'seeded:read', 'Seeded', now())"),
         ("tenant_attempt", (t, _) =>
             "INSERT INTO tenant_attempt (tenant_id, policy, subject_hash, window_start, attempts) " +
             $"VALUES ('{t}', 'authentication.token_request.tenant', sha256(convert_to('{t}', 'UTF8')), now(), 1) ON CONFLICT DO NOTHING"),

@@ -64,4 +64,28 @@ public static class DirectoryEvents
         new AuditTypeCode("directory.client_secret.revoked"),
         "One of an Application's client secrets was revoked, or a rotated-out secret was ended early: it is refused at once. Names the Application only, never a secret.",
         AuditOutcome.Success);
+
+    /// <summary>Written when an Editor, Owner or machine client creates an API (Story 3.6, FR-16). The target is the API.</summary>
+    public static readonly AuditEventDefinition ApiCreated = new(
+        new AuditTypeCode("directory.api.created"),
+        "An API was created with its identifier, which can't be changed. Names the API only.",
+        AuditOutcome.Success);
+
+    /// <summary>Written when an API's offline access, RBAC or token lifetimes change (Story 3.6). The target is the API.</summary>
+    public static readonly AuditEventDefinition ApiUpdated = new(
+        new AuditTypeCode("directory.api.updated"),
+        "An API's offline access, RBAC or token lifetimes were changed. Names the API only. A save that changes nothing writes no event.",
+        AuditOutcome.Success);
+
+    /// <summary>Written when a Permission is added to an API (Story 3.6). The target is the API.</summary>
+    public static readonly AuditEventDefinition ApiPermissionAdded = new(
+        new AuditTypeCode("directory.api.permission_added"),
+        "A Permission was added to an API. Names the API only.",
+        AuditOutcome.Success);
+
+    /// <summary>Written when a Permission is removed from an API (Story 3.6). The target is the API.</summary>
+    public static readonly AuditEventDefinition ApiPermissionRemoved = new(
+        new AuditTypeCode("directory.api.permission_removed"),
+        "A Permission was removed from an API. Names the API only.",
+        AuditOutcome.Success);
 }

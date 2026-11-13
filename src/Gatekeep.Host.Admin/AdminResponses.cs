@@ -155,6 +155,24 @@ internal static class AdminResponses
     /// </summary>
     public const string ClientSecretLimitReached = "client_secret_limit_reached";
 
+    /// <summary>
+    /// An API or Permission write (Story 3.6) that is malformed: not JSON, over its size cap, a field missing or of the
+    /// wrong type (no errors), or a field that breaks a rule (errors name each). Nothing was written.
+    /// </summary>
+    public const string ApiInvalid = "api_invalid";
+
+    /// <summary>An API create whose identifier another of the Tenant's APIs has, exactly (Story 3.6). Nothing was written.</summary>
+    public const string ApiIdentifierTaken = "api_identifier_taken";
+
+    /// <summary>A Permission add whose value the API already has (Story 3.6). Nothing was written.</summary>
+    public const string PermissionTaken = "permission_taken";
+
+    /// <summary>A Permission add to an API that already holds the most Permissions (Story 3.6). Nothing was written.</summary>
+    public const string PermissionLimitReached = "permission_limit_reached";
+
+    /// <summary>A Permission add or removal on the built-in Management API, whose Permissions are fixed (Story 3.6). Nothing was written.</summary>
+    public const string ApiBuiltIn = "api_built_in";
+
     /// <summary>Directory's guard SQLSTATE for a secret naming a Tenant's system Application (Story 2.8): a 404 on a secret create (Story 3.3).</summary>
     public const string SystemApplicationNamed = "GK011";
 
@@ -224,6 +242,11 @@ internal static class AdminResponses
         CustomSchemeAcknowledgementRequired,
         ClientSecretNotApplicable,
         ClientSecretLimitReached,
+        ApiInvalid,
+        ApiIdentifierTaken,
+        PermissionTaken,
+        PermissionLimitReached,
+        ApiBuiltIn,
     ];
 
     /// <summary>The Session cookie, expired: sent with a sign-out and a 401 for a stale cookie.</summary>

@@ -477,6 +477,74 @@ describe('api-client', () => {
     assert.equal(result.data.type, 'directory.application.purge');
   });
 
+  it('lists, reads and creates APIs with the cursor and IDs encoded, the page Tenant and the CSRF header (Story 3.6)', async () => {
+    const { calls, fetch } = fakeFetch(200, JSON.stringify({ apis: [], nextCursor: null }));
+    const client = createApiClient({ fetch, csrfToken: () => 'csrf-1', pageTenant: () => 'ten_a' });
+
+    await client.listApis('ten_a');
+    await client.listApis('ten_a', 'api_b/c');
+    await client.getApi('ten_a', 'api_b/c');
+    await client.createApi('ten_a', { name: 'Billing', identifier: 'https://api.example.com' });
+
+    assert.equal(calls[0].input, '/api/v1/tenants/ten_a/apis');
+    assert.equal(calls[0].init.method, 'GET');
+    assert.equal(calls[1].input, '/api/v1/tenants/ten_a/apis?cursor=api_b%2Fc');
+    assert.equal(calls[2].input, '/api/v1/tenants/ten_a/apis/api_b%2Fc');
+    assert.equal(calls[2].init.method, 'GET');
+    assert.equal(calls[3].input, '/api/v1/tenants/ten_a/apis');
+    assert.equal(calls[3].init.method, 'POST');
+    assert.equal(calls[3].init.body, JSON.stringify({ name: 'Billing', identifier: 'https://api.example.com' }));
+    assert.equal(calls[3].init.headers[CSRF_HEADER], 'csrf-1');
+    assert.equal(calls[3].init.headers[TENANT_HEADER], 'ten_a');
+  });
+
+  it("saves an API's settings and reads a refused lifetime's field, reason and maximum (Story 3.6)", async () => {
+    const problem = {
+      code: 'api_invalid',
+      traceId: 't',
+      errors: [{ field: 'accessTokenLifetime', index: null, reason: 'above_maximum', maximum: 3600 }],
+    };
+    const { calls, fetch } = fakeFetch(400, JSON.stringify(problem), 'application/problem+json');
+    const client = createApiClient({ fetch, csrfToken: () => 'csrf-1', pageTenant: () => 'ten_a' });
+    const body = {
+      offlineAccess: true,
+      rbac: false,
+      accessTokenLifetime: 3601,
+      idTokenLifetime: 900,
+      refreshTokenAbsoluteLifetime: 2592000,
+      refreshTokenInactivityLifetime: 604800,
+    };
+
+    const result = await client.updateApiSettings('ten_a', 'api_b/c', body);
+
+    assert.equal(calls[0].input, '/api/v1/tenants/ten_a/apis/api_b%2Fc/settings');
+    assert.equal(calls[0].init.method, 'PUT');
+    assert.equal(calls[0].init.body, JSON.stringify(body));
+    assert.equal(calls[0].init.headers[CSRF_HEADER], 'csrf-1');
+    assert.equal(result.ok, false);
+    assert.equal(result.problem?.code, 'api_invalid');
+    assert.deepEqual(result.problem?.errors, problem.errors);
+  });
+
+  it("adds and removes an API's Permission with the value encoded, and reads a duplicate's code (Story 3.6)", async () => {
+    const { calls, fetch } = fakeFetch(409, JSON.stringify({ code: 'permission_taken', traceId: 't' }), 'application/problem+json');
+    const client = createApiClient({ fetch, csrfToken: () => 'csrf-1', pageTenant: () => 'ten_a' });
+
+    const added = await client.addApiPermission('ten_a', 'api_b', { value: 'invoices:read', description: 'Read invoices' });
+    await client.removeApiPermission('ten_a', 'api_b', 'invoices:read');
+
+    assert.equal(calls[0].input, '/api/v1/tenants/ten_a/apis/api_b/permissions');
+    assert.equal(calls[0].init.method, 'POST');
+    assert.equal(calls[0].init.body, JSON.stringify({ value: 'invoices:read', description: 'Read invoices' }));
+    assert.equal(calls[0].init.headers[TENANT_HEADER], 'ten_a');
+    assert.equal(calls[1].input, '/api/v1/tenants/ten_a/apis/api_b/permissions/invoices%3Aread');
+    assert.equal(calls[1].init.method, 'DELETE');
+    assert.equal(calls[1].init.body, undefined);
+    assert.equal(calls[1].init.headers[CSRF_HEADER], 'csrf-1');
+    assert.equal(added.ok, false);
+    assert.equal(added.problem?.code, 'permission_taken');
+  });
+
   it('reads an Application deletion refusal as its problem code', async () => {
     const { fetch } = fakeFetch(404, JSON.stringify({ code: 'not_found', traceId: 't' }), 'application/problem+json');
     const client = createApiClient({ fetch, csrfToken: () => 'csrf-1', pageTenant: () => 'ten_a' });

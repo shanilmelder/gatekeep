@@ -2,7 +2,8 @@
 title: 'Story 3.6: Define APIs and Permissions'
 type: 'feature'
 created: '2026-11-14'
-status: 'ready-for-dev'
+status: 'done'
+baseline_revision: 'c4ee72b3bbc035dd3fcffaf771dc539c1925c80c'
 review_loop_iteration: 0
 followup_review_recommended: false
 context:
@@ -185,6 +186,36 @@ deferred: []
 
 ## Review Triage Log
 
+### 2026-11-14 — Review pass
+- verdicts: 26 findings — high 0, medium 0, low 22, false 4, maybe-false 0
+- findings:
+  - `low` `reject` (intent) "New tokens for that API use it" and "shorter applies when a token is issued" aren't visible in a real token, and the UI words the rule as current — no request can name an API until Story 3.7, which only passes the resolved API to the lookup this story builds and tests; the wording becomes true then.
+  - `low` `patch` (intent, group L) "The Log is written" is checked by counting audit rows, never through the Tenant Logs route — patched: a test reads an `api`-target event through the logs route.
+  - `false` `reject` (intent) The reserved prefix, URI rules and 200-Permission cap narrow the intent — they are this spec's rules; the intent's identifier and Permission criteria are all met.
+  - `low` `patch` (verification-gap, group T) APIs list paging is never exercised — patched: a test walks more than 50 APIs by cursor, with the built-in API once and bad cursors refused.
+  - `low` `patch` (verification-gap, group T) The 200-Permission cap has no test — patched: the 201st add is 409 `permission_limit_reached` with nothing written.
+  - `low` `patch` (verification-gap, group L) The `api` target kind in Tenant Log search is never read — patched with the group L test.
+  - `low` `patch` (verification-gap) Malformed settings bodies are untested — patched: missing fields, string, fraction and null each 400 `api_invalid` with nothing written.
+  - `low` `reject` (verification-gap) The browser identifier check skips the server's final `Uri.TryCreate` — browser checks are feedback only (UX-DR42); the server refuses such a value inline.
+  - `low` `reject` (blind) No way to delete or rename an API — the story asks only to register one; deletion and rename belong to a later story, with no defect in what was built.
+  - `low` `patch` (blind) `ApiRules` says the tables' CHECKs hold the same rules, but the CHECK covers only the exact Management identifier — patched: the comment states what the CHECK holds.
+  - `low` `reject` (blind) Permission events carry no detail of which Permission — consistent with every existing Directory event; the target names the API and its current Permissions are readable.
+  - `low` `reject` (blind) The hourly backfill only adds Management Permissions and never removes them — no capability has ever been removed; a removal would ship with its own migration.
+  - `low` `patch` (blind) The 18 built-in Permissions have empty descriptions — patched: a description per Permission, written by the seed and the migration, pinned by `ManagementPermissionTests`.
+  - `false` `reject` (blind) An ID-token lifetime per API is wrong modelling — the story's AC asks for "its ID, access or refresh token lifetime" on an API, and FR-15 agrees.
+  - `false` `reject` (blind) The settings route advertises a 409 it never returns — every state-changing Tenant route declares 409 `tenant_mismatch` (`AdminApi.cs:856`).
+  - `low` `reject` (blind) Concurrent settings saves overwrite each other — the same as every Admin settings route (rejected in Story 3.4 too); adding versioning is new surface.
+  - `low` `reject` (blind) No limit on APIs per Tenant — creation needs `tenant.apis.manage`; Applications have no per-Tenant cap either; a limit is new policy.
+  - `low` `reject` (blind) Identifiers differing only in host case or a trailing slash coexist — audiences compare as exact strings, as the spec says; normalizing would make two tokens' `aud` ambiguous.
+  - `low` `reject` (blind) Removing a Permission has no confirmation — the design shows none; a removal is audited and a re-add restores it.
+  - `low` `patch` (blind, group U) Permission UI refusals are inconsistent: 403 generic, 404 not reloaded, no 401 renewal on add — patched: 404 drops the row, 403 shows `actionForbidden`, add renews on 401.
+  - `low` `patch` (blind, group T) Several behaviours untested: the cap, paging, concurrent adds, purge order, a client-accepted bad URI — patched the cap and paging in group T; the rest rejected: the row lock and foreign keys decide concurrency and order.
+  - `low` `reject` (blind) Some reads are repeated — two indexed reads per request; no named harm.
+  - `low` `reject` (blind) The add-Permission 201's `Location` names the API — a Permission has no route of its own; the response body is the updated API.
+  - `false` `reject` (blind) The built-in API's offline access and RBAC have undefined meaning — the user chose to make them editable (2026-11-14), and Epic 17's token endpoint defines Management tokens.
+  - `low` `patch` (edge) The hourly ensure inserts Permissions unconditionally, so a Tenant gone `deleting` raises GK010 and fails the job — patched: only missing Permissions are inserted.
+  - `low` `patch` (edge, group U) A Remove answered 404 leaves the stale row — patched with group U.
+
 ## Design Notes
 
 - **Why "new tokens for that API use it" isn't visible yet:** no token can name an API until Story 3.7 resolves `resource`/`audience`. So this story makes the one lookup combine both lifetimes and tests it at that function. Story 3.7 passes the resolved API.
@@ -197,3 +228,56 @@ deferred: []
 - **.NET build:** with `MSYS_NO_PATHCONV=1`, run `docker run --rm -v "D:/Projects/Personal/gatekeep:/src" -v gk-nuget:/root/.nuget -w /src mcr.microsoft.com/dotnet/sdk:10.0.403-noble sh -c 'dotnet build Gatekeep.slnx -p:NuGetAudit=false -v q'`. Expected: 0 warnings and 0 errors.
 - **Contract:** run `deploy/docker/api-contract.sh --write`. Then run `pnpm -r build`, `pnpm -r --if-present typecheck`, and the dashboard and api-client unit tests in the `gatekeep/tests:local` image. Expected: all clean.
 - **Targeted suites:** run only the new or changed Isolation and Architecture test classes and the new browser project. Memory is tight, so don't run the full Isolation suite; CI runs it.
+
+## Auto Run Result
+
+**Summary.** Tenants can register APIs with `resource:action` Permissions (FR-16, FR-15). Editors and Owners create APIs, add and remove Permissions, and set offline access, RBAC and the four token lifetimes within the §5.2 limits.
+- Every Tenant has a built-in Gatekeep Management API (`urn:gatekeep:management`) with 18 Permissions, one for each machine-allowed Tenant capability. It is seeded at activation, by the migration backfill and by the hourly backfill job.
+- Its settings are editable, but its identifier and Permissions are locked.
+- `ApplicationTokenLifetimes.Of(application, api?)` applies the shorter of each lifetime. Callers pass `null` until Story 3.7 resolves audiences.
+
+**Files changed (main ones)**
+- **Migration and schema:** `Migration20261118000000DefineApis.cs` and `TableRegistry.cs` add the `api` and `permission` tables. They have RLS, guards, CHECKs and grants. The migration backfills the built-in API, and the audit target CHECK now accepts `api`. This is migration 34.
+- **Kernel:** the `api_` public ID, `AuditTargetKind.Api`, and the API and Permission limits.
+- **Directory:** `DirectoryApi`, `ApiRules`, `DirectoryService.Apis.cs` and the events. The `ManagementPermissions` constant (with descriptions) and the purge are in the contract.
+- **Operations:** `TenantCreation` and `TenantKeyBackfill` call `EnsureBuiltInApiAsync`.
+- **Management:** `IApiManagement` and `ApiManagement`.
+- **Host.Admin:** `ApisApi.cs`, six routes in `AdminApi.cs`, the problem codes and the OpenAPI document. `TenantLogsApi` renders API targets by their `api_` ID.
+- **Contract:** `docs/api/openapi-v1.json`, `packages/api-client/*` (six methods) and the regenerated audit catalogue.
+- **Protocol:** `ApplicationLifetimes.cs` applies the shorter-wins rule.
+- **Dashboard:** the nav entry, `ApisPage`, `CreateApiModal` (with the environment advice), `ApiDetailPage`, `apis.ts`, `Shell.tsx` routing and `messages.tsx`.
+- **Tests:**
+  - New: `tests/Isolation/Apis/ApisApiTests.cs`, `tests/Architecture/ManagementPermissionTests.cs` and `tests/browser/admin-apis.spec.ts`.
+  - Updated: `TenantCreationOperationTests`, `DirectoryTests`, `TenantKeysTests`, `RouteRegistry`, `CanaryFlows`, `HostedGrantsTests`, `TenantSeeds`, `TenantLogSearchTests` (follows `nextCursor`), `CapabilityRuleTests`, `AdminApiRuleTests`, `TokenLifetimeLimitTests`, `MigrateCommandTests` (34), and the api-client and dashboard unit tests.
+
+**Decisions taken by the implementer:** the response schemas are named `ApiResource*` to avoid a clash with the api-client's `ApiResponse`. There is a new 409 `permission_limit_reached`. Add-Permission answers 201, with `Location` pointing at the API. The database also refuses `urn:gatekeep:management` on any non-built-in API.
+
+**Review findings.** 26 findings: 11 patched in 7 entries, 0 deferred, 15 rejected (reasons in the triage log).
+- **Tests added:** paging past 50 with bad cursors, the 200-Permission cap, malformed settings bodies, and an API event read through the Tenant Logs route.
+- **Data:** descriptions for the 18 Management Permissions.
+- **Backfill:** the hourly ensure inserts only missing Permissions, so a Tenant in `deleting` can't fail the job.
+- **Dashboard:** Permission refusals are now handled: 404 drops the row, 403 shows forbidden, and 401 renews.
+- **Docs:** the comment on the reserved-prefix CHECK now matches what it holds.
+
+**Follow-up review recommended (`false`).** Patched counts by verdict: high 0, medium 0, low 7 entries.
+
+**Verification**
+- `dotnet build Gatekeep.slnx -p:NuGetAudit=false` (SDK 10.0.403 container): 0 warnings and 0 errors, after the patches.
+- `sh deploy/docker/api-contract.sh`: the contract matches.
+- `pnpm -r build` and typecheck: clean.
+- Unit tests: api-client 29/29 and dashboard 110/110. The implementer also ran ui 46 and `ui check`.
+- Run by the implementer:
+  - the full Architecture suite (778 tests);
+  - the targeted Isolation classes (125 of 126 before the patches, then 35/35 after);
+  - Playwright `admin-apis` and `admin-applications` (84 tests), then `admin-apis` 10/10.
+- The `TenantLogSearchTests` catalogue fix (52 codes now span two pages) was not re-run locally, because a low-memory stop interrupted the run. CI is its first run.
+- **Matrix audit:** every row has a named test.
+  - API rows: `ApisApiTests`.
+  - New-Tenant row: `TenantCreationOperationTests`.
+  - Existing-Tenant row: `DirectoryTests` (backfill) and `TenantKeysTests` (job rerun).
+  - Shorter-wins row: `Of` is called by reflection in `ApisApiTests`.
+
+**Residual risks**
+- No issued token reflects an API's lifetime until Story 3.7 passes the resolved API to `Of`.
+- The full Isolation suite runs first on CI.
+- Built-in Management Permissions are only ever added. A future capability removal needs its own migration.

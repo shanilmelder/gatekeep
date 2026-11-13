@@ -210,6 +210,38 @@ public sealed class TenantKeysTests(PostgresFixture postgres, OpenBaoFixture bao
         Assert.Equal(0L, await database.ScalarAsync<long>("SELECT count(*) FROM job WHERE type = 'keys.tenant_keys.backfill' AND status <> 'done'"));
     }
 
+    /// <summary>
+    /// Story 3.6: an active Tenant with no built-in Management API gets exactly one with its 18 Permissions, and no event;
+    /// a rerun adds nothing, and one after a Permission went missing puts back only that one.
+    /// </summary>
+    [Fact]
+    public async Task Backfill_gives_an_active_Tenant_its_one_built_in_Management_API_and_a_rerun_adds_nothing()
+    {
+        var database = await CreateAsync(postgres, registry: null);
+        var protocol = new ProtocolDatabase(postgres, database.Name);
+        Assert.True(await protocol.ProvisionAsync(bao, TenantA));
+        Assert.Equal(0L, await database.ScalarAsync<long>($"SELECT count(*) FROM api WHERE tenant_id = '{TenantA}'"));
+
+        using var worker = bao.Custody(OpenBaoFixture.Worker);
+        await RunBackfillAsync(database, worker, logger: null);
+
+        var api = await database.ScalarAsync<Guid>($"SELECT id FROM api WHERE tenant_id = '{TenantA}' AND built_in AND identifier = 'urn:gatekeep:management'");
+        Assert.Equal(18L, await database.ScalarAsync<long>($"SELECT count(*) FROM permission WHERE tenant_id = '{TenantA}' AND api_id = '{api}'"));
+        Assert.Equal(0L, await database.ScalarAsync<long>($"SELECT count(*) FROM audit_event WHERE tenant_id = '{TenantA}' AND target_kind = 'api'"));
+
+        await RunBackfillAsync(database, worker, logger: null);
+
+        Assert.Equal(1L, await database.ScalarAsync<long>($"SELECT count(*) FROM api WHERE tenant_id = '{TenantA}'"));
+        Assert.Equal(api, await database.ScalarAsync<Guid>($"SELECT id FROM api WHERE tenant_id = '{TenantA}' AND built_in"));
+        Assert.Equal(18L, await database.ScalarAsync<long>($"SELECT count(*) FROM permission WHERE tenant_id = '{TenantA}'"));
+
+        await database.SuperuserAsync($"DELETE FROM permission WHERE tenant_id = '{TenantA}' AND value = 'users:read'");
+        await RunBackfillAsync(database, worker, logger: null);
+
+        Assert.Equal(18L, await database.ScalarAsync<long>($"SELECT count(*) FROM permission WHERE tenant_id = '{TenantA}' AND api_id = '{api}'"));
+        Assert.Equal(0L, await database.ScalarAsync<long>("SELECT count(*) FROM job WHERE type = 'keys.tenant_keys.backfill' AND status <> 'done'"));
+    }
+
     [Fact]
     public async Task Backfill_logs_one_Tenants_failure_and_still_provisions_the_others()
     {

@@ -12,7 +12,7 @@ using Gatekeep.Modules.Sessions.Contracts;
 
 namespace Gatekeep.Modules.Directory.Core;
 
-internal sealed class DirectoryService(IAuditAppender audit, TimeProvider time) : IDirectory
+internal sealed partial class DirectoryService(IAuditAppender audit, TimeProvider time) : IDirectory
 {
     private const int MaxNameLength = DirectoryContract.MaxNameLength;
 

@@ -725,6 +725,82 @@ public sealed class DirectoryTests(PostgresFixture postgres)
     }
 
     /// <summary>
+    /// Story 3.6's backfills, rendered through the same <c>ForEachTenant</c> the migration calls and run twice as the
+    /// migrator: each creating or active Tenant gets exactly one built-in Management API with its 18 Permissions, a
+    /// deleting one none, and a rerun adds nothing.
+    /// </summary>
+    [Fact]
+    public async Task Api_backfill_gives_each_creating_or_active_Tenant_exactly_one_built_in_API_and_its_Permissions()
+    {
+        var database = await DatabaseAsync();
+        var superuser = postgres.SuperuserConnection(database);
+        await TestTenants.InsertAsync(superuser, TenantC, status: "deleting");
+        await TestTenants.InsertAsync(superuser, TenantD, status: "creating");
+
+        var builder = new MigrationBuilder("Npgsql.EntityFrameworkCore.PostgreSQL");
+        builder.ForEachTenant(Migration20261118000000DefineApis.BackfillApi);
+        builder.ForEachTenant(Migration20261118000000DefineApis.BackfillPermissions);
+        var statements = builder.Operations.Select(o => Assert.IsType<SqlOperation>(o).Sql).ToList();
+
+        // The migration's Up() runs exactly those statements, last.
+        var migration = new Migration20261118000000DefineApis { ActiveProvider = "Npgsql.EntityFrameworkCore.PostgreSQL" };
+        Assert.Equal(statements, migration.UpOperations.TakeLast(2).Select(o => Assert.IsType<SqlOperation>(o).Sql));
+
+        // Up() has already run them once over no Tenant; these are the Tenants seeded since.
+        for (var run = 0; run < 2; run++)
+        {
+            foreach (var sql in statements)
+            {
+                await PostgresFixture.ExecuteAsync(postgres.RoleConnection(TableRegistry.Migrator, database), sql);
+            }
+        }
+
+        foreach (var tenant in new[] { TenantA, TenantB, TenantD })
+        {
+            Assert.Equal(1L, await CountAsync(
+                superuser,
+                $"SELECT count(*) FROM api WHERE tenant_id = '{tenant}' AND built_in AND name = @name AND identifier = @identifier",
+                ("name", DirectoryContract.ManagementApiName),
+                ("identifier", DirectoryContract.ManagementApiIdentifier)));
+            Assert.Equal(
+                string.Join(",", DirectoryContract.ManagementPermissions.Order(StringComparer.Ordinal)),
+                await PostgresFixture.ScalarAsync<string>(superuser, $"SELECT string_agg(value, ',' ORDER BY value COLLATE \"C\") FROM permission WHERE tenant_id = '{tenant}'"));
+        }
+
+        Assert.Equal(0L, await PostgresFixture.ScalarAsync<long>(superuser, $"SELECT count(*) FROM api WHERE tenant_id = '{TenantC}'"));
+        Assert.Equal(3L, await PostgresFixture.ScalarAsync<long>(superuser, "SELECT count(*) FROM api"));
+        Assert.Equal(54L, await PostgresFixture.ScalarAsync<long>(superuser, "SELECT count(*) FROM permission"));
+        Assert.Equal(0L, await PostgresFixture.ScalarAsync<long>(superuser, "SELECT count(*) FROM audit_event"));
+    }
+
+    /// <summary>
+    /// Story 3.6: the ensure, as gk_worker, writes the built-in API with every Management Permission and its description;
+    /// once it is complete, it inserts nothing at all, so a Tenant whose deletion has since started isn't refused by the
+    /// row guard; one missing Permission is put back alone.
+    /// </summary>
+    [Fact]
+    public async Task Ensuring_the_built_in_API_inserts_only_what_is_missing_and_nothing_once_complete()
+    {
+        var database = await DatabaseAsync();
+        var superuser = postgres.SuperuserConnection(database);
+
+        Assert.True(await InTenantAsync(database, TableRegistry.Worker, TenantA, c => _directory.EnsureBuiltInApiAsync(c, Cancellation)));
+        Assert.Equal(
+            string.Join(",", DirectoryContract.ManagementPermissions.Order(StringComparer.Ordinal).Select(v => $"{v}={DirectoryContract.ManagementPermissionDescriptions[v]}")),
+            await PostgresFixture.ScalarAsync<string>(superuser, $"SELECT string_agg(value || '=' || description, ',' ORDER BY value COLLATE \"C\") FROM permission WHERE tenant_id = '{TenantA}'"));
+
+        // Complete, and the Tenant now deleting: nothing is attempted, so the row guard has nothing to refuse.
+        await PostgresFixture.ExecuteAsync(superuser, $"SET session_replication_role = replica; UPDATE tenant SET status = 'deleting' WHERE id = '{TenantA}'; SET session_replication_role = DEFAULT");
+        Assert.False(await InTenantAsync(database, TableRegistry.Worker, TenantA, c => _directory.EnsureBuiltInApiAsync(c, Cancellation)));
+
+        // Active again, with one Permission gone: only it is put back.
+        await PostgresFixture.ExecuteAsync(superuser, $"SET session_replication_role = replica; UPDATE tenant SET status = 'active' WHERE id = '{TenantA}'; DELETE FROM permission WHERE tenant_id = '{TenantA}' AND value = 'users:read'; SET session_replication_role = DEFAULT");
+        Assert.True(await InTenantAsync(database, TableRegistry.Worker, TenantA, c => _directory.EnsureBuiltInApiAsync(c, Cancellation)));
+        Assert.Equal(18L, await PostgresFixture.ScalarAsync<long>(superuser, $"SELECT count(*) FROM permission WHERE tenant_id = '{TenantA}'"));
+        Assert.Equal(1L, await PostgresFixture.ScalarAsync<long>(superuser, $"SELECT count(*) FROM api WHERE tenant_id = '{TenantA}'"));
+    }
+
+    /// <summary>
     /// Story 2.10's backfill, rendered the same way and run as the migrator: a Story 2.9 web client allowed
     /// only the code grant gains the refresh grant, and nothing else changes.
     /// </summary>

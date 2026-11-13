@@ -6,6 +6,9 @@ public enum AuditTargetKind
     Admin,
     User,
     Client,
+
+    /// <summary>An API, a resource server of the Tenant (Story 3.6).</summary>
+    Api,
 }
 
 /// <summary>

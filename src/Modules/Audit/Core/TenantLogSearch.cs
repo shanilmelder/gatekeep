@@ -209,6 +209,7 @@ internal sealed class TenantLogSearch : ITenantLogSearch
         "admin" => AuditTargetKind.Admin,
         "user" => AuditTargetKind.User,
         "client" => AuditTargetKind.Client,
+        "api" => AuditTargetKind.Api,
         _ => throw new InvalidOperationException("An audit event has an unknown target kind."),
     };
 

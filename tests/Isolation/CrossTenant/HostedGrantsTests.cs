@@ -85,8 +85,8 @@ public sealed class HostedGrantsTests(PostgresFixture postgres)
         // The spec's classification (Story 1.31): every other table is runtime state.
         Assert.Equal(
             [
-                "admin", "admin_credential", "admin_enrolment", "admin_recovery_code", "application", "bootstrap_state", "client_secret",
-                "migration_history", "protection_key_wrap", "signing_key", "tenant", "tenant_host", "tenant_role", "tenant_settings",
+                "admin", "admin_credential", "admin_enrolment", "admin_recovery_code", "api", "application", "bootstrap_state", "client_secret",
+                "migration_history", "permission", "protection_key_wrap", "signing_key", "tenant", "tenant_host", "tenant_role", "tenant_settings",
             ],
             TableRegistry.Tables.Where(t => t.Use == TableUse.Configuration).Select(t => t.Name).Order(StringComparer.Ordinal));
     }

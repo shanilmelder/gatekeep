@@ -58,6 +58,21 @@ public sealed class TenantCreationOperationTests(PostgresFixture postgres)
                 $"SELECT count(*) FROM application WHERE tenant_id = '{tenant}' AND id = '{system}' AND name = '{DirectoryContract.SystemApplicationName}' AND grant_types = '{{}}' AND audiences = '{{}}'"));
         Assert.Equal(0L, await database.ScalarAsync<long>($"SELECT count(*) FROM client_secret WHERE tenant_id = '{tenant}'"));
         Assert.Equal(0L, await database.ScalarAsync<long>($"SELECT count(*) FROM audit_event WHERE target_id = '{system}'"));
+
+        // Story 3.6: the built-in Management API with its 18 Permissions, and no event of its own.
+        await AssertBuiltInApiAsync(database, tenant);
+    }
+
+    /// <summary>Story 3.6: the Tenant's one built-in Management API, with exactly Directory's Management Permissions and no event.</summary>
+    private static async Task AssertBuiltInApiAsync(JobDatabase database, Guid tenant)
+    {
+        Assert.Equal(1L, await database.ScalarAsync<long>(
+            $"SELECT count(*) FROM api WHERE tenant_id = '{tenant}' AND built_in AND name = '{DirectoryContract.ManagementApiName}' AND identifier = '{DirectoryContract.ManagementApiIdentifier}' AND NOT offline_access AND NOT rbac"));
+        Assert.Equal(1L, await database.ScalarAsync<long>($"SELECT count(*) FROM api WHERE tenant_id = '{tenant}'"));
+        Assert.Equal(
+            string.Join(",", DirectoryContract.ManagementPermissions.Order(StringComparer.Ordinal)),
+            await database.ScalarAsync<string>($"SELECT string_agg(value, ',' ORDER BY value COLLATE \"C\") FROM permission WHERE tenant_id = '{tenant}'"));
+        Assert.Equal(0L, await database.ScalarAsync<long>($"SELECT count(*) FROM audit_event WHERE tenant_id = '{tenant}' AND target_kind = 'api'"));
     }
 
     /// <summary>Story 2.8: the whole completion handler again, for the Tenant it already activated: still one system Application.</summary>
@@ -72,6 +87,7 @@ public sealed class TenantCreationOperationTests(PostgresFixture postgres)
 
         Assert.Equal(system, await SystemApplicationAsync(database, tenant));
         Assert.Equal(1L, await database.ScalarAsync<long>($"SELECT count(*) FROM audit_event WHERE tenant_id = '{tenant}' AND type_code = '{Activated}'"));
+        await AssertBuiltInApiAsync(database, tenant);
     }
 
     /// <summary>Story 2.8: a completion for a Tenant whose deletion started activates nothing, so no system Application is written.</summary>

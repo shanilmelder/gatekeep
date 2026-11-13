@@ -243,7 +243,36 @@ public class CapabilityRuleTests
         Assert.Equal("tenant.applications.manage", deletion.GetProperty("capability").GetString());
         Assert.True(deletion.GetProperty("machineAllowed").GetBoolean());
         Assert.Equal("never", deletion.GetProperty("freshAssertion").GetString());
+
+        // Story 3.6: every API write is tenant.apis.manage, open to machine principals, with no fresh assertion; the reads
+        // are tenant.configuration.read. These are the only routes that declare tenant.apis.manage.
+        foreach (var (route, capability) in ApiRoutes)
+        {
+            Assert.Null(Fresh(operations[route]));
+            var api = operations[route].GetProperty("x-gatekeep-access");
+            Assert.Equal("capability", api.GetProperty("kind").GetString());
+            Assert.Equal(capability, api.GetProperty("capability").GetString());
+            Assert.True(api.GetProperty("machineAllowed").GetBoolean());
+            Assert.Equal("never", api.GetProperty("freshAssertion").GetString());
+        }
+
+        Assert.Equal(
+            ApiRoutes.Where(r => r.Capability == "tenant.apis.manage").Select(r => r.Route).Order(StringComparer.Ordinal),
+            operations
+                .Where(o => o.Value.GetProperty("x-gatekeep-access").TryGetProperty("capability", out var c) && c.GetString() == "tenant.apis.manage")
+                .Select(o => o.Key)
+                .Order(StringComparer.Ordinal));
     }
+
+    private static readonly (string Route, string Capability)[] ApiRoutes =
+    [
+        ("get /api/v1/tenants/{tenantId}/apis", "tenant.configuration.read"),
+        ("post /api/v1/tenants/{tenantId}/apis", "tenant.apis.manage"),
+        ("get /api/v1/tenants/{tenantId}/apis/{apiId}", "tenant.configuration.read"),
+        ("put /api/v1/tenants/{tenantId}/apis/{apiId}/settings", "tenant.apis.manage"),
+        ("post /api/v1/tenants/{tenantId}/apis/{apiId}/permissions", "tenant.apis.manage"),
+        ("delete /api/v1/tenants/{tenantId}/apis/{apiId}/permissions/{value}", "tenant.apis.manage"),
+    ];
 
     private static readonly string[] ClientSecretRoutes =
     [
