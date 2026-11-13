@@ -191,6 +191,88 @@ public sealed class SigningKeyManagementTests(PostgresFixture postgres, OpenBaoF
         Assert.Equal(SigningKeyRotateStatus.Unavailable, (await RotateAsync(database, a, custody, owner, new TenantRoleGrant(a, TenantRole.Owner))).Status);
     }
 
+    /// <summary>
+    /// Story 9.3 (AD-5): the revocation decides <c>tenant.signing_keys.revoke</c> again from the grant it is given.
+    /// Only the path Tenant's Owner revokes; a Viewer, an Editor, another Tenant's Owner and a Deployment Owner
+    /// with no role are refused before custody is called, and nothing is written.
+    /// </summary>
+    [Fact]
+    public async Task The_revocation_needs_tenant_signing_keys_revoke_in_the_path_Tenant()
+    {
+        var database = await ProtocolDatabase.CreateAsync(postgres);
+        var a = (await database.AddTenantAsync("a.revoke.signing-keys.test")).TenantId;
+        var b = (await database.AddTenantAsync("b.revoke.signing-keys.test")).TenantId;
+        Assert.True(await database.ProvisionAsync(bao, a));
+        var keyId = await CurrentKeyIdAsync(database, a);
+        var before = await database.ScalarAsync<string>($"SELECT string_agg(to_jsonb(s)::text, ',' ORDER BY id) FROM signing_key s WHERE tenant_id = '{a}'");
+
+        var refused = new (AdminPrincipal Principal, TenantRoleGrant? Grant)[]
+        {
+            (new AdminPrincipal(Guid.CreateVersion7(), DeploymentOwner: false), new TenantRoleGrant(a, TenantRole.Viewer)),
+            (new AdminPrincipal(Guid.CreateVersion7(), DeploymentOwner: false), new TenantRoleGrant(a, TenantRole.Editor)),
+            (new AdminPrincipal(Guid.CreateVersion7(), DeploymentOwner: false), new TenantRoleGrant(b, TenantRole.Owner)),
+            (new AdminPrincipal(Guid.CreateVersion7(), DeploymentOwner: true), null),
+        };
+
+        using var custody = new ControlledCustody(bao.Custody(OpenBaoFixture.Admin));
+        foreach (var (principal, grant) in refused)
+        {
+            Assert.Equal(SigningKeyRevokeStatus.Forbidden, (await RevokeAsync(database, a, custody, principal, grant, keyId, revokeAccess: true)).Status);
+        }
+
+        Assert.Equal(0, custody.TotalCalls);
+        Assert.Equal(before, await database.ScalarAsync<string>($"SELECT string_agg(to_jsonb(s)::text, ',' ORDER BY id) FROM signing_key s WHERE tenant_id = '{a}'"));
+        Assert.Equal(0L, await database.ScalarAsync<long>("SELECT count(*) FROM audit_event WHERE type_code LIKE 'keys.signing_key.%' OR type_code = 'sessions.access.revoked'"));
+
+        // The Owner: no custody is Unavailable, a key ID naming no published key NotFound, a failing custody Unavailable.
+        var owner = new AdminPrincipal(Guid.CreateVersion7(), DeploymentOwner: false);
+        var ownerGrant = new TenantRoleGrant(a, TenantRole.Owner);
+        Assert.Equal(SigningKeyRevokeStatus.Unavailable, (await RevokeAsync(database, a, null, owner, ownerGrant, keyId, revokeAccess: false)).Status);
+        Assert.Equal(SigningKeyRevokeStatus.NotFound, (await RevokeAsync(database, a, custody, owner, ownerGrant, "sig-unknown.v1", revokeAccess: true)).Status);
+        custody.Failing.Add(KeyOperation.Create);
+        Assert.Equal(SigningKeyRevokeStatus.Unavailable, (await RevokeAsync(database, a, custody, owner, ownerGrant, keyId, revokeAccess: true)).Status);
+        Assert.Equal(before, await database.ScalarAsync<string>($"SELECT string_agg(to_jsonb(s)::text, ',' ORDER BY id) FROM signing_key s WHERE tenant_id = '{a}'"));
+        custody.Failing.Clear();
+
+        // Without revokeAccess, no Session is touched and no revocation event written.
+        Assert.Equal(SigningKeyRevokeStatus.Revoked, (await RevokeAsync(database, a, custody, owner, ownerGrant, keyId, revokeAccess: false)).Status);
+        Assert.Equal(2L, await database.ScalarAsync<long>(
+            $"SELECT count(*) FROM audit_event WHERE tenant_id = '{a}' AND actor_kind = 'admin' AND actor_id = '{owner.AdminId}' AND type_code IN ('keys.signing_key.revoked', 'keys.signing_key.created')"));
+        Assert.Equal(0L, await database.ScalarAsync<long>("SELECT count(*) FROM audit_event WHERE type_code = 'sessions.access.revoked'"));
+    }
+
+    /// <summary>
+    /// Story 9.3 (AD-13): with <c>revokeAccess</c>, the revocation also ends every Session and revokes every Token
+    /// Family and token of the path Tenant, through <c>RevokeAccessAsync</c>, with one <c>sessions.access.revoked</c>
+    /// in the same transaction. Another Tenant's are untouched.
+    /// </summary>
+    [Fact]
+    public async Task Revoking_with_revokeAccess_revokes_the_Tenants_Sessions_and_tokens_by_the_one_path()
+    {
+        var database = await ProtocolDatabase.CreateAsync(postgres);
+        var a = (await database.AddTenantAsync("a.access.signing-keys.test")).TenantId;
+        var b = (await database.AddTenantAsync("b.access.signing-keys.test")).TenantId;
+        Assert.True(await database.ProvisionAsync(bao, a));
+        await SeedAccessAsync(database, a);
+        await SeedAccessAsync(database, b);
+        var bBefore = await AccessAsync(database, b);
+
+        var owner = new AdminPrincipal(Guid.CreateVersion7(), DeploymentOwner: false);
+        using var custody = bao.Custody(OpenBaoFixture.Admin);
+        var result = await RevokeAsync(database, a, custody, owner, new TenantRoleGrant(a, TenantRole.Owner), await CurrentKeyIdAsync(database, a), revokeAccess: true);
+
+        Assert.Equal(SigningKeyRevokeStatus.Revoked, result.Status);
+        Assert.Equal(0L, await database.ScalarAsync<long>($"SELECT count(*) FROM user_session WHERE tenant_id = '{a}' AND (ended_at IS NULL OR end_reason <> 'admin_revoke')"));
+        Assert.Equal(0L, await database.ScalarAsync<long>($"SELECT count(*) FROM \"authorization\" WHERE tenant_id = '{a}' AND status <> 'revoked'"));
+        Assert.Equal(0L, await database.ScalarAsync<long>($"SELECT count(*) FROM token WHERE tenant_id = '{a}' AND status <> 'revoked'"));
+        Assert.Equal(1L, await database.ScalarAsync<long>(
+            $"SELECT count(*) FROM audit_event WHERE tenant_id = '{a}' AND type_code = 'sessions.access.revoked' AND actor_kind = 'admin' AND actor_id = '{owner.AdminId}'"));
+        Assert.Equal(1L, await database.ScalarAsync<long>($"SELECT count(*) FROM audit_event WHERE tenant_id = '{a}' AND type_code = 'keys.signing_key.revoked'"));
+
+        Assert.Equal(bBefore, await AccessAsync(database, b));
+        Assert.Equal(0L, await database.ScalarAsync<long>($"SELECT count(*) FROM audit_event WHERE tenant_id = '{b}' AND type_code = 'sessions.access.revoked'"));
+    }
+
     [Fact]
     public async Task Reads_need_the_path_Tenants_own_scope()
     {
@@ -245,6 +327,63 @@ public sealed class SigningKeyManagementTests(PostgresFixture postgres, OpenBaoF
 
         return result;
     }
+
+    /// <summary>The revocation as Host.Admin calls it, committed only when it revoked.</summary>
+    private async Task<SigningKeyRevokeResult> RevokeAsync(
+        ProtocolDatabase database,
+        Guid tenant,
+        IKeyCustody? custody,
+        AdminPrincipal principal,
+        TenantRoleGrant? grant,
+        string keyId,
+        bool revokeAccess)
+    {
+        await using var source = NpgsqlDataSource.Create(postgres.RoleConnection(TableRegistry.Admin, database.Name));
+        await using var scope = await TenantScope.BeginAsync(source, tenant, Cancellation);
+        var result = await ManagementContract.CreateSigningKeys(AuditContract.CreateAppender())
+            .RevokeAsync(scope.CreateCommandContext(), custody, principal, grant, tenant, keyId, revokeAccess, Cancellation);
+        if (result.Status == SigningKeyRevokeStatus.Revoked)
+        {
+            await scope.CommitAsync(Cancellation);
+        }
+
+        return result;
+    }
+
+    private static Task<string> CurrentKeyIdAsync(ProtocolDatabase database, Guid tenant) =>
+        database.ScalarAsync<string>(
+            $"SELECT transit_name || '.v' || transit_version FROM signing_key WHERE tenant_id = '{tenant}' AND purpose = 'signing' AND state = 'current'");
+
+    /// <summary>Two live Sessions of one User, each with a Token Family and a refresh token, as the superuser.</summary>
+    private static async Task SeedAccessAsync(ProtocolDatabase database, Guid tenant)
+    {
+        var user = await database.AddUserAsync(tenant);
+        var (application, _) = await database.CreateApplicationAsync(tenant, "web");
+        for (var i = 0; i < 2; i++)
+        {
+            var session = Guid.CreateVersion7();
+            var family = Guid.CreateVersion7();
+            await database.ExecuteAsync(
+                $"""
+                INSERT INTO user_session (tenant_id, id, user_id, id_hash, amr, auth_time, idle_expires_at, absolute_expires_at, created_at)
+                VALUES ('{tenant}', '{session}', '{user}', sha256('{session}'::bytea), ARRAY['pwd'], now(), now() + interval '1 day', now() + interval '2 days', now());
+                INSERT INTO "authorization" (tenant_id, id, application_id, user_session_id, subject, status, type, concurrency_token)
+                VALUES ('{tenant}', '{family}', '{application}', '{session}', '{user}', 'valid', 'ad-hoc', gen_random_uuid());
+                INSERT INTO token (tenant_id, id, application_id, authorization_id, subject, type, status, reference_id, concurrency_token)
+                VALUES ('{tenant}', gen_random_uuid(), '{application}', '{family}', '{user}', 'refresh_token', 'valid',
+                        encode(sha256('{family}'::bytea), 'base64'), gen_random_uuid());
+                """);
+        }
+    }
+
+    /// <summary>Every column of the Tenant's Sessions, Token Families and tokens, so any change shows.</summary>
+    private static Task<string> AccessAsync(ProtocolDatabase database, Guid tenant) =>
+        database.ScalarAsync<string>(
+            $"""
+            SELECT coalesce((SELECT string_agg(to_jsonb(s)::text, ',' ORDER BY id) FROM user_session s WHERE tenant_id = '{tenant}'), '')
+                || '|' || coalesce((SELECT string_agg(to_jsonb(f)::text, ',' ORDER BY id) FROM "authorization" f WHERE tenant_id = '{tenant}'), '')
+                || '|' || coalesce((SELECT string_agg(to_jsonb(t)::text, ',' ORDER BY id) FROM token t WHERE tenant_id = '{tenant}'), '')
+            """);
 
     private async Task<SigningKeyJwksRead> JwksAsync(
         ProtocolDatabase database,

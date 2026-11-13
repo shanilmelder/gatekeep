@@ -133,7 +133,7 @@ internal static class AdminResponses
     /// <summary>
     /// A Log search (Story 7.4) whose filter, cursor or range is malformed: an unknown parameter value,
     /// one sent twice, or a range that ends before it starts; from Story 3.1 also a malformed Applications
-    /// list cursor. Nothing was read.
+    /// list cursor; from Story 9.3 also a Signing Key revocation's malformed body. Nothing was read or written.
     /// </summary>
     public const string InvalidRequest = "invalid_request";
 

@@ -465,8 +465,8 @@ public sealed class SessionTablesTests(PostgresFixture postgres)
 
         await using var scope = await TenantScope.BeginAsync(source, TenantA, Cancellation);
         await using var command = scope.CreateCommandContext().CreateCommand();
-        // Every column: Story 3.5 gives gk_admin a column-level SELECT on token and "authorization"
-        // (the revocation's references only), which a bare SELECT 1 would pass.
+        // Every column: Story 3.5 gives gk_admin a column-level SELECT on token and "authorization", and
+        // Story 9.3 on user_session (the revocation's references only), which a bare SELECT 1 would pass.
         command.CommandText = $"SELECT * FROM \"{table}\" LIMIT 1";
 
         var error = await Assert.ThrowsAsync<PostgresException>(() => command.ExecuteNonQueryAsync(Cancellation));
@@ -661,6 +661,49 @@ public sealed class SessionTablesTests(PostgresFixture postgres)
         // Story 2.9: gk_hosted can't update an authorization's or token's tenant_id at all.
         Assert.Equal(RowSecurityOrPermission, error.SqlState);
         Assert.Contains(table is "authorization" or "token" ? "permission denied" : "row-level security", error.MessageText);
+    }
+
+    /// <summary>
+    /// Story 9.3: a Signing Key revocation, as gk_admin, may end its Tenant's Sessions by the one revocation
+    /// path's Tenant-scope statement, and do nothing else to <c>user_session</c>.
+    /// </summary>
+    [Fact]
+    public async Task Admin_only_ends_its_own_Tenants_Sessions()
+    {
+        var database = await SeededDatabaseAsync();
+        await SeedChainAsync(database);
+        await using var admin = Source(TableRegistry.Admin, database);
+
+        async Task<int> RunAsync(Guid tenantId, string sql)
+        {
+            await using var scope = await TenantScope.BeginAsync(admin, tenantId, Cancellation);
+            await using var command = scope.CreateCommandContext().CreateCommand();
+            command.CommandText = sql;
+            return await command.ExecuteNonQueryAsync(Cancellation);
+        }
+
+        const string End =
+            "UPDATE user_session SET ended_at = now(), end_reason = 'admin_revoke' WHERE tenant_id = '{0}' AND ended_at IS NULL";
+
+        // Row-level security: Tenant B's scope reaches none of Tenant A's Sessions.
+        Assert.Equal(0, await RunAsync(TenantB, string.Format(System.Globalization.CultureInfo.InvariantCulture, End, TenantA)));
+
+        foreach (var refused in new[]
+        {
+            $"UPDATE user_session SET idle_expires_at = now() WHERE tenant_id = '{TenantA}'",
+            $"SELECT id FROM user_session WHERE tenant_id = '{TenantA}'",
+            $"DELETE FROM user_session WHERE tenant_id = '{TenantA}'",
+            $"""
+            INSERT INTO user_session (tenant_id, id, user_id, id_hash, amr, auth_time, idle_expires_at, absolute_expires_at, created_at)
+            VALUES ('{TenantA}', gen_random_uuid(), '{UserA}', sha256('s'::bytea), ARRAY['pwd'], now(), now(), now(), now())
+            """,
+        })
+        {
+            var error = await Assert.ThrowsAsync<PostgresException>(() => RunAsync(TenantA, refused));
+            Assert.Equal(RowSecurityOrPermission, error.SqlState);
+        }
+
+        Assert.Equal(1, await RunAsync(TenantA, string.Format(System.Globalization.CultureInfo.InvariantCulture, End, TenantA)));
     }
 
     [Fact]

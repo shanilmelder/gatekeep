@@ -537,7 +537,7 @@ function ShellFrame({ adminId }: { adminId: string }) {
         <ForbiddenPage code="access_denied" traceId="" />
       );
     else if (answered.path.endsWith('/signing-keys'))
-      page = <SigningKeysPage key={tenantId} request={shellRequest} tenantId={tenantId} />;
+      page = <SigningKeysPage key={tenantId} request={shellRequest} fresh={fresh} tenantId={tenantId} />;
     // Applications (Story 3.1): any Tenant Role reads them, as the path Tenant's read has answered.
     else if (answered.path.endsWith('/applications'))
       page = <ApplicationsPage key={tenantId} request={shellRequest} tenantId={tenantId} />;

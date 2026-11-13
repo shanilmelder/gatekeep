@@ -560,6 +560,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/tenants/{tenantId}/signing-keys/{keyId}/revoke": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Revoke one of the path Tenant's published Signing Keys: it leaves the JWKS at once and its private material is destroyed.
+         * @description Tenant Owners only; never a machine principal. Needs a fresh assertion for tenant.signing_keys.revoke with this keyId as its target, or 403 fresh_assertion_required. keyId is the key's kid as the list gives it, and must name a next, current or previous signing key of the path Tenant. In one transaction the key becomes revoked, so the Tenant's JWKS stops serving it at once (relying parties that cached the JWKS may accept its tokens for up to 15 minutes), and a job to destroy its private material in key custody is queued, which retries on failure. A revoked current key has the next key promoted at once, even if it was published less than 15 minutes ago, and a revoked current or next key gets a new next key, created in key custody first. It writes keys.signing_key.revoked, then keys.signing_key.promoted (or keys.signing_key.promoted_unaged when the next key was younger than 15 minutes) and keys.signing_key.created as they apply, on the Tenant's own Log with the Admin as Actor. With revokeAccess true, every Session, Token Family and refresh token of the Tenant is revoked too, in the same transaction, writing sessions.access.revoked. The answer is the Tenant's Signing Keys after the revocation, as the list gives them. A body that isn't JSON, misses revokeAccess or gives it another type is 400 invalid_request. A keyId that is malformed, unknown, another Tenant's, a Management key's, or names a retired or already revoked key is 404 not_found, and nothing is written. Key custody down is 503 and nothing is written. A malformed, unknown or role-less Tenant, and a Viewer or Editor, is 403 access_denied, audited as every Tenant capability refusal is.
+         */
+        post: operations["RevokeSigningKey"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/tenants/{tenantId}/applications": {
         parameters: {
             query?: never;
@@ -995,6 +1015,9 @@ export interface components {
         };
         /** @description Shown in this response only, never stored and never shown again. */
         RevealOnceOfstring: string;
+        RevokeSigningKeyRequest: {
+            revokeAccess: boolean;
+        };
         SetTenantLabelRequest: {
             /** @enum {string} */
             label: "dev" | "staging" | "prod";
@@ -2779,6 +2802,86 @@ export interface operations {
             };
             /** @description access_denied, with the problem body, when the capability is refused. No body when an earlier check refuses first: a Session restricted to setup, or on a state-changing call a wrong Origin or CSRF token. */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description tenant_mismatch, with the problem body, when X-Gatekeep-Tenant is missing, sent twice or isn't {tenantId}, and nothing ran; or another conflict the operation's description names. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    RevokeSigningKey: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description The Tenant the page shows, its ten_ ID: it must equal {tenantId}, or 409 tenant_mismatch. It never selects a Tenant. */
+                "X-Gatekeep-Tenant": string;
+            };
+            path: {
+                /** @description The Tenant's public ID: ten_ and the UUID's 16 bytes in lowercase RFC 4648 base32 with no padding, whose last character carries two zero bits. Only this canonical spelling, after URL decoding, names a Tenant, and the empty UUID's never does; anything else is refused like a Tenant the Admin holds no role in. */
+                tenantId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RevokeSigningKeyRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SigningKeysResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description fresh_assertion_required, with the problem body, when no fresh assertion for this action and target is bound to the Session; access_denied when the capability is refused. No body when an earlier check refuses first: a restricted Session, or a wrong Origin or CSRF token. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Not Found */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

@@ -2,7 +2,8 @@
 title: 'Story 9.3: Revoke a Signing Key'
 type: 'feature'
 created: '2026-11-14'
-status: 'ready-for-dev'
+status: 'in-review'
+baseline_revision: '15abe768f3aa3a093a29fe760be4f65c905369d7'
 review_loop_iteration: 0
 followup_review_recommended: false
 context:
@@ -176,17 +177,17 @@ deferred: []
 ## Tasks & Acceptance
 
 **Execution:**
-- [ ] Keys: add `RevokeSigningKeyAsync`, the revoked-destroy changes, the new event codes and the revised summaries. Add new `tests/Isolation/Keys/SigningKeyRevokeTests.cs` covering every domain row: three states, aged and unaged, not-found cases, custody failure rollback, the destroy job on a revoked row with retry, dead-job re-queue, and other Tenant untouched.
-- [ ] Add the migration and the `ProductionJobs` roles, and update `TableRegistry` (`user_session`). Update `SigningKeyRotationTests` (CHECK theory, job roles), `JobGuardTests` (latest block), `TenantKeysTests`/`TenantTablesTests`/`SessionTablesTests` and `MigrateCommandTests` (35).
-- [ ] Management: add `RevokeAsync`, plus tests for the re-check and for `revokeAccess` through `RevokeAccessAsync` (A revoked, B untouched, one event).
-- [ ] Host.Admin:
+- [x] Keys: add `RevokeSigningKeyAsync`, the revoked-destroy changes, the new event codes and the revised summaries. Add new `tests/Isolation/Keys/SigningKeyRevokeTests.cs` covering every domain row: three states, aged and unaged, not-found cases, custody failure rollback, the destroy job on a revoked row with retry, dead-job re-queue, and other Tenant untouched.
+- [x] Add the migration and the `ProductionJobs` roles, and update `TableRegistry` (`user_session`). Update `SigningKeyRotationTests` (CHECK theory, job roles), `JobGuardTests` (latest block), `TenantKeysTests`/`TenantTablesTests`/`SessionTablesTests` and `MigrateCommandTests` (35).
+- [x] Management: add `RevokeAsync`, plus tests for the re-check and for `revokeAccess` through `RevokeAccessAsync` (A revoked, B untouched, one event).
+- [x] Host.Admin:
   - add the route, the request type and the handler;
   - add new `tests/Isolation/Keys/SigningKeyRevokeApiTests.cs` covering every API row, including the stale assertion and JWKS leaving Hosted;
   - add the `RouteRegistry`, `CanaryFlows`, `CapabilityRuleTests` and `AdminApiRuleTests` entries.
-- [ ] Protocol: add new `tests/Isolation/Protocol/RevokedSigningKeyTests.cs`, the forged-token fixture resource server row.
-- [ ] Regenerate the OpenAPI, schema and audit catalogue in Docker. Add the client method and its test.
-- [ ] Dashboard: add the Revoke column, the modal, the messages and the `fresh` wiring. Extend `admin-signing-keys.spec.ts` with every browser row.
-- [ ] Docs: update install.md and the threat model.
+- [x] Protocol: add new `tests/Isolation/Protocol/RevokedSigningKeyTests.cs`, the forged-token fixture resource server row.
+- [x] Regenerate the OpenAPI, schema and audit catalogue in Docker. Add the client method and its test.
+- [x] Dashboard: add the Revoke column, the modal, the messages and the `fresh` wiring. Extend `admin-signing-keys.spec.ts` with every browser row.
+- [x] Docs: update install.md and the threat model.
 
 **Acceptance Criteria:**
 - Given a revoke, when it's confirmed with a fresh assertion, then the key leaves the JWKS at once, a job destroys its private material, and failure retries.
@@ -197,6 +198,14 @@ deferred: []
 - Given the full suite in CI, when it runs, then every test passes.
 
 ## Spec Change Log
+
+- 2026-11-14, implementation:
+  - **The forged token.** Token issuance exists now (the code flow), so `RevokedSigningKeyTests` uses the real code flow's access token, signed in Transit with the key while it was `current`: exactly what anyone holding its private material could forge. The fixture resource server is `JsonWebTokenHandler` against a fresh JWKS fetch, as in `ClientCredentialsTests`.
+  - **The 400 code.** A malformed body is the existing `invalid_request`; no new problem code.
+  - **The `user_session` grant.** Confirmed against `SessionRevocation`'s Tenant-scope statement: `SELECT (tenant_id, ended_at)` and `UPDATE (ended_at, end_reason)`. `AdminCredentialIsolationTests` pins it beside Story 3.5's `token` and `authorization` grants.
+  - **Shared helpers.** `ReplaceAsync`'s Transit create and `next` insert became `CreateReplacementAsync` and `InsertNextAsync`, which the revocation reuses; rotation keeps its order and behaviour. `SelectOpen` also reads `transit_version`, so the key ID's version is matched without a second read.
+  - **Lock first.** The revocation takes `TenantKeys.Lock` before it parses the key ID, so even a not-found ID is serialized with the rotations; it still writes nothing.
+  - **Dashboard.** The Revoke column's header is "Revoke", and each button is named "Revoke key {keyId}" for screen readers. The "Tenant Owner only" note describes both the read-only Rotate and the read-only Revoke buttons.
 
 ## Review Triage Log
 

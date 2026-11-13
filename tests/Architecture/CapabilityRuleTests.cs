@@ -252,6 +252,19 @@ public class CapabilityRuleTests
         Assert.Equal("tenant.signing_keys.rotate", rotate.GetProperty("capability").GetString());
         Assert.False(rotate.GetProperty("machineAllowed").GetBoolean());
         Assert.Equal("never", rotate.GetProperty("freshAssertion").GetString());
+
+        // Story 9.3: Revoke is tenant.signing_keys.revoke, refused to machine principals, and checks-enforced
+        // (Always) with the fresh assertion bound to the key it revokes.
+        const string Revoke = "post /api/v1/tenants/{tenantId}/signing-keys/{keyId}/revoke";
+        var revokeFresh = Fresh(operations[Revoke])!;
+        Assert.Equal("checks", revokeFresh.EnforcedBy);
+        Assert.Equal("tenant.signing_keys.revoke", revokeFresh.Action);
+        Assert.Equal("keyId", revokeFresh.Target);
+        var revoke = operations[Revoke].GetProperty("x-gatekeep-access");
+        Assert.Equal("capability", revoke.GetProperty("kind").GetString());
+        Assert.Equal("tenant.signing_keys.revoke", revoke.GetProperty("capability").GetString());
+        Assert.False(revoke.GetProperty("machineAllowed").GetBoolean());
+        Assert.Equal("always", revoke.GetProperty("freshAssertion").GetString());
     }
 
     private static readonly string[] ClientSecretRoutes =

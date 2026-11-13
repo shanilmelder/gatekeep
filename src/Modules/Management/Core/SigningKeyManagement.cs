@@ -6,15 +6,17 @@ using Gatekeep.Kernel.Secrets;
 using Gatekeep.Modules.Admins.Contracts;
 using Gatekeep.Modules.Keys.Contracts;
 using Gatekeep.Modules.Management.Contracts;
+using Gatekeep.Modules.Operations.Contracts;
+using Gatekeep.Modules.Sessions.Contracts;
 using Gatekeep.Modules.Tenancy.Contracts;
 
 namespace Gatekeep.Modules.Management.Core;
 
 /// <summary>
-/// The Signing keys page (Stories 9.1 and 9.2): the rows from PostgreSQL, and the public JWKS sample
+/// The Signing keys page (Stories 9.1, 9.2 and 9.3): the rows from PostgreSQL, and the public JWKS sample
 /// from the public halves custody returns, which write nothing; and the Tenant Owner's rotation on
-/// demand, through the Keys contract. Only <c>signing</c> rows are read or rotated, so no Management
-/// key can reach either.
+/// demand and revocation, through the Keys contract. Only <c>signing</c> rows are read, rotated or
+/// revoked, so no Management key can reach any of them.
 /// </summary>
 internal sealed class SigningKeyManagement(IAuditAppender appender) : ISigningKeyManagement
 {
@@ -24,6 +26,8 @@ internal sealed class SigningKeyManagement(IAuditAppender appender) : ISigningKe
     private readonly IAuditAppender _appender = appender;
 
     private readonly ITenants _tenants = TenancyContract.CreateTenants(appender);
+
+    private readonly ISessions _sessions = SessionsContract.CreateSessions(appender, TimeProvider.System);
 
     public async Task<SigningKeyListRead> ListAsync(
         CommandContext tenantContext,
@@ -186,6 +190,72 @@ internal sealed class SigningKeyManagement(IAuditAppender appender) : ISigningKe
         return rotation.Status == SigningKeyRotationStatus.Rotated
             ? new SigningKeyRotateResult(SigningKeyRotateStatus.Rotated, RetryAfter: null)
             : new SigningKeyRotateResult(SigningKeyRotateStatus.NotReady, rotation.RetryAfter);
+    }
+
+    public async Task<SigningKeyRevokeResult> RevokeAsync(
+        CommandContext tenantContext,
+        IKeyCustody? custody,
+        AdminPrincipal principal,
+        TenantRoleGrant? grant,
+        Guid tenantId,
+        string keyId,
+        bool revokeAccess,
+        CancellationToken cancellationToken)
+    {
+        RequireOwnContext(tenantContext, tenantId);
+        ArgumentNullException.ThrowIfNull(principal);
+
+        // Authorization runs in the module too (AD-5), from the grant the checks read: no second read.
+        if (!AdminCapabilities.Allows(AdminCapabilities.TenantSigningKeysRevoke, principal, grant, tenantId))
+        {
+            return new SigningKeyRevokeResult(SigningKeyRevokeStatus.Forbidden);
+        }
+
+        if (custody is null)
+        {
+            return new SigningKeyRevokeResult(SigningKeyRevokeStatus.Unavailable);
+        }
+
+        var actor = Actor.Admin(principal.AdminId);
+        SigningKeyRevocation revocation;
+        try
+        {
+            // The destruction job is queued in this same command, as gk_admin: the job guard allows it.
+            revocation = await KeysContract.RevokeSigningKeyAsync(
+                tenantContext,
+                custody,
+                _appender,
+                OperationsContract.CreateEnqueuer(OperationsContract.ProductionRegistry, custody: null),
+                OperationsContract.DestroySigningKey,
+                actor,
+                tenantId,
+                keyId,
+                cancellationToken);
+        }
+        catch (KeyCustodyException)
+        {
+            // Transit first: nothing of this revocation is in a row yet, and the caller doesn't commit.
+            return new SigningKeyRevokeResult(SigningKeyRevokeStatus.Unavailable);
+        }
+
+        if (revocation.Status != SigningKeyRevocationStatus.Revoked)
+        {
+            return new SigningKeyRevokeResult(SigningKeyRevokeStatus.NotFound);
+        }
+
+        if (revokeAccess)
+        {
+            // The one revocation path (AD-13), in the same command: it writes sessions.access.revoked.
+            await _sessions.RevokeAccessAsync(
+                tenantContext,
+                new RevocationScope.Tenant(),
+                exceptSessionId: null,
+                RevocationReason.AdminRevoke,
+                actor,
+                cancellationToken);
+        }
+
+        return new SigningKeyRevokeResult(SigningKeyRevokeStatus.Revoked);
     }
 
     private static SigningKeyJwksRead Refused(SigningKeyReadStatus status) => new(status, null, []);
