@@ -183,7 +183,7 @@ public sealed class SigningKeyManagementTests(PostgresFixture postgres, OpenBaoF
         Assert.Equal(3L, await database.ScalarAsync<long>(
             $"SELECT count(*) FROM audit_event WHERE tenant_id = '{a}' AND actor_kind = 'admin' AND actor_id = '{owner.AdminId}'"));
 
-        // A failing custody is Unavailable too, and the next key, now brand new, is not ready.
+        // The next key, now brand new, is not ready; once aged, a failing custody is Unavailable too.
         Assert.Equal(SigningKeyRotateStatus.NotReady, (await RotateAsync(database, a, custody, owner, new TenantRoleGrant(a, TenantRole.Owner))).Status);
         await database.BackdateAsync(
             $"UPDATE signing_key SET published_at = now() - interval '20 minutes' WHERE tenant_id = '{a}' AND purpose = 'signing' AND state = 'next'");

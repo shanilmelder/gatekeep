@@ -192,6 +192,44 @@ deferred: []
 
 ## Review Triage Log
 
+### 2026-11-14: Review pass
+
+- verdicts: 27 findings. High 0, medium 0, low 19, false 8, maybe-false 0.
+- findings:
+  - `[low]` `[reject]` Blind: `gk_admin` INSERT on the whole table with no insert guard.
+    - Refuted in part: the `signing_key_transit_name` CHECK ties `transit_name` to the row's own Tenant and ID, so no other Tenant's key or `mgmt-` name can be inserted as `signing`.
+    - What's left (any state, backdated `published_at`) needs SQL as `gk_admin`, which `gk_worker` already has in the same way.
+    - A column list wouldn't help, because `InsertKey` itself writes `created_at`, `published_at` and `promoted_at`. The fix would be a new trigger.
+  - `[low]` `[patch]` Blind: Rotated, then a list read other than `Read`, falls to `default` and answers 403. It's unreachable for an Owner, but it is the wrong answer. Fixed: that case is now 503.
+  - `[false]` `[reject]` Blind: a NULL `published_at` gives a never-true "retry in 1 s". The `signing_key_signing_published` CHECK makes `published_at` NOT NULL for every signing row.
+  - `[low]` `[reject]` Blind: on-demand rotations can pile up `previous` keys, about 96 a day. Owner-only, and each one is held 15 minutes by the gate. Every `previous` key retires after 1 h 15 min once the daily job runs. A cap would add a new refusal and new surface for a case nobody meets in normal use.
+  - `[false]` `[reject]` Blind: the daily clock doesn't reset after an on-demand rotation. That's intended: due-ness counts from the key's own `created_at`, and `SigningKeyMaxAge` limits every key's lifetime. An early daily rotation can only follow a `next` that was already old.
+  - `[low]` `[reject]` Blind: no fresh assertion and no confirmation. Story 1.24's capability table sets rotate to `FreshAssertion.Never`, and the epic's UX puts the confirmation modal on Revoke (9.3) only. Rotation retires nothing and invalidates no token.
+  - `[low]` `[reject]` Blind: switching Tenant while a rotate is in flight. The page is keyed by `tenantId`, so a remount clears `refusal`; the only leak is a toast that is still true. Switching in the second the POST takes is rare, and the fix adds a guard.
+  - `[false]` `[reject]` Blind: an Owner with rotate but no `*.manage` would see no action. Owners always hold `tenant.label.manage` (`AdminCapabilities.cs:167`), so `canRotate` implies `!viewOnly`.
+  - `[low]` `[reject]` Blind: HTTP gaps (machine principal, a Deployment Owner without a Role, CSRF, the broken invariant).
+    - No request path can bring a machine principal into Host.Admin before Epic 17, and the flag is pinned by `CapabilityRuleTests` and `CapabilityMatrixTests`.
+    - A Deployment Owner without a Role is covered at the module level.
+    - CSRF and Origin are the shared request checks, which their own tests cover for every state-changing route.
+  - `[low]` `[patch]` Blind: the TB-6 cell runs the 9.2 sentence into the backtick list. Fixed with punctuation.
+  - `[low]` `[patch]` Blind: the `SigningKeyManagementTests` comment gives the assertions in the wrong order. Fixed: the comment is reordered.
+  - `[low]` `[reject]` Blind: no countdown or disabled state after not-ready. The banner already gives the minutes; a timer adds state for little gain.
+  - `[low]` `[reject]` Blind: the loading `aria-disabled` has no description. The state lasts a moment, and axe passes on every state.
+  - `[false]` `[reject]` Blind: not-ready isn't audited. Audit records state changes and capability denials. A not-ready refusal is neither, and writes nothing, like `client_secret_limit_reached`.
+  - `[low]` `[patch]` Verification gap: no browser test for the refusals the shell handles (409 `tenant_mismatch`, 401). Fixed: a test modelled on `admin-applications.spec.ts:583` asserts that none of the page's banners or toast appear. The 401 variant was left out: it needs the WebAuthn renewal harness, which this spec's mocks don't have, and the renewal is the shell's and tested in its own specs.
+  - `[low]` `[patch]` Verification gap (other): Rotated plus a list read other than `Read` gives 403. Grouped with Blind #2.
+  - `[low]` `[patch]` Verification gap (other): the comment order. Grouped with Blind #11.
+  - `[low]` `[reject]` Edge: no cap on `previous` rows. Grouped with Blind #4.
+  - `[false]` `[reject]` Edge: no `current` or `next` gives an unhandled 500. AD-11 guarantees both at every commit, so this is a broken invariant, and failing loudly is correct; the spec asks for the throw.
+  - `[false]` `[reject]` Edge: an empty version list from custody gives a 500 and an orphan. This is the existing guard moved unchanged from `RotateAsync`. Transit always returns the created version, and the orphan sweep removes an unowned key.
+  - `[low]` `[reject]` Edge: a client abort after the Transit create rolls the rotation back. The outcome is safe: no rows change, and the orphan sweep takes the Transit key. The comment refers to the list read and commit, which do use `CancellationToken.None`.
+  - `[low]` `[patch]` Edge: Rotated plus a list read other than `Read` gives 403. Grouped with Blind #2.
+  - `[low]` `[reject]` Edge: the page unmounts mid-rotation and the toast appears elsewhere. Grouped with Blind #7.
+  - `[low]` `[reject]` Intent: machine principal refusal is shown by declaration only. No machine principal can reach Host.Admin before Epic 17; the capability, OpenAPI and matrix tests pin the refusal.
+  - `[false]` `[reject]` Intent: three events, where the intent says "a Log event". "A Log event is written" holds, and the three codes match the daily rotation's record of the same change.
+  - `[low]` `[reject]` Intent: the time remaining in the UI is checked only against mocked APIs. That is the repository's convention: browser specs intercept the API, and Isolation proves the 580 to 600 s against real Postgres.
+  - `[false]` `[reject]` Intent: reclassifying KeyOperation also changes the daily rotation's events. Intended: both paths write the same key operation, and the Tenant Log should show both.
+
 ## Design Notes
 
 **Why a new contract method:** `RotateTenantKeysAsync` is the daily sweep. It is gated on `current`'s age, handles both purposes, retires, and re-queues destruction, which needs SELECT on `job`, a grant `gk_admin` doesn't have. The on-demand method shares the SQL and the Transit-first order, but its only gate is `next`'s publication age, which keeps the 15-minute JWKS cache promise.

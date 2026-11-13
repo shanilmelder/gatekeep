@@ -138,6 +138,13 @@ internal static class SigningKeysApi
                 await AdminResponses.JsonAsync(context, Response(read), cancellationToken: CancellationToken.None);
                 return;
 
+            case SigningKeyRotateStatus.Rotated:
+                // The keys couldn't be read after the rotation, so nothing was committed: unavailable, never a refusal.
+                Logger(context).LogWarning(
+                    "The Signing Keys couldn't be read after a rotation, so it was rolled back, trace {TraceId}.", AdminResponses.TraceId(context));
+                await AdminResponses.UnavailableAsync(context);
+                return;
+
             case SigningKeyRotateStatus.NotReady:
                 // Whole seconds, rounded up and never under one, in the body and the header alike.
                 var seconds = (int)Math.Max(1, Math.Ceiling((result.RetryAfter ?? TimeSpan.Zero).TotalSeconds));

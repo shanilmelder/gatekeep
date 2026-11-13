@@ -376,6 +376,24 @@ test.describe('rotate', () => {
   });
 });
 
+test.describe('rotate refusals the shell handles', () => {
+  test('a 409 tenant_mismatch shows none of the page banners and no toast, and the table is unchanged', async ({ page }) => {
+    const api = await answerApi(page, { capabilities: TENANT_OWNER, rotate: (route) => problem(route, 409, 'tenant_mismatch') });
+
+    await page.goto(PAGE);
+    await expect(page.getByTestId('signing-key-id')).toHaveCount(ROWS.length);
+    await rotate(page).click();
+
+    await expect.poll(() => api.count(`POST ${ROTATE}`)).toBe(1);
+    await expect(rotate(page)).not.toHaveAttribute('aria-busy', 'true');
+    await expect(page.getByTestId('signing-keys-rotate-failed')).toHaveCount(0);
+    await expect(page.getByTestId('signing-keys-rotate-not-ready')).toHaveCount(0);
+    await expect(page.getByTestId('signing-keys-rotate-forbidden')).toHaveCount(0);
+    await expect(toast(page)).toHaveCount(0);
+    await expect(page.getByTestId('signing-key-id')).toHaveText(ROWS.map((row) => row.keyId));
+  });
+});
+
 test.describe('sidebar', () => {
   test('Signing keys sits in the Security group, current on its page', async ({ page }) => {
     await answerApi(page);
