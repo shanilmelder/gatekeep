@@ -27,6 +27,10 @@ public sealed class PostgresFixture : IAsyncLifetime
 
     private readonly PostgreSqlContainer _container = new PostgreSqlBuilder(Image)
         .WithDatabase(ClusterDatabase)
+        // Docker's default /dev/shm is 64 MB. Parallel tests across thousands of cloned
+        // databases outgrow it, and PostgreSQL then refuses connections with 53100
+        // "could not resize shared memory segment".
+        .WithCreateParameterModifier(parameters => (parameters.HostConfig ??= new()).ShmSize = 1L << 30)
         .Build();
 
     // PostgreSQL refuses to clone a template while another clone holds it.
