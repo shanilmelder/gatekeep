@@ -145,7 +145,7 @@ development_status:
   7-4-search-a-tenant-s-logs: done
   7-5-open-an-event-s-raw-detail: done
   7-6-view-a-user-s-history: backlog
-  7-7-search-the-deployment-log: backlog
+  7-7-search-the-deployment-log: in-progress
   7-8-plant-canaries-and-publish-the-event-catalogue: done
   epic-7-retrospective: optional
 
