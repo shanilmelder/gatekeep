@@ -2,7 +2,7 @@
 title: 'Story 9.2: Rotate a Signing Key on demand'
 type: 'feature'
 created: '2026-11-14'
-status: 'in-review'
+status: 'done'
 baseline_revision: 'b805adb24e715c98f099ab569a56109604910e1a'
 review_loop_iteration: 0
 followup_review_recommended: false
@@ -241,3 +241,38 @@ deferred: []
 **Commands:**
 - Don't run the suite locally (CI is the source of truth). Generated files only: the audit catalogue generator, and `sh deploy/docker/api-contract.sh --write` in Docker.
 - Push and open a draft PR; CI's build, Isolation, Architecture and browser jobs must be green.
+
+## Auto Run Result
+
+Status: done
+
+- **Implemented:** a Tenant Owner can rotate the Signing Key on demand.
+  - **Server:** `KeysContract.RotateSigningKeyNowAsync` covers the signing purpose only. It takes the per-Tenant lock and gates on `next`'s publication age by database time. It creates the Transit key first, then makes the Rotate and Promote changes and inserts the new `next`. It writes three events with the Admin as Actor, classed KeyOperation, and sends the NOTIFY at commit.
+  - **Route:** `POST /api/v1/tenants/{tenantId}/signing-keys/rotate` answers 200 with the refreshed list, 409 `signing_key_not_ready` with `retryAfterSeconds` and `Retry-After`, 403, or 503.
+  - **Grants and permission:** a migration gives `gk_admin` INSERT plus UPDATE on (state, promoted_at, rotated_at). The rotate permission is no longer machine-allowed.
+  - **Page:** a "Rotate now" action with owner-only, view-only, not-ready and failure states.
+- **Files changed:**
+  - Keys contract and lifecycle;
+  - the migration and the `TableRegistry` entry;
+  - `AdminCapabilities`;
+  - Management `ISigningKeyManagement` and `SigningKeyManagement`;
+  - Host.Admin: `AdminApi`, `SigningKeysApi` and `AdminResponses`;
+  - api-client, the `SigningKeysPage` and its messages;
+  - the regenerated OpenAPI, schema and audit catalogue;
+  - the threat model and install.md;
+  - new Isolation tests (`SigningKeyRotateNowTests`, `SigningKeyRotateApiTests`, `PublicHalves`), and updates to the matrix, rule, catalogue, grants, route registry, canary and browser tests.
+- **Review:**
+  - 27 findings: 7 patch rows (low) grouped into 4 fixes, 0 deferred.
+  - The rest were rejected; the reasons are in the triage log.
+  - Patched by verdict: high 0, medium 0, low 4 entries.
+  - Follow-up review recommended: false.
+- **Verification:** CI on PR #61 is the test run.
+  - **First run:** 633 of 634 browser tests passed. The Editor test clicked an `aria-disabled` button without `force` and timed out. Fixed as the other specs do.
+  - **Second run:** Architecture passed 763/763 and Isolation 3425/3426. `CapabilityMatrixTests.Machine_principal_at_handler_level_…` still pinned 18 machine-allowed Tenant capabilities; it is now 17 and asserts that rotate is refused to a machine principal at the authorizer. That test is the live machine-principal check for AC3.
+- **Matrix audit:**
+  - Every API and domain row is covered in `SigningKeyRotateApiTests` and `SigningKeyRotateNowTests`.
+  - Every browser row is covered in `admin-signing-keys.spec.ts`: Owner, not ready, Editor and Viewer, failure, and axe in both themes at both widths.
+  - The final green CI run is the one that runs them.
+- **Residual risks:**
+  - On-demand rotations aren't capped beyond the 15-minute gate. Up to about 96 `previous` keys a day could stay published until the daily retirement.
+  - `gk_admin`'s INSERT isn't guarded by a trigger. The transit-name CHECK still keeps it to the Tenant's own keys.
