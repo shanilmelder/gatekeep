@@ -211,8 +211,41 @@ internal static class AdminOpenApi
                 }
                 else if (type == typeof(ApiProblemError))
                 {
-                    Enumerate(schema, "field", [.. ManagementContract.ApplicationSettingsFields, .. ManagementContract.ApplicationLifetimeFields]);
-                    Enumerate(schema, "reason", [.. ManagementContract.ApplicationSettingsReasons, .. ManagementContract.ApplicationLifetimeReasons]);
+                    Enumerate(
+                        schema,
+                        "field",
+                        [.. ManagementContract.ApplicationSettingsFields.Concat(ManagementContract.ApplicationLifetimeFields).Concat(ManagementContract.ApiFields).Distinct(StringComparer.Ordinal)]);
+                    Enumerate(
+                        schema,
+                        "reason",
+                        [.. ManagementContract.ApplicationSettingsReasons.Concat(ManagementContract.ApplicationLifetimeReasons).Concat(ManagementContract.ApiReasons).Distinct(StringComparer.Ordinal)]);
+                }
+                else if (type == typeof(CreateApiRequest))
+                {
+                    Bound(schema, "name", pattern: null, maxLength: ManagementContract.MaxApiNameLength);
+                    Bound(schema, "identifier", pattern: null, maxLength: ManagementContract.MaxApiIdentifierLength);
+                }
+                else if (type == typeof(AddApiPermissionRequest) || type == typeof(ApiPermissionResponse))
+                {
+                    Bound(schema, "value", PermissionPattern, maxLength: null);
+                    Bound(schema, "description", pattern: null, maxLength: ManagementContract.MaxPermissionDescriptionLength);
+                }
+                else if (type == typeof(ApiResourceResponse))
+                {
+                    Bound(schema, "id", ApiIdPattern, maxLength: null);
+                    Bound(schema, "name", pattern: null, maxLength: ManagementContract.MaxApiNameLength);
+                    Bound(schema, "identifier", pattern: null, maxLength: ManagementContract.MaxApiIdentifierLength);
+                }
+                else if (type == typeof(ApiResourceDetailResponse))
+                {
+                    if (schema.Properties?.TryGetValue("permissions", out var permissions) == true && permissions is OpenApiSchema array)
+                    {
+                        array.MaxItems = ManagementContract.MaxPermissionsPerApi;
+                    }
+                }
+                else if (type == typeof(ApiResourceListResponse))
+                {
+                    Bound(schema, "nextCursor", ApiIdPattern, maxLength: null);
                 }
                 else if (type == typeof(ApplicationSecretCreatedResponse))
                 {
@@ -531,6 +564,11 @@ internal static class AdminOpenApi
     private const string ApplicationIdPattern = "^app_[a-z2-7]{25}[aeimquy4]$";
 
     private const string ClientSecretIdPattern = "^sec_[a-z2-7]{25}[aeimquy4]$";
+
+    private const string ApiIdPattern = "^api_[a-z2-7]{25}[aeimquy4]$";
+
+    /// <summary>A Permission's value (Story 3.6): <c>resource:action</c>, as Directory and the table check it.</summary>
+    private const string PermissionPattern = "^[a-z0-9][a-z0-9_.-]{0,63}:[a-z0-9][a-z0-9_.-]{0,63}$";
 
     /// <summary>A client secret's value (Story 3.3): the Tenant's public ID, a dot, then 32 bytes in base64url, unpadded.</summary>
     private const string ClientSecretPattern = "^ten_[a-z2-7]{25}[aeimquy4]\\.[A-Za-z0-9_-]{43}$";

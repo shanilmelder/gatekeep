@@ -53,6 +53,12 @@ public enum PublicIdType
     /// path. Never the secret's value or hash, which no response carries but the one that creates it.
     /// </summary>
     ClientSecret,
+
+    /// <summary>
+    /// <c>api_</c>: an API, a resource server a Tenant's tokens are for (Story 3.6), as <c>{apiId}</c> in a path.
+    /// Never its identifier, which is the audience a token names.
+    /// </summary>
+    Api,
 }
 
 /// <summary>
@@ -83,6 +89,7 @@ public static class PublicId
         PublicIdType.User => "usr",
         PublicIdType.Session => "ses",
         PublicIdType.ClientSecret => "sec",
+        PublicIdType.Api => "api",
         _ => throw new ArgumentOutOfRangeException(nameof(type)),
     };
 

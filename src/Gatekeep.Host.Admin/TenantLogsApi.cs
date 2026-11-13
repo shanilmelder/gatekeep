@@ -13,12 +13,12 @@ namespace Gatekeep.Host.Admin;
 /// <summary>Who caused an event, or what it acted on, as a Log shows it: a kind and an ID, never a name or an email.</summary>
 public sealed class LogReference
 {
-    /// <summary><c>system</c>, <c>anonymous</c>, <c>admin</c>, <c>user</c> or <c>client</c> (an Application), or <c>tenant</c> as a target.</summary>
+    /// <summary><c>system</c>, <c>anonymous</c>, <c>admin</c>, <c>user</c> or <c>client</c> (an Application), or <c>tenant</c> or <c>api</c> (Story 3.6) as a target.</summary>
     public required string Kind { get; init; }
 
     /// <summary>
     /// The internal reference: a UUID for an Admin, a User or an Application, the <c>ten_</c> public ID
-    /// for a Tenant, and null for <c>system</c> and <c>anonymous</c>.
+    /// for a Tenant, the <c>api_</c> public ID for an API (Story 3.6), and null for <c>system</c> and <c>anonymous</c>.
     /// </summary>
     public required string? Id { get; init; }
 }
@@ -170,7 +170,7 @@ internal static partial class TenantLogsApi
     public static readonly IReadOnlyList<string> Outcomes = ["success", "failure"];
 
     /// <summary>The reference kinds an Actor or target can have, as the API spells them.</summary>
-    public static readonly IReadOnlyList<string> ReferenceKinds = ["system", "anonymous", "admin", "user", "client", "tenant"];
+    public static readonly IReadOnlyList<string> ReferenceKinds = ["system", "anonymous", "admin", "user", "client", "tenant", "api"];
 
     private const int MaxEmailLength = 320;
 
@@ -377,9 +377,12 @@ internal static partial class TenantLogsApi
                 ? new LogReference
                 {
                     Kind = Stored(kind),
-                    Id = kind == AuditTargetKind.Tenant
-                        ? PublicId.Format(PublicIdType.Tenant, entry.TargetId!.Value)
-                        : entry.TargetId!.Value.ToString("D"),
+                    Id = kind switch
+                    {
+                        AuditTargetKind.Tenant => PublicId.Format(PublicIdType.Tenant, entry.TargetId!.Value),
+                        AuditTargetKind.Api => PublicId.Format(PublicIdType.Api, entry.TargetId!.Value),
+                        _ => entry.TargetId!.Value.ToString("D"),
+                    },
                 }
                 : null,
         };

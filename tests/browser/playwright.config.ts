@@ -62,7 +62,7 @@ export default defineConfig({
       name,
       // Every spec that isn't another project's own, so a new spec runs by default.
       testMatch: '*.spec.ts',
-      testIgnore: ['admin-csp.spec.ts', 'bootstrap.spec.ts', 'credential-setup.spec.ts', 'signin.spec.ts', 'controls.spec.ts', 'data.spec.ts', 'overlay.spec.ts', 'drawer.spec.ts', 'hosted.spec.ts', 'shell.spec.ts', 'admin-shell.spec.ts', 'admin-credentials.spec.ts', 'admin-recovery.spec.ts', 'admin-tenants.spec.ts', 'admin-tenant-switcher.spec.ts', 'admin-tenant-delete.spec.ts', 'admin-logs.spec.ts', 'admin-signing-keys.spec.ts', 'admin-applications.spec.ts'],
+      testIgnore: ['admin-csp.spec.ts', 'bootstrap.spec.ts', 'credential-setup.spec.ts', 'signin.spec.ts', 'controls.spec.ts', 'data.spec.ts', 'overlay.spec.ts', 'drawer.spec.ts', 'hosted.spec.ts', 'shell.spec.ts', 'admin-shell.spec.ts', 'admin-credentials.spec.ts', 'admin-recovery.spec.ts', 'admin-tenants.spec.ts', 'admin-tenant-switcher.spec.ts', 'admin-tenant-delete.spec.ts', 'admin-logs.spec.ts', 'admin-signing-keys.spec.ts', 'admin-applications.spec.ts', 'admin-apis.spec.ts'],
       use: { baseURL: `http://127.0.0.1:${port}` },
     })),
     { name: fixture.name, testMatch: 'controls.spec.ts', use: { baseURL: `http://127.0.0.1:${fixture.port}` } },
@@ -159,6 +159,12 @@ export default defineConfig({
     {
       name: 'admin-applications',
       testMatch: 'admin-applications.spec.ts',
+      use: { baseURL: `http://localhost:${adminHost.port}` },
+    },
+    // A Tenant's APIs and their Permissions (Story 3.6), from localhost, with the API intercepted.
+    {
+      name: 'admin-apis',
+      testMatch: 'admin-apis.spec.ts',
       use: { baseURL: `http://localhost:${adminHost.port}` },
     },
   ],

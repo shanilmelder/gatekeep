@@ -165,6 +165,35 @@ public class AdminApiRuleTests
         Assert.Equal(columns, ColumnGrants(Entry(table)));
     }
 
+    /// <summary>
+    /// Story 3.6: an API's identifier is never updatable. gk_admin updates only its offline access, RBAC and lifetimes,
+    /// and adds and removes Permissions without editing one; gk_worker reads only what finds the built-in Management API.
+    /// </summary>
+    [Theory]
+    [InlineData(
+        "api",
+        new[] { "gk_admin INSERT", "gk_admin SELECT", "gk_worker DELETE", "gk_worker INSERT" },
+        new[]
+        {
+            "gk_admin UPDATE access_token_lifetime,id_token_lifetime,offline_access,rbac,refresh_token_absolute_lifetime,refresh_token_inactivity_lifetime",
+            "gk_worker SELECT built_in,id,tenant_id",
+        })]
+    [InlineData(
+        "permission",
+        new[] { "gk_admin DELETE", "gk_admin INSERT", "gk_admin SELECT", "gk_worker DELETE", "gk_worker INSERT" },
+        new[] { "gk_worker SELECT api_id,tenant_id,value" })]
+    public void Registry_holds_APIs_and_Permissions_to_their_grants(string table, string[] grants, string[] columns)
+    {
+        var entry = Entry(table);
+
+        Assert.Equal("Tenant", Get(entry, "Class")!.ToString());
+        Assert.Equal("Directory", Get(entry, "Owner"));
+        Assert.Equal(grants, TableGrants(entry));
+        Assert.Equal(columns, ColumnGrants(entry));
+        Assert.DoesNotContain(ColumnGrants(entry), g => g.Contains("UPDATE", StringComparison.Ordinal) && g.Contains("identifier", StringComparison.Ordinal));
+        Assert.DoesNotContain(TableGrants(entry), g => g.EndsWith(" UPDATE", StringComparison.Ordinal));
+    }
+
     private static IEnumerable<string> TableGrants(object entry) =>
         ((IEnumerable)Get(entry, "Grants")!)
             .Cast<object>()

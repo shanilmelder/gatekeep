@@ -67,6 +67,18 @@ export type ApplicationSecretListResponse = components['schemas']['ApplicationSe
 /** A client secret just created or rotated in: the value, shown in this response only, and the live secrets after it. */
 export type ApplicationSecretCreatedResponse = components['schemas']['ApplicationSecretCreatedResponse'];
 
+/** One API, a resource server of the Tenant (Story 3.6): its `api_` ID, identifier, settings and lifetimes. */
+export type ApiResource = components['schemas']['ApiResourceResponse'];
+/** One API with its Permissions (Story 3.6). */
+export type ApiResourceDetail = components['schemas']['ApiResourceDetailResponse'];
+/** A page of the Tenant's APIs, the built-in Management API first (Story 3.6). */
+export type ApiResourceListResponse = components['schemas']['ApiResourceListResponse'];
+/** One of an API's `resource:action` Permissions (Story 3.6). */
+export type ApiPermission = components['schemas']['ApiPermissionResponse'];
+export type CreateApiRequest = components['schemas']['CreateApiRequest'];
+export type ApiSettingsRequest = components['schemas']['ApiSettingsRequest'];
+export type AddApiPermissionRequest = components['schemas']['AddApiPermissionRequest'];
+
 /** A path the committed OpenAPI document has, so a removed endpoint fails to compile. */
 export type ApiPath = keyof paths;
 
@@ -429,6 +441,46 @@ export function createApiClient(options: ApiClientOptions = {}) {
       request(
         `/api/v1/tenants/${encodeURIComponent(tenantId)}/applications/${encodeURIComponent(applicationId)}/secrets/${encodeURIComponent(secretId)}/revoke` as '/api/v1/tenants/{tenantId}/applications/{applicationId}/secrets/{secretId}/revoke',
         'post',
+      ),
+    /**
+     * One page of the Tenant's APIs (Story 3.6): the built-in Management API first, then newest first, 50 a page.
+     * `cursor` is the previous page's `nextCursor`; it and the Tenant's ID go into the URL encoded.
+     */
+    listApis: (tenantId: string, cursor?: string) =>
+      request(
+        `/api/v1/tenants/${encodeURIComponent(tenantId)}/apis${
+          cursor === undefined ? '' : `?cursor=${encodeURIComponent(cursor)}`
+        }` as '/api/v1/tenants/{tenantId}/apis',
+        'get',
+      ),
+    /** One of the Tenant's APIs by its `api_` ID, with its Permissions. Both IDs go into the path encoded. */
+    getApi: (tenantId: string, apiId: string) =>
+      request(
+        `/api/v1/tenants/${encodeURIComponent(tenantId)}/apis/${encodeURIComponent(apiId)}` as '/api/v1/tenants/{tenantId}/apis/{apiId}',
+        'get',
+      ),
+    /** Creates an API with a name and an identifier that never changes (Story 3.6): a 201 with it. A taken identifier is 409 api_identifier_taken. */
+    createApi: (tenantId: string, body: CreateApiRequest) =>
+      request(`/api/v1/tenants/${encodeURIComponent(tenantId)}/apis` as '/api/v1/tenants/{tenantId}/apis', 'post', body),
+    /** Saves an API's offline access, RBAC and four token lifetimes (Story 3.6): a full replace. Both IDs go into the path encoded. */
+    updateApiSettings: (tenantId: string, apiId: string, body: ApiSettingsRequest) =>
+      request(
+        `/api/v1/tenants/${encodeURIComponent(tenantId)}/apis/${encodeURIComponent(apiId)}/settings` as '/api/v1/tenants/{tenantId}/apis/{apiId}/settings',
+        'put',
+        body,
+      ),
+    /** Adds a `resource:action` Permission to an API (Story 3.6): a 201 with the API and its Permissions. Both IDs go into the path encoded. */
+    addApiPermission: (tenantId: string, apiId: string, body: AddApiPermissionRequest) =>
+      request(
+        `/api/v1/tenants/${encodeURIComponent(tenantId)}/apis/${encodeURIComponent(apiId)}/permissions` as '/api/v1/tenants/{tenantId}/apis/{apiId}/permissions',
+        'post',
+        body,
+      ),
+    /** Removes one of an API's Permissions by its value (Story 3.6): a 204. The IDs and the value go into the path encoded. */
+    removeApiPermission: (tenantId: string, apiId: string, value: string) =>
+      request(
+        `/api/v1/tenants/${encodeURIComponent(tenantId)}/apis/${encodeURIComponent(apiId)}/permissions/${encodeURIComponent(value)}` as '/api/v1/tenants/{tenantId}/apis/{apiId}/permissions/{value}',
+        'delete',
       ),
     /** Begins a fresh assertion for a Tenant action, bound to the Tenant `tenantId` names. The Deployment complete finishes it. */
     beginTenantFreshAssertion: (tenantId: string, binding: FreshAssertionBeginRequest) =>

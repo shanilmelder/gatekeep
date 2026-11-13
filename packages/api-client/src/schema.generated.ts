@@ -712,6 +712,110 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/tenants/{tenantId}/apis": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The path Tenant's APIs: the built-in Management API first, then newest first, 50 a page.
+         * @description Any Tenant Role in the path Tenant. Read only, in the Tenant's own scope: no other Tenant's API is ever listed. Every Tenant has its built-in Gatekeep Management API (urn:gatekeep:management), so the list is never empty. Each API's ID, name, identifier, whether it is built in, offline access, RBAC, its four token lifetimes and when it was created. nextCursor is the last API's ID when another page follows, else null; pass it back as cursor. A cursor sent twice, empty or that isn't an api_ ID is 400 invalid_request. A malformed, unknown or role-less Tenant is 403 access_denied, audited as every Tenant capability refusal is.
+         */
+        get: operations["ListApis"];
+        put?: never;
+        /**
+         * Create an API in the path Tenant, with a name and an identifier that never changes.
+         * @description Tenant Editors and Owners, and machine principals that hold tenant.apis.manage; no fresh assertion. The name is trimmed, then 1 to 200 characters with no control character, and two APIs may share one. The identifier is the audience its tokens will name: 1 to 255 characters, an absolute URI with a scheme and no fragment or white space, such as https://api.example.com, matched exactly, case included. Use a different identifier in each environment. It can't be changed later. An identifier under urn:gatekeep: is reserved for the built-in Management API. The API starts with offline access and RBAC off, the default token lifetimes and no Permission. In one transaction it writes the API and directory.api.created by the caller. A body that isn't JSON, is over 4096 bytes, misses a field or has the wrong type is 400 api_invalid with no errors; an invalid name or identifier is 400 api_invalid with errors naming each field and reason (invalid or reserved); an identifier another API of this Tenant has is 409 api_identifier_taken. Nothing is written on any of them. The answer is the API with its Permissions, and Location names it.
+         */
+        post: operations["CreateApi"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tenants/{tenantId}/apis/{apiId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * One of the path Tenant's APIs, with its Permissions.
+         * @description Any Tenant Role in the path Tenant. Read only, in the Tenant's own scope. The same fields as the list, and its Permissions by value, each with its description. An apiId that isn't an api_ ID, names no API of this Tenant or names another Tenant's is the same 404 not_found. A malformed, unknown or role-less Tenant is 403 access_denied, audited as every Tenant capability refusal is.
+         */
+        get: operations["GetApi"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tenants/{tenantId}/apis/{apiId}/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Save an API's offline access, RBAC and token lifetimes.
+         * @description Tenant Editors and Owners, and machine principals that hold tenant.apis.manage; no fresh assertion. The body is every setting and replaces what is stored: offlineAccess and rbac, and the four lifetimes in whole seconds with an Application's limits: accessTokenLifetime and idTokenLifetime 1 to 3600, refreshTokenAbsoluteLifetime 1 to 7776000 and refreshTokenInactivityLifetime 1 to 2592000. The defaults are 900, 900, 2592000 and 604800. A token for this API lives the shorter of its lifetime and its Application's. A value over its limit is 400 api_invalid with errors naming each field, reason above_maximum and the limit as maximum; under 1 is below_minimum. A body that isn't JSON, is over 4096 bytes, misses a field, or holds a lifetime that isn't a JSON whole number in the 32-bit range is 400 api_invalid with no errors. The built-in Management API's settings may be saved too; its identifier and Permissions can't. A save that changes something writes directory.api.updated; one that changes nothing writes nothing and is 200. The answer is the API with its Permissions. An apiId that isn't an api_ ID, names no API of this Tenant or names another Tenant's is the same 404 not_found.
+         */
+        put: operations["UpdateApiSettings"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tenants/{tenantId}/apis/{apiId}/permissions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Add a resource:action Permission to an API.
+         * @description Tenant Editors and Owners, and machine principals that hold tenant.apis.manage; no fresh assertion. The value is resource:action, lowercase, each part a letter or digit followed by up to 63 letters, digits, _, . or -, such as invoices:read, and unique in the API; the description is trimmed, then 0 to 200 characters with no control character, and may be left out. An API holds at most 200 Permissions. It writes the Permission and directory.api.permission_added by the caller. A body that isn't JSON, is over 4096 bytes or misses the value is 400 api_invalid with no errors; an invalid value or description is 400 api_invalid with errors naming each field; a value the API has is 409 permission_taken; an API at its limit is 409 permission_limit_reached; the built-in Management API, whose Permissions are fixed, is 409 api_built_in. Nothing is written on any of them. The answer is the API with its Permissions, and Location names the API. An apiId that isn't an api_ ID, names no API of this Tenant or names another Tenant's is the same 404 not_found.
+         */
+        post: operations["AddApiPermission"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tenants/{tenantId}/apis/{apiId}/permissions/{value}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Remove one of an API's Permissions.
+         * @description Tenant Editors and Owners, and machine principals that hold tenant.apis.manage; no fresh assertion and no body. The value is the Permission's, such as invoices:read. It deletes the Permission and writes directory.api.permission_removed by the caller: 204. The built-in Management API's Permissions are fixed: 409 api_built_in. An apiId that isn't an api_ ID, names no API of this Tenant or another Tenant's, and a value the API has no Permission by, are the same 404 not_found. Nothing is written on any refusal.
+         */
+        delete: operations["RemoveApiPermission"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/tenants/{tenantId}/assertions": {
         parameters: {
             query?: never;
@@ -736,6 +840,10 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        AddApiPermissionRequest: {
+            value: string;
+            description?: null | string;
+        };
         AdminCredentialRemovalResponse: {
             sessionEnded: boolean;
         };
@@ -808,9 +916,13 @@ export interface components {
             /** @enum {string} */
             label: "dev" | "staging" | "prod";
         };
+        ApiPermissionResponse: {
+            value: string;
+            description: string;
+        };
         ApiProblem: {
             /** @enum {string} */
-            code: "bootstrap_refused" | "credential_refused" | "signin_refused" | "rate_limited" | "access_denied" | "fresh_assertion_required" | "assertion_refused" | "credentials_minimum" | "credentials_maximum" | "recovery_code_refused" | "recovery_code_superseded" | "enrolment_refused" | "tenant_invalid" | "subdomain_refused" | "operation_not_failed" | "tenant_mismatch" | "tenant_not_active" | "tenant_deleted" | "tenant_busy" | "confirmation_mismatch" | "invalid_request" | "application_invalid" | "not_found" | "custom_scheme_acknowledgement_required" | "client_secret_not_applicable" | "client_secret_limit_reached" | "signing_key_not_ready";
+            code: "bootstrap_refused" | "credential_refused" | "signin_refused" | "rate_limited" | "access_denied" | "fresh_assertion_required" | "assertion_refused" | "credentials_minimum" | "credentials_maximum" | "recovery_code_refused" | "recovery_code_superseded" | "enrolment_refused" | "tenant_invalid" | "subdomain_refused" | "operation_not_failed" | "tenant_mismatch" | "tenant_not_active" | "tenant_deleted" | "tenant_busy" | "confirmation_mismatch" | "invalid_request" | "application_invalid" | "not_found" | "custom_scheme_acknowledgement_required" | "client_secret_not_applicable" | "client_secret_limit_reached" | "api_invalid" | "api_identifier_taken" | "permission_taken" | "permission_limit_reached" | "api_built_in" | "signing_key_not_ready";
             traceId: string;
             errors?: null | components["schemas"]["ApiProblemError"][];
             /** Format: int32 */
@@ -818,13 +930,50 @@ export interface components {
         };
         ApiProblemError: {
             /** @enum {string} */
-            field: "callbackUrls" | "logoutUrls" | "webOrigins" | "grantTypes" | "accessTokenLifetime" | "idTokenLifetime" | "refreshTokenAbsoluteLifetime" | "refreshTokenInactivityLifetime";
+            field: "callbackUrls" | "logoutUrls" | "webOrigins" | "grantTypes" | "accessTokenLifetime" | "idTokenLifetime" | "refreshTokenAbsoluteLifetime" | "refreshTokenInactivityLifetime" | "name" | "identifier" | "value" | "description";
             /** Format: int32 */
             index: null | number;
             /** @enum {string} */
-            reason: "not_absolute" | "wildcard" | "scheme_not_allowed" | "too_long" | "too_many" | "duplicate" | "not_allowed_for_type" | "below_minimum" | "above_maximum";
+            reason: "not_absolute" | "wildcard" | "scheme_not_allowed" | "too_long" | "too_many" | "duplicate" | "not_allowed_for_type" | "below_minimum" | "above_maximum" | "invalid" | "reserved";
             /** Format: int32 */
             maximum?: null | number;
+        };
+        ApiResourceDetailResponse: {
+            api: components["schemas"]["ApiResourceResponse"];
+            permissions: components["schemas"]["ApiPermissionResponse"][];
+        };
+        ApiResourceListResponse: {
+            apis: components["schemas"]["ApiResourceResponse"][];
+            nextCursor: null | string;
+        };
+        ApiResourceResponse: {
+            id: string;
+            name: string;
+            identifier: string;
+            builtIn: boolean;
+            offlineAccess: boolean;
+            rbac: boolean;
+            /** Format: int32 */
+            accessTokenLifetime: number;
+            /** Format: int32 */
+            idTokenLifetime: number;
+            /** Format: int32 */
+            refreshTokenAbsoluteLifetime: number;
+            /** Format: int32 */
+            refreshTokenInactivityLifetime: number;
+            createdAt: string;
+        };
+        ApiSettingsRequest: {
+            offlineAccess: boolean;
+            rbac: boolean;
+            /** Format: int32 */
+            accessTokenLifetime: number;
+            /** Format: int32 */
+            idTokenLifetime: number;
+            /** Format: int32 */
+            refreshTokenAbsoluteLifetime: number;
+            /** Format: int32 */
+            refreshTokenInactivityLifetime: number;
         };
         ApplicationListResponse: {
             applications: components["schemas"]["ApplicationResponse"][];
@@ -892,6 +1041,10 @@ export interface components {
         CapabilitiesResponse: {
             capabilities: ("tenant.configuration.read" | "tenant.users.read" | "tenant.logs.read" | "tenant.log_detail.read" | "tenant.applications.manage" | "tenant.application_callbacks.manage" | "tenant.apis.manage" | "tenant.roles.manage" | "tenant.users.manage" | "tenant.theme.manage" | "tenant.templates.manage" | "tenant.settings.manage" | "tenant.connections.toggle" | "tenant.configuration.export" | "tenant.client_secrets.manage" | "tenant.password_policy.manage" | "tenant.mfa_policy.manage" | "tenant.connection_credentials.manage" | "tenant.email_provider.manage" | "tenant.label.manage" | "tenant.signing_keys.rotate" | "tenant.signing_keys.revoke" | "tenant.management_access.grant" | "tenant.user_data.export" | "tenant.user_data.erase" | "tenant.incident_response.run" | "deployment.tenants.read" | "deployment.tenants.create" | "deployment.tenants.delete" | "deployment.admins.read" | "deployment.admins.manage" | "deployment.email_provider.manage" | "deployment.incident_response.run" | "deployment.log.read")[];
         };
+        CreateApiRequest: {
+            name: string;
+            identifier: string;
+        };
         CreateApplicationRequest: {
             name: string;
             /** @enum {string} */
@@ -951,7 +1104,7 @@ export interface components {
         };
         LogReference: {
             /** @enum {string} */
-            kind: "system" | "anonymous" | "admin" | "user" | "client" | "tenant";
+            kind: "system" | "anonymous" | "admin" | "user" | "client" | "tenant" | "api";
             id: null | string;
         };
         OperationResponse: {
@@ -3487,6 +3640,415 @@ export interface operations {
                 content?: never;
             };
             /** @description fresh_assertion_required, with the problem body, when no fresh assertion for this action and target is bound to the Session; access_denied when the capability is refused. No body when an earlier check refuses first: a restricted Session, or a wrong Origin or CSRF token. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description tenant_mismatch, with the problem body, when X-Gatekeep-Tenant is missing, sent twice or isn't {tenantId}, and nothing ran; or another conflict the operation's description names. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    ListApis: {
+        parameters: {
+            query?: {
+                /** @description The previous page's nextCursor: an api_ public ID. */
+                cursor?: string;
+            };
+            header?: never;
+            path: {
+                /** @description The Tenant's public ID: ten_ and the UUID's 16 bytes in lowercase RFC 4648 base32 with no padding, whose last character carries two zero bits. Only this canonical spelling, after URL decoding, names a Tenant, and the empty UUID's never does; anything else is refused like a Tenant the Admin holds no role in. */
+                tenantId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResourceListResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description access_denied, with the problem body, when the capability is refused. No body when an earlier check refuses first: a Session restricted to setup, or on a state-changing call a wrong Origin or CSRF token. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    CreateApi: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description The Tenant the page shows, its ten_ ID: it must equal {tenantId}, or 409 tenant_mismatch. It never selects a Tenant. */
+                "X-Gatekeep-Tenant": string;
+            };
+            path: {
+                /** @description The Tenant's public ID: ten_ and the UUID's 16 bytes in lowercase RFC 4648 base32 with no padding, whose last character carries two zero bits. Only this canonical spelling, after URL decoding, names a Tenant, and the empty UUID's never does; anything else is refused like a Tenant the Admin holds no role in. */
+                tenantId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateApiRequest"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResourceDetailResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description access_denied, with the problem body, when the capability is refused. No body when an earlier check refuses first: a Session restricted to setup, or on a state-changing call a wrong Origin or CSRF token. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description tenant_mismatch, with the problem body, when X-Gatekeep-Tenant is missing, sent twice or isn't {tenantId}, and nothing ran; or another conflict the operation's description names. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    GetApi: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The Tenant's public ID: ten_ and the UUID's 16 bytes in lowercase RFC 4648 base32 with no padding, whose last character carries two zero bits. Only this canonical spelling, after URL decoding, names a Tenant, and the empty UUID's never does; anything else is refused like a Tenant the Admin holds no role in. */
+                tenantId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResourceDetailResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description access_denied, with the problem body, when the capability is refused. No body when an earlier check refuses first: a Session restricted to setup, or on a state-changing call a wrong Origin or CSRF token. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    UpdateApiSettings: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description The Tenant the page shows, its ten_ ID: it must equal {tenantId}, or 409 tenant_mismatch. It never selects a Tenant. */
+                "X-Gatekeep-Tenant": string;
+            };
+            path: {
+                /** @description The Tenant's public ID: ten_ and the UUID's 16 bytes in lowercase RFC 4648 base32 with no padding, whose last character carries two zero bits. Only this canonical spelling, after URL decoding, names a Tenant, and the empty UUID's never does; anything else is refused like a Tenant the Admin holds no role in. */
+                tenantId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ApiSettingsRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResourceDetailResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description access_denied, with the problem body, when the capability is refused. No body when an earlier check refuses first: a Session restricted to setup, or on a state-changing call a wrong Origin or CSRF token. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description tenant_mismatch, with the problem body, when X-Gatekeep-Tenant is missing, sent twice or isn't {tenantId}, and nothing ran; or another conflict the operation's description names. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    AddApiPermission: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description The Tenant the page shows, its ten_ ID: it must equal {tenantId}, or 409 tenant_mismatch. It never selects a Tenant. */
+                "X-Gatekeep-Tenant": string;
+            };
+            path: {
+                /** @description The Tenant's public ID: ten_ and the UUID's 16 bytes in lowercase RFC 4648 base32 with no padding, whose last character carries two zero bits. Only this canonical spelling, after URL decoding, names a Tenant, and the empty UUID's never does; anything else is refused like a Tenant the Admin holds no role in. */
+                tenantId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AddApiPermissionRequest"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResourceDetailResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description access_denied, with the problem body, when the capability is refused. No body when an earlier check refuses first: a Session restricted to setup, or on a state-changing call a wrong Origin or CSRF token. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description tenant_mismatch, with the problem body, when X-Gatekeep-Tenant is missing, sent twice or isn't {tenantId}, and nothing ran; or another conflict the operation's description names. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    RemoveApiPermission: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description The Tenant the page shows, its ten_ ID: it must equal {tenantId}, or 409 tenant_mismatch. It never selects a Tenant. */
+                "X-Gatekeep-Tenant": string;
+            };
+            path: {
+                /** @description The Tenant's public ID: ten_ and the UUID's 16 bytes in lowercase RFC 4648 base32 with no padding, whose last character carries two zero bits. Only this canonical spelling, after URL decoding, names a Tenant, and the empty UUID's never does; anything else is refused like a Tenant the Admin holds no role in. */
+                tenantId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No Content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description access_denied, with the problem body, when the capability is refused. No body when an earlier check refuses first: a Session restricted to setup, or on a state-changing call a wrong Origin or CSRF token. */
             403: {
                 headers: {
                     [name: string]: unknown;

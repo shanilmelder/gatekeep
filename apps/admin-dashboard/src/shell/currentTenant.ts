@@ -61,14 +61,14 @@ export function current<T extends Listed>(path: string, tenants: readonly T[], r
 
 /**
  * Where choosing Tenant `to` goes from `path`: the same page in that Tenant on a Tenant path,
- * else the Tenant's own landing. One Application's page is the other Tenant's Applications list,
+ * else the Tenant's own landing. One Application's page is the other Tenant's Applications list, and one API's its APIs list (Story 3.6),
  * as its Application isn't that Tenant's (Story 3.1). The search and hash are dropped, and the
  * result always starts with /tenants/, so it is same-origin and path-absolute whatever `path` holds.
  */
 export function switchHref(path: string, to: string): string {
   const target = `/tenants/${encodeURIComponent(to)}`;
   const match = TENANT_PATH.exec(path);
-  const rest = (match?.[2] ?? '').replace(/^\/applications\/.*$/, '/applications');
+  const rest = (match?.[2] ?? '').replace(/^\/applications\/.*$/, '/applications').replace(/^\/apis\/.*$/, '/apis');
   // Only plain path segments carry over: anything that could leave the path is dropped.
   return /^(?:\/[A-Za-z0-9._~%!$&'()*+,;=:@-]*)*$/.test(rest) ? `${target}${rest}` : target;
 }
