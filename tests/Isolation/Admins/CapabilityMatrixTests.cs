@@ -232,7 +232,9 @@ public sealed class CapabilityMatrixTests(PostgresFixture postgres)
 
         var expected = AdminCapabilities.All.Where(c => c.Scope == CapabilityScope.Tenant && c.MachineAllowed).Select(c => c.Name).ToList();
         Assert.Equal(expected, allowed);
-        Assert.Equal(18, expected.Count);
+        // 17 since Story 9.2: tenant.signing_keys.rotate is the Owner's own, never a machine principal's.
+        Assert.Equal(17, expected.Count);
+        Assert.DoesNotContain(AdminCapabilities.TenantSigningKeysRotate.Name, allowed);
         Assert.DoesNotContain(allowed, n => n.StartsWith("deployment.", StringComparison.Ordinal));
 
         Assert.Equal(expected, (await authorization.HeldAsync(context, machine, CapabilityScope.Tenant, TenantA, Cancellation)).Select(c => c.Name));
