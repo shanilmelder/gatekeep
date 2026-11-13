@@ -2,15 +2,32 @@
 title: 'Story 3.4: Set token lifetimes'
 type: 'feature'
 created: '2026-11-13'
-baseline_revision: '68d12344cb7510941489cb3f211046c6a3be4091'
-status: 'ready-for-dev'
+baseline_revision: '583a53383a3f838a6249facc16364ad17671a173'
+status: 'done'
 review_loop_iteration: 0
 followup_review_recommended: false
 context:
   - '{project-root}/_bmad-output/implementation-artifacts/epic-3-context.md'
   - '{project-root}/_bmad-output/implementation-artifacts/spec-3-3-create-rotate-and-revoke-client-secrets.md'
 warnings: ['oversized']
-deferred: []
+deferred:
+  - summary: >-
+      CapRefreshTokenLifetime may tie in order with OpenIddict's next sign-in handler.
+    evidence: |-
+      Its order is PrepareUserCodePrincipal + 1000. If OpenIddict's next handler (same order) is GenerateRefreshToken,
+      the cap could run after the token row is written. Reflection outside the host could not read the descriptors.
+      Settled by CI: ApplicationLifetimeProtocolTests (absolute 2h, inactivity 1 day) asserts the stored row's expiry.
+    location: >-
+      src/Modules/Protocol/Core/RefreshTokens.cs (CapRefreshTokenLifetime.Descriptor)
+    severity: high (unverified)
+  - summary: >-
+      The OpenAPI document lists no applicationId path parameter on the Application sub-routes.
+    evidence: |-
+      docs/api/openapi-v1.json: PUT .../applications/{applicationId}/settings and .../tokens list only path:tenantId and
+      the X-Gatekeep-Tenant header. Pre-existing since Story 3.2; the fix belongs in AdminOpenApi for every such route.
+    location: >-
+      src/Gatekeep.Host.Admin/AdminOpenApi.cs
+    severity: low
 ---
 
 <intent-contract>
@@ -157,6 +174,76 @@ deferred: []
 
 ## Review Triage Log
 
+### 2026-11-13: Review pass
+
+- **Verdicts:** 27 findings. High 0, medium 0, low 17, false 8, maybe-false 2.
+- **Routes:** 4 findings patched (3 entries), 2 deferred, 21 rejected.
+
+**Intent Alignment (4 findings)**
+
+- `[false]` `[reject]` **The API never sends the English "Maximum is {limit}."**
+  - The intent contract chooses this reading on purpose: `errors[] {field, reason: "above_maximum", maximum}` on the API, and the copy is shown by the UI.
+  - The API returns machine codes only. This is a convention since Story 3.2.
+- `[low]` `[reject]` **No single test goes from a PUT to an issued token.**
+  - The save is tested against the real Admin host. Issuance is tested against the real Protocol host, after the same `application` columns are written.
+  - The only join is those columns, and both sides read them for real. An end-to-end test would need both hosts in one test, which is new machinery.
+- `[low]` `[reject]` **The UI's limits are a separate copy of the server constants.**
+  - `LIFETIME_MAXIMUMS` is pinned by unit tests, and §5.2 fixes the hard limits.
+  - A drift would show as the browser and server refusing at different values. The server stays authoritative and shows the same copy from `maximum`.
+- `[low]` `[reject]` **No test sends extra properties in the tokens body.**
+  - The request type has four `required int` properties and nothing else. Extra properties are ignored, as they are on every Admin body.
+  - Nothing can turn off rotation or choose an algorithm through it.
+
+**Blind Hunter (14 findings)**
+
+- `[false]` `[reject]` **The Settings save can now fail silently.**
+  - The new filter drops only errors on the four lifetime fields.
+  - The settings route never returns those fields, since its errors come from `CheckSettings` only. So no Settings 400 is ever emptied by the filter.
+- `[false]` `[reject]` **A machine-to-machine save fails silently on hidden-field errors.**
+  - The hidden ID and refresh values are sent back exactly as stored. The table's CHECKs keep every stored value within its limits.
+  - So neither the browser check nor the server can refuse a hidden field. Grouped with the Edge Case Hunter's first finding and its machine copy claim.
+- `[low]` `[reject]` **Concurrent saves overwrite each other.** The settings save in Story 3.2 has the same last-write-wins shape. A precondition (ETag or `If-Match`) is new API machinery, and two Admins editing the same Application's lifetimes at the same moment is rare.
+- `[low]` `[reject]` **The audit event doesn't record what changed.**
+  - `detail` is null on every Directory event, as Story 3.3's triage also recorded.
+  - Field-level detail is a change to the event catalogue. The actor, the Application and the time are logged.
+- `[low]` `[reject]` **Inactivity longer than absolute is allowed.**
+  - `CapRefreshTokenLifetime` cuts every refresh token to the family's absolute end, so the pair behaves correctly.
+  - Refusing it would add a cross-field rule and a new reason.
+- `[low]` `[patch]` **Screen readers never hear the unit.** Patched: the unit hint is no longer `aria-hidden`, and the input's `aria-describedby` references it as well as the helper. A browser test asserts the accessible description.
+- `[low]` `[patch]` **The duration hint drops units after the second.** Patched: `durationParts` returns every non-zero unit, so 90061 reads "1 day 1 hour 1 minute 1 second". The unit tests were updated and a 3601 case added.
+- `[low]` `[defer]` **The OpenAPI operation lists no `applicationId` path parameter.**
+  - Confirmed in `docs/api/openapi-v1.json`: the settings route from Story 3.2 has the same gap, so it is pre-existing.
+  - Fixing it is a change to `AdminOpenApi` for every Application route.
+- `[low]` `[reject]` **The issuance tests write the columns by SQL, not through the PUT.** Same as Intent Alignment's end-to-end row.
+- `[low]` `[reject]` **No test for a lengthened absolute lifetime, and nothing documents that tokens already issued keep their expiry.**
+  - The Design Notes record that the absolute lifetime is read at each refresh. A refresh token's own expiry is fixed when it is issued, as OpenIddict stores it.
+  - The shortened case, the one that matters for safety, is tested.
+- `[low]` `[reject]` **A machine principal's save is not tested over HTTP.**
+  - No Management API tokens exist until Epic 17, so there is no machine caller over HTTP yet.
+  - The Management contract test covers the capability check and the actor.
+- `[low]` `[reject]` **The Refresh tokens card shows when the refresh grant is off.** The values are kept and apply if the grant is turned on. Hiding the card would add grant-dependent branching to the form.
+- `[false]` `[reject]` **The draft isn't re-seeded when the Application prop changes.** The shared `Tabs` unmount inactive panels (Story 3.3's triage). So a save on Settings, or a reload, remounts Tokens with a fresh draft.
+- `[false]` `[reject]` **Settings and Tokens share read-only copy that could become wrong.**
+  - Both capabilities are held by exactly Editors and Owners, so "Only Tenant Editors and Owners can change these." is true on both tabs.
+  - The harm needs a capability-table change that doesn't exist.
+
+**Edge Case Hunter (9 findings)**
+
+- `[false]` `[reject]` **A machine-to-machine Application gets no feedback when an error lands on a hidden field.** Grouped with the Blind Hunter's second finding: stored values always pass.
+- `[low]` `[reject]` **A digit string beyond `Number.MAX_SAFE_INTEGER` shows "seconds · " with an empty duration.** The field is still refused with "Maximum is …" before anything is sent. Only the hint text is odd, for an absurd input.
+- `[low]` `[patch]` **The duration hint keeps only two units.** Grouped with the Blind Hunter's duration-hint finding (patched).
+- `[low]` `[reject]` **"0900" counts as dirty against a stored 900.** The only effect is a leave prompt for a form the Admin retyped with a leading zero.
+- `[low]` `[patch]` **A whole number above the 32-bit range is 400 with no errors, which the description doesn't say.** Patched: the route description now names that case, and `openapi-v1.json` and `schema.generated.ts` were regenerated.
+- `[maybe-false]` `[defer]` **`CapRefreshTokenLifetime` may tie in order with OpenIddict's next sign-in handler** (`PrepareUserCodePrincipal` + 1000).
+  - If the next handler is `GenerateRefreshToken`, the cap could run after the token row is written. Reading the descriptors by reflection outside the host failed, because their type initializers need the host.
+  - **What settles it:** `ApplicationLifetimeProtocolTests` (absolute 2h, inactivity 1 day) asserts the stored refresh-token row's expiry, so it fails on CI if the cap runs late.
+  - Severity if true: high (unverified).
+- `[maybe-false]` `[reject]` **The ApplicationSettings filter can empty a Settings 400.** Same as the Blind Hunter's first finding, which is false: the settings route never names lifetime fields.
+- `[false]` `[reject]` **`AdminApiRuleTests` isn't updated for the tokens route.**
+  - Its rules are generated over every mapped route: metadata, problem types and the 409 for state-changing Tenant routes.
+  - The new route meets them through its `.Produces` list. `CapabilityRuleTests` pins its capability.
+- `[false]` `[reject]` **A machine Admin never sees "Maximum is {limit}." for a hidden field.** Hidden fields hold stored values, which can't be over their limits.
+
 ## Design Notes
 
 - **Seconds, NOT NULL, DB defaults.** These are the design's units. Existing Applications are unchanged in behavior. A CHECK in the database backs the Kernel limits ("enforced by the Deployment").
@@ -170,3 +257,70 @@ deferred: []
 - With `$env:MSYS_NO_PATHCONV=1`: `docker run --rm -v "D:/Projects/Personal/gatekeep:/src" -v gk-nuget:/root/.nuget -w /src mcr.microsoft.com/dotnet/sdk:10.0.403-noble sh -c 'dotnet build Gatekeep.slnx -p:NuGetAudit=false -v q'`. Expected: 0 warnings, 0 errors.
 - `pnpm -r build` and `pnpm -r --if-present typecheck` in `node:26.13.0-bookworm-slim`. Expected: clean.
 - Don't run the suites locally. CI on the PR is the test run.
+
+## Auto Run Result
+
+**Summary.** An Admin can set an Application's token lifetimes (FR-15, §5.2): access token, ID token, and the refresh token's absolute and inactivity lifetimes, in whole seconds.
+- New tokens use them on every grant: authorization_code, refresh_token and client_credentials.
+- Values above the hard limits (1 hour, 1 hour, 90 days, 30 days) are refused by the API (`above_maximum` with `maximum`) and by the database. The UI shows "Maximum is {limit}." before sending, and for the server's refusal too.
+
+**Files changed (main ones)**
+- `src/Adapters/Postgres/Migrations/Migration20261116000000SetTokenLifetimes.cs`, `Schema/TableRegistry.cs`: four columns with defaults and CHECKs, and the `gk_admin` column grant (migration 32).
+- `src/Modules/Directory/{Contracts/ApplicationLifetimes.cs (new), Contracts/DirectoryApplication.cs, Contracts/IDirectory.cs, Core/ApplicationLifetimeRules.cs (new), Core/DirectoryService.cs}`: the lifetimes on every Application read, and the locked update with its `updated` event (none when unchanged).
+- `src/Modules/Management/{Contracts/IApplicationManagement.cs, Contracts/ManagementContract.cs, Core/ApplicationManagement.cs}`: `UpdateLifetimesAsync` with the capability re-check.
+- `src/Gatekeep.Host.Admin/{AdminApi.cs, ApplicationsApi.cs, AdminResponses.cs, AdminOpenApi.cs}`: `PUT …/tokens`, the lifetimes on `ApplicationResponse`, and `ApiProblemError.maximum`.
+- `src/Modules/Protocol/Core/{ApplicationLifetimes.cs (new), RefreshTokens.cs, ProtocolServer.cs}`:
+  - `ApplyApplicationLifetimes` sets every token's expiry.
+  - `ApplicationTokenLifetimes.Of` is the one lookup that Story 3.6 extends.
+  - The absolute end comes from the Application.
+- `docs/api/openapi-v1.json`, `packages/api-client/*`: regenerated contract, `updateApplicationTokens`, and `maximum` kept by `parseProblem`.
+- `apps/admin-dashboard/src/shell/{ApplicationTokens.tsx (+ .module.css, new), ApplicationDetailPage.tsx, ApplicationSettings.tsx, applications.ts}`, `packages/ui/src/messages.tsx`: the Tokens tab, the per-tab leave guard, limits and duration helpers, and copy.
+- **Tests:**
+  - new `tests/Isolation/Applications/{ApplicationTokensApiTests.cs, ApplicationLifetimeProtocolTests.cs}` and `tests/Architecture/TokenLifetimeLimitTests.cs`;
+  - updated `CapabilityRuleTests`, `RouteRegistry`, `CanaryFlows` (a no-credential reason for `/tokens`), `MigrateCommandTests` (32), and the dashboard and api-client unit tests;
+  - updated `tests/browser/admin-applications.spec.ts`.
+
+**Review findings.** 27 findings: 4 patched in 3 entries, 2 deferred, 21 rejected.
+
+Patched (all low):
+- the unit hint is described to screen readers;
+- the duration hint shows every non-zero unit;
+- the route description names the 32-bit out-of-range case.
+
+Deferred:
+- the refresh-cap order tie (high if true, unverified; CI's protocol test settles it);
+- the missing `applicationId` OpenAPI path parameter (pre-existing).
+
+Rejected, with reasons in the triage log:
+- **8 false:**
+  - the API's English copy;
+  - Settings filter emptying a 400;
+  - hidden machine-field errors, reported three ways;
+  - the draft re-seed;
+  - the shared read-only copy;
+  - `AdminApiRuleTests`.
+- **12 low:**
+  - end-to-end PUT to token, reported twice;
+  - the UI limits copy and the extra body properties;
+  - concurrent overwrite and audit detail;
+  - inactivity above absolute;
+  - lengthened and already-issued coverage;
+  - machine over HTTP;
+  - the refresh card with the grant off;
+  - the unsafe-integer hint and the "0900" dirty flag.
+- **1 maybe-false:** the Settings filter claim, a duplicate of the false finding.
+
+**Follow-up review recommended (`false`).** Patched counts by verdict: high 0, medium 0, low 3 entries.
+
+**Verification**
+- `dotnet build Gatekeep.slnx -p:NuGetAudit=false` (SDK 10.0.403 container): 0 warnings and 0 errors, before and after the patches.
+- `pnpm -r build` and typecheck (Node 26 container): clean, before and after the patches.
+- Dashboard unit tests and api-client unit tests passed, run by the implementer.
+- The Isolation, Architecture and browser suites were not run locally, as the spec says. CI on the PR is their first run.
+- **Matrix audit:** every I/O row has a named test in `ApplicationTokensApiTests` or `ApplicationLifetimeProtocolTests`, and the UI copy has browser tests. Pass or fail is judged from CI.
+
+**Residual risks**
+- The refresh-cap order tie (deferred) has not been verified until CI runs.
+- Handler order relies on OpenIddict 7.7.2's `Prepare*` ordering, and an upgrade could shift it.
+- The browser tests use mocked API answers only.
+- A machine principal's save is tested at the Management contract, not over HTTP (no Management API tokens until Epic 17).

@@ -47,6 +47,41 @@ public sealed class ApplicationResponse
 
     /// <summary>Its grant types, sorted: <c>authorization_code</c>, <c>client_credentials</c> or <c>refresh_token</c>.</summary>
     public required IReadOnlyList<string> GrantTypes { get; init; }
+
+    /// <summary>How long its access tokens live, in seconds (Story 3.4): 900 by default, 1 to 3600.</summary>
+    public required int AccessTokenLifetime { get; init; }
+
+    /// <summary>How long its ID tokens live, in seconds (Story 3.4): 900 by default, 1 to 3600.</summary>
+    public required int IdTokenLifetime { get; init; }
+
+    /// <summary>
+    /// How long a family of its refresh tokens lives from its authorization, however often it rotates, in seconds
+    /// (Story 3.4): 2592000 (30 days) by default, 1 to 7776000 (90 days).
+    /// </summary>
+    public required int RefreshTokenAbsoluteLifetime { get; init; }
+
+    /// <summary>How long one of its refresh tokens lives unused, in seconds (Story 3.4): 604800 (7 days) by default, 1 to 2592000 (30 days).</summary>
+    public required int RefreshTokenInactivityLifetime { get; init; }
+}
+
+/// <summary>
+/// An Application's four token lifetimes (Story 3.4), each in whole seconds: all required, and the save replaces
+/// what is stored. Each is at least 1 and at most its hard limit.
+/// </summary>
+[System.Text.Json.Serialization.JsonNumberHandling(System.Text.Json.Serialization.JsonNumberHandling.Strict)]
+public sealed class ApplicationTokensRequest
+{
+    /// <summary>Access tokens: at most 3600 (1 hour).</summary>
+    public required int AccessTokenLifetime { get; init; }
+
+    /// <summary>ID tokens: at most 3600 (1 hour).</summary>
+    public required int IdTokenLifetime { get; init; }
+
+    /// <summary>A refresh token family's absolute lifetime: at most 7776000 (90 days).</summary>
+    public required int RefreshTokenAbsoluteLifetime { get; init; }
+
+    /// <summary>A refresh token's inactivity lifetime: at most 2592000 (30 days).</summary>
+    public required int RefreshTokenInactivityLifetime { get; init; }
 }
 
 /// <summary>
@@ -105,6 +140,9 @@ internal static class ApplicationsApi
 
     /// <summary>The largest settings body read (Story 3.2): anything bigger is 400 <c>application_invalid</c>, unread past it.</summary>
     public const int MaxSettingsBody = 131072;
+
+    /// <summary>The largest tokens body read (Story 3.4): anything bigger is 400 <c>application_invalid</c>, unread past it.</summary>
+    public const int MaxTokensBody = 4096;
 
     /// <summary>The types an Admin creates, from Directory through Management, for the OpenAPI document.</summary>
     public static IReadOnlyList<string> Types => ManagementContract.ApplicationTypes;
@@ -348,6 +386,87 @@ internal static class ApplicationsApi
         }
     }
 
+    public static async Task UpdateTokensAsync(HttpContext context, AdminApiServices services)
+    {
+        var path = AdminRequestChecks.PathTenantGrant(context);
+        var cancellationToken = context.RequestAborted;
+
+        // A malformed ID names no Application: the same 404 as an unknown one, after the capability.
+        if (!PublicId.TryParse(PublicIdType.Application, context.GetRouteValue(ApplicationRouteValue) as string, out var applicationId))
+        {
+            await RefuseAsync(context, StatusCodes.Status404NotFound, AdminResponses.NotFound);
+            return;
+        }
+
+        // Under a deadline and a size cap, as application/json only, every lifetime given as a whole number:
+        // anything else, a null included, is malformed, and refused before anything is locked.
+        var body = await AdminApi.ReadJsonAsync<ApplicationTokensRequest>(context.Request, MaxTokensBody, cancellationToken);
+        if (body is null)
+        {
+            await RefuseAsync(context, StatusCodes.Status400BadRequest, AdminResponses.ApplicationInvalid);
+            return;
+        }
+
+        ApplicationLifetimesResult result;
+        try
+        {
+            await using var scope = await TenantScope.BeginAsync(services.Source, AdminRequestChecks.PathTenant(context), cancellationToken);
+            result = await services.Applications.UpdateLifetimesAsync(
+                scope.CreateCommandContext(),
+                AdminRequestChecks.Principal(context),
+                path.Grant,
+                path.TenantId,
+                applicationId,
+                new ApplicationLifetimesInput(
+                    body.AccessTokenLifetime, body.IdTokenLifetime, body.RefreshTokenAbsoluteLifetime, body.RefreshTokenInactivityLifetime),
+                cancellationToken);
+
+            if (result.Status == ApplicationLifetimesStatus.Saved)
+            {
+                // The row and its event are written: a client gone now mustn't undo them.
+                await scope.CommitAsync(CancellationToken.None);
+            }
+        }
+        catch (DbException e) when (e.SqlState == AdminResponses.SystemApplicationEdited && !context.Response.HasStarted)
+        {
+            // The guard the visibility filter should have met first: the system Application is no Application here.
+            AdminRequestChecks.Log(context, e);
+            await RefuseAsync(context, StatusCodes.Status404NotFound, AdminResponses.NotFound);
+            return;
+        }
+        catch (DbException e) when (!context.Response.HasStarted)
+        {
+            AdminRequestChecks.Log(context, e);
+            await AdminResponses.UnavailableAsync(context);
+            return;
+        }
+
+        switch (result.Status)
+        {
+            case ApplicationLifetimesStatus.Saved:
+            case ApplicationLifetimesStatus.Unchanged:
+                await AdminResponses.JsonAsync(context, Response(result.Application!), cancellationToken: CancellationToken.None);
+                return;
+
+            case ApplicationLifetimesStatus.Invalid:
+                LogRefusal(context, AdminResponses.ApplicationInvalid);
+                await AdminResponses.ProblemAsync(
+                    context,
+                    StatusCodes.Status400BadRequest,
+                    AdminResponses.ApplicationInvalid,
+                    [.. (result.Errors ?? []).Select(e => new ApiProblemError { Field = e.Field, Index = null, Reason = e.Reason, Maximum = e.Maximum })]);
+                return;
+
+            case ApplicationLifetimesStatus.NotFound:
+                await RefuseAsync(context, StatusCodes.Status404NotFound, AdminResponses.NotFound);
+                return;
+
+            default:
+                await RefuseAsync(context, StatusCodes.Status403Forbidden, AdminResponses.AccessDenied);
+                return;
+        }
+    }
+
     private static ApplicationResponse Response(ManagedApplication application) => new()
     {
         Id = application.ClientId,
@@ -360,6 +479,10 @@ internal static class ApplicationsApi
         LogoutUrls = application.LogoutUrls,
         WebOrigins = application.WebOrigins,
         GrantTypes = application.GrantTypes,
+        AccessTokenLifetime = application.AccessTokenLifetime,
+        IdTokenLifetime = application.IdTokenLifetime,
+        RefreshTokenAbsoluteLifetime = application.RefreshTokenAbsoluteLifetime,
+        RefreshTokenInactivityLifetime = application.RefreshTokenInactivityLifetime,
     };
 
     /// <summary>An instant as the Applications responses write one: ISO 8601 in UTC, to the millisecond.</summary>

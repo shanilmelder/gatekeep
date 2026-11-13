@@ -186,6 +186,25 @@ public interface IDirectory
         CancellationToken cancellationToken);
 
     /// <summary>
+    /// Replaces the context Tenant's Application <paramref name="id"/>'s four token lifetimes (Story 3.4, FR-15),
+    /// under the row's lock, in the caller's transaction. When they differ from what is stored it writes them and
+    /// <c>directory.application.updated</c> by <paramref name="actor"/>; when they don't it writes nothing and
+    /// no event. The <c>system</c> Application is never updated. Returns the Application as it now stands and
+    /// whether it changed, or null when the Tenant has no visible one by that ID.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The context has no Tenant. Nothing is written.</exception>
+    /// <exception cref="ArgumentException">
+    /// A lifetime breaks a limit of <see cref="DirectoryContract.CheckLifetimes"/>. Nothing is written.
+    /// </exception>
+    [StateChanging]
+    Task<ApplicationLifetimesWrite?> UpdateApplicationLifetimesAsync(
+        CommandContext context,
+        Actor actor,
+        Guid id,
+        ApplicationLifetimes lifetimes,
+        CancellationToken cancellationToken);
+
+    /// <summary>
     /// The live client secrets of the context Tenant's Application <paramref name="applicationId"/> (Story 3.3),
     /// newest first: not revoked, and with no <c>expires_at</c> or one still ahead by the database's clock.
     /// Always empty for a <c>spa</c> or <c>native</c> Application. Null when the Tenant has no visible

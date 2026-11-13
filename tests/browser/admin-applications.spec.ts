@@ -42,6 +42,11 @@ interface Application {
   logoutUrls: string[];
   webOrigins: string[];
   grantTypes: string[];
+  /** Story 3.4: the four token lifetimes, in seconds. */
+  accessTokenLifetime: number;
+  idTokenLifetime: number;
+  refreshTokenAbsoluteLifetime: number;
+  refreshTokenInactivityLifetime: number;
 }
 
 const application = (n: number, name: string, type: Type, createdAt = '2026-11-10T09:00:00.000Z'): Application => ({
@@ -55,6 +60,10 @@ const application = (n: number, name: string, type: Type, createdAt = '2026-11-1
   logoutUrls: [],
   webOrigins: [],
   grantTypes: type === 'machine' ? ['client_credentials'] : type === 'web' ? ['authorization_code'] : [],
+  accessTokenLifetime: 900,
+  idTokenLifetime: 900,
+  refreshTokenAbsoluteLifetime: 2592000,
+  refreshTokenInactivityLifetime: 604800,
 });
 
 const ROWS: Application[] = [
@@ -110,6 +119,8 @@ interface State {
   created: number;
   secretList: ((route: Route) => Promise<void>) | null;
   secretWrite: ((route: Route) => Promise<void>) | null;
+  /** Story 3.4: replaces the tokens save's answer. */
+  tokensSave: ((route: Route) => Promise<void>) | null;
 }
 
 async function answerApi(page: Page, initial: Partial<State> = {}) {
@@ -118,6 +129,7 @@ async function answerApi(page: Page, initial: Partial<State> = {}) {
   const puts: { body: Record<string, unknown>; headers: Record<string, string> }[] = [];
   const begins: unknown[] = [];
   const secretWrites: { path: string; headers: Record<string, string> }[] = [];
+  const tokenPuts: { body: Record<string, number>; headers: Record<string, string> }[] = [];
   const state: State = {
     capabilities: TENANT_EDITOR,
     applications: ROWS,
@@ -135,6 +147,7 @@ async function answerApi(page: Page, initial: Partial<State> = {}) {
     created: 0,
     secretList: null,
     secretWrite: null,
+    tokensSave: null,
     ...initial,
   };
   await page.route(
@@ -210,6 +223,25 @@ async function answerApi(page: Page, initial: Partial<State> = {}) {
         state.applications = state.applications.map((row) => (row.id === id ? saved : row));
         return json(route, 200, saved);
       }
+      // Story 3.4: the tokens save, no fresh assertion; the server's limits are the Isolation tests'.
+      const tokens = new RegExp(`^${LIST}/([^/]+)/tokens$`).exec(pathname);
+      if (tokens && request.method() === 'PUT') {
+        const body = request.postDataJSON() as Record<string, number>;
+        tokenPuts.push({ body, headers: request.headers() });
+        if (state.tokensSave) return state.tokensSave(route);
+        const id = decodeURIComponent(tokens[1]!);
+        const found = state.applications.find((row) => row.id === id);
+        if (!found) return problem(route, 404, 'not_found');
+        const saved: Application = {
+          ...found,
+          accessTokenLifetime: body.accessTokenLifetime!,
+          idTokenLifetime: body.idTokenLifetime!,
+          refreshTokenAbsoluteLifetime: body.refreshTokenAbsoluteLifetime!,
+          refreshTokenInactivityLifetime: body.refreshTokenInactivityLifetime!,
+        };
+        state.applications = state.applications.map((row) => (row.id === id ? saved : row));
+        return json(route, 200, saved);
+      }
       // Story 3.3: every write needs a fresh assertion bound to the Application, used up by the write.
       const secrets = new RegExp(`^${LIST}/([^/]+)/secrets(?:/([^/]+)/revoke)?$`).exec(pathname);
       if (secrets) {
@@ -257,7 +289,7 @@ async function answerApi(page: Page, initial: Partial<State> = {}) {
       return route.fulfill({ status: 404 });
     },
   );
-  return { log, posts, puts, begins, secretWrites, state, count: (entry: string) => log.filter((line) => line === entry).length };
+  return { log, posts, puts, begins, secretWrites, tokenPuts, state, count: (entry: string) => log.filter((line) => line === entry).length };
 }
 
 /** A virtual CTAP2 authenticator holding the Admin's resident credential, so the shell's renewal completes by itself. */
@@ -1190,6 +1222,234 @@ test.describe('credentials (Story 3.3)', () => {
         await page.goto(`${PAGE}/${app(3)}?tab=credentials`);
         await expect(page.getByTestId('application-secrets-owner-only')).toBeVisible();
         expect(await axe(page), 'editor').toEqual([]);
+      });
+    }
+  }
+});
+
+test.describe('tokens (Story 3.4)', () => {
+  const tokensTab = (page: Page) => page.getByTestId('application-tokens');
+  const field = (page: Page, name: string) => page.getByTestId(`application-${name}`);
+  const save = (page: Page) => page.getByTestId('application-tokens-save');
+  const toast = (page: Page) => page.getByTestId('toast');
+  const FIELDS = ['accessTokenLifetime', 'idTokenLifetime', 'refreshTokenAbsoluteLifetime', 'refreshTokenInactivityLifetime'];
+
+  test('the Tokens tab shows each lifetime in seconds with its duration and default, and no algorithm or rotation control', async ({ page }) => {
+    const api = await answerApi(page);
+
+    await page.goto(`${PAGE}/${app(1)}?tab=tokens`);
+
+    await expect(page.getByRole('tab', { name: 'Tokens' })).toHaveAttribute('aria-selected', 'true');
+    await expect(tokensTab(page).getByRole('heading', { level: 2 })).toHaveText(['Access token', 'ID token', 'Refresh tokens']);
+    await expect(tokensTab(page).getByRole('textbox', { name: 'Access token lifetime' })).toHaveValue('900');
+    await expect(tokensTab(page).getByRole('textbox', { name: 'ID token lifetime' })).toHaveValue('900');
+    await expect(tokensTab(page).getByRole('textbox', { name: 'Absolute lifetime' })).toHaveValue('2592000');
+    await expect(tokensTab(page).getByRole('textbox', { name: 'Inactivity lifetime' })).toHaveValue('604800');
+    await expect(field(page, 'accessTokenLifetime-hint')).toHaveText('seconds · 15 minutes');
+    // The unit and duration describe the input, beside its helper.
+    await expect(field(page, 'accessTokenLifetime')).toHaveAccessibleDescription(/seconds · 15 minutes/);
+    await expect(field(page, 'accessTokenLifetime')).toHaveAccessibleDescription(/Default: 15 minutes/);
+    await expect(field(page, 'refreshTokenAbsoluteLifetime-hint')).toHaveText('seconds · 30 days');
+    await expect(field(page, 'refreshTokenInactivityLifetime-hint')).toHaveText('seconds · 7 days');
+    for (const text of ['Default: 15 minutes', 'Default: 30 days', 'Default: 7 days']) await expect(tokensTab(page)).toContainText(text);
+    await expect(tokensTab(page).getByText('Default: 15 minutes')).toHaveCount(2);
+
+    // The Design Delta's removals: no algorithm, no rotation or reuse control, nothing that turns refresh tokens off.
+    await expect(tokensTab(page).getByRole('switch')).toHaveCount(0);
+    await expect(tokensTab(page).getByRole('combobox')).toHaveCount(0);
+    await expect(tokensTab(page).getByRole('checkbox')).toHaveCount(0);
+    for (const removed of [/algorithm/i, /RS256/, /HS256/, /Reuse interval/i, /Reuse detection/i, /^Rotation$/]) {
+      await expect(tokensTab(page).getByText(removed)).toHaveCount(0);
+    }
+
+    // The hint follows what is typed.
+    await field(page, 'accessTokenLifetime').fill('5400');
+    await expect(field(page, 'accessTokenLifetime-hint')).toHaveText('seconds · 1 hour 30 minutes');
+    expect(api.tokenPuts).toHaveLength(0);
+  });
+
+  test('Save sends all four lifetimes once, with the page Tenant and no fresh assertion, then shows "Changes saved"', async ({ page }) => {
+    const api = await answerApi(page);
+    await page.goto(`${PAGE}/${app(1)}?tab=tokens`);
+
+    await field(page, 'accessTokenLifetime').fill('300');
+    await field(page, 'idTokenLifetime').fill(' 600 ');
+    await field(page, 'refreshTokenAbsoluteLifetime').fill('864000');
+    await field(page, 'refreshTokenInactivityLifetime').fill('86400');
+    await save(page).click();
+
+    await expect(toast(page)).toHaveText('Changes saved');
+    expect(api.tokenPuts).toHaveLength(1);
+    expect(api.tokenPuts[0]!.body).toEqual({
+      accessTokenLifetime: 300,
+      idTokenLifetime: 600,
+      refreshTokenAbsoluteLifetime: 864000,
+      refreshTokenInactivityLifetime: 86400,
+    });
+    expect(api.tokenPuts[0]!.headers['x-gatekeep-tenant']).toBe(TENANT);
+    expect(api.tokenPuts[0]!.headers['x-gatekeep-csrf']).toBe(CSRF);
+    expect(api.begins).toHaveLength(0);
+    await expect(field(page, 'idTokenLifetime')).toHaveValue('600');
+    await expect(field(page, 'refreshTokenAbsoluteLifetime-hint')).toHaveText('seconds · 10 days');
+    await expect(field(page, 'refreshTokenInactivityLifetime-hint')).toHaveText('seconds · 1 day');
+  });
+
+  test('an over-limit value is refused in the browser with "Maximum is {limit}." and nothing is sent', async ({ page }) => {
+    const api = await answerApi(page);
+    await page.goto(`${PAGE}/${app(1)}?tab=tokens`);
+
+    await field(page, 'accessTokenLifetime').fill('3601');
+    await field(page, 'idTokenLifetime').fill('3601');
+    await field(page, 'refreshTokenAbsoluteLifetime').fill('7776001');
+    await field(page, 'refreshTokenInactivityLifetime').fill('2592001');
+    await save(page).click();
+
+    await expect(tokensTab(page).getByText('Maximum is 1 hour.')).toHaveCount(2);
+    await expect(tokensTab(page)).toContainText('Maximum is 90 days.');
+    await expect(tokensTab(page)).toContainText('Maximum is 30 days.');
+    await expect(field(page, 'accessTokenLifetime')).toBeFocused();
+    await expect(field(page, 'accessTokenLifetime')).toHaveAttribute('aria-invalid', 'true');
+
+    // Zero and anything that isn't whole seconds are refused too.
+    await field(page, 'accessTokenLifetime').fill('0');
+    await field(page, 'idTokenLifetime').fill('15m');
+    await field(page, 'refreshTokenAbsoluteLifetime').fill('2592000');
+    await field(page, 'refreshTokenInactivityLifetime').fill('604800');
+    await save(page).click();
+    await expect(tokensTab(page)).toContainText('Use at least 1 second.');
+    await expect(tokensTab(page)).toContainText('Enter a whole number of seconds.');
+
+    expect(api.tokenPuts).toHaveLength(0);
+  });
+
+  test("the server's above_maximum shows the same copy from its maximum", async ({ page }) => {
+    const api = await answerApi(page, {
+      tokensSave: (route) =>
+        route.fulfill({
+          status: 400,
+          contentType: 'application/problem+json',
+          body: JSON.stringify({
+            code: 'application_invalid',
+            traceId: TRACE,
+            errors: [{ field: 'refreshTokenAbsoluteLifetime', index: null, reason: 'above_maximum', maximum: 7776000 }],
+          }),
+        }),
+    });
+    await page.goto(`${PAGE}/${app(1)}?tab=tokens`);
+
+    await field(page, 'refreshTokenAbsoluteLifetime').fill('864000');
+    await save(page).click();
+
+    await expect(tokensTab(page)).toContainText('Maximum is 90 days.');
+    await expect(field(page, 'refreshTokenAbsoluteLifetime')).toBeFocused();
+    await expect(field(page, 'refreshTokenAbsoluteLifetime')).toHaveValue('864000');
+    await expect(toast(page)).toHaveCount(0);
+    expect(api.tokenPuts).toHaveLength(1);
+  });
+
+  test('a refused or failed save shows its banner and keeps what was typed', async ({ page }) => {
+    const api = await answerApi(page, { tokensSave: (route) => problem(route, 403, 'access_denied') });
+    await page.goto(`${PAGE}/${app(1)}?tab=tokens`);
+    await field(page, 'accessTokenLifetime').fill('300');
+
+    await save(page).click();
+    await expect(page.getByTestId('application-tokens-save-forbidden')).toHaveText("You can't do this in this session.");
+
+    api.state.tokensSave = (route) => problem(route, 500, 'unavailable');
+    await save(page).click();
+    const failed = page.getByTestId('application-tokens-save-failed');
+    await expect(failed).toContainText("Couldn't save the changes. Try again.");
+    await expect(failed).toContainText(TRACE);
+    await expect(field(page, 'accessTokenLifetime')).toHaveValue('300');
+    expect(api.tokenPuts).toHaveLength(2);
+  });
+
+  test('a machine-to-machine Application shows only its access token, and Save sends the others back unchanged', async ({ page }) => {
+    const machine = { ...application(3, 'Billing worker', 'machine'), idTokenLifetime: 600, refreshTokenAbsoluteLifetime: 86400, refreshTokenInactivityLifetime: 3600 };
+    const api = await answerApi(page, { applications: [ROWS[0]!, ROWS[1]!, ROWS[2]!, machine] });
+    await page.goto(`${PAGE}/${app(3)}?tab=tokens`);
+
+    await expect(tokensTab(page).getByRole('heading', { level: 2 })).toHaveText(['Access token']);
+    await expect(tokensTab(page).getByRole('textbox')).toHaveCount(1);
+    for (const name of FIELDS.slice(1)) await expect(field(page, name)).toHaveCount(0);
+
+    await field(page, 'accessTokenLifetime').fill('120');
+    await save(page).click();
+
+    await expect(toast(page)).toHaveText('Changes saved');
+    expect(api.tokenPuts[0]!.body).toEqual({
+      accessTokenLifetime: 120,
+      idTokenLifetime: 600,
+      refreshTokenAbsoluteLifetime: 86400,
+      refreshTokenInactivityLifetime: 3600,
+    });
+  });
+
+  test('a Viewer sees every lifetime read-only and no Save', async ({ page }) => {
+    await answerApi(page, { capabilities: TENANT_VIEWER });
+
+    await page.goto(`${PAGE}/${app(1)}?tab=tokens`);
+
+    for (const name of FIELDS) await expect(field(page, name)).toHaveAttribute('readonly', '');
+    await expect(save(page)).toHaveCount(0);
+    await expect(page.getByTestId('application-tokens-read-only')).toHaveText('Only Tenant Editors and Owners can change these.');
+  });
+
+  test('leaving Tokens with unsaved changes asks first: Keep editing stays, Discard and leave goes', async ({ page }) => {
+    await answerApi(page);
+    await page.goto(`${PAGE}/${app(1)}?tab=tokens`);
+    await field(page, 'accessTokenLifetime').fill('300');
+
+    await page.getByRole('tab', { name: 'Settings' }).click();
+    const prompt = page.getByRole('dialog', { name: 'Discard unsaved changes?' });
+    await expect(prompt).toBeVisible();
+    await prompt.getByRole('button', { name: 'Keep editing' }).click();
+    await expect(prompt).toBeHidden();
+    await expect(page.getByRole('tab', { name: 'Tokens' })).toHaveAttribute('aria-selected', 'true');
+    await expect(field(page, 'accessTokenLifetime')).toHaveValue('300');
+
+    await page.getByRole('tab', { name: 'Credentials' }).click();
+    await page.getByRole('dialog', { name: 'Discard unsaved changes?' }).getByRole('button', { name: 'Discard and leave' }).click();
+    await expect(page.getByTestId('application-credentials')).toBeVisible();
+
+    // Back on Tokens, the stored lifetimes show, and an unchanged form leaves without asking.
+    await page.getByRole('tab', { name: 'Tokens' }).click();
+    await expect(field(page, 'accessTokenLifetime')).toHaveValue('900');
+    await page.getByRole('tab', { name: 'Settings' }).click();
+    await expect(page.getByRole('dialog', { name: 'Discard unsaved changes?' })).toHaveCount(0);
+    await expect(page.getByRole('tab', { name: 'Settings' })).toHaveAttribute('aria-selected', 'true');
+  });
+
+  for (const scheme of ['light', 'dark'] as const) {
+    for (const width of [1100, 768]) {
+      test(`axe finds no violations at ${width}px, ${scheme}: the lifetimes, their errors, a failure and a Viewer's`, async ({ page }) => {
+        await page.setViewportSize({ width, height: 900 });
+        await page.emulateMedia({ colorScheme: scheme });
+        const api = await answerApi(page);
+
+        await page.goto(`${PAGE}/${app(1)}?tab=tokens`);
+        await expect(field(page, 'accessTokenLifetime')).toHaveValue('900');
+        expect(await axe(page), 'tokens').toEqual([]);
+        expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+
+        await field(page, 'accessTokenLifetime').fill('3601');
+        await field(page, 'refreshTokenAbsoluteLifetime').fill('7776001');
+        await save(page).click();
+        await expect(tokensTab(page)).toContainText('Maximum is 90 days.');
+        expect(await axe(page), 'errors').toEqual([]);
+
+        await field(page, 'accessTokenLifetime').fill('300');
+        await field(page, 'refreshTokenAbsoluteLifetime').fill('864000');
+        api.state.tokensSave = (route) => problem(route, 500, 'unavailable');
+        await save(page).click();
+        await expect(page.getByTestId('application-tokens-save-failed')).toBeVisible();
+        expect(await axe(page), 'failure').toEqual([]);
+        expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+
+        api.state.capabilities = TENANT_VIEWER;
+        await page.goto(`${PAGE}/${app(3)}?tab=tokens`);
+        await expect(page.getByTestId('application-tokens-read-only')).toBeVisible();
+        expect(await axe(page), 'viewer').toEqual([]);
       });
     }
   }

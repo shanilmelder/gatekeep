@@ -13,27 +13,39 @@ public sealed class ApiProblem
     public required string TraceId { get; init; }
 
     /// <summary>
-    /// Only on <c>application_invalid</c> from an Application settings save (Story 3.2): each refused line or
-    /// field, never its value. Absent on every other problem.
+    /// Only on <c>application_invalid</c> from an Application settings save (Story 3.2) or tokens save (Story 3.4):
+    /// each refused line or field, never its value. Absent on every other problem.
     /// </summary>
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
     public IReadOnlyList<ApiProblemError>? Errors { get; init; }
 }
 
-/// <summary>One refused line or field of an Application settings save (Story 3.2).</summary>
+/// <summary>One refused line or field of an Application settings save (Story 3.2) or tokens save (Story 3.4).</summary>
 public sealed class ApiProblemError
 {
-    /// <summary><c>callbackUrls</c>, <c>logoutUrls</c>, <c>webOrigins</c> or <c>grantTypes</c>.</summary>
+    /// <summary>
+    /// A settings save's <c>callbackUrls</c>, <c>logoutUrls</c>, <c>webOrigins</c> or <c>grantTypes</c>; a tokens
+    /// save's <c>accessTokenLifetime</c>, <c>idTokenLifetime</c>, <c>refreshTokenAbsoluteLifetime</c> or
+    /// <c>refreshTokenInactivityLifetime</c>.
+    /// </summary>
     public required string Field { get; init; }
 
     /// <summary>The line's 0-based position in the field's array, or null when the whole field is refused.</summary>
     public required int? Index { get; init; }
 
     /// <summary>
-    /// <c>not_absolute</c>, <c>wildcard</c>, <c>scheme_not_allowed</c>, <c>too_long</c>, <c>too_many</c>,
-    /// <c>duplicate</c> or <c>not_allowed_for_type</c>.
+    /// A settings save's <c>not_absolute</c>, <c>wildcard</c>, <c>scheme_not_allowed</c>, <c>too_long</c>,
+    /// <c>too_many</c>, <c>duplicate</c> or <c>not_allowed_for_type</c>; a tokens save's <c>below_minimum</c>
+    /// or <c>above_maximum</c>.
     /// </summary>
     public required string Reason { get; init; }
+
+    /// <summary>
+    /// Only with <c>above_maximum</c> (Story 3.4): the field's hard limit in seconds, so a client can say
+    /// "Maximum is {limit}." Absent otherwise.
+    /// </summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public int? Maximum { get; init; }
 }
 
 /// <summary>The responses every Admin API path shares, so equal cases are byte-identical.</summary>

@@ -17,6 +17,7 @@ import { api } from '../session';
 import { ApplicationCredentials } from './ApplicationCredentials';
 import { applicationsPath } from './applications';
 import { ApplicationSettings } from './ApplicationSettings';
+import { ApplicationTokens } from './ApplicationTokens';
 import { failureOf } from './ApplicationsPage';
 import { useCapabilities } from './capabilities';
 import { kindText } from './CreateApplicationModal';
@@ -50,7 +51,7 @@ export interface ApplicationDetailPageProps {
  * name with its type badge, the client ID in the code type with Copy, then the tabs. Settings, the
  * default (Story 3.2), holds the URLs and grants; Credentials (Story 3.3) the client secrets a regular
  * web or machine-to-machine Application needs, which only a Tenant Owner creates, rotates and revokes;
- * single-page and native need none. A 404 says the Tenant has no such Application, a 403 is the
+ * single-page and native need none; Tokens (Story 3.4) the token lifetimes. A 404 says the Tenant has no such Application, a 403 is the
  * forbidden page, and any other failure a banner with Retry.
  */
 export function ApplicationDetailPage({ request, fresh, tenantId, tenant, applicationId }: ApplicationDetailPageProps) {
@@ -82,15 +83,19 @@ export function ApplicationDetailPage({ request, fresh, tenantId, tenant, applic
     return () => controller.abort();
   }, [request, tenantId, applicationId, attempt]);
 
-  // Leaving Settings with unsaved changes asks first (Story 3.2): its panel goes, and its form with it.
-  const dirty = useRef(false);
+  // Leaving Settings (Story 3.2) or Tokens (Story 3.4) with unsaved changes asks first: its panel goes,
+  // and its form with it. Only the selected tab's panel is mounted, so each tab keeps its own flag.
+  const dirty = useRef<Record<string, boolean>>({ settings: false, tokens: false });
   const [leaving, setLeaving] = useState<((leave: boolean) => void) | null>(null);
-  const onDirtyChange = useCallback((now: boolean) => {
-    dirty.current = now;
+  const onSettingsDirtyChange = useCallback((now: boolean) => {
+    dirty.current.settings = now;
+  }, []);
+  const onTokensDirtyChange = useCallback((now: boolean) => {
+    dirty.current.tokens = now;
   }, []);
   const canLeave = useCallback(
     (from: string) =>
-      from !== 'settings' || !dirty.current
+      !dirty.current[from]
         ? true
         : new Promise<boolean>((resolve) => {
             setLeaving(() => resolve);
@@ -99,7 +104,7 @@ export function ApplicationDetailPage({ request, fresh, tenantId, tenant, applic
   );
   const settleLeave = (leave: boolean) => {
     leaving?.(leave);
-    if (leave) dirty.current = false;
+    if (leave) dirty.current = { settings: false, tokens: false };
     setLeaving(null);
   };
 
@@ -198,7 +203,7 @@ export function ApplicationDetailPage({ request, fresh, tenantId, tenant, applic
                   application={ready}
                   canManage={has('tenant.application_callbacks.manage')}
                   onSaved={(application) => setLoad({ kind: 'ready', application })}
-                  onDirtyChange={onDirtyChange}
+                  onDirtyChange={onSettingsDirtyChange}
                 />
               ),
             },
@@ -212,6 +217,20 @@ export function ApplicationDetailPage({ request, fresh, tenantId, tenant, applic
                   tenantId={tenantId}
                   application={ready}
                   canManage={has('tenant.client_secrets.manage')}
+                />
+              ),
+            },
+            {
+              id: 'tokens',
+              label: messages.applicationTabTokens,
+              panel: (
+                <ApplicationTokens
+                  request={request}
+                  tenantId={tenantId}
+                  application={ready}
+                  canManage={has('tenant.applications.manage')}
+                  onSaved={(application) => setLoad({ kind: 'ready', application })}
+                  onDirtyChange={onTokensDirtyChange}
                 />
               ),
             },

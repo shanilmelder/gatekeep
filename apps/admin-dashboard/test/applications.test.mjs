@@ -6,6 +6,13 @@ import { describe, it } from 'node:test';
 import {
   APPLICATION_KINDS,
   APPLICATION_NAME_MAX_LENGTH,
+  LIFETIME_DEFAULTS,
+  LIFETIME_FIELDS,
+  LIFETIME_MAXIMUMS,
+  LIFETIME_MINIMUM,
+  checkLifetime,
+  durationParts,
+  lifetimeFields,
   MAX_LIVE_SECRETS,
   canAddSecret,
   currentSecret,
@@ -116,5 +123,66 @@ describe('client secrets (Story 3.3)', () => {
     assert.equal(takeSecretCreate('app_x'), true);
     assert.equal(takeSecretCreate('app_x'), false);
     assert.equal(secretCreateRequested('app_x'), false);
+  });
+});
+
+describe('token lifetimes (Story 3.4)', () => {
+  it("holds the server's defaults and hard limits, in seconds", () => {
+    assert.deepEqual(LIFETIME_FIELDS, ['accessTokenLifetime', 'idTokenLifetime', 'refreshTokenAbsoluteLifetime', 'refreshTokenInactivityLifetime']);
+    assert.deepEqual(LIFETIME_DEFAULTS, {
+      accessTokenLifetime: 900,
+      idTokenLifetime: 900,
+      refreshTokenAbsoluteLifetime: 2592000,
+      refreshTokenInactivityLifetime: 604800,
+    });
+    assert.deepEqual(LIFETIME_MAXIMUMS, {
+      accessTokenLifetime: 3600,
+      idTokenLifetime: 3600,
+      refreshTokenAbsoluteLifetime: 7776000,
+      refreshTokenInactivityLifetime: 2592000,
+    });
+    assert.equal(LIFETIME_MINIMUM, 1);
+  });
+
+  it('shows a machine-to-machine Application only its access token', () => {
+    assert.deepEqual(lifetimeFields('machine'), ['accessTokenLifetime']);
+    for (const kind of ['spa', 'web', 'native']) assert.deepEqual(lifetimeFields(kind), LIFETIME_FIELDS);
+  });
+
+  it('accepts whole seconds from 1 to each limit, and names why anything else is refused', () => {
+    assert.deepEqual(checkLifetime('accessTokenLifetime', ' 300 '), { kind: 'ok', seconds: 300 });
+    assert.deepEqual(checkLifetime('accessTokenLifetime', '3600'), { kind: 'ok', seconds: 3600 });
+    assert.deepEqual(checkLifetime('accessTokenLifetime', '3601'), { kind: 'aboveMaximum', maximum: 3600 });
+    assert.deepEqual(checkLifetime('idTokenLifetime', '3601'), { kind: 'aboveMaximum', maximum: 3600 });
+    assert.deepEqual(checkLifetime('refreshTokenAbsoluteLifetime', '7776001'), { kind: 'aboveMaximum', maximum: 7776000 });
+    assert.deepEqual(checkLifetime('refreshTokenInactivityLifetime', '2592001'), { kind: 'aboveMaximum', maximum: 2592000 });
+    assert.deepEqual(checkLifetime('accessTokenLifetime', '1'), { kind: 'ok', seconds: 1 });
+    assert.deepEqual(checkLifetime('accessTokenLifetime', '0'), { kind: 'belowMinimum' });
+    for (const text of ['', '-1', '1.5', '1e3', 'abc', '15m']) assert.deepEqual(checkLifetime('accessTokenLifetime', text), { kind: 'notWhole' });
+  });
+
+  it('tells a duration in every one of its non-zero units, largest first', () => {
+    assert.deepEqual(durationParts(900), [{ unit: 'minute', count: 15 }]);
+    assert.deepEqual(durationParts(3600), [{ unit: 'hour', count: 1 }]);
+    assert.deepEqual(durationParts(5400), [
+      { unit: 'hour', count: 1 },
+      { unit: 'minute', count: 30 },
+    ]);
+    assert.deepEqual(durationParts(2592000), [{ unit: 'day', count: 30 }]);
+    assert.deepEqual(durationParts(7776000), [{ unit: 'day', count: 90 }]);
+    assert.deepEqual(durationParts(604800), [{ unit: 'day', count: 7 }]);
+    assert.deepEqual(durationParts(90061), [
+      { unit: 'day', count: 1 },
+      { unit: 'hour', count: 1 },
+      { unit: 'minute', count: 1 },
+      { unit: 'second', count: 1 },
+    ]);
+    assert.deepEqual(durationParts(3601), [
+      { unit: 'hour', count: 1 },
+      { unit: 'second', count: 1 },
+    ]);
+    assert.deepEqual(durationParts(45), [{ unit: 'second', count: 45 }]);
+    assert.deepEqual(durationParts(0), []);
+    assert.deepEqual(durationParts(1.5), []);
   });
 });

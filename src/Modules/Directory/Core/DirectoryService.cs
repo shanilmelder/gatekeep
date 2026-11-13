@@ -238,7 +238,8 @@ internal sealed class DirectoryService(IAuditAppender audit, TimeProvider time) 
             [],
             [],
             [],
-            now);
+            now,
+            ApplicationLifetimes.Defaults);
     }
 
     public Task<DirectoryApplicationPage> ListApplicationsPageAsync(
@@ -310,6 +311,49 @@ internal sealed class DirectoryService(IAuditAppender audit, TimeProvider time) 
         }
 
         return updated;
+    }
+
+    public async Task<ApplicationLifetimesWrite?> UpdateApplicationLifetimesAsync(
+        CommandContext context,
+        Actor actor,
+        Guid id,
+        ApplicationLifetimes lifetimes,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        ArgumentNullException.ThrowIfNull(actor);
+        ArgumentNullException.ThrowIfNull(lifetimes);
+        _ = context.TenantId ?? throw new InvalidOperationException("An Application is updated only in a Tenant context.");
+
+        if (ApplicationLifetimeRules.Check(lifetimes).Count != 0)
+        {
+            throw new ArgumentException("A lifetime is outside its limits.", nameof(lifetimes));
+        }
+
+        // Decided under the row's lock, on the same row the update then writes.
+        if (await ApplicationRows.FindAsync(context, id, cancellationToken, locked: true) is not { } current)
+        {
+            return null;
+        }
+
+        // Nothing to change: no write and no event.
+        if (current.Lifetimes == lifetimes)
+        {
+            return new ApplicationLifetimesWrite(current, Changed: false);
+        }
+
+        if (await ApplicationRows.UpdateLifetimesAsync(context, id, lifetimes, cancellationToken) is not { } updated)
+        {
+            return null;
+        }
+
+        await _audit.AppendAsync(
+            context,
+            new AuditEvent(DirectoryEvents.ApplicationUpdated.Code, actor, AuditTargetKind.Client, id),
+            detail: null,
+            cancellationToken);
+
+        return new ApplicationLifetimesWrite(updated, Changed: true);
     }
 
     public async Task<IReadOnlyList<DirectoryClientSecret>?> ListClientSecretsAsync(CommandContext context, Guid applicationId, CancellationToken cancellationToken)
@@ -572,7 +616,9 @@ internal static class ApplicationRows
     /// <summary>The one predicate that hides the <c>system</c> Application from every caller-facing read.</summary>
     public const string Visible = "kind <> 'system'";
 
-    private const string Columns = "id, name, kind, grant_types, audiences, redirect_uris, post_logout_redirect_uris, web_origins, created_at";
+    private const string Columns =
+        "id, name, kind, grant_types, audiences, redirect_uris, post_logout_redirect_uris, web_origins, created_at, "
+        + "access_token_lifetime, id_token_lifetime, refresh_token_absolute_lifetime, refresh_token_inactivity_lifetime";
 
     private const string Select =
         $"SELECT {Columns} FROM application WHERE tenant_id = @tenant_id AND id = @id AND {Visible}";
@@ -603,6 +649,17 @@ internal static class ApplicationRows
         RETURNING {Columns}
         """;
 
+    // Story 3.4: the four lifetime columns only, and never the system Application, which GK012 refuses too.
+    private const string UpdateLifetimes =
+        $"""
+        UPDATE application
+        SET access_token_lifetime = @access_token_lifetime, id_token_lifetime = @id_token_lifetime,
+            refresh_token_absolute_lifetime = @refresh_token_absolute_lifetime,
+            refresh_token_inactivity_lifetime = @refresh_token_inactivity_lifetime
+        WHERE tenant_id = @tenant_id AND id = @id AND {Visible}
+        RETURNING {Columns}
+        """;
+
     public static async Task<DirectoryApplication?> FindAsync(CommandContext context, Guid id, CancellationToken cancellationToken, bool locked = false)
     {
         var tenantId = TenantOf(context);
@@ -628,6 +685,23 @@ internal static class ApplicationRows
         DirectoryService.Add(command, "post_logout_redirect_uris", settings.LogoutUrls.ToArray());
         DirectoryService.Add(command, "web_origins", settings.WebOrigins.ToArray());
         DirectoryService.Add(command, "grant_types", ApplicationSettingsRules.Sorted(settings.GrantTypes));
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        return await reader.ReadAsync(cancellationToken) ? Read(reader) : null;
+    }
+
+    public static async Task<DirectoryApplication?> UpdateLifetimesAsync(
+        CommandContext context, Guid id, ApplicationLifetimes lifetimes, CancellationToken cancellationToken)
+    {
+        var tenantId = TenantOf(context);
+
+        await using var command = context.CreateCommand();
+        command.CommandText = UpdateLifetimes;
+        DirectoryService.Add(command, "tenant_id", tenantId);
+        DirectoryService.Add(command, "id", id);
+        DirectoryService.Add(command, "access_token_lifetime", lifetimes.AccessTokenLifetime);
+        DirectoryService.Add(command, "id_token_lifetime", lifetimes.IdTokenLifetime);
+        DirectoryService.Add(command, "refresh_token_absolute_lifetime", lifetimes.RefreshTokenAbsoluteLifetime);
+        DirectoryService.Add(command, "refresh_token_inactivity_lifetime", lifetimes.RefreshTokenInactivityLifetime);
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         return await reader.ReadAsync(cancellationToken) ? Read(reader) : null;
     }
@@ -707,5 +781,6 @@ internal static class ApplicationRows
             [.. reader.GetFieldValue<string[]>(5)],
             [.. reader.GetFieldValue<string[]>(6)],
             [.. reader.GetFieldValue<string[]>(7)],
-            reader.GetFieldValue<DateTimeOffset>(8));
+            reader.GetFieldValue<DateTimeOffset>(8),
+            new ApplicationLifetimes(reader.GetInt32(9), reader.GetInt32(10), reader.GetInt32(11), reader.GetInt32(12)));
 }

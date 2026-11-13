@@ -88,7 +88,7 @@ development_status:
   3-1-list-and-create-applications: done
   3-2-configure-application-urls-and-grants: done
   3-3-create-rotate-and-revoke-client-secrets: done
-  3-4-set-token-lifetimes: backlog
+  3-4-set-token-lifetimes: done
   3-5-delete-an-application: backlog
   3-6-define-apis-and-permissions: backlog
   3-7-authorize-a-machine-to-machine-application: backlog

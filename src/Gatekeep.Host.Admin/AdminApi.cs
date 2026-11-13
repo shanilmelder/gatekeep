@@ -731,6 +731,36 @@ internal static class AdminApi
             .Produces<ApiProblem>(StatusCodes.Status409Conflict, AdminResponses.ProblemContentType)
             .Produces(StatusCodes.Status503ServiceUnavailable);
 
+        app.MapPut("/api/v1/tenants/{tenantId}/applications/{applicationId}/tokens", static (HttpContext context, AdminApiServices services) => ApplicationsApi.UpdateTokensAsync(context, services))
+            .WithMetadata(
+                TenantApiEndpoint.Instance,
+                new RequiresCapability(AdminCapabilities.TenantApplicationsManage),
+                new JsonRequestBody(typeof(ApplicationTokensRequest)))
+            .WithName("UpdateApplicationTokens")
+            .WithTags(TenantTag)
+            .WithSummary("Save an Application's access, ID and refresh token lifetimes.")
+            .WithDescription(
+                "Tenant Editors and Owners, and machine principals that hold tenant.applications.manage; no fresh assertion. " +
+                "The body is all four lifetimes, in whole seconds, and replaces what is stored: accessTokenLifetime and " +
+                "idTokenLifetime 1 to 3600 (1 hour), refreshTokenAbsoluteLifetime 1 to 7776000 (90 days) from the refresh " +
+                "token family's authorization, and refreshTokenInactivityLifetime 1 to 2592000 (30 days) from each refresh " +
+                "token's issue. The defaults are 900, 900, 2592000 and 604800. A value over its limit is 400 " +
+                "application_invalid with errors naming each field, reason above_maximum and the limit as maximum; under 1 is " +
+                "below_minimum. A body that isn't JSON, is over 4096 bytes, misses a lifetime, or holds one that isn't a JSON " +
+                "whole number or is a whole number outside the 32-bit signed integer range (such as 99999999999) is 400 " +
+                "application_invalid with no errors. Tokens issued after the save use the new lifetimes; a " +
+                "shortened absolute lifetime also ends older refresh token families at their next refresh. A save that changes " +
+                "something writes directory.application.updated; a save that changes nothing writes nothing and is 200. An " +
+                "applicationId that isn't an app_ ID, names no Application of this Tenant, another Tenant's or the hidden " +
+                "system Application is the same 404 not_found.")
+            .Produces<ApplicationResponse>(StatusCodes.Status200OK)
+            .Produces<ApiProblem>(StatusCodes.Status400BadRequest, AdminResponses.ProblemContentType)
+            .Produces(StatusCodes.Status401Unauthorized)
+            .Produces<ApiProblem>(StatusCodes.Status403Forbidden, AdminResponses.ProblemContentType)
+            .Produces<ApiProblem>(StatusCodes.Status404NotFound, AdminResponses.ProblemContentType)
+            .Produces<ApiProblem>(StatusCodes.Status409Conflict, AdminResponses.ProblemContentType)
+            .Produces(StatusCodes.Status503ServiceUnavailable);
+
         app.MapGet("/api/v1/tenants/{tenantId}/applications/{applicationId}/secrets", static (HttpContext context, AdminApiServices services) => ApplicationSecretsApi.ListAsync(context, services))
             .WithMetadata(TenantApiEndpoint.Instance, new RequiresCapability(AdminCapabilities.TenantConfigurationRead))
             .WithName("ListApplicationSecrets")

@@ -39,6 +39,12 @@ public static class ManagementContract
     /// <summary>The reasons a settings save's errors give (Story 3.2).</summary>
     public static IReadOnlyList<string> ApplicationSettingsReasons => Gatekeep.Modules.Directory.Contracts.ApplicationSettingsReasons.All;
 
+    /// <summary>The fields a lifetimes save's errors name (Story 3.4).</summary>
+    public static IReadOnlyList<string> ApplicationLifetimeFields => Gatekeep.Modules.Directory.Contracts.ApplicationLifetimeFields.All;
+
+    /// <summary>The reasons a lifetimes save's errors give (Story 3.4).</summary>
+    public static IReadOnlyList<string> ApplicationLifetimeReasons => Gatekeep.Modules.Directory.Contracts.ApplicationLifetimeReasons.All;
+
     /// <summary>The most lines in each of an Application's URL lists (Story 3.2).</summary>
     public const int MaxApplicationUrls = Gatekeep.Modules.Directory.Contracts.DirectoryContract.MaxRedirectUris;
 

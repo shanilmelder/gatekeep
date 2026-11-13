@@ -180,6 +180,8 @@ export function ApplicationSettings({ request, fresh, tenantId, prod, applicatio
   function showErrors(list: readonly ApiProblemError[]) {
     const next: Errors = {};
     for (const error of list) {
+      // A settings save names only its own fields; the tokens save's (Story 3.4) never come here.
+      if (error.field !== 'grantTypes' && error.field !== 'callbackUrls' && error.field !== 'logoutUrls' && error.field !== 'webOrigins') continue;
       const reason = reasonText(error, messages);
       const field = error.field;
       const line = field === 'grantTypes' || error.index === null ? undefined : lines[field as UrlField]?.lines[error.index];

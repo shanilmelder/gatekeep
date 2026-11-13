@@ -24,7 +24,8 @@ public enum ApplicationStatus
 /// One Application as the Admin API shows it (Story 3.1): its ID, which is also its OAuth
 /// <c>client_id</c>, its name, its stored type (<c>spa</c>, <c>web</c>, <c>native</c> or <c>machine</c>),
 /// whether that type authenticates with a credential, and when it was created; from Story 3.2 its callback,
-/// logout and web origin URLs as stored and its grant types, sorted. Never a secret.
+/// logout and web origin URLs as stored and its grant types, sorted; from Story 3.4 its four token lifetimes,
+/// in whole seconds. Never a secret.
 /// </summary>
 public sealed record ManagedApplication(
     Guid Id,
@@ -36,7 +37,11 @@ public sealed record ManagedApplication(
     IReadOnlyList<string> CallbackUrls,
     IReadOnlyList<string> LogoutUrls,
     IReadOnlyList<string> WebOrigins,
-    IReadOnlyList<string> GrantTypes);
+    IReadOnlyList<string> GrantTypes,
+    int AccessTokenLifetime,
+    int IdTokenLifetime,
+    int RefreshTokenAbsoluteLifetime,
+    int RefreshTokenInactivityLifetime);
 
 /// <summary>One Application read or create's result: the Application when <see cref="Status"/> is <see cref="ApplicationStatus.Done"/>.</summary>
 public sealed record ApplicationResult(ApplicationStatus Status, ManagedApplication? Application = null);
@@ -85,6 +90,45 @@ public sealed record ApplicationSettingsResult(
     ApplicationSettingsStatus Status,
     ManagedApplication? Application = null,
     IReadOnlyList<ApplicationSettingsError>? Errors = null);
+
+/// <summary>An Application's four token lifetimes as a save sends them (Story 3.4), each in whole seconds: a full replace.</summary>
+public sealed record ApplicationLifetimesInput(
+    int AccessTokenLifetime,
+    int IdTokenLifetime,
+    int RefreshTokenAbsoluteLifetime,
+    int RefreshTokenInactivityLifetime);
+
+/// <summary>
+/// One refused field of a lifetimes save (Story 3.4): the field (<c>accessTokenLifetime</c>, <c>idTokenLifetime</c>,
+/// <c>refreshTokenAbsoluteLifetime</c> or <c>refreshTokenInactivityLifetime</c>), the reason (<c>below_minimum</c> or
+/// <c>above_maximum</c>), and for <c>above_maximum</c> the field's hard limit in seconds.
+/// </summary>
+public sealed record ApplicationLifetimesError(string Field, string Reason, int? Maximum);
+
+/// <summary>How a lifetimes save ended (Story 3.4).</summary>
+public enum ApplicationLifetimesStatus
+{
+    /// <summary>Saved: the result holds the updated Application, and its event is written.</summary>
+    Saved,
+
+    /// <summary>The lifetimes are what is stored: nothing written, no event.</summary>
+    Unchanged,
+
+    /// <summary>The capability isn't held in the path Tenant, decided again here (AD-5).</summary>
+    Forbidden,
+
+    /// <summary>The path Tenant has no visible Application by that ID: another Tenant's and the hidden <c>system</c> one alike.</summary>
+    NotFound,
+
+    /// <summary>Some lifetime is outside its limits: the result names each. Nothing was written.</summary>
+    Invalid,
+}
+
+/// <summary>A lifetimes save's result: the Application when saved or unchanged, the errors when invalid.</summary>
+public sealed record ApplicationLifetimesResult(
+    ApplicationLifetimesStatus Status,
+    ManagedApplication? Application = null,
+    IReadOnlyList<ApplicationLifetimesError>? Errors = null);
 
 /// <summary>A page of Applications when <see cref="Status"/> is <see cref="ApplicationStatus.Done"/>, newest first, and the next page's cursor.</summary>
 public sealed record ApplicationPageResult(ApplicationStatus Status, IReadOnlyList<ManagedApplication> Applications, Guid? NextAfter);
@@ -196,6 +240,24 @@ public interface IApplicationManagement
         Guid applicationId,
         ApplicationSettingsInput input,
         Func<CancellationToken, Task<bool>> requireFreshAssertion,
+        CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Saves the Application <paramref name="applicationId"/>'s four token lifetimes (Story 3.4, FR-15) with
+    /// <c>tenant.applications.manage</c>, which Editors, Owners and machine principals may hold, and no fresh
+    /// assertion. Each is 1 second to its hard limit, every problem named; a save equal to what is stored writes
+    /// nothing. Otherwise the row and <c>directory.application.updated</c>, by the caller, an Admin or a machine
+    /// client, in the caller's transaction.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The context isn't <paramref name="tenantId"/>'s.</exception>
+    [StateChanging]
+    Task<ApplicationLifetimesResult> UpdateLifetimesAsync(
+        CommandContext tenantContext,
+        Principal principal,
+        TenantRoleGrant? grant,
+        Guid tenantId,
+        Guid applicationId,
+        ApplicationLifetimesInput input,
         CancellationToken cancellationToken);
 
     /// <summary>

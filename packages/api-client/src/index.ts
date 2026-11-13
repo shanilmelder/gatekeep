@@ -33,6 +33,7 @@ export {
   type ApplicationSecretListResponse,
   type ApplicationSecretResponse,
   type ApplicationSettingsRequest,
+  type ApplicationTokensRequest,
   type ApplicationType,
   type CreateApplicationRequest,
   type BootstrapClaimResponse,

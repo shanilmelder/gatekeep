@@ -411,6 +411,13 @@ internal static class CanaryFlows
             + "by fixed code only, never a URL.",
             "Story 3.2 build review",
             new DateOnly(2026, 11, 12)),
+        new(
+            new(SurfaceKind.Route, "/api/v1/tenants/{tenantId}/applications/{applicationId}/tokens"),
+            "The save takes four whole-second lifetimes only, writes them and an ID-only event, and returns the Application, "
+            + "never a secret or hash. A refused lifetime is named by field, reason and limit; refusals are logged by fixed code "
+            + "only.",
+            "Story 3.4 build review",
+            new DateOnly(2026, 11, 13)),
     ];
 
     /// <summary>Every production surface: the job and Operation registries, the Cli's commands and the hosts.</summary>

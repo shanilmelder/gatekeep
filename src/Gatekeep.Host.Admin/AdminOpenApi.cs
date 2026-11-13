@@ -201,8 +201,8 @@ internal static class AdminOpenApi
                 }
                 else if (type == typeof(ApiProblemError))
                 {
-                    Enumerate(schema, "field", ManagementContract.ApplicationSettingsFields);
-                    Enumerate(schema, "reason", ManagementContract.ApplicationSettingsReasons);
+                    Enumerate(schema, "field", [.. ManagementContract.ApplicationSettingsFields, .. ManagementContract.ApplicationLifetimeFields]);
+                    Enumerate(schema, "reason", [.. ManagementContract.ApplicationSettingsReasons, .. ManagementContract.ApplicationLifetimeReasons]);
                 }
                 else if (type == typeof(ApplicationSecretCreatedResponse))
                 {

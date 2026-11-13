@@ -86,14 +86,7 @@ internal sealed class ApplicationManagement(IAuditAppender appender) : IApplicat
             return new ApplicationResult(ApplicationStatus.Invalid);
         }
 
-        var actor = principal switch
-        {
-            AdminPrincipal admin => Actor.Admin(admin.AdminId),
-            MachinePrincipal machine => Actor.Client(machine.ClientId),
-            _ => throw new ArgumentOutOfRangeException(nameof(principal)),
-        };
-
-        var created = await _directory.CreateApplicationAsync(tenantContext, actor, trimmed, type, cancellationToken);
+        var created = await _directory.CreateApplicationAsync(tenantContext, ActorOf(principal), trimmed, type, cancellationToken);
         return new ApplicationResult(ApplicationStatus.Done, Managed(created));
     }
 
@@ -185,6 +178,44 @@ internal sealed class ApplicationManagement(IAuditAppender appender) : IApplicat
         return updated is null
             ? new ApplicationSettingsResult(ApplicationSettingsStatus.NotFound)
             : new ApplicationSettingsResult(ApplicationSettingsStatus.Saved, Managed(updated));
+    }
+
+    public async Task<ApplicationLifetimesResult> UpdateLifetimesAsync(
+        CommandContext tenantContext,
+        Principal principal,
+        TenantRoleGrant? grant,
+        Guid tenantId,
+        Guid applicationId,
+        ApplicationLifetimesInput input,
+        CancellationToken cancellationToken)
+    {
+        RequireOwnContext(tenantContext, tenantId);
+        ArgumentNullException.ThrowIfNull(principal);
+        ArgumentNullException.ThrowIfNull(input);
+
+        // Authorization runs in the module too (AD-5), from the grant the checks read. Machine principals may hold it.
+        if (!AdminCapabilities.Allows(AdminCapabilities.TenantApplicationsManage, principal, grant, tenantId))
+        {
+            return new ApplicationLifetimesResult(ApplicationLifetimesStatus.Forbidden);
+        }
+
+        // Every limit named, before anything is locked or written.
+        var lifetimes = new ApplicationLifetimes(
+            input.AccessTokenLifetime, input.IdTokenLifetime, input.RefreshTokenAbsoluteLifetime, input.RefreshTokenInactivityLifetime);
+        var problems = DirectoryContract.CheckLifetimes(lifetimes);
+        if (problems.Count != 0)
+        {
+            return new ApplicationLifetimesResult(
+                ApplicationLifetimesStatus.Invalid,
+                Errors: [.. problems.Select(p => new ApplicationLifetimesError(p.Field, p.Reason, p.Maximum))]);
+        }
+
+        return await _directory.UpdateApplicationLifetimesAsync(tenantContext, ActorOf(principal), applicationId, lifetimes, cancellationToken) switch
+        {
+            null => new ApplicationLifetimesResult(ApplicationLifetimesStatus.NotFound),
+            { Changed: true } write => new ApplicationLifetimesResult(ApplicationLifetimesStatus.Saved, Managed(write.Application)),
+            { } write => new ApplicationLifetimesResult(ApplicationLifetimesStatus.Unchanged, Managed(write.Application)),
+        };
     }
 
     public async Task<ApplicationSecretsResult> ListSecretsAsync(
@@ -281,7 +312,19 @@ internal sealed class ApplicationManagement(IAuditAppender appender) : IApplicat
             application.RedirectUris,
             application.PostLogoutRedirectUris,
             application.WebOrigins,
-            application.GrantTypes);
+            application.GrantTypes,
+            application.Lifetimes.AccessTokenLifetime,
+            application.Lifetimes.IdTokenLifetime,
+            application.Lifetimes.RefreshTokenAbsoluteLifetime,
+            application.Lifetimes.RefreshTokenInactivityLifetime);
+
+    /// <summary>Who a write is by: the Admin, or the machine client a Management API token names.</summary>
+    private static Actor ActorOf(Principal principal) => principal switch
+    {
+        AdminPrincipal admin => Actor.Admin(admin.AdminId),
+        MachinePrincipal machine => Actor.Client(machine.ClientId),
+        _ => throw new ArgumentOutOfRangeException(nameof(principal)),
+    };
 
     private static void RequireOwnContext(CommandContext context, Guid tenantId)
     {

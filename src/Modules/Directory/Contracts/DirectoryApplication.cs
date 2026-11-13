@@ -19,7 +19,8 @@ public sealed class DirectoryApplication
         ImmutableArray<string> redirectUris,
         ImmutableArray<string> postLogoutRedirectUris,
         ImmutableArray<string> webOrigins,
-        DateTimeOffset createdAt)
+        DateTimeOffset createdAt,
+        ApplicationLifetimes lifetimes)
     {
         Id = id;
         ClientId = clientId;
@@ -31,6 +32,11 @@ public sealed class DirectoryApplication
         PostLogoutRedirectUris = postLogoutRedirectUris;
         WebOrigins = webOrigins;
         CreatedAt = createdAt;
+        Lifetimes = lifetimes;
+        AccessTokenLifetime = TimeSpan.FromSeconds(lifetimes.AccessTokenLifetime);
+        IdTokenLifetime = TimeSpan.FromSeconds(lifetimes.IdTokenLifetime);
+        RefreshTokenAbsoluteLifetime = TimeSpan.FromSeconds(lifetimes.RefreshTokenAbsoluteLifetime);
+        RefreshTokenInactivityLifetime = TimeSpan.FromSeconds(lifetimes.RefreshTokenInactivityLifetime);
     }
 
     public Guid Id { get; }
@@ -82,4 +88,22 @@ public sealed class DirectoryApplication
 
     /// <summary>When the row was written.</summary>
     public DateTimeOffset CreatedAt { get; }
+
+    /// <summary>Its four token lifetimes in whole seconds, as stored (Story 3.4).</summary>
+    public ApplicationLifetimes Lifetimes { get; }
+
+    /// <summary>How long its access tokens live (Story 3.4): 15 minutes by default, never more than 1 hour.</summary>
+    public TimeSpan AccessTokenLifetime { get; }
+
+    /// <summary>How long its ID tokens live (Story 3.4): 15 minutes by default, never more than 1 hour.</summary>
+    public TimeSpan IdTokenLifetime { get; }
+
+    /// <summary>
+    /// How long a Token Family of its refresh tokens lives from its authorization, however often it rotates
+    /// (Story 3.4): 30 days by default, never more than 90. It is read at each refresh.
+    /// </summary>
+    public TimeSpan RefreshTokenAbsoluteLifetime { get; }
+
+    /// <summary>How long one of its refresh tokens lives unused from its issue (Story 3.4): 7 days by default, never more than 30.</summary>
+    public TimeSpan RefreshTokenInactivityLifetime { get; }
 }
