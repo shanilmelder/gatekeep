@@ -11,7 +11,17 @@ context:
   - '{project-root}/_bmad-output/implementation-artifacts/spec-9-2-rotate-a-signing-key-on-demand.md'
   - '{project-root}/_bmad-output/implementation-artifacts/spec-3-5-delete-an-application.md'
 warnings: ['oversized']
-deferred: []
+deferred:
+  - summary: >-
+      A rolled-back revoke (custody or database failure) answers the fixed bodiless 503, so the page's failure banner has no trace ID to show.
+    evidence: |-
+      AdminResponses.UnavailableAsync (src/Gatekeep.Host.Admin/AdminResponses.cs:315) sends 503 with no problem body by the
+      Admin API's standing design (fixed bodiless 503 since Story 1.27); the client falls back to traceId ''. The page shows
+      the trace ID when present (Story 1.25 convention), as Rotate (9.2) and every other page do. AC5's "a banner shows the
+      trace ID" would need the 503 to carry a trace ID API-wide, which is a cross-cutting change, not this story's.
+    location: >-
+      src/Gatekeep.Host.Admin/AdminResponses.cs:315
+    severity: medium
 ---
 
 <intent-contract>
@@ -208,6 +218,39 @@ deferred: []
   - **Dashboard.** The Revoke column's header is "Revoke", and each button is named "Revoke key {keyId}" for screen readers. The "Tenant Owner only" note describes both the read-only Rotate and the read-only Revoke buttons.
 
 ## Review Triage Log
+
+### 2026-11-14: Review pass
+
+- verdicts: 25 findings. High 0, medium 2, low 19, false 4, maybe-false 0.
+- findings:
+  - `[low]` `[patch]` Verification gap: the revoke modal's 403 `access_denied`, 409 `tenant_mismatch` and 404 answers have no browser test. Fixed: a `revoke refusals` describe.
+  - `[low]` `[patch]` Verification gap (other): on 409 `tenant_mismatch` the modal stays open and empty, and the shell's banner sits behind it. Fixed: a mismatch closes the modal.
+  - `[false]` `[reject]` Intent: next and previous are revocable as well as current. The epic says "Revoke on a key", every published key can be compromised, and AD-11's replacement rule ("any command that consumes or revokes next creates its replacement") expects it.
+  - `[low]` `[reject]` Intent: the token impact is qualitative, and the Session option is Tenant-wide. Tokens aren't tracked per signing key, and `RevokeAccess` has no "signed by key" scope. The epic asks the modal to "state token impact", which the text does.
+  - `[low]` `[reject]` Intent: AC4's cache is not modelled, the token is real, and the test sits in `tests/Isolation/Protocol`.
+    - A fresh JWKS fetch is what a relying party does once its cache expires.
+    - A token Transit signed with the key is byte-for-byte what a forger holding the key would make.
+    - `tests/Protocol` doesn't exist (Ask First). The revocation goes through the contract, and the API tests cover the route.
+  - `[medium]` `[defer]` Intent: a rolled-back revoke's real 503 has no body, so the banner has no trace ID. That is the Admin API's standing fixed bodiless 503 (Story 1.27), and the page shows the trace ID when present. Deferred; see `deferred`.
+  - `[low]` `[reject]` Blind: a client abort after the Transit create rolls back and leaves an orphan. The outcome is safe: no row moves, and the orphan sweep takes the key. This is the same pattern as 9.2's rotation, where the comment refers to the list read and commit.
+  - `[low]` `[reject]` Blind: the rollback branch (list not read) orphans a Transit key. It's unreachable for an Owner, and the sweep removes the key.
+  - `[low]` `[reject]` Blind: there is no `revoked_at` column. Nothing asks for one; it would mean re-creating the update trigger. The Log records when.
+  - `[low]` `[reject]` Blind: `keys.signing_key.revoked` names no key. Every Keys event names no key by convention, and `AuditDetail` can't carry a kid.
+  - `[low]` `[reject]` Blind: Sessions ended by the option get `admin_revoke`. The reasons are a closed set backed by a CHECK, and the spec chose AdminRevoke. A new reason means redefining that CHECK for a label.
+  - `[false]` `[reject]` Blind: the current-key line misleads when next has aged. It says "even if relying parties haven't fetched it yet", a conditional that stays true either way.
+  - `[low]` `[patch]` Blind: a 404 (already revoked elsewhere) leaves the table stale. Fixed: a 404 also reads the list again.
+  - `[low]` `[reject]` Blind: the toast doesn't mention ended Sessions. Cosmetic; the modal already states what the checkbox does.
+  - `[low]` `[reject]` Blind: no test that new tokens are signed by the promoted key. Hosted signs with its runtime's current key, and the NOTIFY rebuild is covered by `KeyChangeEvictionTests`.
+  - `[low]` `[patch]` Blind: `SigningKeyManagementTests` claims "no Session is touched" without seeding any. Fixed: the claim is dropped, since the API test covers it.
+  - `[low]` `[reject]` Blind: `SigningKeysPage` imports helpers from other pages' modules. Moving them would be a refactor with no defect.
+  - `[low]` `[patch]` Blind: the `user_session` grants restate `PurgeColumns` inline. Fixed: built from `PurgeColumns`.
+  - `[low]` `[reject]` Blind: revocations aren't throttled. Each one needs an Owner's fresh assertion, a hijacked fresh session can already do worse, and a limit adds new surface.
+  - `[false]` `[reject]` Blind: the patch leaves out the generated files. That is deliberate: they come from Docker generators, and the API contract and catalogue checks pin them.
+  - `[low]` `[patch]` Edge: revoke and rotate share one `inFlight` ref, so a confirm during a rotate does nothing. Fixed: revoke has its own ref.
+  - `[low]` `[patch]` Edge: a 404 leaves the table stale. Grouped with Blind #7.
+  - `[false]` `[reject]` Edge: an `InvalidOperationException` gives a 500. These are broken invariants (no `next`, custody returning no version), and failing loudly is correct, as in 9.2.
+  - `[low]` `[reject]` Edge: a client abort cancels the revocation. Grouped with Blind #1.
+  - `[medium]` `[defer]` Edge: the 503 paths carry no trace ID. Grouped with Intent #4.
 
 ## Design Notes
 

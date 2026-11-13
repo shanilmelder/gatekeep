@@ -326,14 +326,13 @@ public static class TableRegistry
         {
             [Hosted] = [Select, Insert, Update],
             [Worker] = [Delete],
-        }, new Dictionary<string, IReadOnlyList<ColumnGrant>>
+        }, new Dictionary<string, IReadOnlyList<ColumnGrant>>(PurgeColumns)
         {
             [Admin] =
             [
                 new ColumnGrant(Select, ["tenant_id", "ended_at"]),
                 new ColumnGrant(Update, ["ended_at", "end_reason"]),
             ],
-            [Worker] = [new ColumnGrant(Select, ["tenant_id"])],
         }, RowGuard),
         // Story 2.8: neither ever names a Tenant's system Application. Story 2.9: gk_hosted updates
         // only the columns the Sessions stores and the one revocation path write. Story 3.5: an

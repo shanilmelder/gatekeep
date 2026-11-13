@@ -626,6 +626,52 @@ test.describe('revoke', () => {
   });
 });
 
+test.describe('revoke refusals', () => {
+  test("a 403 access_denied says this session can't do it inside the modal, with no toast", async ({ page }) => {
+    await answerApi(page, { capabilities: TENANT_OWNER, needsAssertion: false, revoke: (route) => problem(route, 403, 'access_denied') });
+
+    await page.goto(PAGE);
+    await expect(page.getByTestId('signing-key-id')).toHaveCount(ROWS.length);
+    await revokeButton(page, ROWS[1]!.keyId).click();
+    await revokeDialog(page).getByRole('button', { name: 'Revoke key' }).click();
+
+    await expect(revokeDialog(page).getByTestId('revoke-signing-key-failed')).toHaveText("You can't do this in this session.");
+    await expect(toast(page)).toHaveCount(0);
+    await expect(page.getByTestId('signing-key-id')).toHaveText(ROWS.map((row) => row.keyId));
+  });
+
+  test('a 409 tenant_mismatch closes the modal with no failure banner and no toast, and the table is unchanged', async ({ page }) => {
+    const api = await answerApi(page, { capabilities: TENANT_OWNER, needsAssertion: false, revoke: (route) => problem(route, 409, 'tenant_mismatch') });
+
+    await page.goto(PAGE);
+    await expect(page.getByTestId('signing-key-id')).toHaveCount(ROWS.length);
+    await revokeButton(page, ROWS[1]!.keyId).click();
+    await revokeDialog(page).getByRole('button', { name: 'Revoke key' }).click();
+
+    await expect.poll(() => api.bodies.length).toBe(1);
+    await expect(revokeDialog(page)).toHaveCount(0);
+    await expect(page.getByTestId('revoke-signing-key-failed')).toHaveCount(0);
+    await expect(toast(page)).toHaveCount(0);
+    await expect(page.getByTestId('signing-key-id')).toHaveText(ROWS.map((row) => row.keyId));
+  });
+
+  test('a 404 shows the failure banner with its reference and reads the list again', async ({ page }) => {
+    const api = await answerApi(page, { capabilities: TENANT_OWNER, needsAssertion: false, revoke: (route) => problem(route, 404, 'not_found') });
+
+    await page.goto(PAGE);
+    await expect(page.getByTestId('signing-key-id')).toHaveCount(ROWS.length);
+    expect(api.count(`GET ${KEYS}`)).toBe(1);
+    await revokeButton(page, ROWS[1]!.keyId).click();
+    await revokeDialog(page).getByRole('button', { name: 'Revoke key' }).click();
+
+    const failed = revokeDialog(page).getByTestId('revoke-signing-key-failed');
+    await expect(failed).toContainText("Couldn't revoke the signing key. Nothing was changed.");
+    await expect(failed).toContainText(TRACE);
+    await expect.poll(() => api.count(`GET ${KEYS}`)).toBe(2);
+    await expect(toast(page)).toHaveCount(0);
+  });
+});
+
 test.describe('rotate refusals the shell handles', () => {
   test('a 409 tenant_mismatch shows none of the page banners and no toast, and the table is unchanged', async ({ page }) => {
     const api = await answerApi(page, { capabilities: TENANT_OWNER, rotate: (route) => problem(route, 409, 'tenant_mismatch') });

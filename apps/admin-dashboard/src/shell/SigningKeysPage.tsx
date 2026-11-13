@@ -107,6 +107,8 @@ export function SigningKeysPage({ request, fresh, tenantId }: SigningKeysPagePro
   const [refusal, setRefusal] = useState<Refusal>(null);
   // Set at once, before React re-renders, so a second press sends nothing.
   const inFlight = useRef(false);
+  // The revocation's own, so a rotation still running never swallows a confirmed revoke.
+  const revokeInFlight = useRef(false);
   const [revoking, setRevoking] = useState<SigningKey | null>(null);
   const [revokeAccess, setRevokeAccess] = useState(false);
   const [revokePending, setRevokePending] = useState(false);
@@ -226,8 +228,8 @@ export function SigningKeysPage({ request, fresh, tenantId }: SigningKeysPagePro
 
   /** Revokes the key the modal is for, once at a time, confirming it's the Admin when the server asks. */
   async function revoke() {
-    if (!canRevoke || !revoking || inFlight.current) return;
-    inFlight.current = true;
+    if (!canRevoke || !revoking || revokeInFlight.current) return;
+    revokeInFlight.current = true;
     setRevokePending(true);
     setRevokeSlot({ kind: 'prompt' });
     const { keyId } = revoking;
@@ -241,7 +243,7 @@ export function SigningKeysPage({ request, fresh, tenantId }: SigningKeysPagePro
     } catch {
       outcome = null;
     }
-    inFlight.current = false;
+    revokeInFlight.current = false;
     setRevokePending(false);
 
     if (outcome?.kind === 'unconfirmed') {
@@ -262,8 +264,9 @@ export function SigningKeysPage({ request, fresh, tenantId }: SigningKeysPagePro
     }
     const problem = answer && !answer.ok ? (answer.problem ?? null) : null;
     if (answer?.status === 409 && problem?.code === 'tenant_mismatch') {
-      // The shell's banner names both Tenants: nothing was changed.
+      // The shell's banner names both Tenants: nothing was changed. The modal closes so the banner shows.
       setRevokeSlot({ kind: 'none' });
+      setRevoking(null);
       return;
     }
     if (answer?.status === 401) {
@@ -275,6 +278,8 @@ export function SigningKeysPage({ request, fresh, tenantId }: SigningKeysPagePro
       setRevokeSlot({ kind: 'failed', text: messages.actionForbidden });
       return;
     }
+    // The key changed elsewhere (revoked, rotated out or retired): read the list again, and still say so here.
+    if (answer?.status === 404) setAttempt((n) => n + 1);
     setRevokeSlot({
       kind: 'failed',
       text: messages.signingKeysRevokeFailed,

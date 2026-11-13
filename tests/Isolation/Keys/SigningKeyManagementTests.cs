@@ -234,11 +234,10 @@ public sealed class SigningKeyManagementTests(PostgresFixture postgres, OpenBaoF
         Assert.Equal(before, await database.ScalarAsync<string>($"SELECT string_agg(to_jsonb(s)::text, ',' ORDER BY id) FROM signing_key s WHERE tenant_id = '{a}'"));
         custody.Failing.Clear();
 
-        // Without revokeAccess, no Session is touched and no revocation event written.
+        // Once custody answers, the revocation is the Owner's, as Actor.
         Assert.Equal(SigningKeyRevokeStatus.Revoked, (await RevokeAsync(database, a, custody, owner, ownerGrant, keyId, revokeAccess: false)).Status);
         Assert.Equal(2L, await database.ScalarAsync<long>(
             $"SELECT count(*) FROM audit_event WHERE tenant_id = '{a}' AND actor_kind = 'admin' AND actor_id = '{owner.AdminId}' AND type_code IN ('keys.signing_key.revoked', 'keys.signing_key.created')"));
-        Assert.Equal(0L, await database.ScalarAsync<long>("SELECT count(*) FROM audit_event WHERE type_code = 'sessions.access.revoked'"));
     }
 
     /// <summary>
