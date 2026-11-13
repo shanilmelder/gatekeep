@@ -455,7 +455,7 @@ internal sealed class TenantManagement(IAuditAppender appender, TenantAddressing
         return new OperationRetryResult(OperationRetryStatus.Retried, Managed(retried));
     }
 
-    private static ManagedOperation Managed(OperationResource operation) => new(
+    internal static ManagedOperation Managed(OperationResource operation) => new(
         operation.Id,
         operation.Type.Value,
         operation.TenantId,

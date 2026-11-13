@@ -27,6 +27,7 @@ internal static class ProductionOperations
     /// <c>tenancy.tenant.create</c> (Story 1.27) creates a new Tenant's secret class keys, then, on
     /// success, its settings, and makes it active. <c>tenancy.tenant.delete</c> (Story 1.29) purges
     /// a deleting Tenant's data and destroys its keys, then, on success, marks it deleted.
+    /// <c>directory.application.purge</c> (Story 3.5) removes the rows of a Tenant's deleted Applications from each owning module.
     /// </summary>
     public static readonly OperationRegistry Registry = new(
     [
@@ -35,6 +36,7 @@ internal static class ProductionOperations
             [new OperationStage(AuditRetentionJobs.PurgeStage, OperationStageKind.Tenant, AuditRetentionJobs.PurgeStageAsync)]),
         TenantCreation.Definition,
         TenantDeletion.Definition,
+        ApplicationPurge.Definition,
     ]);
 }
 

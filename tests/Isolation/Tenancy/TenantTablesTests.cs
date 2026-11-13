@@ -653,13 +653,17 @@ public sealed class TenantTablesTests(PostgresFixture postgres)
         Assert.Equal("GK004", failure.SqlState);
     }
 
+    /// <summary>
+    /// Story 1.29: a purge reads only the Tenant ID its <c>WHERE</c> names. Story 3.5: a deleted Application's
+    /// purge also reads the Application and family references it deletes by, and never any content.
+    /// </summary>
     [Theory]
-    [InlineData("user")]
-    [InlineData("user_session")]
-    [InlineData("authorization")]
-    [InlineData("token")]
-    [InlineData("signin_transaction")]
-    public async Task Worker_may_delete_and_read_only_the_Tenant_ID_of_a_purged_table(string table)
+    [InlineData("user", "tenant_id")]
+    [InlineData("user_session", "tenant_id")]
+    [InlineData("authorization", "application_id,id,tenant_id")]
+    [InlineData("token", "application_id,authorization_id,tenant_id")]
+    [InlineData("signin_transaction", "application_id,tenant_id")]
+    public async Task Worker_may_delete_and_read_only_the_references_of_a_purged_table(string table, string columns)
     {
         var database = await postgres.NewMigratedDatabaseAsync();
 
@@ -677,7 +681,7 @@ public sealed class TenantTablesTests(PostgresFixture postgres)
               AND has_column_privilege('gk_worker', 'public."{table}"', attname, 'SELECT')
             ORDER BY attname
             """);
-        Assert.Equal(["tenant_id"], readable);
+        Assert.Equal(columns.Split(','), readable);
     }
 
     [Fact]

@@ -598,7 +598,11 @@ export interface paths {
         get: operations["GetApplication"];
         put?: never;
         post?: never;
-        delete?: never;
+        /**
+         * Delete an Application: revoke its refresh tokens and grants now, and purge its rows by an Operation.
+         * @description Tenant Editors and Owners, and machine principals that hold tenant.applications.manage; no fresh assertion and no body. In one transaction, in the Tenant's own scope, it marks the Application deleted, so every read and the token, authorize and revocation endpoints treat it as unknown at once; revokes its live client secrets; revokes every refresh token and grant of it through the one revocation path, writing sessions.access.revoked; and writes directory.application.deleted by the caller. Access tokens it already holds stay valid until they expire. Users aren't affected. There is no undelete. Then it starts the Tenant's directory.application.purge Operation, which removes the rows of every deleted Application of the Tenant, module by module: 202 with that Operation, and Location naming it under /api/v1/tenants/{tenantId}/operations. When one is already running or failed for the Tenant, it is that one. The deletion commits first and the purge's start after it; a failure before the deletion commits is 503 unavailable with nothing written, and one after it keeps the deletion, which the next deletion's Operation purges. An applicationId that isn't an app_ ID, names no Application of this Tenant, another Tenant's, one already deleted or the hidden system Application is the same 404 not_found, with nothing written.
+         */
+        delete: operations["DeleteApplication"];
         options?: never;
         head?: never;
         patch?: never;
@@ -2968,6 +2972,73 @@ export interface operations {
             };
             /** @description Not Found */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    DeleteApplication: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description The Tenant the page shows, its ten_ ID: it must equal {tenantId}, or 409 tenant_mismatch. It never selects a Tenant. */
+                "X-Gatekeep-Tenant": string;
+            };
+            path: {
+                /** @description The Tenant's public ID: ten_ and the UUID's 16 bytes in lowercase RFC 4648 base32 with no padding, whose last character carries two zero bits. Only this canonical spelling, after URL decoding, names a Tenant, and the empty UUID's never does; anything else is refused like a Tenant the Admin holds no role in. */
+                tenantId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperationResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description access_denied, with the problem body, when the capability is refused. No body when an earlier check refuses first: a Session restricted to setup, or on a state-changing call a wrong Origin or CSRF token. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description tenant_mismatch, with the problem body, when X-Gatekeep-Tenant is missing, sent twice or isn't {tenantId}, and nothing ran; or another conflict the operation's description names. */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

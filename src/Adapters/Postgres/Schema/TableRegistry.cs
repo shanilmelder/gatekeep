@@ -326,7 +326,9 @@ public static class TableRegistry
             [Worker] = [Delete],
         }, PurgeColumns, RowGuard),
         // Story 2.8: neither ever names a Tenant's system Application. Story 2.9: gk_hosted updates
-        // only the columns the Sessions stores and the one revocation path write.
+        // only the columns the Sessions stores and the one revocation path write. Story 3.5: an
+        // Application's deletion, as gk_admin, revokes its families and tokens by that one path, reading
+        // only the columns its WHERE names; its purge, as gk_worker, deletes them by their Application.
         new("authorization", TableClass.Tenant, "Sessions", TableUse.Runtime, new Dictionary<string, IReadOnlyList<string>>
         {
             [Hosted] = [Select, Insert],
@@ -334,7 +336,12 @@ public static class TableRegistry
         }, new Dictionary<string, IReadOnlyList<ColumnGrant>>
         {
             [Hosted] = [new ColumnGrant(Update, AuthorizationUpdateColumns)],
-            [Worker] = [new ColumnGrant(Select, ["tenant_id"])],
+            [Admin] =
+            [
+                new ColumnGrant(Select, ["tenant_id", "id", "application_id", "status"]),
+                new ColumnGrant(Update, AuthorizationUpdateColumns),
+            ],
+            [Worker] = [new ColumnGrant(Select, ["tenant_id", "id", "application_id"])],
         }, SystemApplicationGuard),
         new("token", TableClass.Tenant, "Sessions", TableUse.Runtime, new Dictionary<string, IReadOnlyList<string>>
         {
@@ -343,13 +350,23 @@ public static class TableRegistry
         }, new Dictionary<string, IReadOnlyList<ColumnGrant>>
         {
             [Hosted] = [new ColumnGrant(Update, TokenUpdateColumns)],
-            [Worker] = [new ColumnGrant(Select, ["tenant_id"])],
+            [Admin] =
+            [
+                new ColumnGrant(Select, ["tenant_id", "application_id", "authorization_id", "status"]),
+                // Story 3.5: only what the one revocation path changes, as on an authorization row.
+                new ColumnGrant(Update, AuthorizationUpdateColumns),
+            ],
+            [Worker] = [new ColumnGrant(Select, ["tenant_id", "application_id", "authorization_id"])],
         }, SystemApplicationGuard),
         new("signin_transaction", TableClass.Tenant, "Authentication", TableUse.Runtime, new Dictionary<string, IReadOnlyList<string>>
         {
             [Hosted] = [Select, Insert, Update],
             [Worker] = [Delete],
-        }, PurgeColumns, RowGuard),
+        }, new Dictionary<string, IReadOnlyList<ColumnGrant>>
+        {
+            // Story 3.5: a deleted Application's purge deletes its transactions by their Application.
+            [Worker] = [new ColumnGrant(Select, ["tenant_id", "application_id"])],
+        }, RowGuard),
         new(
             "admin_attempt",
             TableClass.Control,
@@ -593,6 +610,8 @@ public static class TableRegistry
         // delete but with its Tenant's, and a secret naming it.
         // Story 3.2: Host.Admin's settings save updates an Application's URLs and grants, and nothing else.
         // Story 3.4: its tokens save updates the four token lifetimes too.
+        // Story 3.5: its deletion sets deleted_at, and the directory.application.purge Operation, as
+        // gk_worker, deletes the rows that have it set.
         new(
             "application",
             TableClass.Tenant,
@@ -606,11 +625,12 @@ public static class TableRegistry
             },
             new Dictionary<string, IReadOnlyList<ColumnGrant>>
             {
-                [Worker] = [new ColumnGrant(Select, ["tenant_id", "id", "kind"])],
+                [Worker] = [new ColumnGrant(Select, ["tenant_id", "id", "kind", "deleted_at"])],
                 [Admin] = [new ColumnGrant(Update, [
                     "redirect_uris", "post_logout_redirect_uris", "web_origins", "grant_types",
                     "access_token_lifetime", "id_token_lifetime",
                     "refresh_token_absolute_lifetime", "refresh_token_inactivity_lifetime",
+                    "deleted_at",
                 ])],
             },
             ["application_guard_delete", "application_guard_update", "tenant_row_guard"]),
@@ -629,7 +649,8 @@ public static class TableRegistry
             },
             new Dictionary<string, IReadOnlyList<ColumnGrant>>
             {
-                [Worker] = [new ColumnGrant(Select, ["tenant_id"])],
+                // Story 3.5: a deleted Application's purge deletes its secrets by their Application.
+                [Worker] = [new ColumnGrant(Select, ["tenant_id", "application_id"])],
                 [Admin] = [new ColumnGrant(Update, ["expires_at", "revoked_at"])],
             },
             SystemApplicationGuard),

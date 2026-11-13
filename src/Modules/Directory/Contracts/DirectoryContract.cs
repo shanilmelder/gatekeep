@@ -122,4 +122,23 @@ public static class DirectoryContract
     /// <c>application</c> rows. Sessions' and Authentication's purges must run first: their rows reference Applications.
     /// </summary>
     public static ITenantPurge TenantPurge { get; } = new DirectoryPurge();
+
+    /// <summary>
+    /// The context Tenant's deleted Applications' IDs (Story 3.5), whose rows the <c>directory.application.purge</c>
+    /// Operation removes: Sessions' and Authentication's purges take them, so neither reads Directory's tables. It only reads.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The context has no Tenant.</exception>
+    public static Task<IReadOnlyList<Guid>> DeletedApplicationIdsAsync(CommandContext context, CancellationToken cancellationToken) =>
+        DirectoryApplicationPurge.DeletedAsync(context, cancellationToken);
+
+    /// <summary>
+    /// Directory's purge of deleted Applications (Story 3.5, AD-30): deletes the context Tenant's <c>client_secret</c>
+    /// rows of <paramref name="applicationIds"/>, then those <c>application</c> rows, and of those only the ones whose
+    /// <c>deleted_at</c> is set: a visible or <c>system</c> Application is never deleted. Pass the list
+    /// <see cref="DeletedApplicationIdsAsync"/> read, after Sessions' and Authentication's purges of the same list: their
+    /// rows reference Applications. An empty list deletes nothing. A second run deletes nothing.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The context has no Tenant.</exception>
+    public static Task PurgeDeletedApplicationsAsync(CommandContext context, IReadOnlyCollection<Guid> applicationIds, CancellationToken cancellationToken) =>
+        DirectoryApplicationPurge.PurgeAsync(context, applicationIds, cancellationToken);
 }

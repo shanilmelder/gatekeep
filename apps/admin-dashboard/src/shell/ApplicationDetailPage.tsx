@@ -1,6 +1,7 @@
 import type { AdminTenant, ApplicationResponse } from '@gatekeep/api-client';
 import {
   Banner,
+  Button,
   ConfirmModal,
   CopyButton,
   EmptyState,
@@ -10,6 +11,7 @@ import {
   SkeletonRows,
   Tabs,
   useMessages,
+  useToast,
 } from '@gatekeep/ui/admin';
 import { useCallback, useEffect, useRef, useState, type MouseEvent } from 'react';
 import { navigate } from '../navigation';
@@ -22,6 +24,7 @@ import { failureOf } from './ApplicationsPage';
 import { useCapabilities } from './capabilities';
 import { kindText } from './CreateApplicationModal';
 import type { ShellRequest } from './CredentialsPage';
+import { DeleteApplicationModal } from './DeleteApplicationModal';
 import { ForbiddenPage } from './ForbiddenPage';
 import type { FreshAssertion } from './freshAssertion';
 import styles from './ApplicationsPage.module.css';
@@ -51,13 +54,17 @@ export interface ApplicationDetailPageProps {
  * name with its type badge, the client ID in the code type with Copy, then the tabs. Settings, the
  * default (Story 3.2), holds the URLs and grants; Credentials (Story 3.3) the client secrets a regular
  * web or machine-to-machine Application needs, which only a Tenant Owner creates, rotates and revokes;
- * single-page and native need none; Tokens (Story 3.4) the token lifetimes. A 404 says the Tenant has no such Application, a 403 is the
+ * single-page and native need none; Tokens (Story 3.4) the token lifetimes. Under the tabs, a caller with
+ * tenant.applications.manage gets the danger zone (Story 3.5): Delete opens the confirming modal, and a deletion
+ * goes back to the list with a toast. A 404 says the Tenant has no such Application, a 403 is the
  * forbidden page, and any other failure a banner with Retry.
  */
 export function ApplicationDetailPage({ request, fresh, tenantId, tenant, applicationId }: ApplicationDetailPageProps) {
   const messages = useMessages();
   const { has } = useCapabilities();
+  const toast = useToast();
   const [load, setLoad] = useState<Load>({ kind: 'loading' });
+  const [deleting, setDeleting] = useState(false);
   const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
@@ -237,6 +244,28 @@ export function ApplicationDetailPage({ request, fresh, tenantId, tenant, applic
           ]}
         />
       </div>
+      {has('tenant.applications.manage') && (
+        <section className={styles.danger} aria-labelledby="application-delete-heading" data-testid="application-danger-zone">
+          <div className={styles.dangerText}>
+            <h2 id="application-delete-heading">{messages.applicationDeleteTitle}</h2>
+            <p>{messages.applicationDeleteDescription}</p>
+          </div>
+          <Button variant="destructive" onClick={() => setDeleting(true)} data-testid="application-delete">
+            {messages.applicationDelete}
+          </Button>
+        </section>
+      )}
+      <DeleteApplicationModal
+        application={deleting ? ready : null}
+        request={request}
+        tenantId={tenantId}
+        onClose={() => setDeleting(false)}
+        onDeleted={() => {
+          setDeleting(false);
+          navigate(listHref);
+          toast(messages.applicationDeleted);
+        }}
+      />
       <ConfirmModal
         open={leaving !== null}
         onCancel={() => settleLeave(false)}

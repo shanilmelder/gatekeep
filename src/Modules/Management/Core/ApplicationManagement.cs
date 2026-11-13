@@ -3,6 +3,7 @@ using Gatekeep.Kernel.Persistence;
 using Gatekeep.Modules.Admins.Contracts;
 using Gatekeep.Modules.Directory.Contracts;
 using Gatekeep.Modules.Management.Contracts;
+using Gatekeep.Modules.Operations.Contracts;
 using Gatekeep.Modules.Tenancy.Contracts;
 
 namespace Gatekeep.Modules.Management.Core;
@@ -14,8 +15,11 @@ namespace Gatekeep.Modules.Management.Core;
 /// </summary>
 internal sealed class ApplicationManagement(IAuditAppender appender) : IApplicationManagement
 {
+    private const int MaxPurgeStartAttempts = 3;
+
     private readonly IDirectory _directory = DirectoryContract.CreateDirectory(appender, TimeProvider.System);
     private readonly ITenants _tenants = TenancyContract.CreateTenants(appender);
+    private readonly IOperations _operations = OperationsContract.CreateOperations(OperationsContract.ProductionOperationRegistry);
 
     public async Task<ApplicationPageResult> ListAsync(
         CommandContext tenantContext,
@@ -280,6 +284,74 @@ internal sealed class ApplicationManagement(IAuditAppender appender) : IApplicat
         }
 
         return Secrets(await _directory.RevokeClientSecretAsync(tenantContext, Actor.Admin(admin.AdminId), applicationId, secretId, CancellationToken.None));
+    }
+
+    public async Task<ApplicationDeleteResult> DeleteAsync(
+        CommandContext tenantContext,
+        CommandContext deploymentContext,
+        Principal principal,
+        TenantRoleGrant? grant,
+        Guid tenantId,
+        Guid applicationId,
+        CancellationToken cancellationToken)
+    {
+        RequireOwnContext(tenantContext, tenantId);
+        ArgumentNullException.ThrowIfNull(deploymentContext);
+        if (deploymentContext.TenantId is not null)
+        {
+            throw new InvalidOperationException("An Application's purge starts in a Deployment context.");
+        }
+
+        ArgumentNullException.ThrowIfNull(principal);
+
+        // 1. Authorization runs in the module too (AD-5), from the grant the checks read. Machine principals may hold it.
+        if (!AdminCapabilities.Allows(AdminCapabilities.TenantApplicationsManage, principal, grant, tenantId))
+        {
+            return new ApplicationDeleteResult(ApplicationDeleteStatus.Forbidden);
+        }
+
+        // 2. The deletion, its revocation and its events, in the Tenant's own context, to be committed together.
+        if (!await _directory.DeleteApplicationAsync(tenantContext, ActorOf(principal), applicationId, cancellationToken))
+        {
+            return new ApplicationDeleteResult(ApplicationDeleteStatus.NotFound);
+        }
+
+        // 3. The purge, in the Deployment context, which the caller commits only after the Tenant one: one Operation
+        // per Tenant serves every deletion.
+        return await StartPurgeAsync(deploymentContext, tenantId, cancellationToken) is { } operation
+            ? new ApplicationDeleteResult(ApplicationDeleteStatus.Started, TenantManagement.Managed(operation))
+            : new ApplicationDeleteResult(ApplicationDeleteStatus.PurgeNotStarted);
+    }
+
+    /// <summary>
+    /// Starts the Tenant's <c>directory.application.purge</c>, or finds the one already running or failed for it, whose
+    /// stages purge this deletion too. A start that loses the race to another is tried again a few times, as the other
+    /// may finish before it is read; null when every try lost.
+    /// </summary>
+    private async Task<OperationResource?> StartPurgeAsync(CommandContext context, Guid tenantId, CancellationToken cancellationToken)
+    {
+        for (var attempt = 0; attempt < MaxPurgeStartAttempts; attempt++)
+        {
+            try
+            {
+                return await _operations.StartAsync(
+                    context,
+                    OperationsContract.ApplicationPurgeOperation,
+                    tenantId,
+                    [.. OperationsContract.ApplicationPurgeStages.Select(stage => new OperationStepPlan(stage, tenantId))],
+                    cancellationToken);
+            }
+            catch (OperationAlreadyActiveException)
+            {
+                // The caller's transaction stays usable: read the active one, which may have finished meanwhile.
+                if (await _operations.FindActiveAsync(context, OperationsContract.ApplicationPurgeOperation, tenantId, cancellationToken) is { } active)
+                {
+                    return active;
+                }
+            }
+        }
+
+        return null;
     }
 
     private static ApplicationSecretsResult Secrets(ClientSecretWrite write) => new()

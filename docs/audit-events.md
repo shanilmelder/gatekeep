@@ -29,6 +29,7 @@ Every audit type code Gatekeep writes, declared in its module's contract. Codes 
 | `bootstrap.token.issued` | Admins | Success | gatekeep init issued the first one-time bootstrap token. It expires 15 minutes after issue. Holds no token or hash. | None |
 | `bootstrap.token.reissued` | Admins | Success | gatekeep init reissued the bootstrap token, voiding the previous one. It expires 15 minutes after issue. Holds no token or hash. | None |
 | `directory.application.created` | Directory | Success | An Application was created. Names the Application only: no client secret is created with it, and any secret is stored only as its hash. | None |
+| `directory.application.deleted` | Directory | Success | An Application was deleted: hidden at once, its secrets, refresh tokens and grants revoked. Access tokens it holds stay valid until they expire. Names the Application only. | None |
 | `directory.application.prod_callback_added` | Directory | Success | A callback URL was added to an Application in a Prod Tenant, after a fresh assertion. Names the Application only, never the URL. | None |
 | `directory.application.updated` | Directory | Success | An Application's callback, logout or web origin URLs or its grant types were changed. Names the Application only, never a URL. A save that changes nothing writes no event. | None |
 | `directory.client_secret.created` | Directory | Success | A client secret was created for an Application. Names the Application only: the secret is shown once to its creator and stored only as its hash. | None |

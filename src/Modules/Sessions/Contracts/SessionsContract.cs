@@ -48,4 +48,13 @@ public static class SessionsContract
     /// <c>authorization</c>, then <c>user_session</c> rows.
     /// </summary>
     public static ITenantPurge TenantPurge { get; } = new SessionsPurge();
+
+    /// <summary>
+    /// Sessions' purge of deleted Applications (Story 3.5, AD-30): deletes the context Tenant's <c>token</c> rows of
+    /// <paramref name="applicationIds"/> or of their Token Families, then those <c>authorization</c> rows. It ends no
+    /// Session. Directory names the deleted Applications; an empty list deletes nothing. A second run deletes nothing.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The context has no Tenant.</exception>
+    public static Task PurgeApplicationsAsync(CommandContext context, IReadOnlyCollection<Guid> applicationIds, CancellationToken cancellationToken) =>
+        SessionsApplicationPurge.PurgeAsync(context, applicationIds, cancellationToken);
 }

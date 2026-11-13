@@ -65,4 +65,13 @@ public static class AuthenticationContract
     /// <c>signin_transaction</c> and <c>tenant_attempt</c> rows.
     /// </summary>
     public static ITenantPurge TenantPurge { get; } = new AuthenticationPurge();
+
+    /// <summary>
+    /// Authentication's purge of deleted Applications (Story 3.5, AD-30): deletes the context Tenant's
+    /// <c>signin_transaction</c> rows of <paramref name="applicationIds"/>. Directory names the deleted Applications; an
+    /// empty list deletes nothing. A second run deletes nothing.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The context has no Tenant.</exception>
+    public static Task PurgeApplicationsAsync(CommandContext context, IReadOnlyCollection<Guid> applicationIds, CancellationToken cancellationToken) =>
+        AuthenticationPurge.PurgeApplicationsAsync(context, applicationIds, cancellationToken);
 }

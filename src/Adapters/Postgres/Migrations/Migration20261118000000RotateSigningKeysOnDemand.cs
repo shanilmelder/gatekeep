@@ -16,8 +16,8 @@ namespace Gatekeep.Adapters.Postgres.Migrations;
 /// It changes no earlier migration.
 /// </summary>
 [DbContext(typeof(MigrationsContext))]
-[Migration("20261117000000_RotateSigningKeysOnDemand")]
-public sealed class Migration20261117000000RotateSigningKeysOnDemand : Migration
+[Migration("20261118000000_RotateSigningKeysOnDemand")]
+public sealed class Migration20261118000000RotateSigningKeysOnDemand : Migration
 {
     protected override void Up(MigrationBuilder migrationBuilder)
     {

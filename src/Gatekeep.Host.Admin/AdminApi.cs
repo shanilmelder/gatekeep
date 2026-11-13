@@ -784,6 +784,32 @@ internal static class AdminApi
             .Produces<ApiProblem>(StatusCodes.Status409Conflict, AdminResponses.ProblemContentType)
             .Produces(StatusCodes.Status503ServiceUnavailable);
 
+        app.MapDelete("/api/v1/tenants/{tenantId}/applications/{applicationId}", static (HttpContext context, AdminApiServices services) => ApplicationsApi.DeleteAsync(context, services))
+            .WithMetadata(TenantApiEndpoint.Instance, new RequiresCapability(AdminCapabilities.TenantApplicationsManage))
+            .WithName("DeleteApplication")
+            .WithTags(TenantTag)
+            .WithSummary("Delete an Application: revoke its refresh tokens and grants now, and purge its rows by an Operation.")
+            .WithDescription(
+                "Tenant Editors and Owners, and machine principals that hold tenant.applications.manage; no fresh assertion and " +
+                "no body. In one transaction, in the Tenant's own scope, it marks the Application deleted, so every read and the " +
+                "token, authorize and revocation endpoints treat it as unknown at once; revokes its live client secrets; revokes " +
+                "every refresh token and grant of it through the one revocation path, writing sessions.access.revoked; and writes " +
+                "directory.application.deleted by the caller. Access tokens it already holds stay valid until they expire. Users " +
+                "aren't affected. There is no undelete. Then it starts the Tenant's directory.application.purge Operation, which " +
+                "removes the rows of every deleted Application of the Tenant, module by module: 202 with that Operation, and " +
+                "Location naming it under /api/v1/tenants/{tenantId}/operations. When one is already running or failed for the " +
+                "Tenant, it is that one. The deletion commits first and the purge's start after it; a failure before the deletion " +
+                "commits is 503 unavailable with nothing written, and one after it keeps the deletion, which the next deletion's " +
+                "Operation purges. An applicationId that isn't an app_ ID, names no Application of this Tenant, " +
+                "another Tenant's, one already deleted or the hidden system Application is the same 404 not_found, with nothing " +
+                "written.")
+            .Produces<OperationResponse>(StatusCodes.Status202Accepted)
+            .Produces(StatusCodes.Status401Unauthorized)
+            .Produces<ApiProblem>(StatusCodes.Status403Forbidden, AdminResponses.ProblemContentType)
+            .Produces<ApiProblem>(StatusCodes.Status404NotFound, AdminResponses.ProblemContentType)
+            .Produces<ApiProblem>(StatusCodes.Status409Conflict, AdminResponses.ProblemContentType)
+            .Produces(StatusCodes.Status503ServiceUnavailable);
+
         app.MapGet("/api/v1/tenants/{tenantId}/applications/{applicationId}/secrets", static (HttpContext context, AdminApiServices services) => ApplicationSecretsApi.ListAsync(context, services))
             .WithMetadata(TenantApiEndpoint.Instance, new RequiresCapability(AdminCapabilities.TenantConfigurationRead))
             .WithName("ListApplicationSecrets")
