@@ -465,7 +465,9 @@ public sealed class SessionTablesTests(PostgresFixture postgres)
 
         await using var scope = await TenantScope.BeginAsync(source, TenantA, Cancellation);
         await using var command = scope.CreateCommandContext().CreateCommand();
-        command.CommandText = $"SELECT 1 FROM \"{table}\" LIMIT 1";
+        // Every column: Story 3.5 gives gk_admin a column-level SELECT on token and "authorization"
+        // (the revocation's references only), which a bare SELECT 1 would pass.
+        command.CommandText = $"SELECT * FROM \"{table}\" LIMIT 1";
 
         var error = await Assert.ThrowsAsync<PostgresException>(() => command.ExecuteNonQueryAsync(Cancellation));
 
