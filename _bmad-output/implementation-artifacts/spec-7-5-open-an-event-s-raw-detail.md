@@ -230,3 +230,7 @@ Status: done
 **Residual risks:**
 - Opening an event's personal data (IP, email, User-Agent) isn't audited, which keeps Story 7.4's no-audit-of-Log-reads rule. Revisit this if a compliance regime needs access to personal data to be traceable.
 - A failed read of an earlier row can show its banner for one frame under a newly opened row. It carries no event data.
+- CI on PR #63 failed twice in `ApplicationsApiTests`, which this story doesn't touch, both times on host startup.
+  - **Cause of the HealthPort refusal:** `AdminHost` took its health and public ports from two back-to-back `HostProcess.FreePort()` calls, and each closes its probe before returning. The OS can hand back the same port twice, and `HostSettings` refuses a HealthPort that equals the PublicPort. The result is "Missing or unsafe settings: Gatekeep:HealthPort", the flake seen since Story 1.x.
+  - **Fix:** a new `HostProcess.FreePorts()` holds both probes open until both are chosen. `AdminHost`, `TenantHostBeforeBootstrapTests` and `HostStartupTests` use it.
+  - **Still possible:** the other failure, "address already in use", happens when another process takes a probed port before the host binds. That remains a rare race.
