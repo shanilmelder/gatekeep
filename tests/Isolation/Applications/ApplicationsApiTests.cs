@@ -27,7 +27,7 @@ public sealed class ApplicationsApiTests(PostgresFixture postgres)
 
     private const string Denied = "type_code = 'admin.access.denied'";
 
-    private static readonly string[] Members = ["callbackUrls", "clientId", "createdAt", "credentialRequired", "grantTypes", "id", "logoutUrls", "name", "type", "webOrigins"];
+    private static readonly string[] Members = ["accessTokenLifetime", "callbackUrls", "clientId", "createdAt", "credentialRequired", "grantTypes", "id", "idTokenLifetime", "logoutUrls", "name", "refreshTokenAbsoluteLifetime", "refreshTokenInactivityLifetime", "type", "webOrigins"];
 
     private static CancellationToken Cancellation => TestContext.Current.CancellationToken;
 

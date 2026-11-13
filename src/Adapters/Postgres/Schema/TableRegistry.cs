@@ -589,6 +589,7 @@ public static class TableRegistry
         // creation's completion, finding it by its kind first; the triggers refuse any edit of it, its
         // delete but with its Tenant's, and a secret naming it.
         // Story 3.2: Host.Admin's settings save updates an Application's URLs and grants, and nothing else.
+        // Story 3.4: its tokens save updates the four token lifetimes too.
         new(
             "application",
             TableClass.Tenant,
@@ -603,7 +604,11 @@ public static class TableRegistry
             new Dictionary<string, IReadOnlyList<ColumnGrant>>
             {
                 [Worker] = [new ColumnGrant(Select, ["tenant_id", "id", "kind"])],
-                [Admin] = [new ColumnGrant(Update, ["redirect_uris", "post_logout_redirect_uris", "web_origins", "grant_types"])],
+                [Admin] = [new ColumnGrant(Update, [
+                    "redirect_uris", "post_logout_redirect_uris", "web_origins", "grant_types",
+                    "access_token_lifetime", "id_token_lifetime",
+                    "refresh_token_absolute_lifetime", "refresh_token_inactivity_lifetime",
+                ])],
             },
             ["application_guard_delete", "application_guard_update", "tenant_row_guard"]),
         // Story 3.3: Host.Admin's rotation sets a secret's expiry and its revocation its revoked_at, and

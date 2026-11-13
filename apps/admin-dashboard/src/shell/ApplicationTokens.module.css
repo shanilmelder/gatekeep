@@ -1,0 +1,80 @@
+/*
+ * An Application's Tokens tab (Story 3.4): the Access token, ID token and Refresh tokens cards on the sf
+ * surface, as the Settings tab's, each lifetime a seconds input with its duration beside it, then Save.
+ * Tokens only.
+ */
+
+.form {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--gk-space-16);
+  min-width: 0;
+  margin: 0;
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  background: var(--gk-color-sf);
+  border: 1px solid var(--gk-color-bd);
+  border-radius: var(--gk-radius-card);
+}
+
+.cardHeader {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gk-space-4);
+  padding: var(--gk-space-12) var(--gk-space-16);
+  border-bottom: 1px solid var(--gk-color-bd);
+}
+
+.cardHeader > h2 {
+  margin: 0;
+  font: var(--gk-font-section);
+  font-weight: var(--gk-font-section-weight);
+}
+
+.cardHeader > p {
+  margin: 0;
+  font: var(--gk-font-small);
+  color: var(--gk-color-tx2);
+}
+
+.cardBody {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr));
+  gap: var(--gk-space-16);
+  padding: var(--gk-space-16);
+  min-width: 0;
+}
+
+.input {
+  display: flex;
+  align-items: center;
+  gap: var(--gk-space-8);
+  min-width: 0;
+}
+
+.input > input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.unit {
+  flex: 0 0 auto;
+  font: var(--gk-font-small);
+  color: var(--gk-color-tx2);
+  white-space: nowrap;
+}
+
+.note {
+  margin: 0;
+  color: var(--gk-color-tx2);
+}
+
+.actions {
+  display: flex;
+  justify-content: flex-start;
+}

@@ -96,8 +96,9 @@ internal static class ProtocolServer
 
             // Refresh tokens are {tenantPublicId}.{random} reference tokens, like codes, rotated on every use
             // (rolling, OpenIddict's default, kept) with no leeway: a rotated one presented again is reuse
-            // (AD-13). Each expires 7 days after its issue; CapRefreshTokenLifetime keeps it within its
-            // family's 30-day absolute end.
+            // (AD-13). The global lifetime is the Deployment default (7 days); ApplyApplicationLifetimes sets
+            // each one's from its Application (Story 3.4), and CapRefreshTokenLifetime keeps it within its
+            // family's absolute end.
             options.UseReferenceRefreshTokens();
             options.SetRefreshTokenLifetime(SecurityLimits.RefreshTokenInactivityLifetime);
             options.SetRefreshTokenReuseLeeway(TimeSpan.Zero);
@@ -109,8 +110,9 @@ internal static class ProtocolServer
                 server.ResponseModes.Remove(ResponseModes.Fragment);
             });
 
-            // Access and ID tokens are JWS, unencrypted (AD-8), for the §5.2 default lifetimes; a code
-            // lives 60 seconds.
+            // Access and ID tokens are JWS, unencrypted (AD-8). The global lifetimes are the §5.2 defaults;
+            // ApplyApplicationLifetimes issues each token for its Application's own (Story 3.4). A code lives
+            // 60 seconds.
             options.DisableAccessTokenEncryption();
             options.SetAccessTokenLifetime(SecurityLimits.DefaultAccessTokenLifetime);
             options.SetIdentityTokenLifetime(SecurityLimits.DefaultIdentityTokenLifetime);
@@ -148,6 +150,9 @@ internal static class ProtocolServer
             options.AddEventHandler(RefuseUngrantedRefreshScopes.Descriptor);
             options.AddEventHandler(SignInRefresh.Descriptor);
             options.AddEventHandler(RefuseLateRefreshes.Descriptor);
+
+            // Every token of every grant for its Application's lifetimes (Story 3.4), then the refresh cap.
+            options.AddEventHandler(ApplyApplicationLifetimes.Descriptor);
             options.AddEventHandler(CapRefreshTokenLifetime.Descriptor);
             options.AddEventHandler(ReportAccessTokenLifetime.Descriptor);
             options.AddEventHandler(EndTokenTransaction<ApplyTokenResponseContext>.Descriptor);

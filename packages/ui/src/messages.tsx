@@ -503,6 +503,8 @@ export interface Messages {
   applicationTabsLabel: string;
   applicationTabSettings: string;
   applicationTabCredentials: string;
+  /** The Tokens tab (Story 3.4). */
+  applicationTabTokens: string;
   /** The Application URLs card: its title, each field, and the helper with URLs and without. */
   applicationUrlsTitle: string;
   applicationCallbackUrls: string;
@@ -580,6 +582,36 @@ export interface Messages {
   applicationSecretRevoked: string;
   /** A secret change that failed: nothing changed. */
   applicationSecretFailed: string;
+  /** The Tokens tab's cards (Story 3.4): access token, ID token, and refresh tokens with their description. */
+  applicationTokensAccessTitle: string;
+  applicationTokensIdTitle: string;
+  applicationTokensRefreshTitle: string;
+  applicationTokensRefreshDescription: string;
+  /** Each lifetime field's label. */
+  applicationTokensAccessLifetime: string;
+  applicationTokensIdLifetime: string;
+  applicationTokensAbsoluteLifetime: string;
+  applicationTokensInactivityLifetime: string;
+  /** The unit beside each input, and its hint once the value reads as a duration. {duration} is that duration. */
+  applicationTokensSeconds: string;
+  applicationTokensSecondsHint: string;
+  /** Each field's helper: its default. {duration} is the default as a duration. */
+  applicationTokensDefault: string;
+  /** A lifetime over its hard limit, in the browser or from the server. {limit} is the limit as a duration. */
+  applicationTokensMaximum: string;
+  /** A lifetime under 1 second, or not a whole number of seconds. */
+  applicationTokensMinimum: string;
+  applicationTokensNotWhole: string;
+  /** A duration's units, one and many; {count} is the number. Each further unit joins with durationJoin. */
+  durationDay: string;
+  durationDays: string;
+  durationHour: string;
+  durationHours: string;
+  durationMinute: string;
+  durationMinutes: string;
+  durationSecond: string;
+  durationSeconds: string;
+  durationJoin: string;
 }
 
 export const defaultMessages: Readonly<Messages> = Object.freeze({
@@ -878,6 +910,7 @@ export const defaultMessages: Readonly<Messages> = Object.freeze({
   applicationTabsLabel: 'Application sections',
   applicationTabSettings: 'Settings',
   applicationTabCredentials: 'Credentials',
+  applicationTabTokens: 'Tokens',
   applicationUrlsTitle: 'Application URLs',
   applicationCallbackUrls: 'Allowed Callback URLs',
   applicationLogoutUrls: 'Allowed Logout URLs',
@@ -938,6 +971,30 @@ export const defaultMessages: Readonly<Messages> = Object.freeze({
   applicationSecretEnded: 'Old secret ended',
   applicationSecretRevoked: 'Secret revoked',
   applicationSecretFailed: "Couldn't change the client secret. Nothing was changed.",
+  applicationTokensAccessTitle: 'Access token',
+  applicationTokensIdTitle: 'ID token',
+  applicationTokensRefreshTitle: 'Refresh tokens',
+  applicationTokensRefreshDescription:
+    'Refresh tokens rotate on every use, and a reused one revokes its whole family. None outlives the absolute lifetime from sign-in.',
+  applicationTokensAccessLifetime: 'Access token lifetime',
+  applicationTokensIdLifetime: 'ID token lifetime',
+  applicationTokensAbsoluteLifetime: 'Absolute lifetime',
+  applicationTokensInactivityLifetime: 'Inactivity lifetime',
+  applicationTokensSeconds: 'seconds',
+  applicationTokensSecondsHint: 'seconds · {duration}',
+  applicationTokensDefault: 'Default: {duration}',
+  applicationTokensMaximum: 'Maximum is {limit}.',
+  applicationTokensMinimum: 'Use at least 1 second.',
+  applicationTokensNotWhole: 'Enter a whole number of seconds.',
+  durationDay: '1 day',
+  durationDays: '{count} days',
+  durationHour: '1 hour',
+  durationHours: '{count} hours',
+  durationMinute: '1 minute',
+  durationMinutes: '{count} minutes',
+  durationSecond: '1 second',
+  durationSeconds: '{count} seconds',
+  durationJoin: '{first} {second}',
 });
 
 /**

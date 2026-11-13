@@ -418,6 +418,38 @@ describe('api-client', () => {
     assert.deepEqual(result.problem?.errors, [{ field: 'callbackUrls', index: 0, reason: 'not_absolute' }]);
   });
 
+  it("saves an Application's token lifetimes with both IDs encoded, the page Tenant and the CSRF header, and keeps each limit", async () => {
+    const { calls, fetch } = fakeFetch(
+      400,
+      JSON.stringify({
+        code: 'application_invalid',
+        traceId: 't',
+        errors: [
+          { field: 'accessTokenLifetime', index: null, reason: 'above_maximum', maximum: 3600 },
+          { field: 'idTokenLifetime', index: null, reason: 'below_minimum' },
+          { field: 'refreshTokenAbsoluteLifetime', index: null, reason: 'above_maximum', maximum: 'lots' },
+        ],
+      }),
+      'application/problem+json',
+    );
+    const client = createApiClient({ fetch, csrfToken: () => 'csrf-1', pageTenant: () => 'ten_a' });
+    const body = { accessTokenLifetime: 3601, idTokenLifetime: 0, refreshTokenAbsoluteLifetime: 2592000, refreshTokenInactivityLifetime: 604800 };
+
+    const result = await client.updateApplicationTokens('ten_a', 'app_b/c', body);
+
+    assert.equal(calls[0].input, '/api/v1/tenants/ten_a/applications/app_b%2Fc/tokens');
+    assert.equal(calls[0].init.method, 'PUT');
+    assert.equal(calls[0].init.body, JSON.stringify(body));
+    assert.equal(calls[0].init.headers[CSRF_HEADER], 'csrf-1');
+    assert.equal(calls[0].init.headers[TENANT_HEADER], 'ten_a');
+    assert.equal(result.ok, false);
+    assert.deepEqual(result.problem?.errors, [
+      { field: 'accessTokenLifetime', index: null, reason: 'above_maximum', maximum: 3600 },
+      { field: 'idTokenLifetime', index: null, reason: 'below_minimum' },
+      { field: 'refreshTokenAbsoluteLifetime', index: null, reason: 'above_maximum' },
+    ]);
+  });
+
   it("lists, creates and revokes an Application's secrets with every ID encoded, the page Tenant and the CSRF header", async () => {
     const created = { secret: 'ten_a.value', items: [{ id: 'sec_n', createdAt: '2026-11-13T00:00:00.000Z', expiresAt: null }] };
     const { calls, fetch } = fakeFetch(201, JSON.stringify(created));

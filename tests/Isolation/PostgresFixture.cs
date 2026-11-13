@@ -27,6 +27,10 @@ public sealed class PostgresFixture : IAsyncLifetime
 
     private readonly PostgreSqlContainer _container = new PostgreSqlBuilder(Image)
         .WithDatabase(ClusterDatabase)
+        // Docker's default /dev/shm is 64 MB. Parallel tests across thousands of cloned
+        // databases outgrow it, and PostgreSQL then refuses connections with 53100
+        // "could not resize shared memory segment".
+        .WithCreateParameterModifier(parameters => (parameters.HostConfig ??= new()).ShmSize = 1L << 30)
         .Build();
 
     // PostgreSQL refuses to clone a template while another clone holds it.
@@ -60,7 +64,18 @@ public sealed class PostgresFixture : IAsyncLifetime
     public async ValueTask DisposeAsync()
     {
         _cloneLock.Dispose();
-        await _container.DisposeAsync();
+        try
+        {
+            await _container.DisposeAsync();
+        }
+        catch (OperationCanceledException exception)
+        {
+            // Removing a container that holds thousands of test databases can outlast the
+            // Docker client's request timeout. Every test has run by now, and Testcontainers'
+            // reaper (or the throwaway CI runner) removes the container, so a slow removal
+            // is reported here and never fails the run.
+            Console.Error.WriteLine($"PostgresFixture: removing the container timed out ({exception.GetType().Name}); it is left for the reaper.");
+        }
     }
 
     public Task<string> NewMigratedDatabaseAsync() => CloneAsync(Migrated);

@@ -225,6 +225,15 @@ public class CapabilityRuleTests
         Assert.Equal(
             ClientSecretRoutes.Order(StringComparer.Ordinal),
             operations.Where(o => Fresh(o.Value)?.Action == "tenant.client_secrets.manage").Select(o => o.Key).Order(StringComparer.Ordinal));
+
+        // Story 3.4: the tokens save is tenant.applications.manage, open to machine principals, with no fresh assertion.
+        const string Tokens = "put /api/v1/tenants/{tenantId}/applications/{applicationId}/tokens";
+        Assert.Null(Fresh(operations[Tokens]));
+        var access = operations[Tokens].GetProperty("x-gatekeep-access");
+        Assert.Equal("capability", access.GetProperty("kind").GetString());
+        Assert.Equal("tenant.applications.manage", access.GetProperty("capability").GetString());
+        Assert.True(access.GetProperty("machineAllowed").GetBoolean());
+        Assert.Equal("never", access.GetProperty("freshAssertion").GetString());
     }
 
     private static readonly string[] ClientSecretRoutes =

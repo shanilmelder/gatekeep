@@ -179,12 +179,14 @@ public static class SecurityLimits
     /// <summary>
     /// The default lifetime of an access token: 15 minutes (PRD §5.2, Story 2.5), never more than
     /// <see cref="HardSignedTokenLifetime"/>. A Client Credentials token carries it as <c>expires_in</c> 900.
+    /// From Story 3.4 each Application sets its own within the hard limit, starting from this.
     /// </summary>
     public static readonly TimeSpan DefaultAccessTokenLifetime = TimeSpan.FromMinutes(15);
 
     /// <summary>
     /// The default lifetime of an ID token: 15 minutes (PRD §5.2, Story 2.9), the same as an access
-    /// token's, never more than <see cref="HardSignedTokenLifetime"/>.
+    /// token's, never more than <see cref="HardSignedTokenLifetime"/>. From Story 3.4 each Application sets
+    /// its own within the hard limit, starting from this.
     /// </summary>
     public static readonly TimeSpan DefaultIdentityTokenLifetime = TimeSpan.FromMinutes(15);
 
@@ -198,7 +200,7 @@ public static class SecurityLimits
     /// The default absolute lifetime of a Token Family's refresh tokens: 30 days from the family's
     /// authorization, made by its code flow (PRD §5.2, AD-13, Story 2.10). No refresh token of the
     /// family outlives it, however often it rotates. Never more than <see cref="HardRefreshTokenAbsoluteLifetime"/>;
-    /// Story 3.4 makes it configurable within that.
+    /// from Story 3.4 each Application sets its own within that, starting from this.
     /// </summary>
     public static readonly TimeSpan RefreshTokenAbsoluteLifetime = TimeSpan.FromDays(30);
 
@@ -208,7 +210,8 @@ public static class SecurityLimits
     /// <summary>
     /// The default inactivity lifetime of a refresh token: 7 days from its issue (PRD §5.2, Story 2.10).
     /// Each use rotates it, so a family left unused that long ends. Never more than
-    /// <see cref="HardRefreshTokenInactivityLifetime"/>; Story 3.4 makes it configurable within that.
+    /// <see cref="HardRefreshTokenInactivityLifetime"/>; from Story 3.4 each Application sets its own within that,
+    /// starting from this.
     /// </summary>
     public static readonly TimeSpan RefreshTokenInactivityLifetime = TimeSpan.FromDays(7);
 

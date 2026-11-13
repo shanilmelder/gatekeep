@@ -49,7 +49,8 @@ export type CreateApplicationRequest = components['schemas']['CreateApplicationR
 /** An Application's type (Story 3.1): single-page, regular web, native or machine-to-machine. */
 export type ApplicationType = ApplicationResponse['type'];
 export type ApplicationSettingsRequest = components['schemas']['ApplicationSettingsRequest'];
-/** One refused line or field of a settings save (Story 3.2). */
+export type ApplicationTokensRequest = components['schemas']['ApplicationTokensRequest'];
+/** One refused line or field of a settings save (Story 3.2) or tokens save (Story 3.4), with the limit in seconds on above_maximum. */
 export type ApiProblemError = components['schemas']['ApiProblemError'];
 /** A grant type an Application can hold (Story 3.2). */
 export type ApplicationGrantType = ApplicationResponse['grantTypes'][number];
@@ -148,7 +149,12 @@ export function parseProblem(body: unknown): ApiProblem | null {
   if (typeof code !== 'string' || code === '') return null;
   const problem: ApiProblem = { code: code as ApiProblem['code'], traceId: typeof traceId === 'string' ? traceId : '' };
   if (Array.isArray(errors)) {
-    problem.errors = errors.filter(isProblemError).map(({ field, index, reason }) => ({ field, index, reason }));
+    // A tokens save's above_maximum carries the limit in seconds (Story 3.4); nothing else is kept.
+    problem.errors = errors
+      .filter(isProblemError)
+      .map(({ field, index, reason, maximum }) =>
+        typeof maximum === 'number' && Number.isInteger(maximum) && maximum > 0 ? { field, index, reason, maximum } : { field, index, reason },
+      );
   }
   return problem;
 }
@@ -346,6 +352,17 @@ export function createApiClient(options: ApiClientOptions = {}) {
     updateApplicationSettings: (tenantId: string, applicationId: string, body: ApplicationSettingsRequest) =>
       request(
         `/api/v1/tenants/${encodeURIComponent(tenantId)}/applications/${encodeURIComponent(applicationId)}/settings` as '/api/v1/tenants/{tenantId}/applications/{applicationId}/settings',
+        'put',
+        body,
+      ),
+    /**
+     * Saves an Application's four token lifetimes (Story 3.4), in whole seconds: a full replace. Tenant Editors and
+     * Owners; no fresh assertion. A value over its hard limit is 400 application_invalid with errors naming the
+     * field, above_maximum and the limit as maximum. Both IDs go into the path encoded.
+     */
+    updateApplicationTokens: (tenantId: string, applicationId: string, body: ApplicationTokensRequest) =>
+      request(
+        `/api/v1/tenants/${encodeURIComponent(tenantId)}/applications/${encodeURIComponent(applicationId)}/tokens` as '/api/v1/tenants/{tenantId}/applications/{applicationId}/tokens',
         'put',
         body,
       ),

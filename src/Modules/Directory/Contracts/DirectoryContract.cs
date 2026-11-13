@@ -74,6 +74,14 @@ public static class DirectoryContract
         ApplicationSettingsRules.Check(kind, settings);
 
     /// <summary>
+    /// Every lifetime in <paramref name="lifetimes"/> outside its limits (Story 3.4): under 1 second is
+    /// <see cref="ApplicationLifetimeReasons.BelowMinimum"/>, over its <c>SecurityLimits</c> hard limit
+    /// <see cref="ApplicationLifetimeReasons.AboveMaximum"/> with that limit in seconds. Empty when the lifetimes may be saved.
+    /// </summary>
+    public static IReadOnlyList<ApplicationLifetimeProblem> CheckLifetimes(ApplicationLifetimes lifetimes) =>
+        ApplicationLifetimeRules.Check(lifetimes);
+
+    /// <summary>
     /// Whether <paramref name="url"/> has a custom scheme, such as <c>com.example.app:/callback</c>: one that
     /// isn't <c>http</c> or <c>https</c> (Story 3.2). Only a <c>native</c> Application may register one, and
     /// a Prod Tenant's needs an acknowledgement.

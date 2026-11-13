@@ -19,9 +19,11 @@ namespace Gatekeep.Modules.Protocol.Core;
 /// <item>A rotated token presented again revokes its whole Token Family: OpenIddict's <c>ValidateTokenEntry</c>
 /// calls the token store, which calls <c>ISessions.RevokeAccessAsync</c>.</item>
 /// </list>
-/// Two limits apply. Each refresh token expires <see cref="SecurityLimits.RefreshTokenInactivityLifetime"/>
-/// after its issue. None of a family outlives the family's creation plus
-/// <see cref="SecurityLimits.RefreshTokenAbsoluteLifetime"/>.
+/// Two limits apply, each the client Application's own from Story 3.4 (by default
+/// <see cref="SecurityLimits.RefreshTokenInactivityLifetime"/> and <see cref="SecurityLimits.RefreshTokenAbsoluteLifetime"/>).
+/// Each refresh token expires the inactivity lifetime after its issue. None of a family outlives the family's
+/// creation plus the absolute lifetime, read at each refresh: shortening it ends older families at once, and the
+/// family keeps its original creation.
 /// <para>
 /// <b>A refresh naming scopes</b> gets only those, from what its family was granted. One that leaves out
 /// <c>offline_access</c>, such as <c>scope=openid</c>, gets new access and ID tokens and no new refresh
@@ -55,8 +57,15 @@ internal static class RefreshTokens
 
     public const string NoLongerValidDescription = "The refresh token is no longer valid.";
 
-    /// <summary>When no refresh token of <paramref name="family"/> may be valid any more.</summary>
-    public static DateTimeOffset AbsoluteEnd(TokenFamily family) => family.CreatedAt + SecurityLimits.RefreshTokenAbsoluteLifetime;
+    /// <summary>
+    /// When no refresh token of <paramref name="family"/> may be valid any more: its creation plus its client
+    /// Application's <paramref name="absoluteLifetime"/> (Story 3.4), as it stands now.
+    /// </summary>
+    public static DateTimeOffset AbsoluteEnd(TokenFamily family, TimeSpan absoluteLifetime)
+    {
+        ArgumentNullException.ThrowIfNull(family);
+        return family.CreatedAt + absoluteLifetime;
+    }
 
     public static Guid? AuthorizationId(ClaimsPrincipal? principal) =>
         Guid.TryParse(principal?.GetAuthorizationId(), out var id) && id != Guid.Empty ? id : null;
@@ -100,8 +109,8 @@ internal sealed class RefuseUngrantedRefreshScopes : IOpenIddictServerHandler<Va
 /// <list type="bullet">
 /// <item>Reading the family share-locks its authorization until the request ends (see <see cref="RefreshTokens"/>).</item>
 /// <item>The family must still be valid.</item>
-/// <item>It must be within its absolute limit, the family's creation plus
-/// <see cref="SecurityLimits.RefreshTokenAbsoluteLifetime"/>. Past it the refresh is <c>invalid_grant</c>,
+/// <item>It must be within its absolute limit, the family's creation plus its client Application's absolute
+/// lifetime as it stands now (Story 3.4). Past it the refresh is <c>invalid_grant</c>,
 /// whatever the presented token's own expiry says, and nothing is revoked or burnt.</item>
 /// <item>A Tenant with no <c>current</c> Signing Key is <c>server_error</c>, as for Client Credentials, and
 /// nothing is redeemed.</item>
@@ -114,7 +123,8 @@ internal sealed class RefuseUngrantedRefreshScopes : IOpenIddictServerHandler<Va
 /// <item>It carries no <c>nonce</c>, so the new ID token has none (OIDC Core §12.2).</item>
 /// </list>
 /// </summary>
-internal sealed class SignInRefresh(TokenRequestTransaction transaction, TokenEndpointServices services)
+internal sealed class SignInRefresh(
+    TokenRequestTransaction transaction, TokenEndpointServices services, IOpenIddictApplicationManager applications)
     : IOpenIddictServerHandler<HandleTokenRequestContext>
 {
     public static OpenIddictServerHandlerDescriptor Descriptor { get; } =
@@ -153,7 +163,9 @@ internal sealed class SignInRefresh(TokenRequestTransaction transaction, TokenEn
             return;
         }
 
-        if (services.Time.GetUtcNow() >= RefreshTokens.AbsoluteEnd(family))
+        var lifetimes = await ApplicationTokenLifetimes.ForClientAsync(
+            context.Transaction, applications, context.ClientId ?? context.Request.ClientId, context.CancellationToken);
+        if (services.Time.GetUtcNow() >= RefreshTokens.AbsoluteEnd(family, lifetimes.RefreshTokenAbsolute))
         {
             services.Logger?.LogInformation("A refresh was refused: its Token Family is past its absolute lifetime.");
             context.Reject(Errors.InvalidGrant, RefreshTokens.NoLongerValidDescription);
@@ -244,27 +256,27 @@ internal sealed class RefuseLateRefreshes(TokenRequestTransaction transaction, T
 
 /// <summary>
 /// Prepares every new refresh token of a family (Story 2.10, AD-13), on a code exchange or a refresh alike,
-/// right after OpenIddict's <c>PrepareRefreshTokenPrincipal</c>.
+/// right after <see cref="ApplyApplicationLifetimes"/>.
 /// <list type="bullet">
-/// <item>OpenIddict sets its expiry to <see cref="SecurityLimits.RefreshTokenInactivityLifetime"/> from now.
-/// This cuts it to the family's creation plus <see cref="SecurityLimits.RefreshTokenAbsoluteLifetime"/> if
-/// that comes first. So no refresh token of a family outlives the family's absolute end, however often it
-/// rotates; OpenIddict has no family-wide lifetime of its own.</item>
+/// <item>That sets its expiry to the client Application's inactivity lifetime from now (Story 3.4). This cuts
+/// it to the family's creation plus the Application's absolute lifetime if that comes first. So no refresh
+/// token of a family outlives the family's absolute end, however often it rotates; OpenIddict has no
+/// family-wide lifetime of its own.</item>
 /// <item>The absolute end bounds refresh tokens only. Access and ID tokens issued near it keep their full
-/// §5.2 lifetime, <see cref="SecurityLimits.DefaultAccessTokenLifetime"/>, and can outlive it by that
-/// much.</item>
+/// lifetime, the Application's, and can outlive it by that much.</item>
 /// <item>It drops the code's <c>nonce</c>, which OpenIddict would otherwise carry into every refresh token
 /// and every refreshed ID token. A refreshed ID token has no <c>nonce</c> (OIDC Core §12.2).</item>
 /// </list>
 /// </summary>
-internal sealed class CapRefreshTokenLifetime(TokenRequestTransaction transaction, TokenEndpointServices services)
+internal sealed class CapRefreshTokenLifetime(
+    TokenRequestTransaction transaction, TokenEndpointServices services, IOpenIddictApplicationManager applications)
     : IOpenIddictServerHandler<ProcessSignInContext>
 {
     public static OpenIddictServerHandlerDescriptor Descriptor { get; } =
         OpenIddictServerHandlerDescriptor.CreateBuilder<ProcessSignInContext>()
             .AddFilter<RequireRefreshTokenGenerated>()
             .UseScopedHandler<CapRefreshTokenLifetime>()
-            .SetOrder(OpenIddictServerHandlers.PrepareRefreshTokenPrincipal.Descriptor.Order + 500)
+            .SetOrder(ApplyApplicationLifetimes.Descriptor.Order + 500)
             .SetType(OpenIddictServerHandlerType.Custom)
             .Build();
 
@@ -281,7 +293,9 @@ internal sealed class CapRefreshTokenLifetime(TokenRequestTransaction transactio
                 : null)
             ?? throw new InvalidOperationException("A refresh token is issued only in a Token Family.");
 
-        var end = RefreshTokens.AbsoluteEnd(family);
+        var lifetimes = await ApplicationTokenLifetimes.ForClientAsync(
+            context.Transaction, applications, context.ClientId ?? context.Request?.ClientId, context.CancellationToken);
+        var end = RefreshTokens.AbsoluteEnd(family, lifetimes.RefreshTokenAbsolute);
         if (principal.GetExpirationDate() is not { } expires || expires > end)
         {
             principal.SetExpirationDate(end);

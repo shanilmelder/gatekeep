@@ -151,3 +151,87 @@ export function takeSecretCreate(applicationId: string): boolean {
 export function secretCreateRequested(applicationId: string): boolean {
   return pendingSecretCreates.has(applicationId);
 }
+
+// Token lifetimes (Story 3.4): each field's default and hard limit in seconds, as the server's limits
+// file holds them, which fields a type shows, the browser's check before a save, and a duration's parts
+// for its human hint. Feedback only: the server checks every value again and decides.
+
+/** A lifetime field, as the API names it. */
+export type LifetimeField = 'accessTokenLifetime' | 'idTokenLifetime' | 'refreshTokenAbsoluteLifetime' | 'refreshTokenInactivityLifetime';
+
+/** The fields in the order the Tokens tab shows them. */
+export const LIFETIME_FIELDS: readonly LifetimeField[] = Object.freeze([
+  'accessTokenLifetime',
+  'idTokenLifetime',
+  'refreshTokenAbsoluteLifetime',
+  'refreshTokenInactivityLifetime',
+]);
+
+/** Each field's Deployment default: 15 minutes, 15 minutes, 30 days and 7 days. */
+export const LIFETIME_DEFAULTS: Readonly<Record<LifetimeField, number>> = Object.freeze({
+  accessTokenLifetime: 900,
+  idTokenLifetime: 900,
+  refreshTokenAbsoluteLifetime: 2_592_000,
+  refreshTokenInactivityLifetime: 604_800,
+});
+
+/** Each field's hard limit (PRD §5.2): 1 hour, 1 hour, 90 days and 30 days. */
+export const LIFETIME_MAXIMUMS: Readonly<Record<LifetimeField, number>> = Object.freeze({
+  accessTokenLifetime: 3_600,
+  idTokenLifetime: 3_600,
+  refreshTokenAbsoluteLifetime: 7_776_000,
+  refreshTokenInactivityLifetime: 2_592_000,
+});
+
+/** The shortest lifetime: 1 second. */
+export const LIFETIME_MINIMUM = 1;
+
+/** The fields an Application of `kind` shows: machine-to-machine gets only an access token, so only that. */
+export function lifetimeFields(kind: ApplicationKind): readonly LifetimeField[] {
+  return kind === 'machine' ? ['accessTokenLifetime'] : LIFETIME_FIELDS;
+}
+
+export type LifetimeCheck =
+  | { kind: 'ok'; seconds: number }
+  | { kind: 'notWhole' }
+  | { kind: 'belowMinimum' }
+  | { kind: 'aboveMaximum'; maximum: number };
+
+const WHOLE = /^\d+$/;
+
+/** A field's text as whole seconds, or why it can't be saved: not a whole number, under 1 second, or over its limit. */
+export function checkLifetime(field: LifetimeField, text: string): LifetimeCheck {
+  const value = text.trim();
+  if (!WHOLE.test(value)) return { kind: 'notWhole' };
+  const seconds = Number(value);
+  if (seconds < LIFETIME_MINIMUM) return { kind: 'belowMinimum' };
+  const maximum = LIFETIME_MAXIMUMS[field];
+  if (seconds > maximum) return { kind: 'aboveMaximum', maximum };
+  return { kind: 'ok', seconds };
+}
+
+/** A unit a duration is told in. */
+export type DurationUnit = 'day' | 'hour' | 'minute' | 'second';
+
+const UNITS: readonly [DurationUnit, number][] = [
+  ['day', 86_400],
+  ['hour', 3_600],
+  ['minute', 60],
+  ['second', 1],
+];
+
+/**
+ * A whole number of seconds as each of its non-zero units, largest first, such as 900 as 15 minutes, 3600 as
+ * 1 hour, 5400 as 1 hour 30 minutes, 90061 as 1 day 1 hour 1 minute 1 second and 2592000 as 30 days. Empty for 0 or anything that isn't a whole number.
+ */
+export function durationParts(seconds: number): { unit: DurationUnit; count: number }[] {
+  if (!Number.isSafeInteger(seconds) || seconds <= 0) return [];
+  const parts: { unit: DurationUnit; count: number }[] = [];
+  let rest = seconds;
+  for (const [unit, size] of UNITS) {
+    const count = Math.floor(rest / size);
+    rest -= count * size;
+    if (count > 0) parts.push({ unit, count });
+  }
+  return parts;
+}

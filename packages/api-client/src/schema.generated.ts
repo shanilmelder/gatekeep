@@ -604,6 +604,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/tenants/{tenantId}/applications/{applicationId}/tokens": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Save an Application's access, ID and refresh token lifetimes.
+         * @description Tenant Editors and Owners, and machine principals that hold tenant.applications.manage; no fresh assertion. The body is all four lifetimes, in whole seconds, and replaces what is stored: accessTokenLifetime and idTokenLifetime 1 to 3600 (1 hour), refreshTokenAbsoluteLifetime 1 to 7776000 (90 days) from the refresh token family's authorization, and refreshTokenInactivityLifetime 1 to 2592000 (30 days) from each refresh token's issue. The defaults are 900, 900, 2592000 and 604800. A value over its limit is 400 application_invalid with errors naming each field, reason above_maximum and the limit as maximum; under 1 is below_minimum. A body that isn't JSON, is over 4096 bytes, misses a lifetime, or holds one that isn't a JSON whole number or is a whole number outside the 32-bit signed integer range (such as 99999999999) is 400 application_invalid with no errors. Tokens issued after the save use the new lifetimes; a shortened absolute lifetime also ends older refresh token families at their next refresh. A save that changes something writes directory.application.updated; a save that changes nothing writes nothing and is 200. An applicationId that isn't an app_ ID, names no Application of this Tenant, another Tenant's or the hidden system Application is the same 404 not_found.
+         */
+        put: operations["UpdateApplicationTokens"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/tenants/{tenantId}/applications/{applicationId}/secrets": {
         parameters: {
             query?: never;
@@ -752,11 +772,13 @@ export interface components {
         };
         ApiProblemError: {
             /** @enum {string} */
-            field: "callbackUrls" | "logoutUrls" | "webOrigins" | "grantTypes";
+            field: "callbackUrls" | "logoutUrls" | "webOrigins" | "grantTypes" | "accessTokenLifetime" | "idTokenLifetime" | "refreshTokenAbsoluteLifetime" | "refreshTokenInactivityLifetime";
             /** Format: int32 */
             index: null | number;
             /** @enum {string} */
-            reason: "not_absolute" | "wildcard" | "scheme_not_allowed" | "too_long" | "too_many" | "duplicate" | "not_allowed_for_type";
+            reason: "not_absolute" | "wildcard" | "scheme_not_allowed" | "too_long" | "too_many" | "duplicate" | "not_allowed_for_type" | "below_minimum" | "above_maximum";
+            /** Format: int32 */
+            maximum?: null | number;
         };
         ApplicationListResponse: {
             applications: components["schemas"]["ApplicationResponse"][];
@@ -774,6 +796,14 @@ export interface components {
             logoutUrls: string[];
             webOrigins: string[];
             grantTypes: ("authorization_code" | "client_credentials" | "refresh_token")[];
+            /** Format: int32 */
+            accessTokenLifetime: number;
+            /** Format: int32 */
+            idTokenLifetime: number;
+            /** Format: int32 */
+            refreshTokenAbsoluteLifetime: number;
+            /** Format: int32 */
+            refreshTokenInactivityLifetime: number;
         };
         ApplicationSecretCreatedResponse: {
             /** @description The client secret: {tenantPublicId}.{base64url of 32 random bytes}. Shown in this response only, stored only as its SHA-256 and never shown again. */
@@ -794,6 +824,16 @@ export interface components {
             webOrigins: string[];
             grantTypes: ("authorization_code" | "client_credentials" | "refresh_token")[];
             acknowledgeCustomScheme?: null | boolean;
+        };
+        ApplicationTokensRequest: {
+            /** Format: int32 */
+            accessTokenLifetime: number;
+            /** Format: int32 */
+            idTokenLifetime: number;
+            /** Format: int32 */
+            refreshTokenAbsoluteLifetime: number;
+            /** Format: int32 */
+            refreshTokenInactivityLifetime: number;
         };
         BootstrapClaimRequest: {
             token: string;
@@ -2909,6 +2949,86 @@ export interface operations {
                 content?: never;
             };
             /** @description fresh_assertion_required, with the problem body, when no fresh assertion for this action and target is bound to the Session; access_denied when the capability is refused. No body when an earlier check refuses first: a restricted Session, or a wrong Origin or CSRF token. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description tenant_mismatch, with the problem body, when X-Gatekeep-Tenant is missing, sent twice or isn't {tenantId}, and nothing ran; or another conflict the operation's description names. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    UpdateApplicationTokens: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description The Tenant the page shows, its ten_ ID: it must equal {tenantId}, or 409 tenant_mismatch. It never selects a Tenant. */
+                "X-Gatekeep-Tenant": string;
+            };
+            path: {
+                /** @description The Tenant's public ID: ten_ and the UUID's 16 bytes in lowercase RFC 4648 base32 with no padding, whose last character carries two zero bits. Only this canonical spelling, after URL decoding, names a Tenant, and the empty UUID's never does; anything else is refused like a Tenant the Admin holds no role in. */
+                tenantId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ApplicationTokensRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApplicationResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description access_denied, with the problem body, when the capability is refused. No body when an earlier check refuses first: a Session restricted to setup, or on a state-changing call a wrong Origin or CSRF token. */
             403: {
                 headers: {
                     [name: string]: unknown;
