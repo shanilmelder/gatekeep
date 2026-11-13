@@ -140,12 +140,13 @@ const LOG_QUERY = ['type', 'user', 'application', 'outcome', 'from', 'to', 'curs
 
 /**
  * `{ code, traceId }` from a problem body, or null for anything else, with `errors` too when the body
- * carries a well-formed list of them (Story 3.2's settings save). Nothing else in it is kept, and a
- * malformed error entry is dropped.
+ * carries a well-formed list of them (Story 3.2's settings save), and `retryAfterSeconds` when it
+ * carries a positive whole number (Story 9.2's signing_key_not_ready). Nothing else in it is kept,
+ * and a malformed error entry is dropped.
  */
 export function parseProblem(body: unknown): ApiProblem | null {
   if (typeof body !== 'object' || body === null) return null;
-  const { code, traceId, errors } = body as Record<string, unknown>;
+  const { code, traceId, errors, retryAfterSeconds } = body as Record<string, unknown>;
   if (typeof code !== 'string' || code === '') return null;
   const problem: ApiProblem = { code: code as ApiProblem['code'], traceId: typeof traceId === 'string' ? traceId : '' };
   if (Array.isArray(errors)) {
@@ -155,6 +156,9 @@ export function parseProblem(body: unknown): ApiProblem | null {
       .map(({ field, index, reason, maximum }) =>
         typeof maximum === 'number' && Number.isInteger(maximum) && maximum > 0 ? { field, index, reason, maximum } : { field, index, reason },
       );
+  }
+  if (typeof retryAfterSeconds === 'number' && Number.isInteger(retryAfterSeconds) && retryAfterSeconds > 0) {
+    problem.retryAfterSeconds = retryAfterSeconds;
   }
   return problem;
 }
@@ -323,6 +327,16 @@ export function createApiClient(options: ApiClientOptions = {}) {
       request(
         `/api/v1/tenants/${encodeURIComponent(tenantId)}/signing-keys/jwks` as '/api/v1/tenants/{tenantId}/signing-keys/jwks',
         'get',
+      ),
+    /**
+     * Rotates the Tenant's Signing Key now (Story 9.2): next becomes current and a new next is created, and the
+     * answer is the keys after it. Tenant Owners only; no fresh assertion. A next key published less than 15
+     * minutes ago is 409 signing_key_not_ready with `retryAfterSeconds`. Its ID goes into the path encoded.
+     */
+    rotateSigningKeys: (tenantId: string) =>
+      request(
+        `/api/v1/tenants/${encodeURIComponent(tenantId)}/signing-keys/rotate` as '/api/v1/tenants/{tenantId}/signing-keys/rotate',
+        'post',
       ),
     /**
      * One page of the Tenant's Applications (Story 3.1), newest first, 50 a page. `cursor` is the

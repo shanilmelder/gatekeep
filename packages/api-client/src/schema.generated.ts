@@ -540,6 +540,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/tenants/{tenantId}/signing-keys/rotate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Rotate the path Tenant's Signing Key now: next becomes current, and a new next is created.
+         * @description Tenant Owners only; never a machine principal. It takes no body and needs no fresh assertion. Once the Tenant's next signing key has been published for at least 15 minutes, the JWKS cache limit, it becomes current, the current key becomes previous and stays published, and a new next key is created in key custody first and then published, in one transaction that writes keys.signing_key.rotated, keys.signing_key.promoted and keys.signing_key.created on the Tenant's own Log with the Admin as Actor. Management keys are never rotated here, and nothing is retired. The answer is the Tenant's Signing Keys after the rotation, as the list gives them. A next key published less than 15 minutes ago is 409 signing_key_not_ready, with retryAfterSeconds and a Retry-After header saying how many seconds remain, and nothing is written. Key custody down is 503 and nothing is written. A malformed, unknown or role-less Tenant, and a Viewer or Editor, is 403 access_denied, audited as every Tenant capability refusal is.
+         */
+        post: operations["RotateSigningKeys"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/tenants/{tenantId}/applications": {
         parameters: {
             query?: never;
@@ -766,9 +786,11 @@ export interface components {
         };
         ApiProblem: {
             /** @enum {string} */
-            code: "bootstrap_refused" | "credential_refused" | "signin_refused" | "rate_limited" | "access_denied" | "fresh_assertion_required" | "assertion_refused" | "credentials_minimum" | "credentials_maximum" | "recovery_code_refused" | "recovery_code_superseded" | "enrolment_refused" | "tenant_invalid" | "subdomain_refused" | "operation_not_failed" | "tenant_mismatch" | "tenant_not_active" | "tenant_deleted" | "tenant_busy" | "confirmation_mismatch" | "invalid_request" | "application_invalid" | "not_found" | "custom_scheme_acknowledgement_required" | "client_secret_not_applicable" | "client_secret_limit_reached";
+            code: "bootstrap_refused" | "credential_refused" | "signin_refused" | "rate_limited" | "access_denied" | "fresh_assertion_required" | "assertion_refused" | "credentials_minimum" | "credentials_maximum" | "recovery_code_refused" | "recovery_code_superseded" | "enrolment_refused" | "tenant_invalid" | "subdomain_refused" | "operation_not_failed" | "tenant_mismatch" | "tenant_not_active" | "tenant_deleted" | "tenant_busy" | "confirmation_mismatch" | "invalid_request" | "application_invalid" | "not_found" | "custom_scheme_acknowledgement_required" | "client_secret_not_applicable" | "client_secret_limit_reached" | "signing_key_not_ready";
             traceId: string;
             errors?: null | components["schemas"]["ApiProblemError"][];
+            /** Format: int32 */
+            retryAfterSeconds?: null | number;
         };
         ApiProblemError: {
             /** @enum {string} */
@@ -2704,6 +2726,64 @@ export interface operations {
             };
             /** @description access_denied, with the problem body, when the capability is refused. No body when an earlier check refuses first: a Session restricted to setup, or on a state-changing call a wrong Origin or CSRF token. */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    RotateSigningKeys: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description The Tenant the page shows, its ten_ ID: it must equal {tenantId}, or 409 tenant_mismatch. It never selects a Tenant. */
+                "X-Gatekeep-Tenant": string;
+            };
+            path: {
+                /** @description The Tenant's public ID: ten_ and the UUID's 16 bytes in lowercase RFC 4648 base32 with no padding, whose last character carries two zero bits. Only this canonical spelling, after URL decoding, names a Tenant, and the empty UUID's never does; anything else is refused like a Tenant the Admin holds no role in. */
+                tenantId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SigningKeysResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description access_denied, with the problem body, when the capability is refused. No body when an earlier check refuses first: a Session restricted to setup, or on a state-changing call a wrong Origin or CSRF token. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description tenant_mismatch, with the problem body, when X-Gatekeep-Tenant is missing, sent twice or isn't {tenantId}, and nothing ran; or another conflict the operation's description names. */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

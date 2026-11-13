@@ -140,6 +140,57 @@ public sealed class SigningKeyManagementTests(PostgresFixture postgres, OpenBaoF
         Assert.Equal(SigningKeyReadStatus.Unavailable, (await JwksAsync(database, a.TenantId, admin, Reader(a.TenantId))).Status);
     }
 
+    /// <summary>
+    /// Story 9.2 (AD-5): the rotation decides <c>tenant.signing_keys.rotate</c> again from the grant it is given.
+    /// Only the path Tenant's Owner rotates; a Viewer, an Editor, another Tenant's Owner and a Deployment
+    /// Owner with no role are refused before custody is called, and nothing is written.
+    /// </summary>
+    [Fact]
+    public async Task The_rotation_needs_tenant_signing_keys_rotate_in_the_path_Tenant()
+    {
+        var database = await ProtocolDatabase.CreateAsync(postgres);
+        var a = (await database.AddTenantAsync("a.rotate.signing-keys.test")).TenantId;
+        var b = (await database.AddTenantAsync("b.rotate.signing-keys.test")).TenantId;
+        Assert.True(await database.ProvisionAsync(bao, a));
+        await database.BackdateAsync(
+            $"UPDATE signing_key SET published_at = now() - interval '20 minutes' WHERE tenant_id = '{a}' AND purpose = 'signing' AND state = 'next'");
+        var before = await database.ScalarAsync<string>($"SELECT string_agg(to_jsonb(s)::text, ',' ORDER BY id) FROM signing_key s WHERE tenant_id = '{a}'");
+
+        var refused = new (AdminPrincipal Principal, TenantRoleGrant? Grant)[]
+        {
+            (new AdminPrincipal(Guid.CreateVersion7(), DeploymentOwner: false), new TenantRoleGrant(a, TenantRole.Viewer)),
+            (new AdminPrincipal(Guid.CreateVersion7(), DeploymentOwner: false), new TenantRoleGrant(a, TenantRole.Editor)),
+            (new AdminPrincipal(Guid.CreateVersion7(), DeploymentOwner: false), new TenantRoleGrant(b, TenantRole.Owner)),
+            (new AdminPrincipal(Guid.CreateVersion7(), DeploymentOwner: true), null),
+        };
+
+        using var custody = new ControlledCustody(bao.Custody(OpenBaoFixture.Admin));
+        foreach (var (principal, grant) in refused)
+        {
+            var result = await RotateAsync(database, a, custody, principal, grant);
+            Assert.Equal(SigningKeyRotateStatus.Forbidden, result.Status);
+            Assert.Null(result.RetryAfter);
+        }
+
+        Assert.Equal(0, custody.TotalCalls);
+        Assert.Equal(before, await database.ScalarAsync<string>($"SELECT string_agg(to_jsonb(s)::text, ',' ORDER BY id) FROM signing_key s WHERE tenant_id = '{a}'"));
+        Assert.Equal(0L, await database.ScalarAsync<long>("SELECT count(*) FROM audit_event WHERE type_code LIKE 'keys.signing_key.%'"));
+
+        // The Owner without custody is Unavailable; with it, the rotation is the Owner's, as Actor.
+        var owner = new AdminPrincipal(Guid.CreateVersion7(), DeploymentOwner: false);
+        Assert.Equal(SigningKeyRotateStatus.Unavailable, (await RotateAsync(database, a, null, owner, new TenantRoleGrant(a, TenantRole.Owner))).Status);
+        Assert.Equal(SigningKeyRotateStatus.Rotated, (await RotateAsync(database, a, custody, owner, new TenantRoleGrant(a, TenantRole.Owner))).Status);
+        Assert.Equal(3L, await database.ScalarAsync<long>(
+            $"SELECT count(*) FROM audit_event WHERE tenant_id = '{a}' AND actor_kind = 'admin' AND actor_id = '{owner.AdminId}'"));
+
+        // A failing custody is Unavailable too, and the next key, now brand new, is not ready.
+        Assert.Equal(SigningKeyRotateStatus.NotReady, (await RotateAsync(database, a, custody, owner, new TenantRoleGrant(a, TenantRole.Owner))).Status);
+        await database.BackdateAsync(
+            $"UPDATE signing_key SET published_at = now() - interval '20 minutes' WHERE tenant_id = '{a}' AND purpose = 'signing' AND state = 'next'");
+        custody.Failing.Add(KeyOperation.Create);
+        Assert.Equal(SigningKeyRotateStatus.Unavailable, (await RotateAsync(database, a, custody, owner, new TenantRoleGrant(a, TenantRole.Owner))).Status);
+    }
+
     [Fact]
     public async Task Reads_need_the_path_Tenants_own_scope()
     {
@@ -173,6 +224,26 @@ public sealed class SigningKeyManagementTests(PostgresFixture postgres, OpenBaoF
             .ListAsync(scope.CreateCommandContext(), principal, grant, tenant, Cancellation);
         await scope.CommitAsync(Cancellation);
         return read;
+    }
+
+    /// <summary>The rotation as Host.Admin calls it, committed only when it rotated.</summary>
+    private async Task<SigningKeyRotateResult> RotateAsync(
+        ProtocolDatabase database,
+        Guid tenant,
+        IKeyCustody? custody,
+        AdminPrincipal principal,
+        TenantRoleGrant? grant)
+    {
+        await using var source = NpgsqlDataSource.Create(postgres.RoleConnection(TableRegistry.Admin, database.Name));
+        await using var scope = await TenantScope.BeginAsync(source, tenant, Cancellation);
+        var result = await ManagementContract.CreateSigningKeys(AuditContract.CreateAppender())
+            .RotateAsync(scope.CreateCommandContext(), custody, principal, grant, tenant, Cancellation);
+        if (result.Status == SigningKeyRotateStatus.Rotated)
+        {
+            await scope.CommitAsync(Cancellation);
+        }
+
+        return result;
     }
 
     private async Task<SigningKeyJwksRead> JwksAsync(

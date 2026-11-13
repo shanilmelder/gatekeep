@@ -95,6 +95,7 @@ public static class RouteRegistry
         new("GET", "/api/v1/tenants/{tenantId}/logs", CaseKind.TenantPath),
         new("GET", "/api/v1/tenants/{tenantId}/signing-keys", CaseKind.TenantPath),
         new("GET", "/api/v1/tenants/{tenantId}/signing-keys/jwks", CaseKind.TenantPath),
+        new("POST", "/api/v1/tenants/{tenantId}/signing-keys/rotate", CaseKind.TenantPath),
         new("GET", "/api/v1/tenants/{tenantId}/applications", CaseKind.TenantPath),
         new("GET", "/api/v1/tenants/{tenantId}/applications/{applicationId}", CaseKind.TenantPath, RouteValues: new Dictionary<string, string> { ["applicationId"] = "app_aaaaaaaaaaaaaaaaaaaaaaaaaa" }),
         new("PUT", "/api/v1/tenants/{tenantId}/label", CaseKind.TenantPath, Body: """{"label":"staging"}"""),

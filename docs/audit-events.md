@@ -34,12 +34,12 @@ Every audit type code Gatekeep writes, declared in its module's contract. Codes 
 | `directory.client_secret.created` | Directory | Success | A client secret was created for an Application. Names the Application only: the secret is shown once to its creator and stored only as its hash. | None |
 | `directory.client_secret.revoked` | Directory | Success | One of an Application's client secrets was revoked, or a rotated-out secret was ended early: it is refused at once. Names the Application only, never a secret. | None |
 | `directory.client_secret.rotated` | Directory | Success | An Application's client secret was rotated: a new secret was created, and the old one stays valid for 24 hours unless ended sooner. Names the Application only, never a secret. | None |
-| `keys.signing_key.created` | Keys | Success | A Tenant's replacement next Signing or Management key was created in key custody. Names no key. | None |
+| `keys.signing_key.created` | Keys | Success | A Tenant's replacement next Signing or Management key was created in key custody. Names no key. | Key operations |
 | `keys.signing_key.destroyed` | Keys | Success | A Tenant's retired Signing or Management key was destroyed in key custody. Names no key. | None |
 | `keys.signing_key.destruction_failed` | Keys | Failure | Key custody failed to destroy a Tenant's retired Signing or Management key; the destruction retries. Names no key. | None |
-| `keys.signing_key.promoted` | Keys | Success | A Tenant's next Signing or Management key became current. Names no key. | None |
+| `keys.signing_key.promoted` | Keys | Success | A Tenant's next Signing or Management key became current. Names no key. | Key operations |
 | `keys.signing_key.retired` | Keys | Success | A Tenant's previous Signing or Management key retired and its destruction was queued. Names no key. | None |
-| `keys.signing_key.rotated` | Keys | Success | A Tenant's current Signing or Management key reached its rotation age and became previous. Names no key. | None |
+| `keys.signing_key.rotated` | Keys | Success | A Tenant's Signing or Management key was rotated, by the daily rotation or a Tenant Owner: current became previous. Names no key. | Key operations |
 | `keys.tenant_keys.provisioned` | Keys | Success | A Tenant's missing Signing Keys, Management keys or token protection key were created in key custody. Names no key. | None |
 | `keys.transit_key.swept` | Keys | Success | A Signing or Management key at least 24 hours old, named by no row when checked, was deleted from key custody. Names no key. | None |
 | `operations.job.dead` | Operations | Failure | A job used its last attempt and went dead. Only its fixed failure code is kept. | None |
@@ -67,7 +67,7 @@ Each class a Tenant's Log must cover, and the codes that prove it. A pending cla
 | Recovery Code events | None yet | Pending: Story 6.8 |
 | Session and token revocation | `sessions.access.revoked` | Proved |
 | Admin changes | None yet | Pending: Story 8.2 |
-| Key operations | None yet | Pending: Story 9.2 |
+| Key operations | `keys.signing_key.created`, `keys.signing_key.promoted`, `keys.signing_key.rotated` | Proved |
 | Management API grants | None yet | Pending: Story 17.2 |
 | Token Family revocations | `sessions.access.revoked` | Proved |
 | Rejected cross-Tenant attempts | `admin.cross_tenant.rejected`, `protocol.client.cross_tenant_rejected` | Proved |

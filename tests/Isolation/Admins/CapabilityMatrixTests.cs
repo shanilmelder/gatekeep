@@ -161,11 +161,19 @@ public sealed class CapabilityMatrixTests(PostgresFixture postgres)
             AdminCapabilities.All.Where(c => c.FreshAssertion != FreshAssertion.Never || c.Scope == CapabilityScope.Deployment),
             c => Assert.False(c.MachineAllowed, c.Name));
 
-        // FR-42 literally: everything else is machine-allowed.
+        // FR-42 literally: everything else is machine-allowed, but for the reviewed Tenant Owner-only
+        // actions with no fresh assertion that Epic 9 refuses to machine principals.
         Assert.All(
-            AdminCapabilities.All.Where(c => c.FreshAssertion == FreshAssertion.Never && c.Scope == CapabilityScope.Tenant),
+            AdminCapabilities.All.Where(c => c.FreshAssertion == FreshAssertion.Never && c.Scope == CapabilityScope.Tenant && !MachineDenied.Contains(c.Name)),
             c => Assert.True(c.MachineAllowed, c.Name));
+        Assert.All(MachineDenied, name => Assert.False(AdminCapabilities.Find(name)!.MachineAllowed, name));
     }
+
+    /// <summary>
+    /// Story 9.2: Signing Key rotation on demand needs no fresh assertion, yet Epic 9 refuses it to machine
+    /// principals ("Given an Editor or machine principal … refused"), over Story 1.24's FR-42 default.
+    /// </summary>
+    private static readonly string[] MachineDenied = ["tenant.signing_keys.rotate"];
 
     public static TheoryData<string, CapabilityScope, TenantRole[], bool, FreshAssertion> BrokenInvariants => new()
     {

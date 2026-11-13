@@ -234,6 +234,15 @@ public class CapabilityRuleTests
         Assert.Equal("tenant.applications.manage", access.GetProperty("capability").GetString());
         Assert.True(access.GetProperty("machineAllowed").GetBoolean());
         Assert.Equal("never", access.GetProperty("freshAssertion").GetString());
+
+        // Story 9.2: Rotate now is tenant.signing_keys.rotate, with no fresh assertion, and refused to machine principals.
+        const string Rotate = "post /api/v1/tenants/{tenantId}/signing-keys/rotate";
+        Assert.Null(Fresh(operations[Rotate]));
+        var rotate = operations[Rotate].GetProperty("x-gatekeep-access");
+        Assert.Equal("capability", rotate.GetProperty("kind").GetString());
+        Assert.Equal("tenant.signing_keys.rotate", rotate.GetProperty("capability").GetString());
+        Assert.False(rotate.GetProperty("machineAllowed").GetBoolean());
+        Assert.Equal("never", rotate.GetProperty("freshAssertion").GetString());
     }
 
     private static readonly string[] ClientSecretRoutes =

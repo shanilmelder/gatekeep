@@ -35,10 +35,30 @@ public sealed record SigningKeyJwk(string Kty, string Use, string Alg, string Ki
 /// <summary>The path Tenant's public JWKS sample and where Host.Hosted serves it, or why there is none.</summary>
 public sealed record SigningKeyJwksRead(SigningKeyReadStatus Status, string? JwksUri, IReadOnlyList<SigningKeyJwk> Keys);
 
+/// <summary>How a Signing Key rotation on demand ended (Story 9.2).</summary>
+public enum SigningKeyRotateStatus
+{
+    /// <summary>Rotated: <c>next</c> is <c>current</c>, the old <c>current</c> is <c>previous</c>, and a new <c>next</c> exists.</summary>
+    Rotated,
+
+    /// <summary><c>tenant.signing_keys.rotate</c> isn't held in the path Tenant.</summary>
+    Forbidden,
+
+    /// <summary><c>next</c> was published less than 15 minutes ago; the result says how long remains. Nothing was written.</summary>
+    NotReady,
+
+    /// <summary>Key custody is missing or failed to create the replacement. The caller rolls the command back.</summary>
+    Unavailable,
+}
+
+/// <summary>A rotation's outcome, with the time left on <see cref="SigningKeyRotateStatus.NotReady"/> only.</summary>
+public sealed record SigningKeyRotateResult(SigningKeyRotateStatus Status, TimeSpan? RetryAfter);
+
 /// <summary>
-/// The Signing keys page's reads (Story 9.1, FR-37): a Tenant's Signing Keys and its public JWKS
-/// sample. Both only read, in the path Tenant's own context, and write no event. Never a
-/// <c>management</c> key (AD-33), and never key material beyond the public halves.
+/// The Signing keys page (Stories 9.1 and 9.2, FR-37): a Tenant's Signing Keys and its public JWKS
+/// sample, which only read and write no event, and the Tenant Owner's rotation on demand. All run in
+/// the path Tenant's own context. Never a <c>management</c> key (AD-33), and never key material beyond
+/// the public halves.
 /// </summary>
 public interface ISigningKeyManagement
 {
@@ -75,6 +95,25 @@ public interface ISigningKeyManagement
     /// </summary>
     /// <exception cref="InvalidOperationException">The context isn't <paramref name="tenantId"/>'s.</exception>
     Task<SigningKeyJwksRead> GetJwksAsync(
+        CommandContext tenantContext,
+        IKeyCustody? custody,
+        AdminPrincipal principal,
+        TenantRoleGrant? grant,
+        Guid tenantId,
+        CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Rotates the path Tenant's Signing Key now (Story 9.2), once <c>tenant.signing_keys.rotate</c> is
+    /// decided again here (AD-5) from <paramref name="grant"/>: <c>next</c>, once published for at least
+    /// 15 minutes, becomes <c>current</c>, <c>current</c> becomes <c>previous</c>, and a replacement
+    /// <c>next</c> is created through <paramref name="custody"/>, with three Log events whose Actor is the
+    /// Admin. Management keys are never touched. A younger <c>next</c> is
+    /// <see cref="SigningKeyRotateStatus.NotReady"/> with the time left. No custody, or a custody
+    /// failure, is <see cref="SigningKeyRotateStatus.Unavailable"/>. The caller commits only on
+    /// <see cref="SigningKeyRotateStatus.Rotated"/>.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The context isn't <paramref name="tenantId"/>'s.</exception>
+    Task<SigningKeyRotateResult> RotateAsync(
         CommandContext tenantContext,
         IKeyCustody? custody,
         AdminPrincipal principal,

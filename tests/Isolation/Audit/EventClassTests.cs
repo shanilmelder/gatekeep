@@ -36,6 +36,7 @@ public sealed class EventClassTests(PostgresFixture postgres)
         [TenantLogClass.SessionRevocation] = ProveSessionRevocationAsync,
         [TenantLogClass.TokenFamilyRevocation] = ProveTokenFamilyRevocationAsync,
         [TenantLogClass.CrossTenantRejection] = ProveClientCrossTenantRejectionAsync,
+        [TenantLogClass.KeyOperation] = ProveKeyOperationAsync,
     };
 
     [Fact]
@@ -240,6 +241,35 @@ public sealed class EventClassTests(PostgresFixture postgres)
         Assert.Equal(System.Net.HttpStatusCode.Forbidden, refused.StatusCode);
 
         return (host.Database, b);
+    }
+
+    /// <summary>
+    /// Story 9.2, over HTTP on the real Host.Admin: the Tenant Owner rotates the Signing Key on demand, which
+    /// writes <c>keys.signing_key.rotated</c>, <c>promoted</c> and <c>created</c> on the Tenant's own Log.
+    /// <c>SigningKeyRotateNowTests</c> and <c>SigningKeyRotateApiTests</c> cover the rotation itself.
+    /// </summary>
+    private static async Task<(string Database, Guid TenantId)> ProveKeyOperationAsync(PostgresFixture postgres)
+    {
+        await using var host = await AdminHost.StartAsync(postgres);
+        _ = new Gatekeep.Tests.Isolation.Keys.PublicHalves(host);
+        var (cookie, csrf, session) = await host.InsertFullSessionAsync();
+        var admin = await host.AdminOfSessionAsync(session);
+        var tenant = Guid.CreateVersion7();
+        await TestTenants.InsertAsync(host.Superuser, tenant, TestTenants.Host(tenant));
+        await Gatekeep.Tests.Isolation.Keys.SigningKeySeeds.FreshAsync(host.Superuser, tenant);
+        await PostgresFixture.ExecuteAsync(
+            host.Superuser,
+            "SET session_replication_role = replica; "
+            + $"UPDATE signing_key SET published_at = now() - interval '20 minutes' WHERE tenant_id = '{tenant}' AND purpose = 'signing' AND state = 'next'; "
+            + "SET session_replication_role = DEFAULT");
+        await host.GrantTenantRoleAsync(tenant, admin, "owner");
+
+        var id = PublicId.Format(PublicIdType.Tenant, tenant);
+        using var rotated = await host.SendAsync(
+            HttpMethod.Post, $"/api/v1/tenants/{id}/signing-keys/rotate", cookie, csrf, AdminHost.Origin, headers: [("X-Gatekeep-Tenant", id)]);
+        Assert.Equal(System.Net.HttpStatusCode.OK, rotated.StatusCode);
+
+        return (host.Database, tenant);
     }
 
     /// <summary>Story 2.7: a Tenant-scope <c>RevokeAccessAsync</c> as <c>gk_hosted</c> writes <c>sessions.access.revoked</c>.</summary>

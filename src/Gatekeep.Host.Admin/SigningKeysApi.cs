@@ -62,10 +62,11 @@ public sealed class JwkResponse
 }
 
 /// <summary>
-/// The Signing keys page's two reads (Story 9.1, FR-37), each with any Tenant Role, in the path
-/// Tenant's own scope. The list reads PostgreSQL only, so it still answers while custody is down;
-/// the JWKS sample needs custody's public halves. The request checks have decided the capability,
-/// and Management decides it again from the same grant. Neither writes anything.
+/// The Signing keys page's two reads (Story 9.1, FR-37), each with any Tenant Role, and its rotation
+/// on demand (Story 9.2), the Tenant Owner's only, all in the path Tenant's own scope. The list reads
+/// PostgreSQL only, so it still answers while custody is down; the JWKS sample needs custody's public
+/// halves, and the rotation custody's create. The request checks have decided the capability, and
+/// Management decides it again from the same grant. Neither read writes anything.
 /// </summary>
 internal static class SigningKeysApi
 {
@@ -95,17 +96,80 @@ internal static class SigningKeysApi
             return;
         }
 
-        await AdminResponses.JsonAsync(context, new SigningKeysResponse
-        {
-            Keys = [.. read.Keys.Select(k => new SigningKeyResponse
-            {
-                KeyId = k.KeyId,
-                Algorithm = ISigningKeyManagement.Algorithm,
-                State = k.State,
-                CreatedAt = k.CreatedAt.UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", CultureInfo.InvariantCulture),
-            })],
-        });
+        await AdminResponses.JsonAsync(context, Response(read));
     }
+
+    public static async Task RotateAsync(HttpContext context, AdminApiServices services)
+    {
+        var path = AdminRequestChecks.PathTenantGrant(context);
+        var principal = AdminRequestChecks.Principal(context);
+        var cancellationToken = context.RequestAborted;
+        var custody = context.RequestServices.GetService<IKeyCustody>();
+
+        SigningKeyRotateResult result;
+        SigningKeyListRead? listed = null;
+        try
+        {
+            await using var scope = await TenantScope.BeginAsync(services.Source, AdminRequestChecks.PathTenant(context), cancellationToken);
+            var tenantContext = scope.CreateCommandContext();
+            result = await services.SigningKeys.RotateAsync(tenantContext, custody, principal, path.Grant, path.TenantId, cancellationToken);
+
+            if (result.Status == SigningKeyRotateStatus.Rotated)
+            {
+                // The keys as this rotation leaves them, read in its own transaction. Once the Transit key
+                // exists the rows must follow it: a client gone now mustn't undo the rotation.
+                listed = await services.SigningKeys.ListAsync(tenantContext, principal, path.Grant, path.TenantId, CancellationToken.None);
+                if (listed.Status == SigningKeyReadStatus.Read)
+                {
+                    await scope.CommitAsync(CancellationToken.None);
+                }
+            }
+        }
+        catch (DbException e) when (!context.Response.HasStarted)
+        {
+            AdminRequestChecks.Log(context, e);
+            await AdminResponses.UnavailableAsync(context);
+            return;
+        }
+
+        switch (result.Status)
+        {
+            case SigningKeyRotateStatus.Rotated when listed is { Status: SigningKeyReadStatus.Read } read:
+                await AdminResponses.JsonAsync(context, Response(read), cancellationToken: CancellationToken.None);
+                return;
+
+            case SigningKeyRotateStatus.NotReady:
+                // Whole seconds, rounded up and never under one, in the body and the header alike.
+                var seconds = (int)Math.Max(1, Math.Ceiling((result.RetryAfter ?? TimeSpan.Zero).TotalSeconds));
+                Logger(context).LogInformation(
+                    "A Signing Key rotation was refused with {Problem}, trace {TraceId}.", AdminResponses.SigningKeyNotReady, AdminResponses.TraceId(context));
+                await AdminResponses.ProblemAsync(context, StatusCodes.Status409Conflict, AdminResponses.SigningKeyNotReady, errors: null, retryAfterSeconds: seconds);
+                return;
+
+            case SigningKeyRotateStatus.Unavailable:
+                // The failure's kind only: never a key name, a version or what custody answered.
+                Logger(context).LogWarning(
+                    "Key custody couldn't create a Signing Key for a rotation, trace {TraceId}.", AdminResponses.TraceId(context));
+                await AdminResponses.UnavailableAsync(context);
+                return;
+
+            default:
+                await RefuseAsync(context);
+                return;
+        }
+    }
+
+    /// <summary>The list as the page shows it: the key ID, the one algorithm, the state and the creation time, never more.</summary>
+    private static SigningKeysResponse Response(SigningKeyListRead read) => new()
+    {
+        Keys = [.. read.Keys.Select(k => new SigningKeyResponse
+        {
+            KeyId = k.KeyId,
+            Algorithm = ISigningKeyManagement.Algorithm,
+            State = k.State,
+            CreatedAt = k.CreatedAt.UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", CultureInfo.InvariantCulture),
+        })],
+    };
 
     public static async Task GetJwksAsync(HttpContext context, AdminApiServices services)
     {
@@ -155,7 +219,7 @@ internal static class SigningKeysApi
     private static Task RefuseAsync(HttpContext context)
     {
         Logger(context).LogInformation(
-            "A Signing keys read was refused with {Problem}, trace {TraceId}.", AdminResponses.AccessDenied, AdminResponses.TraceId(context));
+            "A Signing keys request was refused with {Problem}, trace {TraceId}.", AdminResponses.AccessDenied, AdminResponses.TraceId(context));
         return AdminResponses.ProblemAsync(context, StatusCodes.Status403Forbidden, AdminResponses.AccessDenied);
     }
 

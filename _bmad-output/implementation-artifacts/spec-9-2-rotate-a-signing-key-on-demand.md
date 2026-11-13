@@ -2,7 +2,8 @@
 title: 'Story 9.2: Rotate a Signing Key on demand'
 type: 'feature'
 created: '2026-11-14'
-status: 'ready-for-dev'
+status: 'in-review'
+baseline_revision: 'b805adb24e715c98f099ab569a56109604910e1a'
 review_loop_iteration: 0
 followup_review_recommended: false
 context:
@@ -160,18 +161,18 @@ deferred: []
 ## Tasks & Acceptance
 
 **Execution:**
-- [ ] `src/Modules/Keys/{Contracts,Core}`: add `SigningKeyRotation`, `RotateSigningKeyNowAsync` and the `Actor` threading. Revise the `KeysEvents` summary and classes. Add new `tests/Isolation/Keys/SigningKeyRotateNowTests.cs`: aged, young (`RetryAfter` range), existing previous, Transit failure rolls back, management untouched, other Tenant untouched, concurrent calls, Admin actor on events.
-- [ ] Add the migration and the `TableRegistry` change. Bump `MigrateCommandTests` to 33. Add a grants assertion (`gk_admin` can't DELETE `signing_key` or update `retired_at`/`destroyed_at`) beside `TenantKeysTests`' grant checks.
-- [ ] `AdminCapabilities`: rotate not machine-allowed, with the pinning tests updated.
-- [ ] Management: add `RotateAsync`, plus a Forbidden re-check test.
-- [ ] Host.Admin:
+- [x] `src/Modules/Keys/{Contracts,Core}`: add `SigningKeyRotation`, `RotateSigningKeyNowAsync` and the `Actor` threading. Revise the `KeysEvents` summary and classes. Add new `tests/Isolation/Keys/SigningKeyRotateNowTests.cs`: aged, young (`RetryAfter` range), existing previous, Transit failure rolls back, management untouched, other Tenant untouched, concurrent calls, Admin actor on events.
+- [x] Add the migration and the `TableRegistry` change. Bump `MigrateCommandTests` to 33. Add a grants assertion (`gk_admin` can't DELETE `signing_key` or update `retired_at`/`destroyed_at`) beside `TenantKeysTests`' grant checks.
+- [x] `AdminCapabilities`: rotate not machine-allowed, with the pinning tests updated.
+- [x] Management: add `RotateAsync`, plus a Forbidden re-check test.
+- [x] Host.Admin:
   - add the route, the handler, `ApiProblem.RetryAfterSeconds`, the problem code, and the `Retry-After` header;
   - add new `tests/Isolation/Keys/SigningKeyRotateApiTests.cs` covering every API row of the matrix;
   - add the RouteRegistry, CanaryFlows and AdminApiRuleTests entries.
-- [ ] Audit catalogue: update the generator entry, then regenerate the docs and code in Docker.
-- [ ] Regenerate OpenAPI and the schema. Add the client method and its test.
-- [ ] Dashboard: add the Rotate action, the messages, and the owner-only and view-only states. Extend `admin-signing-keys.spec.ts` with every browser row.
-- [ ] Docs: update the threat model and install.md.
+- [x] Audit catalogue: update the generator entry, then regenerate the docs and code in Docker.
+- [x] Regenerate OpenAPI and the schema. Add the client method and its test.
+- [x] Dashboard: add the Rotate action, the messages, and the owner-only and view-only states. Extend `admin-signing-keys.spec.ts` with every browser row.
+- [x] Docs: update the threat model and install.md.
 
 **Acceptance Criteria:**
 - Given a `next` key aged at least 15 minutes, when the Owner rotates, then it's promoted and a replacement `next` is created in one command, and a Log event is written.
@@ -180,6 +181,14 @@ deferred: []
 - Given the full suite in CI, when it runs, then every test passes, including the existing Architecture, Isolation and browser tests.
 
 ## Spec Change Log
+
+- 2026-11-14, implementation:
+  - **`rotated` summary.** The event still covers the daily rotation's Management keys, so it reads "A Tenant's Signing or Management key was rotated, by the daily rotation or a Tenant Owner: current became previous. Names no key." rather than the example's "A Signing Key was rotated…".
+  - **Readiness time.** `SelectOpen` gives the gate, as the spec says. The seconds left come from one more read of `next`'s `published_at + 15 min - now()`, by database time, made only when it isn't ready.
+  - **Shared custody stand-in.** `SigningKeysApiTests`' private `PublicHalves` moved to `tests/Isolation/Keys/PublicHalves.cs`. It also answers creates now, recording them or refusing them with 503, so `SigningKeyRotateApiTests` and the `EventClassTests` proof can share it.
+  - **KeyOperation proof.** `EventClassTests.Proofs` proves the class over HTTP on the real Host.Admin: an Owner's rotation writes the three codes to the Tenant's Log.
+  - **Existing tests changed by the new grants.** `TenantTablesTests.Admin_only_reads_signing_keys_and_only_its_scopes_Tenants` is now `Admin_reads_inserts_and_rotates_signing_keys_only_in_its_scopes_Tenant`. `CapabilityMatrixTests`' FR-42 rule lists rotate as its one reviewed exception. `CapabilityRuleTests` pins the route's `x-gatekeep-access`.
+  - **The 9.1 browser test.** The Viewer row now expects the view-only banner.
 
 ## Review Triage Log
 

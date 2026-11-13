@@ -43,8 +43,8 @@ internal static class AuditCatalogue
 
     /// <summary>
     /// The 11 FR-40 Tenant classes, in the Kernel enum's order. A class is proved once its story
-    /// maps it to a catalogued code: Session and token revocation (Story 2.7), Token Family revocations (Story 2.10, through the same code) and rejected
-    /// cross-Tenant attempts (Stories 2.5 and 7.4) so far. The rest are pending (Story 7.8).
+    /// maps it to a catalogued code: Session and token revocation (Story 2.7), Token Family revocations (Story 2.10, through the same code), rejected
+    /// cross-Tenant attempts (Stories 2.5 and 7.4) and Key operations (Story 9.2) so far. The rest are pending (Story 7.8).
     /// </summary>
     public static readonly IReadOnlyList<LogClass> TenantLogClasses =
     [
@@ -55,7 +55,9 @@ internal static class AuditCatalogue
         new("RecoveryCode", "Recovery Code events", "6.8"),
         new("SessionRevocation", "Session and token revocation", null),
         new("AdminChange", "Admin changes", "8.2"),
-        new("KeyOperation", "Key operations", "9.2"),
+        // Story 9.2: a Signing Key rotation, by the daily job or a Tenant Owner on demand, writes rotated, promoted
+        // and created (SigningKeyRotateNowTests, SigningKeyRotateApiTests, EventClassTests).
+        new("KeyOperation", "Key operations", null),
         new("ManagementApiGrant", "Management API grants", "17.2"),
         // Story 2.10: reuse and replay revoke a family through the one revocation path, whose one event is
         // sessions.access.revoked (AD-13, Story 2.7); no second code is written.
