@@ -22,7 +22,7 @@ public static class AuditContract
     public static ITenantLogSearch CreateLogSearch() => new TenantLogSearch();
 
     /// <summary>One event of a Tenant's Log, opened (Story 7.5). It only reads, in the caller's Tenant scope: <c>gk_admin</c> runs it.</summary>
-    public static ITenantLogEvents CreateLogEvents() => new TenantLogEvents();
+    public static ITenantLogEventReader CreateLogEventReader() => new TenantLogEventReader();
 
     /// <summary>
     /// RFC 8785 JSON for one flat object of string, integer and null values.

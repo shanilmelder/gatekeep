@@ -19,7 +19,7 @@ public sealed record TenantLogEvent(TenantLogEntry Entry, TenantLogSeal? Seal, T
 /// it to that Tenant (AD-4): another Tenant's event is found exactly as an unknown one is, not at
 /// all. It only reads, and reads <c>audit_detail</c> only when the caller asks for detail.
 /// </summary>
-public interface ITenantLogEvents
+public interface ITenantLogEventReader
 {
     /// <summary>The event, or null when this Tenant has none with <paramref name="eventId"/>.</summary>
     /// <exception cref="InvalidOperationException"><paramref name="context"/> isn't in a Tenant scope.</exception>

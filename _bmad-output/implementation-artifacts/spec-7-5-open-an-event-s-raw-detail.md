@@ -186,7 +186,7 @@ Status: done
 - On the Logs screen, opening a row (by click, or with the keyboard from its Description link) opens the event drawer. It shows the code badge, the summary rows and, only when the server sent `raw`, the raw JSON with Copy JSON. It also has loading, failure-with-Retry and not-found states.
 
 **Files changed:**
-- `src/Modules/Audit/{Contracts/ITenantLogEvents.cs,Core/TenantLogEvents.cs,Contracts/AuditContract.cs}` -- the event port and query. Detail is read only on request.
+- `src/Modules/Audit/{Contracts/ITenantLogEventReader.cs,Core/TenantLogEventReader.cs,Contracts/AuditContract.cs}` -- the event port and query. Detail is read only on request. It is named `*Reader`, not `*Events`, because `AuditCatalogueTests` keeps `*Events.cs` in Contracts for catalogues; the first CI run failed on that, and the files were renamed.
 - `src/Gatekeep.Host.Admin/{TenantLogsApi.cs,AdminApi.cs,AdminApiServices.cs,AdminOpenApi.cs}` -- the endpoint, its DTOs, the route and the OpenAPI path parameter and bounds.
 - `docs/api/openapi-v1.json`, `packages/api-client/*` -- the regenerated contract and `getTenantLogEvent`.
 - `apps/admin-dashboard/src/shell/{LogsPage.tsx,logEvent.ts}`, `packages/ui/src/{components/EventDrawer.tsx,messages.tsx}` -- the drawer on the Logs screen. `EventDrawer` gains an optional `status` slot.

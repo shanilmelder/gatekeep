@@ -10,7 +10,7 @@ namespace Gatekeep.Modules.Audit.Core;
 /// then, only when detail is asked for, the row in <c>audit_detail</c>. A caller without the
 /// detail capability never causes a detail read, so no mapping bug can leak it.
 /// </summary>
-internal sealed class TenantLogEvents : ITenantLogEvents
+internal sealed class TenantLogEventReader : ITenantLogEventReader
 {
     private const string SelectEvent =
         """
