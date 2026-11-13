@@ -60,7 +60,18 @@ public sealed class PostgresFixture : IAsyncLifetime
     public async ValueTask DisposeAsync()
     {
         _cloneLock.Dispose();
-        await _container.DisposeAsync();
+        try
+        {
+            await _container.DisposeAsync();
+        }
+        catch (OperationCanceledException exception)
+        {
+            // Removing a container that holds thousands of test databases can outlast the
+            // Docker client's request timeout. Every test has run by now, and Testcontainers'
+            // reaper (or the throwaway CI runner) removes the container, so a slow removal
+            // is reported here and never fails the run.
+            Console.Error.WriteLine($"PostgresFixture: removing the container timed out ({exception.GetType().Name}); it is left for the reaper.");
+        }
     }
 
     public Task<string> NewMigratedDatabaseAsync() => CloneAsync(Migrated);
