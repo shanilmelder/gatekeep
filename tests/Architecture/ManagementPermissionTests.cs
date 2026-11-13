@@ -25,7 +25,7 @@ public class ManagementPermissionTests
     public void The_migrations_backfill_writes_exactly_Directorys_Management_Permissions_and_the_API_they_belong_to()
     {
         // Read as source: the migration's base type is EF Core's, which this project doesn't load.
-        var source = File.ReadAllText(Path.Combine(Root, "src/Adapters/Postgres/Migrations/Migration20261118000000DefineApis.cs"));
+        var source = File.ReadAllText(Path.Combine(Root, "src/Adapters/Postgres/Migrations/Migration20261119000000DefineApis.cs"));
         var permissions = Constant(source, "BackfillPermissions");
         var api = Constant(source, "BackfillApi");
 

@@ -618,7 +618,7 @@ public sealed class ApisApiTests(PostgresFixture postgres)
         var tenant = await InsertAsync(host, "dev");
         await PostgresFixture.ExecuteAsync(
             host.Superuser,
-            $"SELECT set_config('gatekeep.tenant_id', '{tenant}', false); {Migration20261118000000DefineApis.BackfillApi}; {Migration20261118000000DefineApis.BackfillPermissions}");
+            $"SELECT set_config('gatekeep.tenant_id', '{tenant}', false); {Migration20261119000000DefineApis.BackfillApi}; {Migration20261119000000DefineApis.BackfillPermissions}");
         return tenant;
     }
 

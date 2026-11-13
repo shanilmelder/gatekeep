@@ -15,7 +15,7 @@ public class TokenLifetimeLimitTests
 {
     private const string Migration = "src/Adapters/Postgres/Migrations/Migration20261116000000SetTokenLifetimes.cs";
 
-    private const string ApiMigration = "src/Adapters/Postgres/Migrations/Migration20261118000000DefineApis.cs";
+    private const string ApiMigration = "src/Adapters/Postgres/Migrations/Migration20261119000000DefineApis.cs";
 
     private static readonly string Root = EdgeList.FindRepositoryRoot(AppContext.BaseDirectory);
 

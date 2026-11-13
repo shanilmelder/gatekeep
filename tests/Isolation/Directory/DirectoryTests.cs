@@ -738,12 +738,12 @@ public sealed class DirectoryTests(PostgresFixture postgres)
         await TestTenants.InsertAsync(superuser, TenantD, status: "creating");
 
         var builder = new MigrationBuilder("Npgsql.EntityFrameworkCore.PostgreSQL");
-        builder.ForEachTenant(Migration20261118000000DefineApis.BackfillApi);
-        builder.ForEachTenant(Migration20261118000000DefineApis.BackfillPermissions);
+        builder.ForEachTenant(Migration20261119000000DefineApis.BackfillApi);
+        builder.ForEachTenant(Migration20261119000000DefineApis.BackfillPermissions);
         var statements = builder.Operations.Select(o => Assert.IsType<SqlOperation>(o).Sql).ToList();
 
         // The migration's Up() runs exactly those statements, last.
-        var migration = new Migration20261118000000DefineApis { ActiveProvider = "Npgsql.EntityFrameworkCore.PostgreSQL" };
+        var migration = new Migration20261119000000DefineApis { ActiveProvider = "Npgsql.EntityFrameworkCore.PostgreSQL" };
         Assert.Equal(statements, migration.UpOperations.TakeLast(2).Select(o => Assert.IsType<SqlOperation>(o).Sql));
 
         // Up() has already run them once over no Tenant; these are the Tenants seeded since.
@@ -769,7 +769,7 @@ public sealed class DirectoryTests(PostgresFixture postgres)
 
         Assert.Equal(0L, await PostgresFixture.ScalarAsync<long>(superuser, $"SELECT count(*) FROM api WHERE tenant_id = '{TenantC}'"));
         Assert.Equal(3L, await PostgresFixture.ScalarAsync<long>(superuser, "SELECT count(*) FROM api"));
-        Assert.Equal(54L, await PostgresFixture.ScalarAsync<long>(superuser, "SELECT count(*) FROM permission"));
+        Assert.Equal(51L, await PostgresFixture.ScalarAsync<long>(superuser, "SELECT count(*) FROM permission"));
         Assert.Equal(0L, await PostgresFixture.ScalarAsync<long>(superuser, "SELECT count(*) FROM audit_event"));
     }
 
@@ -796,7 +796,7 @@ public sealed class DirectoryTests(PostgresFixture postgres)
         // Active again, with one Permission gone: only it is put back.
         await PostgresFixture.ExecuteAsync(superuser, $"SET session_replication_role = replica; UPDATE tenant SET status = 'active' WHERE id = '{TenantA}'; DELETE FROM permission WHERE tenant_id = '{TenantA}' AND value = 'users:read'; SET session_replication_role = DEFAULT");
         Assert.True(await InTenantAsync(database, TableRegistry.Worker, TenantA, c => _directory.EnsureBuiltInApiAsync(c, Cancellation)));
-        Assert.Equal(18L, await PostgresFixture.ScalarAsync<long>(superuser, $"SELECT count(*) FROM permission WHERE tenant_id = '{TenantA}'"));
+        Assert.Equal(17L, await PostgresFixture.ScalarAsync<long>(superuser, $"SELECT count(*) FROM permission WHERE tenant_id = '{TenantA}'"));
         Assert.Equal(1L, await PostgresFixture.ScalarAsync<long>(superuser, $"SELECT count(*) FROM api WHERE tenant_id = '{TenantA}'"));
     }
 

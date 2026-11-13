@@ -22,8 +22,8 @@ namespace Gatekeep.Adapters.Postgres.Migrations;
 /// It changes no earlier migration.
 /// </summary>
 [DbContext(typeof(MigrationsContext))]
-[Migration("20261118000000_DefineApis")]
-public sealed class Migration20261118000000DefineApis : Migration
+[Migration("20261119000000_DefineApis")]
+public sealed class Migration20261119000000DefineApis : Migration
 {
     /// <summary>
     /// The first backfill, run once per Tenant with that Tenant's setting in place: the built-in Management API, only

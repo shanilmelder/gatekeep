@@ -226,19 +226,19 @@ public sealed class TenantKeysTests(PostgresFixture postgres, OpenBaoFixture bao
         await RunBackfillAsync(database, worker, logger: null);
 
         var api = await database.ScalarAsync<Guid>($"SELECT id FROM api WHERE tenant_id = '{TenantA}' AND built_in AND identifier = 'urn:gatekeep:management'");
-        Assert.Equal(18L, await database.ScalarAsync<long>($"SELECT count(*) FROM permission WHERE tenant_id = '{TenantA}' AND api_id = '{api}'"));
+        Assert.Equal(17L, await database.ScalarAsync<long>($"SELECT count(*) FROM permission WHERE tenant_id = '{TenantA}' AND api_id = '{api}'"));
         Assert.Equal(0L, await database.ScalarAsync<long>($"SELECT count(*) FROM audit_event WHERE tenant_id = '{TenantA}' AND target_kind = 'api'"));
 
         await RunBackfillAsync(database, worker, logger: null);
 
         Assert.Equal(1L, await database.ScalarAsync<long>($"SELECT count(*) FROM api WHERE tenant_id = '{TenantA}'"));
         Assert.Equal(api, await database.ScalarAsync<Guid>($"SELECT id FROM api WHERE tenant_id = '{TenantA}' AND built_in"));
-        Assert.Equal(18L, await database.ScalarAsync<long>($"SELECT count(*) FROM permission WHERE tenant_id = '{TenantA}'"));
+        Assert.Equal(17L, await database.ScalarAsync<long>($"SELECT count(*) FROM permission WHERE tenant_id = '{TenantA}'"));
 
         await database.SuperuserAsync($"DELETE FROM permission WHERE tenant_id = '{TenantA}' AND value = 'users:read'");
         await RunBackfillAsync(database, worker, logger: null);
 
-        Assert.Equal(18L, await database.ScalarAsync<long>($"SELECT count(*) FROM permission WHERE tenant_id = '{TenantA}' AND api_id = '{api}'"));
+        Assert.Equal(17L, await database.ScalarAsync<long>($"SELECT count(*) FROM permission WHERE tenant_id = '{TenantA}' AND api_id = '{api}'"));
         Assert.Equal(0L, await database.ScalarAsync<long>("SELECT count(*) FROM job WHERE type = 'keys.tenant_keys.backfill' AND status <> 'done'"));
     }
 

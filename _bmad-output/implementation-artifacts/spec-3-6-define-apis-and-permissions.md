@@ -149,7 +149,7 @@ deferred: []
 ## Tasks & Acceptance
 
 **Execution:**
-- [ ] **Migration** `Migration20261118000000DefineApis.cs` with `TableRegistry.cs`:
+- [ ] **Migration** `Migration20261119000000DefineApis.cs` with `TableRegistry.cs`:
   - `api` (id, name, identifier, built_in, offline_access, rbac, the four lifetimes with CHECKs, created_at, and a unique index on `(tenant_id, identifier)`);
   - `permission` (`api_id`, value, description, created_at, unique on `(tenant_id, api_id, value)`);
   - RLS, the guards and grants;
@@ -237,7 +237,7 @@ deferred: []
 - `ApplicationTokenLifetimes.Of(application, api?)` applies the shorter of each lifetime. Callers pass `null` until Story 3.7 resolves audiences.
 
 **Files changed (main ones)**
-- **Migration and schema:** `Migration20261118000000DefineApis.cs` and `TableRegistry.cs` add the `api` and `permission` tables. They have RLS, guards, CHECKs and grants. The migration backfills the built-in API, and the audit target CHECK now accepts `api`. This is migration 34.
+- **Migration and schema:** `Migration20261119000000DefineApis.cs` and `TableRegistry.cs` add the `api` and `permission` tables. They have RLS, guards, CHECKs and grants. The migration backfills the built-in API, and the audit target CHECK now accepts `api`. This is migration 35 (after Story 9.2's).
 - **Kernel:** the `api_` public ID, `AuditTargetKind.Api`, and the API and Permission limits.
 - **Directory:** `DirectoryApi`, `ApiRules`, `DirectoryService.Apis.cs` and the events. The `ManagementPermissions` constant (with descriptions) and the purge are in the contract.
 - **Operations:** `TenantCreation` and `TenantKeyBackfill` call `EnsureBuiltInApiAsync`.
