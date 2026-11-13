@@ -2,15 +2,18 @@
 title: 'Story 3.4: Set token lifetimes'
 type: 'feature'
 created: '2026-11-13'
-status: 'draft'
-route: 'dispatch'
+baseline_revision: '68d12344cb7510941489cb3f211046c6a3be4091'
+status: 'ready-for-dev'
 review_loop_iteration: 0
+followup_review_recommended: false
 context:
   - '{project-root}/_bmad-output/implementation-artifacts/epic-3-context.md'
   - '{project-root}/_bmad-output/implementation-artifacts/spec-3-3-create-rotate-and-revoke-client-secrets.md'
+warnings: ['oversized']
+deferred: []
 ---
 
-<frozen-after-approval reason="human-owned intent — do not modify unless human renegotiates">
+<intent-contract>
 
 ## Intent
 
@@ -89,7 +92,7 @@ context:
 | Absolute shortened | family 3 days old, absolute set to 2 days | next refresh `invalid_grant` | — |
 | Inactivity shortened | inactivity 3600 | new refresh token expires ≈ now+1h; refresh after 1h+1s is `invalid_grant` | — |
 
-</frozen-after-approval>
+</intent-contract>
 
 ## Code Map
 
@@ -149,8 +152,6 @@ context:
 - Given lifetime fields, when a value exceeds a §5.2 hard limit, then the UI and the API both refuse it, and the UI shows "Maximum is {limit}."
 - Given a saved lifetime, when a new token is issued, then it uses that lifetime.
 - Given the Tokens tab, when it renders, then no option turns off rotation or chooses an algorithm.
-
-## Implementation Notes
 
 ## Spec Change Log
 
