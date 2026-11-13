@@ -174,7 +174,7 @@ export function LogsPage({ request, tenantId }: LogsPageProps) {
   const alive = useRef(new AbortController());
   // The open row, and its event read: each open, and each Retry, reads with its own controller.
   const [opened, setOpened] = useState<TenantLogEvent | null>(null);
-  const [eventRead, setEventRead] = useState<EventRead | null>(null);
+  const [currentRead, setEventRead] = useState<EventRead | null>(null);
   const [eventAttempt, setEventAttempt] = useState(0);
 
   // The URL is the search: on a reload, Back or Forward, the form shows what the URL holds.
@@ -189,6 +189,7 @@ export function LogsPage({ request, tenantId }: LogsPageProps) {
     setRead(null);
     setMore('idle');
     setOpened(null);
+    setEventRead(null);
     void readLogs(request, tenantId, sent, undefined, controller.signal).then((result) => {
       if (!controller.signal.aborted) setRead(result);
     });
@@ -253,6 +254,9 @@ export function LogsPage({ request, tenantId }: LogsPageProps) {
 
   const invalid = read?.kind === 'failed' && read.failure.status === 400;
 
+  // Only a read of the open row counts: one of a row opened before shows as loading, so nothing
+  // of the earlier event paints under the new one before its read starts.
+  const eventRead = currentRead?.kind === 'ready' && currentRead.event.id !== openedId ? null : currentRead;
   // The drawer's header comes from the event once read, from its row until then.
   const shown = eventRead?.kind === 'ready' ? eventRead.event : opened;
   const summary: EventSummaryRow[] =

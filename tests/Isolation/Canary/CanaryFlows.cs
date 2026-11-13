@@ -1348,7 +1348,8 @@ internal static class CanaryFlows
     /// Story 7.4: a Viewer's Session reading the Tenant's Log by outcome; failing, a cross-Tenant read,
     /// which writes the rejection to the other Tenant's Log, and malformed filters, cursor and range.
     /// Story 7.5: the Viewer and an Editor open one event, the Editor's with its raw detail; failing,
-    /// an unknown event, a malformed event ID and another Tenant's event.
+    /// an unknown event, a malformed event ID, another Tenant's event through this Tenant's path
+    /// (the RLS 404), and an event read on a Tenant path the Admin holds no role in (the 403).
     /// </summary>
     private static async Task TenantLogsAsync(CanaryFlowContext context, FlowRun run, bool failing)
     {
@@ -1368,7 +1369,7 @@ internal static class CanaryFlows
 
         if (failing)
         {
-            // An unknown event, a malformed ID and another Tenant's event read nothing.
+            // An unknown event and a malformed ID read nothing.
             using (var unknown = await host.SendAsync(HttpMethod.Get, $"{path}/{PublicId.Format(PublicIdType.AuditEvent, Guid.CreateVersion7())}", cookie))
             {
                 run.Capture("unknown event response", await ResponseTextAsync(unknown));
@@ -1381,11 +1382,24 @@ internal static class CanaryFlows
                 Assert.Equal(HttpStatusCode.BadRequest, malformed.StatusCode);
             }
 
-            // A refused cross-Tenant read writes to the other Tenant's Log; malformed filters read nothing.
+            // Another Tenant's event, through this Tenant's path, is found as an unknown one is: 404.
             var other = await host.InsertTenantAsync();
+            var theirs = Guid.CreateVersion7();
+            await PostgresFixture.ExecuteAsync(
+                host.Superuser,
+                $"INSERT INTO audit_event (tenant_id, id, type_code, actor_kind) VALUES ('{other}', '{theirs}', 'operations.job.dead', 'system')");
+            using (var hidden = await host.SendAsync(HttpMethod.Get, $"{path}/{PublicId.Format(PublicIdType.AuditEvent, theirs)}", cookie))
+            {
+                run.Capture("other Tenant's event response", await ResponseTextAsync(hidden));
+                Assert.Equal(HttpStatusCode.NotFound, hidden.StatusCode);
+            }
+
+            // An event read on a Tenant path the Admin holds no role in is the 403 role refusal,
+            // which writes the rejection to that Tenant's Log; so is the search, and malformed
+            // filters read nothing.
             using (var refusedEvent = await host.SendAsync(HttpMethod.Get, $"/api/v1/tenants/{Tenancy.TenantRequests.Id(other)}/logs/{PublicId.Format(PublicIdType.AuditEvent, eventId)}", cookie))
             {
-                run.Capture("cross-Tenant event response", await ResponseTextAsync(refusedEvent));
+                run.Capture("role-less Tenant event response", await ResponseTextAsync(refusedEvent));
                 Assert.Equal(HttpStatusCode.Forbidden, refusedEvent.StatusCode);
             }
 

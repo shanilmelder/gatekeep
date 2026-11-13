@@ -40,7 +40,6 @@ public class LogRouteRuleTests
         var operations = Operations(document).ToList();
 
         Assert.Contains(operations, o => o.Path == TenantLogs && o.Method == "get");
-        Assert.Contains(operations, o => o.Path == TenantLogEvent && o.Method == "get");
         Assert.Equal(["get"], operations.Where(o => o.Path == TenantLogEvent).Select(o => o.Method));
         Assert.Empty(DocumentProblems(operations));
     }

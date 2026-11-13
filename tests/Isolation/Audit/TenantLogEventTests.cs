@@ -108,6 +108,29 @@ public sealed class TenantLogEventTests(PostgresFixture postgres)
     }
 
     [Fact]
+    public async Task An_Owner_elsewhere_who_is_only_a_Viewer_here_gets_no_raw_detail()
+    {
+        await using var host = await AdminHost.StartAsync(postgres);
+        var a = await host.InsertTenantAsync();
+        var b = await host.InsertTenantAsync();
+        var (cookie, _, admin) = await TenantRequests.RoleSessionAsync(host, b, "owner");
+        await host.GrantTenantRoleAsync(a, admin, "viewer");
+        var id = await InsertEventAsync(host, a, Guid.CreateVersion7(), seq: 2, detail: true);
+
+        using var response = await host.SendAsync(HttpMethod.Get, PathFor(a, id), cookie);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var body = await response.Content.ReadAsStringAsync(Cancellation);
+        foreach (var planted in new[] { Ip, UserAgent, Email, PrevHash, Hash })
+        {
+            Assert.DoesNotContain(planted, body, StringComparison.OrdinalIgnoreCase);
+        }
+
+        using var json = JsonDocument.Parse(body);
+        Assert.Equal(JsonValueKind.Null, json.RootElement.GetProperty("raw").ValueKind);
+    }
+
+    [Fact]
     public async Task A_Viewers_read_never_touches_audit_detail()
     {
         await using var host = await AdminHost.StartAsync(postgres);
