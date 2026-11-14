@@ -416,6 +416,15 @@ internal static class CanaryFlows
             "Story 9.2 build review",
             new DateOnly(2026, 11, 14)),
         new(
+            new(SurfaceKind.Route, "/api/v1/tenants/{tenantId}/signing-keys/{keyId}/revoke"),
+            "A write whose body is one boolean: it moves the path Tenant's signing rows' states, creates at most one new Signing "
+            + "Key in custody by name only, enqueues one ID-only destroy job, optionally revokes the Tenant's Sessions and tokens by "
+            + "status and time only through the one revocation path, and writes ID-only events. It returns the rows' key IDs, fixed "
+            + "algorithm, states and creation times, never key material, ciphertext or a Management key. A refusal is logged by fixed "
+            + "code only, and a custody failure as one fixed message with the trace ID, never a key name or version.",
+            "Story 9.3 build review",
+            new DateOnly(2026, 11, 14)),
+        new(
             new(SurfaceKind.Route, "/api/v1/tenants/{tenantId}/applications"),
             "The list reads the path Tenant's Applications' IDs, names, types and creation times; the create takes a name and a "
             + "type only, writes the row and an ID-only event, and creates no client secret. Neither returns or logs a credential: "

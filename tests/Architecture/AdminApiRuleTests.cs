@@ -278,7 +278,7 @@ public class AdminApiRuleTests
 
         // 403 carries a problem on capability operations, access_denied (Story 1.24), and on
         // fresh-assertion ones, fresh_assertion_required; 404 is a sub-resource the Tenant has none of,
-        // not_found (Story 3.1); 409 is the credential floor and maximum (Story 1.26), and from Story 3.3 a client
+        // not_found (Story 3.1), and from Story 9.3 a key ID that names no published Signing Key; 409 is the credential floor and maximum (Story 1.26), and from Story 3.3 a client
         // secret that isn't applicable or over its limit, and from Story 9.2 a Signing Key rotation whose next key
         // is too young (signing_key_not_ready, with retryAfterSeconds).
         Assert.Equal(["400", "403", "404", "409", "429"], refusals.Select(r => r.Name).Distinct().Order(StringComparer.Ordinal));

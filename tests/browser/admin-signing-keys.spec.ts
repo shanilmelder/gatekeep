@@ -1,11 +1,14 @@
-// Stories 9.1 and 9.2: the Signing keys page and its Rotate now, in the built Admin Dashboard served
-// by the built Host.Admin (admin-host.mjs) under its real CSP, from localhost. The Admin API is
-// answered by route interception. The server's rules (the order, signing keys only, no private
-// material, custody down, the 15-minute wait, Owners only) are the Isolation tests'
-// (tests/Isolation/Keys); here, what the page makes of the answers.
+// Stories 9.1, 9.2 and 9.3: the Signing keys page, its Rotate now and its per-key Revoke, in the built
+// Admin Dashboard served by the built Host.Admin (admin-host.mjs) under its real CSP, from localhost,
+// since WebAuthn takes no IP address as an RP ID. The Admin API is answered by route interception; a
+// revocation's sheet by a Chromium virtual authenticator over CDP, as in admin-tenant-delete.spec.ts.
+// The server's rules (the order, signing keys only, no private material, custody down, the 15-minute
+// wait, Owners only, the fresh assertion) are the Isolation tests' (tests/Isolation/Keys); here, what
+// the page makes of the answers.
 
 import AxeBuilder from '@axe-core/playwright';
-import { expect, test, type Page, type Route } from '@playwright/test';
+import { generateKeyPairSync, randomBytes } from 'node:crypto';
+import { expect, test, type CDPSession, type Page, type Route } from '@playwright/test';
 import { watchCsp } from './csp-watch';
 
 const SESSION = '/api/v1/deployment/session';
@@ -18,6 +21,10 @@ const PAGE = `/tenants/${TENANT}/signing-keys`;
 const KEYS = `/api/v1/tenants/${TENANT}/signing-keys`;
 const JWKS = `${KEYS}/jwks`;
 const ROTATE = `${KEYS}/rotate`;
+const BEGIN = `/api/v1/tenants/${TENANT}/assertions`;
+const COMPLETE = '/api/v1/deployment/assertions/complete';
+const REVOKE_ACTION = 'tenant.signing_keys.revoke';
+const revokePath = (keyId: string) => `${KEYS}/${encodeURIComponent(keyId)}/revoke`;
 const URI = 'https://alpha.gatekeep.test/.well-known/jwks';
 const TRACE = 'c'.repeat(32);
 
@@ -51,6 +58,15 @@ const ROTATED = [
   ...ROWS.slice(2),
 ];
 
+// What revoking the current key leaves: a new next, the old next current, and the old current revoked.
+const REVOKED = [
+  { keyId: kid(7), algorithm: 'RS256', state: 'next', createdAt: '2026-11-14T10:00:00.000Z' },
+  { ...ROWS[0]!, state: 'current' },
+  ROWS[2]!,
+  { ...ROWS[1]!, state: 'revoked' },
+  ...ROWS.slice(3),
+];
+
 const json = (route: Route, status: number, body: unknown) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
 const problem = (route: Route, status: number, code: string) =>
   route.fulfill({ status, contentType: 'application/problem+json', body: JSON.stringify({ code, traceId: TRACE }) });
@@ -72,13 +88,32 @@ interface State {
   jwks: ((route: Route) => Promise<void>) | null;
   /** Answers Rotate now: by default the keys a rotation leaves. */
   rotate: ((route: Route) => Promise<void>) | null;
+  /** Answers a revocation once its grant is used up: by default the keys revoking the current key leaves. */
+  revoke: ((route: Route) => Promise<void>) | null;
+  /** Whether a revocation needs a grant: the server's 403 fresh_assertion_required until the sheet is confirmed. */
+  needsAssertion: boolean;
+  /** The key ID the last confirmed sheet was bound to, used up by the next revocation of it. */
+  grant: string | null;
+  begunFor: string | null;
 }
 
 /** The Admin API for a Viewer of the Tenant, unless a test says otherwise: the page reads with any Tenant Role. */
 async function answerApi(page: Page, initial: Partial<State> = {}) {
   const log: string[] = [];
   const headers: Record<string, string>[] = [];
-  const state: State = { capabilities: TENANT_VIEWER, keys: null, jwks: null, rotate: null, ...initial };
+  const bodies: unknown[] = [];
+  const begins: unknown[] = [];
+  const state: State = {
+    capabilities: TENANT_VIEWER,
+    keys: null,
+    jwks: null,
+    rotate: null,
+    revoke: null,
+    needsAssertion: true,
+    grant: null,
+    begunFor: null,
+    ...initial,
+  };
   await page.route(
     (url) => url.pathname.startsWith('/api/'),
     async (route) => {
@@ -101,12 +136,65 @@ async function answerApi(page: Page, initial: Partial<State> = {}) {
       if (pathname === MY_TENANTS) return json(route, 200, { tenants: [{ id: TENANT, name: 'Alpha', host: 'alpha.gatekeep.test', label: 'dev' }] });
       if (pathname === `/api/v1/tenants/${TENANT}/capabilities`) return json(route, 200, { capabilities: state.capabilities });
       if (pathname === ROTATE && request.method() === 'POST') return state.rotate ? state.rotate(route) : json(route, 200, { keys: ROTATED });
+      if (pathname === BEGIN && request.method() === 'POST') {
+        const binding = request.postDataJSON() as { target: string | null };
+        begins.push(binding);
+        state.begunFor = binding.target;
+        return json(route, 200, {
+          challenge: randomBytes(32).toString('base64url'),
+          rpId: new URL(request.url()).hostname,
+          timeout: 300000,
+          userVerification: 'required',
+          allowCredentials: [],
+        });
+      }
+      if (pathname === COMPLETE && request.method() === 'POST') {
+        state.grant = state.begunFor;
+        return route.fulfill({ status: 204 });
+      }
+      const revoke = /^\/api\/v1\/tenants\/[^/]+\/signing-keys\/([^/]+)\/revoke$/.exec(pathname);
+      if (revoke && request.method() === 'POST') {
+        bodies.push(request.postDataJSON());
+        const keyId = decodeURIComponent(revoke[1]!);
+        // The checks use up a grant for this key, or refuse with fresh_assertion_required.
+        if (state.needsAssertion && state.grant !== keyId) return problem(route, 403, 'fresh_assertion_required');
+        state.grant = null;
+        return state.revoke ? state.revoke(route) : json(route, 200, { keys: REVOKED });
+      }
       if (pathname === KEYS) return state.keys ? state.keys(route) : json(route, 200, { keys: ROWS });
       if (pathname === JWKS) return state.jwks ? state.jwks(route) : json(route, 200, SAMPLE);
       return route.fulfill({ status: 404 });
     },
   );
-  return { log, headers, state, count: (entry: string) => log.filter((line) => line === entry).length };
+  return { log, headers, bodies, begins, state, count: (entry: string) => log.filter((line) => line === entry).length };
+}
+
+/** A Chromium virtual authenticator holding one passkey for the page's host, so the sheet confirms at once. */
+async function authenticator(page: Page, rpId: string) {
+  const cdp: CDPSession = await page.context().newCDPSession(page);
+  await cdp.send('WebAuthn.enable');
+  const { authenticatorId } = await cdp.send('WebAuthn.addVirtualAuthenticator', {
+    options: {
+      protocol: 'ctap2',
+      transport: 'usb',
+      hasResidentKey: true,
+      hasUserVerification: true,
+      isUserVerified: true,
+      automaticPresenceSimulation: true,
+    },
+  });
+  const { privateKey } = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
+  await cdp.send('WebAuthn.addCredential', {
+    authenticatorId,
+    credential: {
+      credentialId: randomBytes(32).toString('base64'),
+      isResidentCredential: true,
+      rpId,
+      privateKey: privateKey.export({ format: 'der', type: 'pkcs8' }).toString('base64'),
+      userHandle: randomBytes(64).toString('base64'),
+      signCount: 0,
+    },
+  });
 }
 
 async function axe(page: Page) {
@@ -377,6 +465,213 @@ test.describe('rotate', () => {
   });
 });
 
+const revokeButtons = (page: Page) => table(page).getByRole('button', { name: /^Revoke key / });
+const revokeButton = (page: Page, keyId: string) => table(page).getByRole('button', { name: `Revoke key ${keyId}` });
+const revokeDialog = (page: Page) => page.getByRole('dialog', { name: 'Revoke signing key?' });
+const IMPACT = 'Tokens signed with this key stop being trusted. Relying parties that cached the JWKS can accept them for up to 15 minutes.';
+const CURRENT_LINE = "The next key becomes current now, even if relying parties haven't fetched it yet.";
+const ACCESS = 'Also end every Session and refresh token in this Tenant';
+
+test.describe('revoke', () => {
+  test('an Owner sees Revoke on next, current and previous only; the modal states the impact, and Cancel sends nothing', async ({ page }) => {
+    const api = await answerApi(page, { capabilities: TENANT_OWNER });
+
+    await page.goto(PAGE);
+    await expect(page.getByTestId('signing-key-id')).toHaveCount(ROWS.length);
+    await expect(table(page).getByRole('columnheader')).toHaveText(['Key ID', 'Algorithm', 'Status', 'Created', 'Revoke']);
+    await expect(revokeButtons(page)).toHaveCount(3);
+    for (const row of ROWS.slice(0, 3)) await expect(revokeButton(page, row.keyId)).not.toHaveAttribute('aria-disabled', 'true');
+    for (const row of ROWS.slice(3)) await expect(revokeButton(page, row.keyId)).toHaveCount(0);
+
+    // A previous key: the impact, no current-key line, and the Sessions box unchecked.
+    await revokeButton(page, ROWS[2]!.keyId).click();
+    const dialog = revokeDialog(page);
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByTestId('revoke-signing-key-id')).toHaveText(ROWS[2]!.keyId);
+    expect(await dialog.getByTestId('revoke-signing-key-id').evaluate((element) => element.tagName)).toBe('CODE');
+    await expect(dialog).toContainText(IMPACT);
+    await expect(dialog.getByTestId('revoke-signing-key-current')).toHaveCount(0);
+    await expect(dialog.getByRole('checkbox', { name: ACCESS })).not.toBeChecked();
+    await dialog.getByRole('button', { name: 'Cancel' }).click();
+    await expect(dialog).toHaveCount(0);
+
+    // The current key adds the promotion line.
+    await revokeButton(page, ROWS[1]!.keyId).click();
+    await expect(revokeDialog(page).getByTestId('revoke-signing-key-current')).toHaveText(CURRENT_LINE);
+    await revokeDialog(page).getByRole('button', { name: 'Cancel' }).click();
+
+    expect(api.bodies).toHaveLength(0);
+    expect(api.begins).toHaveLength(0);
+  });
+
+  test("an Owner confirms: the sheet inside the modal, bound to the key, then the toast, the table as the revocation left it and the sample read again", async ({
+    page,
+    baseURL,
+  }) => {
+    await authenticator(page, new URL(baseURL!).hostname);
+    const api = await answerApi(page, { capabilities: TENANT_OWNER });
+
+    await page.goto(PAGE);
+    await expect(page.getByTestId('signing-keys-jwks')).toBeVisible();
+    await revokeButton(page, ROWS[1]!.keyId).click();
+    await revokeDialog(page).getByRole('checkbox', { name: ACCESS }).check();
+    await revokeDialog(page).getByRole('button', { name: 'Revoke key' }).click();
+
+    await expect(toast(page)).toHaveText('Signing key revoked.');
+    await expect(revokeDialog(page)).toHaveCount(0);
+    await expect(page.getByTestId('signing-key-id')).toHaveText(REVOKED.map((row) => row.keyId));
+    await expect(table(page).locator('[data-badge="key-state"]')).toHaveText(['Next', 'Current', 'Previous', 'Revoked', 'Retired', 'Revoked']);
+    await expect.poll(() => api.count(`GET ${JWKS}`)).toBe(2);
+    expect(api.count(`GET ${KEYS}`)).toBe(1);
+
+    // Sent twice: refused for want of a grant, then with it, each with the checkbox's revokeAccess.
+    expect(api.count(`POST ${revokePath(ROWS[1]!.keyId)}`)).toBe(2);
+    expect(api.bodies).toEqual([{ revokeAccess: true }, { revokeAccess: true }]);
+    // The Tenant begin, bound to the key.
+    expect(api.begins).toEqual([{ action: REVOKE_ACTION, target: ROWS[1]!.keyId }]);
+    const sent = api.headers.at(-1)!;
+    expect(sent['x-gatekeep-csrf']).toBe(CSRF);
+    expect(sent['x-gatekeep-tenant']).toBe(TENANT);
+  });
+
+  test('with a fresh grant already held, it is sent once with revokeAccess false', async ({ page }) => {
+    const api = await answerApi(page, { capabilities: TENANT_OWNER, needsAssertion: false });
+
+    await page.goto(PAGE);
+    await expect(page.getByTestId('signing-key-id')).toHaveCount(ROWS.length);
+    await revokeButton(page, ROWS[0]!.keyId).click();
+    await revokeDialog(page).getByRole('button', { name: 'Revoke key' }).click();
+
+    await expect(toast(page)).toHaveText('Signing key revoked.');
+    expect(api.bodies).toEqual([{ revokeAccess: false }]);
+    expect(api.begins).toHaveLength(0);
+  });
+
+  test('a cancelled sheet shows inside the same modal, no second modal opens, and the table is unchanged', async ({ page, baseURL }) => {
+    const cdp = await page.context().newCDPSession(page);
+    await cdp.send('WebAuthn.enable');
+    const { authenticatorId } = await cdp.send('WebAuthn.addVirtualAuthenticator', {
+      options: { protocol: 'ctap2', transport: 'usb', hasResidentKey: true, hasUserVerification: true, isUserVerified: false, automaticPresenceSimulation: true },
+    });
+    const { privateKey } = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
+    await cdp.send('WebAuthn.addCredential', {
+      authenticatorId,
+      credential: {
+        credentialId: randomBytes(32).toString('base64'),
+        isResidentCredential: true,
+        rpId: new URL(baseURL!).hostname,
+        privateKey: privateKey.export({ format: 'der', type: 'pkcs8' }).toString('base64'),
+        userHandle: randomBytes(64).toString('base64'),
+        signCount: 0,
+      },
+    });
+    const api = await answerApi(page, { capabilities: TENANT_OWNER });
+
+    await page.goto(PAGE);
+    await expect(page.getByTestId('signing-key-id')).toHaveCount(ROWS.length);
+    await revokeButton(page, ROWS[1]!.keyId).click();
+    await revokeDialog(page).getByRole('button', { name: 'Revoke key' }).click();
+
+    await expect(revokeDialog(page).getByTestId('revoke-signing-key-failed')).toHaveText('Confirmation cancelled. Nothing was changed.');
+    await expect(page.getByRole('dialog')).toHaveCount(1);
+    expect(api.count(`POST ${revokePath(ROWS[1]!.keyId)}`)).toBe(1);
+    await expect(page.getByTestId('signing-key-id')).toHaveText(ROWS.map((row) => row.keyId));
+    await expect(toast(page)).toHaveCount(0);
+  });
+
+  test('a failure is the bad banner with its reference inside the modal, which stays open, and the table is unchanged', async ({ page, baseURL }) => {
+    await authenticator(page, new URL(baseURL!).hostname);
+    await answerApi(page, { capabilities: TENANT_OWNER, revoke: (route) => problem(route, 503, 'unavailable') });
+
+    await page.goto(PAGE);
+    await expect(page.getByTestId('signing-key-id')).toHaveCount(ROWS.length);
+    await revokeButton(page, ROWS[1]!.keyId).click();
+    await revokeDialog(page).getByRole('button', { name: 'Revoke key' }).click();
+
+    const failed = revokeDialog(page).getByTestId('revoke-signing-key-failed');
+    await expect(failed).toContainText("Couldn't revoke the signing key. Nothing was changed.");
+    await expect(failed).toContainText(TRACE);
+    await expect(failed).toHaveAttribute('data-tone', 'bad');
+    await expect(revokeDialog(page)).toBeVisible();
+    await expect(page.getByTestId('signing-key-id')).toHaveText(ROWS.map((row) => row.keyId));
+    await expect(toast(page)).toHaveCount(0);
+  });
+
+  test('an Editor sees Revoke read-only, Tenant Owner only, and pressing it opens nothing and sends nothing', async ({ page }) => {
+    const api = await answerApi(page, { capabilities: TENANT_EDITOR });
+
+    await page.goto(PAGE);
+    await expect(page.getByTestId('signing-key-id')).toHaveCount(ROWS.length);
+    await expect(revokeButtons(page)).toHaveCount(3);
+    const note = page.getByTestId('signing-keys-owner-only');
+    await expect(note).toHaveText('Tenant Owner only');
+    for (const row of ROWS.slice(0, 3)) {
+      await expect(revokeButton(page, row.keyId)).toHaveAttribute('aria-disabled', 'true');
+      await expect(revokeButton(page, row.keyId)).toHaveAccessibleDescription('Tenant Owner only');
+    }
+
+    // aria-disabled keeps it focusable, so Playwright's actionability check would wait: press it anyway.
+    await revokeButton(page, ROWS[1]!.keyId).click({ force: true });
+    await expect(revokeDialog(page)).toHaveCount(0);
+    expect(api.bodies).toHaveLength(0);
+  });
+
+  test('a Viewer sees no Revoke column', async ({ page }) => {
+    await answerApi(page, { capabilities: TENANT_VIEWER });
+
+    await page.goto(PAGE);
+    await expect(page.getByTestId('signing-key-id')).toHaveCount(ROWS.length);
+    await expect(table(page).getByRole('columnheader')).toHaveText(['Key ID', 'Algorithm', 'Status', 'Created']);
+    await expect(revokeButtons(page)).toHaveCount(0);
+  });
+});
+
+test.describe('revoke refusals', () => {
+  test("a 403 access_denied says this session can't do it inside the modal, with no toast", async ({ page }) => {
+    await answerApi(page, { capabilities: TENANT_OWNER, needsAssertion: false, revoke: (route) => problem(route, 403, 'access_denied') });
+
+    await page.goto(PAGE);
+    await expect(page.getByTestId('signing-key-id')).toHaveCount(ROWS.length);
+    await revokeButton(page, ROWS[1]!.keyId).click();
+    await revokeDialog(page).getByRole('button', { name: 'Revoke key' }).click();
+
+    await expect(revokeDialog(page).getByTestId('revoke-signing-key-failed')).toHaveText("You can't do this in this session.");
+    await expect(toast(page)).toHaveCount(0);
+    await expect(page.getByTestId('signing-key-id')).toHaveText(ROWS.map((row) => row.keyId));
+  });
+
+  test('a 409 tenant_mismatch closes the modal with no failure banner and no toast, and the table is unchanged', async ({ page }) => {
+    const api = await answerApi(page, { capabilities: TENANT_OWNER, needsAssertion: false, revoke: (route) => problem(route, 409, 'tenant_mismatch') });
+
+    await page.goto(PAGE);
+    await expect(page.getByTestId('signing-key-id')).toHaveCount(ROWS.length);
+    await revokeButton(page, ROWS[1]!.keyId).click();
+    await revokeDialog(page).getByRole('button', { name: 'Revoke key' }).click();
+
+    await expect.poll(() => api.bodies.length).toBe(1);
+    await expect(revokeDialog(page)).toHaveCount(0);
+    await expect(page.getByTestId('revoke-signing-key-failed')).toHaveCount(0);
+    await expect(toast(page)).toHaveCount(0);
+    await expect(page.getByTestId('signing-key-id')).toHaveText(ROWS.map((row) => row.keyId));
+  });
+
+  test('a 404 shows the failure banner with its reference and reads the list again', async ({ page }) => {
+    const api = await answerApi(page, { capabilities: TENANT_OWNER, needsAssertion: false, revoke: (route) => problem(route, 404, 'not_found') });
+
+    await page.goto(PAGE);
+    await expect(page.getByTestId('signing-key-id')).toHaveCount(ROWS.length);
+    expect(api.count(`GET ${KEYS}`)).toBe(1);
+    await revokeButton(page, ROWS[1]!.keyId).click();
+    await revokeDialog(page).getByRole('button', { name: 'Revoke key' }).click();
+
+    const failed = revokeDialog(page).getByTestId('revoke-signing-key-failed');
+    await expect(failed).toContainText("Couldn't revoke the signing key. Nothing was changed.");
+    await expect(failed).toContainText(TRACE);
+    await expect.poll(() => api.count(`GET ${KEYS}`)).toBe(2);
+    await expect(toast(page)).toHaveCount(0);
+  });
+});
+
 test.describe('rotate refusals the shell handles', () => {
   test('a 409 tenant_mismatch shows none of the page banners and no toast, and the table is unchanged', async ({ page }) => {
     const api = await answerApi(page, { capabilities: TENANT_OWNER, rotate: (route) => problem(route, 409, 'tenant_mismatch') });
@@ -479,6 +774,36 @@ for (const scheme of ['light', 'dark'] as const) {
       await expect(page.getByTestId('tenant-view-only')).toBeVisible();
       await expect(page.getByTestId('signing-keys-jwks')).toBeVisible();
       expect(await axe(page), 'viewer').toEqual([]);
+    });
+
+    test(`axe finds no violations at ${width}px, ${scheme}: the revoke modal for a previous and the current key, and its failure`, async ({
+      page,
+      baseURL,
+    }) => {
+      await page.setViewportSize({ width, height: 900 });
+      await page.emulateMedia({ colorScheme: scheme });
+      await authenticator(page, new URL(baseURL!).hostname);
+      await answerApi(page, { capabilities: TENANT_OWNER, revoke: (route) => problem(route, 503, 'unavailable') });
+
+      await page.goto(PAGE);
+      await expect(page.getByTestId('signing-keys-jwks')).toBeVisible();
+      expect(await axe(page), 'owner with Revoke').toEqual([]);
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+
+      await revokeButton(page, ROWS[2]!.keyId).click();
+      await expect(revokeDialog(page)).toBeVisible();
+      expect(await axe(page), 'modal, previous').toEqual([]);
+      await revokeDialog(page).getByRole('button', { name: 'Cancel' }).click();
+      await expect(revokeDialog(page)).toHaveCount(0);
+
+      await revokeButton(page, ROWS[1]!.keyId).click();
+      await expect(revokeDialog(page).getByTestId('revoke-signing-key-current')).toBeVisible();
+      expect(await axe(page), 'modal, current').toEqual([]);
+
+      await revokeDialog(page).getByRole('button', { name: 'Revoke key' }).click();
+      await expect(revokeDialog(page).getByTestId('revoke-signing-key-failed')).toBeVisible();
+      expect(await axe(page), 'modal, failed').toEqual([]);
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
     });
   }
 }

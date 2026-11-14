@@ -320,11 +320,20 @@ public static class TableRegistry
             [Hosted] = [Select],
             [Worker] = [Delete],
         }, PurgeColumns, RowGuard),
+        // Story 9.3: a Signing Key revocation, as gk_admin, may also end every Session of its Tenant by the
+        // one revocation path, reading only the columns its WHERE names and setting only the end.
         new("user_session", TableClass.Tenant, "Sessions", TableUse.Runtime, new Dictionary<string, IReadOnlyList<string>>
         {
             [Hosted] = [Select, Insert, Update],
             [Worker] = [Delete],
-        }, PurgeColumns, RowGuard),
+        }, new Dictionary<string, IReadOnlyList<ColumnGrant>>(PurgeColumns)
+        {
+            [Admin] =
+            [
+                new ColumnGrant(Select, ["tenant_id", "ended_at"]),
+                new ColumnGrant(Update, ["ended_at", "end_reason"]),
+            ],
+        }, RowGuard),
         // Story 2.8: neither ever names a Tenant's system Application. Story 2.9: gk_hosted updates
         // only the columns the Sessions stores and the one revocation path write. Story 3.5: an
         // Application's deletion, as gk_admin, revokes its families and tokens by that one path, reading

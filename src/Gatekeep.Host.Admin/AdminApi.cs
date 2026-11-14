@@ -732,6 +732,40 @@ internal static class AdminApi
             .Produces<ApiProblem>(StatusCodes.Status409Conflict, AdminResponses.ProblemContentType)
             .Produces(StatusCodes.Status503ServiceUnavailable);
 
+        app.MapPost("/api/v1/tenants/{tenantId}/signing-keys/{keyId}/revoke", static (HttpContext context, AdminApiServices services) => SigningKeysApi.RevokeAsync(context, services))
+            .WithMetadata(
+                TenantApiEndpoint.Instance,
+                new RequiresCapability(AdminCapabilities.TenantSigningKeysRevoke),
+                new FreshAssertionTarget(SigningKeysApi.KeyRouteValue),
+                new JsonRequestBody(typeof(RevokeSigningKeyRequest)))
+            .WithName("RevokeSigningKey")
+            .WithTags(TenantTag)
+            .WithSummary("Revoke one of the path Tenant's published Signing Keys: it leaves the JWKS at once and its private material is destroyed.")
+            .WithDescription(
+                "Tenant Owners only; never a machine principal. Needs a fresh assertion for tenant.signing_keys.revoke with this " +
+                "keyId as its target, or 403 fresh_assertion_required. keyId is the key's kid as the list gives it, and must name " +
+                "a next, current or previous signing key of the path Tenant. In one transaction the key becomes revoked, so the " +
+                "Tenant's JWKS stops serving it at once (relying parties that cached the JWKS may accept its tokens for up to 15 " +
+                "minutes), and a job to destroy its private material in key custody is queued, which retries on failure. A revoked " +
+                "current key has the next key promoted at once, even if it was published less than 15 minutes ago, and a revoked " +
+                "current or next key gets a new next key, created in key custody first. It writes keys.signing_key.revoked, then " +
+                "keys.signing_key.promoted (or keys.signing_key.promoted_unaged when the next key was younger than 15 minutes) and " +
+                "keys.signing_key.created as they apply, on the Tenant's own Log with the Admin as Actor. With revokeAccess true, " +
+                "every Session, Token Family and refresh token of the Tenant is revoked too, in the same transaction, writing " +
+                "sessions.access.revoked. The answer is the Tenant's Signing Keys after the revocation, as the list gives them. A " +
+                "body that isn't JSON, misses revokeAccess or gives it another type is 400 invalid_request. A keyId that is " +
+                "malformed, unknown, another Tenant's, a Management key's, or names a retired or already revoked key is 404 " +
+                "not_found, and nothing is written. Key custody down is 503 and nothing is written. A malformed, unknown or " +
+                "role-less Tenant, and a Viewer or Editor, is 403 access_denied, audited as every Tenant capability refusal is.")
+            .Produces<SigningKeysResponse>(StatusCodes.Status200OK)
+            .Produces<ApiProblem>(StatusCodes.Status400BadRequest, AdminResponses.ProblemContentType)
+            .Produces(StatusCodes.Status401Unauthorized)
+            .Produces<ApiProblem>(StatusCodes.Status403Forbidden, AdminResponses.ProblemContentType)
+            .Produces<ApiProblem>(StatusCodes.Status404NotFound, AdminResponses.ProblemContentType)
+            // The request checks' tenant_mismatch: every state-changing Tenant route declares it (AdminOpenApi).
+            .Produces<ApiProblem>(StatusCodes.Status409Conflict, AdminResponses.ProblemContentType)
+            .Produces(StatusCodes.Status503ServiceUnavailable);
+
         app.MapGet("/api/v1/tenants/{tenantId}/applications", static (HttpContext context, AdminApiServices services) => ApplicationsApi.ListAsync(context, services))
             .WithMetadata(
                 TenantApiEndpoint.Instance,

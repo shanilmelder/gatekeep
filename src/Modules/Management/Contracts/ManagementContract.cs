@@ -18,8 +18,8 @@ public static class ManagementContract
     }
 
     /// <summary>
-    /// The Signing keys page's reads (Story 9.1), as <c>gk_admin</c>, in the path Tenant's own scope.
-    /// They write nothing: <paramref name="appender"/> only builds the Tenancy reads they use.
+    /// The Signing keys page (Stories 9.1 to 9.3), as <c>gk_admin</c>, in the path Tenant's own scope. The
+    /// reads write nothing; the rotation and the revocation write their events through <paramref name="appender"/>.
     /// </summary>
     public static ISigningKeyManagement CreateSigningKeys(IAuditAppender appender)
     {

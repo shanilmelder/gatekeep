@@ -1,3 +1,4 @@
+using System.Globalization;
 using Gatekeep.Kernel.Audit;
 using Gatekeep.Kernel.Jobs;
 using Gatekeep.Kernel.Limits;
@@ -39,7 +40,8 @@ internal static class SigningKeyLifecycle
         SELECT id, purpose, state,
                created_at <= now() - make_interval(secs => @due_seconds) AS due,
                published_at IS NOT NULL AND published_at <= now() - make_interval(secs => @published_seconds) AS aged,
-               rotated_at IS NOT NULL AND rotated_at <= now() - make_interval(secs => @retire_seconds) AS retire
+               rotated_at IS NOT NULL AND rotated_at <= now() - make_interval(secs => @retire_seconds) AS retire,
+               transit_version
         FROM signing_key
         WHERE tenant_id = @tenant_id AND state IN ('current', 'next', 'previous')
         ORDER BY created_at, id
@@ -54,10 +56,11 @@ internal static class SigningKeyLifecycle
     private const string Retire =
         "UPDATE signing_key SET state = 'retired', retired_at = now() WHERE tenant_id = @tenant_id AND id = @id AND state = 'previous'";
 
+    // Story 9.3: a revoked key's private material is destroyed as a retired one's is.
     private const string SelectUndestroyed =
         """
         SELECT s.id FROM signing_key s
-        WHERE s.tenant_id = @tenant_id AND s.state = 'retired' AND s.destroyed_at IS NULL
+        WHERE s.tenant_id = @tenant_id AND s.state IN ('retired', 'revoked') AND s.destroyed_at IS NULL
           AND NOT EXISTS (
             SELECT 1 FROM job j JOIN job_payload p ON p.tenant_id = j.tenant_id AND p.job_id = j.id
             WHERE j.tenant_id = @tenant_id AND j.type = @type AND j.status IN ('pending', 'running')
@@ -83,7 +86,11 @@ internal static class SigningKeyLifecycle
         """;
 
     private const string MarkDestroyed =
-        "UPDATE signing_key SET destroyed_at = now() WHERE tenant_id = @tenant_id AND id = @id AND state = 'retired' AND destroyed_at IS NULL";
+        "UPDATE signing_key SET destroyed_at = now() WHERE tenant_id = @tenant_id AND id = @id AND state IN ('retired', 'revoked') AND destroyed_at IS NULL";
+
+    // Story 9.3: a published key leaves JWKS at once.
+    private const string Revoke =
+        "UPDATE signing_key SET state = 'revoked' WHERE tenant_id = @tenant_id AND id = @id AND state IN ('next', 'current', 'previous')";
 
     private const string SelectNamed = "SELECT EXISTS (SELECT 1 FROM signing_key WHERE tenant_id = @tenant_id AND transit_name = @transit_name)";
 
@@ -238,6 +245,96 @@ internal static class SigningKeyLifecycle
         return new SigningKeyRotation(SigningKeyRotationStatus.Rotated, RetryAfter: null);
     }
 
+    /// <summary>
+    /// Story 9.3 (FR-38): the Tenant Owner's revocation of one published Signing Key. It leaves JWKS at
+    /// once, and its destruction is queued in the same command. A revoked <c>current</c> or <c>next</c> is
+    /// replaced so AD-11's one of each holds at commit: for <c>current</c>, <c>next</c> is promoted whatever its age.
+    /// </summary>
+    public static async Task<SigningKeyRevocation> RevokeAsync(
+        CommandContext context,
+        IKeyCustody custody,
+        IAuditAppender appender,
+        IJobEnqueuer enqueuer,
+        JobType destroyJob,
+        Actor actor,
+        Guid tenantId,
+        string keyId,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        ArgumentNullException.ThrowIfNull(custody);
+        ArgumentNullException.ThrowIfNull(appender);
+        ArgumentNullException.ThrowIfNull(enqueuer);
+        ArgumentNullException.ThrowIfNull(destroyJob);
+        ArgumentNullException.ThrowIfNull(actor);
+        TenantKeys.RequireTenant(context, tenantId);
+
+        // The same lock as both rotations and the backfill: none of them sees this Tenant half-changed.
+        await LockAsync(context, tenantId, cancellationToken);
+
+        var notFound = new SigningKeyRevocation(SigningKeyRevocationStatus.NotFound);
+        if (!TryParseKeyId(keyId, tenantId, out var rowId, out var version))
+        {
+            return notFound;
+        }
+
+        var rows = await ReadOpenAsync(context, tenantId, cancellationToken);
+        var target = rows.SingleOrDefault(r => r.Id == rowId && r.Purpose == SigningKeyPurpose.Signing && r.Version == version);
+        if (target is null)
+        {
+            // Retired, revoked, another version, a management row or none at all: nothing is written.
+            return notFound;
+        }
+
+        var next = rows.SingleOrDefault(r => r.Purpose == SigningKeyPurpose.Signing && r.State == "next");
+        if (target.State == "current" && next is null)
+        {
+            // AD-11: at every commit a Tenant has one of each, so a gap is a broken invariant, not a refusal.
+            throw new InvalidOperationException("A Tenant's signing keys have no next key.");
+        }
+
+        // Transit first (AD-10): a custody failure throws before any row moves, and the caller rolls back.
+        var replacement = target.State is "current" or "next"
+            ? await CreateReplacementAsync(custody, tenantId, SigningKeyPurpose.Signing, cancellationToken)
+            : null;
+
+        // In this order, so neither one-current nor one-next index ever sees two.
+        await ChangeAsync(context, Revoke, tenantId, target.Id, cancellationToken);
+        if (target.State == "current")
+        {
+            await ChangeAsync(context, Promote, tenantId, next!.Id, cancellationToken);
+        }
+
+        if (replacement is not null)
+        {
+            await InsertNextAsync(context, tenantId, SigningKeyPurpose.Signing, replacement, cancellationToken);
+        }
+
+        // In the same command, as retirement does: a revoked row always has its destruction queued.
+        await enqueuer.EnqueueAsync(
+            context,
+            destroyJob,
+            new JobPayload(new Dictionary<string, Guid> { [DestroyPayloadId] = target.Id }),
+            runAfter: null,
+            cancellationToken);
+
+        await AppendAsync(context, appender, actor, KeysEvents.SigningKeyRevoked, cancellationToken);
+        if (target.State == "current")
+        {
+            // Aged by database time, as both rotations read it: published for the JWKS cache limit.
+            var promoted = next!.Aged ? KeysEvents.SigningKeyPromoted : KeysEvents.SigningKeyPromotedUnaged;
+            await AppendAsync(context, appender, actor, promoted, cancellationToken);
+        }
+
+        if (replacement is not null)
+        {
+            await AppendAsync(context, appender, actor, KeysEvents.SigningKeyCreated, cancellationToken);
+        }
+
+        await NotifyAsync(context, tenantId, cancellationToken);
+        return new SigningKeyRevocation(SigningKeyRevocationStatus.Revoked);
+    }
+
     public static async Task<bool> DestroyAsync(
         CommandContext context,
         IKeyCustody custody,
@@ -265,7 +362,7 @@ internal static class SigningKeyLifecycle
             TenantKeys.Add(command, "id", signingKeyId);
 
             await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-            if (!await reader.ReadAsync(cancellationToken) || reader.GetString(1) != "retired" || reader.GetBoolean(3))
+            if (!await reader.ReadAsync(cancellationToken) || reader.GetString(1) is not ("retired" or "revoked") || reader.GetBoolean(3))
             {
                 return false;
             }
@@ -405,7 +502,8 @@ internal static class SigningKeyLifecycle
                 reader.GetString(2),
                 reader.GetBoolean(3),
                 reader.GetBoolean(4),
-                reader.GetBoolean(5)));
+                reader.GetBoolean(5),
+                reader.GetInt32(6)));
         }
 
         return rows;
@@ -428,32 +526,88 @@ internal static class SigningKeyLifecycle
     {
         // Transit first (AD-10): the replacement exists before any row moves, and a custody failure
         // throws before anything is written. The caller's whole command then rolls back.
+        var replacement = await CreateReplacementAsync(custody, tenantId, purpose, cancellationToken);
+
+        // In this order, so neither one-current nor one-next index ever sees two.
+        await ChangeAsync(context, Rotate, tenantId, currentId, cancellationToken);
+        await ChangeAsync(context, Promote, tenantId, nextId, cancellationToken);
+        await InsertNextAsync(context, tenantId, purpose, replacement, cancellationToken);
+
+        await AppendAsync(context, appender, actor, KeysEvents.SigningKeyRotated, cancellationToken);
+        await AppendAsync(context, appender, actor, KeysEvents.SigningKeyPromoted, cancellationToken);
+        await AppendAsync(context, appender, actor, KeysEvents.SigningKeyCreated, cancellationToken);
+    }
+
+    /// <summary>A new <c>next</c> key's Transit key, named from its pre-generated row ID (AD-10). Its row isn't written yet.</summary>
+    private static async Task<Replacement> CreateReplacementAsync(
+        IKeyCustody custody,
+        Guid tenantId,
+        SigningKeyPurpose purpose,
+        CancellationToken cancellationToken)
+    {
         var id = Guid.CreateVersion7();
         var key = purpose == SigningKeyPurpose.Signing ? KeyName.Signing(tenantId, id) : KeyName.Management(tenantId, id);
         var versions = await custody.CreateKeyAsync(key, cancellationToken);
         var version = versions.Count == 0
             ? throw new InvalidOperationException("Key custody returned no version for a new Signing Key.")
             : versions.Max(v => v.KeyVersion);
+        return new Replacement(id, key, version);
+    }
 
-        // In this order, so neither one-current nor one-next index ever sees two.
-        await ChangeAsync(context, Rotate, tenantId, currentId, cancellationToken);
-        await ChangeAsync(context, Promote, tenantId, nextId, cancellationToken);
+    /// <summary>The row of a key <see cref="CreateReplacementAsync"/> made, as its purpose's new <c>next</c>.</summary>
+    private static async Task InsertNextAsync(
+        CommandContext context,
+        Guid tenantId,
+        SigningKeyPurpose purpose,
+        Replacement replacement,
+        CancellationToken cancellationToken)
+    {
+        await using var command = context.CreateCommand();
+        command.CommandText = TenantKeys.InsertKey;
+        TenantKeys.Add(command, "id", replacement.Id);
+        TenantKeys.Add(command, "tenant_id", tenantId);
+        TenantKeys.Add(command, "purpose", TenantKeys.Stored(purpose));
+        TenantKeys.Add(command, "state", "next");
+        TenantKeys.Add(command, "transit_name", replacement.Key.Value);
+        TenantKeys.Add(command, "transit_version", replacement.Version);
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
 
-        await using (var command = context.CreateCommand())
+    /// <summary>
+    /// The <c>signing</c> row a <c>kid</c> names, <c>sig-{tenantId}-{rowId}.v{version}</c>: only this
+    /// Tenant's, in Gatekeep's own canonical form. Any other ID, a <c>mgmt-</c> key's included, names no row.
+    /// </summary>
+    private static bool TryParseKeyId(string? keyId, Guid tenantId, out Guid rowId, out int version)
+    {
+        const string Prefix = "sig-";
+        rowId = Guid.Empty;
+        version = 0;
+
+        var dot = keyId?.LastIndexOf(".v", StringComparison.Ordinal) ?? -1;
+        if (keyId is null || dot < 0)
         {
-            command.CommandText = TenantKeys.InsertKey;
-            TenantKeys.Add(command, "id", id);
-            TenantKeys.Add(command, "tenant_id", tenantId);
-            TenantKeys.Add(command, "purpose", TenantKeys.Stored(purpose));
-            TenantKeys.Add(command, "state", "next");
-            TenantKeys.Add(command, "transit_name", key.Value);
-            TenantKeys.Add(command, "transit_version", version);
-            await command.ExecuteNonQueryAsync(cancellationToken);
+            return false;
         }
 
-        await AppendAsync(context, appender, actor, KeysEvents.SigningKeyRotated, cancellationToken);
-        await AppendAsync(context, appender, actor, KeysEvents.SigningKeyPromoted, cancellationToken);
-        await AppendAsync(context, appender, actor, KeysEvents.SigningKeyCreated, cancellationToken);
+        var versionText = keyId[(dot + 2)..];
+        if (!int.TryParse(versionText, NumberStyles.None, CultureInfo.InvariantCulture, out version)
+            || version < 1
+            || version.ToString(CultureInfo.InvariantCulture) != versionText)
+        {
+            return false;
+        }
+
+        var name = keyId[..dot];
+        if (!name.StartsWith(Prefix, StringComparison.Ordinal)
+            || !KeyName.TryParseRowKey(name, out var key)
+            || key.TenantId != tenantId)
+        {
+            return false;
+        }
+
+        // sig-{tenantId}-{rowId}: TryParseRowKey checked the shape and both IDs.
+        rowId = Guid.ParseExact(name[(Prefix.Length + 37)..], "D");
+        return true;
     }
 
     /// <summary>Delivered only at commit: a rolled-back change evicts nothing in Host.Hosted.</summary>
@@ -483,5 +637,7 @@ internal static class SigningKeyLifecycle
     private static Task AppendAsync(CommandContext context, IAuditAppender appender, Actor actor, AuditEventDefinition definition, CancellationToken cancellationToken) =>
         appender.AppendAsync(context, new AuditEvent(definition.Code, actor), detail: null, cancellationToken);
 
-    private sealed record OpenRow(Guid Id, SigningKeyPurpose Purpose, string State, bool Due, bool Aged, bool Retire);
+    private sealed record OpenRow(Guid Id, SigningKeyPurpose Purpose, string State, bool Due, bool Aged, bool Retire, int Version);
+
+    private sealed record Replacement(Guid Id, KeyName Key, int Version);
 }

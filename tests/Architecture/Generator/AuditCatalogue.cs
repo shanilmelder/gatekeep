@@ -56,7 +56,9 @@ internal static class AuditCatalogue
         new("SessionRevocation", "Session and token revocation", null),
         new("AdminChange", "Admin changes", "8.2"),
         // Story 9.2: a Signing Key rotation, by the daily job or a Tenant Owner on demand, writes rotated, promoted
-        // and created (SigningKeyRotateNowTests, SigningKeyRotateApiTests, EventClassTests).
+        // and created (SigningKeyRotateNowTests, SigningKeyRotateApiTests, EventClassTests). Story 9.3: a Tenant
+        // Owner's revocation writes revoked, then promoted or promoted_unaged and created as they apply
+        // (SigningKeyRevokeTests, SigningKeyRevokeApiTests).
         new("KeyOperation", "Key operations", null),
         new("ManagementApiGrant", "Management API grants", "17.2"),
         // Story 2.10: reuse and replay revoke a family through the one revocation path, whose one event is

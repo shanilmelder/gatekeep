@@ -674,6 +674,7 @@ public sealed class SigningKeyRotationTests(PostgresFixture postgres, OpenBaoFix
     [Theory]
     [InlineData("previous", "NULL", "NULL", "NULL", "signing_key_rotated_at")]
     [InlineData("retired", "now()", "NULL", "NULL", "signing_key_retired_at")]
+    [InlineData("next", "NULL", "NULL", "now()", "signing_key_destroyed_at")]
     [InlineData("current", "NULL", "NULL", "now()", "signing_key_destroyed_at")]
     [InlineData("previous", "now()", "NULL", "now()", "signing_key_destroyed_at")]
     public async Task Lifecycle_times_must_match_the_state(string state, string rotated, string retired, string destroyed, string constraint)
@@ -688,6 +689,23 @@ public sealed class SigningKeyRotationTests(PostgresFixture postgres, OpenBaoFix
         Assert.Equal(constraint, refused.ConstraintName);
     }
 
+    /// <summary>Story 9.3: a revoked key's Transit key is destroyed too, so its row may carry <c>destroyed_at</c>.</summary>
+    [Theory]
+    [InlineData("retired", "now()", "now()")]
+    [InlineData("revoked", "NULL", "NULL")]
+    public async Task A_retired_or_revoked_row_may_be_destroyed(string state, string rotated, string retired)
+    {
+        var database = await ProtocolDatabase.CreateAsync(postgres);
+        var tenant = (await database.AddTenantAsync($"t{Guid.NewGuid():N}.rotation.test")).TenantId;
+        var id = Guid.CreateVersion7();
+
+        await database.ExecuteAsync(
+            $"INSERT INTO signing_key (id, tenant_id, purpose, state, transit_name, transit_version, published_at, promoted_at, rotated_at, retired_at, destroyed_at) "
+            + $"VALUES ('{id}', '{tenant}', 'signing', '{state}', 'sig-{tenant:D}-{id:D}', 1, now(), now(), {rotated}, {retired}, now())");
+
+        Assert.Equal(1L, await database.ScalarAsync<long>($"SELECT count(*) FROM signing_key WHERE id = '{id}' AND destroyed_at IS NOT NULL"));
+    }
+
     [Fact]
     public void Job_types_are_registered_with_their_scopes()
     {
@@ -699,8 +717,11 @@ public sealed class SigningKeyRotationTests(PostgresFixture postgres, OpenBaoFix
         Assert.Equal(JobScope.Tenant, registry.Find(OperationsContract.DestroySigningKey)!.Scope);
         Assert.Equal(JobScope.DeploymentWide, registry.Find(OperationsContract.SweepTransitKeys)!.Scope);
         Assert.All(
-            new[] { OperationsContract.RotateSigningKeys, OperationsContract.DestroySigningKey, OperationsContract.SweepTransitKeys },
+            new[] { OperationsContract.RotateSigningKeys, OperationsContract.SweepTransitKeys },
             type => Assert.Equal([JobRole.Worker], registry.Find(type)!.EnqueuingRoles));
+
+        // Story 9.3: a Tenant Owner's revocation, as gk_admin, queues its key's destruction in the same command.
+        Assert.Equal([JobRole.Worker, JobRole.Admin], registry.Find(OperationsContract.DestroySigningKey)!.EnqueuingRoles);
     }
 
     [Theory]
