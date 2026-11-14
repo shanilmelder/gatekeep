@@ -132,7 +132,7 @@ public sealed class TenantLogEventDetailResponse
     /// <summary>What it acted on, or null when it names nothing.</summary>
     public required LogReference? Target { get; init; }
 
-    /// <summary>The raw detail: null unless the caller holds <c>tenant.log_detail.read</c> in this Tenant.</summary>
+    /// <summary>The raw detail: in a Tenant's Log, null unless the caller holds <c>tenant.log_detail.read</c> in this Tenant; always set in the Deployment Log.</summary>
     public required TenantLogRawResponse? Raw { get; init; }
 }
 
@@ -197,11 +197,7 @@ internal static partial class TenantLogsApi
             return;
         }
 
-        await AdminResponses.JsonAsync(context, new TenantLogsResponse
-        {
-            Events = [.. page.Events.Select(Event)],
-            NextCursor = page.NextAfter is { } next ? PublicId.Format(PublicIdType.AuditEvent, next) : null,
-        });
+        await AdminResponses.JsonAsync(context, Page(page));
     }
 
     /// <summary>
@@ -242,8 +238,21 @@ internal static partial class TenantLogsApi
             return;
         }
 
+        await AdminResponses.JsonAsync(context, Opened(found, withDetail));
+    }
+
+    /// <summary>A page of a Log as the API answers it: shared by the Tenant and the Deployment Log (Story 7.7).</summary>
+    internal static TenantLogsResponse Page(TenantLogPage page) => new()
+    {
+        Events = [.. page.Events.Select(Event)],
+        NextCursor = page.NextAfter is { } next ? PublicId.Format(PublicIdType.AuditEvent, next) : null,
+    };
+
+    /// <summary>An opened event as the API answers it, with <c>raw</c> only when <paramref name="withRaw"/>.</summary>
+    internal static TenantLogEventDetailResponse Opened(TenantLogEvent found, bool withRaw)
+    {
         var summary = Event(found.Entry);
-        await AdminResponses.JsonAsync(context, new TenantLogEventDetailResponse
+        return new TenantLogEventDetailResponse
         {
             Id = summary.Id,
             OccurredAt = summary.OccurredAt,
@@ -252,35 +261,28 @@ internal static partial class TenantLogsApi
             Summary = summary.Summary,
             Actor = summary.Actor,
             Target = summary.Target,
-            Raw = withDetail ? Raw(summary, found) : null,
-        });
+            Raw = withRaw ? Raw(summary, found) : null,
+        };
     }
 
     /// <summary>The search a query string names, or null when any parameter in it is malformed.</summary>
     internal static TenantLogQuery? Parse(IQueryCollection parameters)
     {
-        var query = new TenantLogQuery();
-
-        if (!Single(parameters, TypeQuery, out var type)
+        if (ParseShared(parameters) is not { } shared
             || !Single(parameters, UserQuery, out var user)
-            || !Single(parameters, ApplicationQuery, out var application)
-            || !Single(parameters, OutcomeQuery, out var outcome)
-            || !Single(parameters, FromQuery, out var from)
-            || !Single(parameters, ToQuery, out var to)
-            || !Single(parameters, CursorQuery, out var cursor))
+            || !Single(parameters, ApplicationQuery, out var application))
         {
             return null;
         }
 
-        if (type is not null)
+        var query = new TenantLogQuery
         {
-            if (!IsCode(type))
-            {
-                return null;
-            }
-
-            query = query with { Types = [new AuditTypeCode(type)] };
-        }
+            Types = shared.Types,
+            OutcomeTypes = shared.OutcomeTypes,
+            From = shared.From,
+            To = shared.To,
+            After = shared.After,
+        };
 
         if (user is not null)
         {
@@ -308,6 +310,36 @@ internal static partial class TenantLogsApi
             query = query with { ApplicationId = applicationId };
         }
 
+        return query with { Limit = PageSize };
+    }
+
+    /// <summary>
+    /// The filters every Log search takes (Stories 7.4 and 7.7): an event type, an outcome, a time
+    /// range and a cursor, or null when any of them is malformed.
+    /// </summary>
+    internal static LogFilters? ParseShared(IQueryCollection parameters)
+    {
+        if (!Single(parameters, TypeQuery, out var type)
+            || !Single(parameters, OutcomeQuery, out var outcome)
+            || !Single(parameters, FromQuery, out var from)
+            || !Single(parameters, ToQuery, out var to)
+            || !Single(parameters, CursorQuery, out var cursor))
+        {
+            return null;
+        }
+
+        var filters = new LogFilters();
+
+        if (type is not null)
+        {
+            if (!IsCode(type))
+            {
+                return null;
+            }
+
+            filters = filters with { Types = [new AuditTypeCode(type)] };
+        }
+
         if (outcome is not null)
         {
             var wanted = outcome switch
@@ -321,7 +353,7 @@ internal static partial class TenantLogsApi
                 return null;
             }
 
-            query = query with { OutcomeTypes = LogCatalogue.CodesWith(value) };
+            filters = filters with { OutcomeTypes = LogCatalogue.CodesWith(value) };
         }
 
         if (from is not null)
@@ -331,7 +363,7 @@ internal static partial class TenantLogsApi
                 return null;
             }
 
-            query = query with { From = since };
+            filters = filters with { From = since };
         }
 
         if (to is not null)
@@ -341,10 +373,10 @@ internal static partial class TenantLogsApi
                 return null;
             }
 
-            query = query with { To = until };
+            filters = filters with { To = until };
         }
 
-        if (query.From is { } start && query.To is { } end && start >= end)
+        if (filters.From is { } start && filters.To is { } end && start >= end)
         {
             return null;
         }
@@ -356,10 +388,10 @@ internal static partial class TenantLogsApi
                 return null;
             }
 
-            query = query with { After = after };
+            filters = filters with { After = after };
         }
 
-        return query with { Limit = PageSize };
+        return filters;
     }
 
     private static TenantLogEventResponse Event(TenantLogEntry entry)
@@ -410,7 +442,7 @@ internal static partial class TenantLogsApi
         kind.ToString().ToLowerInvariant();
 
     /// <summary>A parameter sent at most once, with a value: sent twice, or empty, is malformed.</summary>
-    private static bool Single(IQueryCollection parameters, string name, out string? value)
+    internal static bool Single(IQueryCollection parameters, string name, out string? value)
     {
         value = null;
         if (!parameters.TryGetValue(name, out StringValues values))
@@ -441,7 +473,7 @@ internal static partial class TenantLogsApi
     }
 
     /// <summary>A UUID in its hyphenated form only, as every internal reference is written.</summary>
-    private static bool IsUuid(string value, out Guid id) =>
+    internal static bool IsUuid(string value, out Guid id) =>
         Guid.TryParseExact(value, "D", out id) && id != Guid.Empty;
 
     /// <summary>One <c>@</c> between a local part and a domain, with no space or control character: a filter, not a validation.</summary>
@@ -456,7 +488,7 @@ internal static partial class TenantLogsApi
             && DateTimeOffset.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.None, out instant);
     }
 
-    private static Task RefuseAsync(HttpContext context)
+    internal static Task RefuseAsync(HttpContext context)
     {
         // The fixed code only: never a parameter's value, which may be an email.
         context.RequestServices.GetRequiredService<ILoggerFactory>()
@@ -468,7 +500,7 @@ internal static partial class TenantLogsApi
         return AdminResponses.ProblemAsync(context, StatusCodes.Status400BadRequest, AdminResponses.InvalidRequest);
     }
 
-    private static Task RefuseEventAsync(HttpContext context, int status, string problem)
+    internal static Task RefuseEventAsync(HttpContext context, int status, string problem)
     {
         // The fixed code only: never the route value.
         context.RequestServices.GetRequiredService<ILoggerFactory>()
@@ -485,4 +517,18 @@ internal static partial class TenantLogsApi
 
     [GeneratedRegex(@"\A[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}(?::[0-9]{2}(?:\.[0-9]{1,7})?)?(?:Z|[+-][0-9]{2}:[0-9]{2})\z")]
     private static partial Regex Instant();
+}
+
+/// <summary>The filters every Log search shares: an event type, an outcome's codes, a time range and a cursor.</summary>
+internal sealed record LogFilters
+{
+    public IReadOnlyCollection<AuditTypeCode>? Types { get; init; }
+
+    public IReadOnlyCollection<AuditTypeCode>? OutcomeTypes { get; init; }
+
+    public DateTimeOffset? From { get; init; }
+
+    public DateTimeOffset? To { get; init; }
+
+    public Guid? After { get; init; }
 }

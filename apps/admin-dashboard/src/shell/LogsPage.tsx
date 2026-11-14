@@ -1,4 +1,4 @@
-import type { TenantLogEvent, TenantLogEventDetail, TenantLogsQuery, TenantLogsResponse } from '@gatekeep/api-client';
+import type { TenantLogEvent, TenantLogEventDetail, TenantLogsResponse } from '@gatekeep/api-client';
 import {
   Banner,
   Button,
@@ -17,16 +17,16 @@ import {
   type DataTableColumn,
   type EventSummaryRow,
 } from '@gatekeep/ui/admin';
-import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { api } from '../session';
 import type { ShellRequest } from './CredentialsPage';
 import styles from './LogsPage.module.css';
 import { eventSummary } from './logEvent';
 import {
-  LOG_FIELDS,
   OUTCOMES,
   RANGES,
   choices,
+  fieldsOf,
   initialValue,
   isChoice,
   isField,
@@ -36,6 +36,7 @@ import {
   searchOf,
   utcTime,
   type LogField,
+  type LogQuery,
   type LogSearch,
 } from './logs';
 
@@ -55,10 +56,20 @@ type LogsRead = { kind: 'ready'; list: TenantLogsResponse } | { kind: 'failed'; 
 
 type EventRead = { kind: 'ready'; event: TenantLogEventDetail } | { kind: 'failed'; failure: LogsFailure };
 
-/** One event, opened (Story 7.5). A 2xx without the event's fields is a failure. */
-export async function readLogEvent(request: ShellRequest, tenantId: string, eventId: string, signal?: AbortSignal): Promise<EventRead> {
+/**
+ * Which Log the page reads: the path Tenant's (Story 7.4), or the Deployment Log (Story 7.7),
+ * which only the Deployment Owner reads.
+ */
+export type LogScope = { kind: 'tenant'; tenantId: string } | { kind: 'deployment' };
+
+/** One event of the scope's Log, opened (Stories 7.5 and 7.7). A 2xx without the event's fields is a failure. */
+export async function readLogEvent(request: ShellRequest, scope: LogScope, eventId: string, signal?: AbortSignal): Promise<EventRead> {
   try {
-    const result = await request('get', () => api.getTenantLogEvent(tenantId, eventId), signal);
+    const result = await request(
+      'get',
+      () => (scope.kind === 'deployment' ? api.getDeploymentLogEvent(eventId) : api.getTenantLogEvent(scope.tenantId, eventId)),
+      signal,
+    );
     if (result.ok) {
       const event = result.data;
       if (event && typeof event.id === 'string' && typeof event.type === 'string' && event.actor) return { kind: 'ready', event };
@@ -71,16 +82,21 @@ export async function readLogEvent(request: ShellRequest, tenantId: string, even
   }
 }
 
-/** One page of the Log for `query`, after `cursor` when given. A 2xx without the list's fields is a failure. */
+/** One page of the scope's Log for `query`, after `cursor` when given. A 2xx without the list's fields is a failure. */
 export async function readLogs(
   request: ShellRequest,
-  tenantId: string,
-  query: TenantLogsQuery,
+  scope: LogScope,
+  query: LogQuery,
   cursor?: string,
   signal?: AbortSignal,
 ): Promise<LogsRead> {
+  const sent = cursor === undefined ? query : { ...query, cursor };
   try {
-    const result = await request('get', () => api.searchTenantLogs(tenantId, cursor === undefined ? query : { ...query, cursor }), signal);
+    const result = await request(
+      'get',
+      () => (scope.kind === 'deployment' ? api.searchDeploymentLogs(sent) : api.searchTenantLogs(scope.tenantId, sent)),
+      signal,
+    );
     if (result.ok) {
       const list = result.data;
       if (list && Array.isArray(list.events)) return { kind: 'ready', list };
@@ -101,6 +117,10 @@ function fieldLabel(field: LogField, messages: Messages): string {
       return messages.logsFieldUser;
     case 'application':
       return messages.logsFieldApplication;
+    case 'admin':
+      return messages.logsFieldAdmin;
+    case 'tenant':
+      return messages.logsFieldTenant;
     case 'outcome':
       return messages.logsFieldOutcome;
     case 'range':
@@ -133,6 +153,8 @@ function helper(field: LogField, messages: Messages): string | undefined {
   if (field === 'type') return messages.logsTypeHelper;
   if (field === 'user') return messages.logsUserHelper;
   if (field === 'application') return messages.logsApplicationHelper;
+  if (field === 'admin') return messages.logsAdminHelper;
+  if (field === 'tenant') return messages.logsTenantHelper;
   return undefined;
 }
 
@@ -143,8 +165,8 @@ function draftOf(search: LogSearch): LogSearch {
 
 export interface LogsPageProps {
   request: ShellRequest;
-  /** The path Tenant, as the shell decoded it. */
-  tenantId: string;
+  /** The Log this page reads: the path Tenant's, as the shell decoded it, or the Deployment's. */
+  scope: LogScope;
 }
 
 /**
@@ -160,14 +182,19 @@ export interface LogsPageProps {
  * opens the event drawer, drawn selected, and reads that event: its code badge, its summary
  * rows and, only when the server sent `raw`, the raw JSON with Copy JSON. Esc and Close shut it;
  * the drawer isn't kept in the URL.
+ *
+ * The same page is the Deployment Log (Story 7.7) for the `deployment` scope: Deployment › Log,
+ * searched by Admin and Tenant in place of User and Application, with Admin and Tenant columns,
+ * and a drawer whose summary names no User or Application. The server always sends its `raw`.
  */
-export function LogsPage({ request, tenantId }: LogsPageProps) {
+export function LogsPage({ request, scope }: LogsPageProps) {
   const messages = useMessages();
+  const fields = fieldsOf(scope.kind);
   const [params, setParams] = useUrlParams(PARAMS);
-  const search = searchOf(params);
+  const search = searchOf(params, fields);
   const [draft, setDraft] = useState<LogSearch>(() => draftOf(search));
   const [read, setRead] = useState<LogsRead | null>(null);
-  const [query, setQuery] = useState<TenantLogsQuery>({});
+  const [query, setQuery] = useState<LogQuery>({});
   const [attempt, setAttempt] = useState(0);
   const [more, setMore] = useState<'idle' | 'loading' | 'failed'>('idle');
   // The page's own life: a late Load more answer after a new search or unmount lands nowhere.
@@ -180,32 +207,36 @@ export function LogsPage({ request, tenantId }: LogsPageProps) {
   // The URL is the search: on a reload, Back or Forward, the form shows what the URL holds.
   useEffect(() => setDraft(draftOf(search)), [search.field, search.value]);
 
+  // The scope as plain values, so a re-render with an equal scope reads nothing again.
+  const tenantId = scope.kind === 'tenant' ? scope.tenantId : null;
+  const current = useMemo<LogScope>(() => (tenantId === null ? { kind: 'deployment' } : { kind: 'tenant', tenantId }), [tenantId]);
+
   useEffect(() => {
     const controller = new AbortController();
     alive.current = controller;
     // A time range ends now: its start is taken as this read is sent.
-    const sent = queryOf(search, Date.now());
+    const sent = queryOf(search, Date.now(), fields);
     setQuery(sent);
     setRead(null);
     setMore('idle');
     setOpened(null);
     setEventRead(null);
-    void readLogs(request, tenantId, sent, undefined, controller.signal).then((result) => {
+    void readLogs(request, current, sent, undefined, controller.signal).then((result) => {
       if (!controller.signal.aborted) setRead(result);
     });
     return () => controller.abort();
-  }, [request, tenantId, search.field, search.value, attempt]);
+  }, [request, current, search.field, search.value, attempt]);
 
   const openedId = opened?.id ?? null;
   useEffect(() => {
     if (openedId === null) return;
     const controller = new AbortController();
     setEventRead(null);
-    void readLogEvent(request, tenantId, openedId, controller.signal).then((result) => {
+    void readLogEvent(request, current, openedId, controller.signal).then((result) => {
       if (!controller.signal.aborted) setEventRead(result);
     });
     return () => controller.abort();
-  }, [request, tenantId, openedId, eventAttempt]);
+  }, [request, current, openedId, eventAttempt]);
 
   const closeEvent = useCallback(() => {
     setOpened(null);
@@ -216,7 +247,7 @@ export function LogsPage({ request, tenantId }: LogsPageProps) {
     if (read?.kind !== 'ready' || read.list.nextCursor == null || more === 'loading') return;
     const signal = alive.current.signal;
     setMore('loading');
-    const next = await readLogs(request, tenantId, query, read.list.nextCursor, signal);
+    const next = await readLogs(request, current, query, read.list.nextCursor, signal);
     if (signal.aborted) return;
     if (next.kind === 'failed') {
       setMore('failed');
@@ -224,7 +255,7 @@ export function LogsPage({ request, tenantId }: LogsPageProps) {
     }
     setRead({ kind: 'ready', list: { events: [...read.list.events, ...next.list.events], nextCursor: next.list.nextCursor } });
     setMore('idle');
-  }, [read, more, request, tenantId, query]);
+  }, [read, more, request, current, query]);
 
   function submit(event: FormEvent) {
     event.preventDefault();
@@ -236,7 +267,7 @@ export function LogsPage({ request, tenantId }: LogsPageProps) {
   }
 
   function pickField(value: string) {
-    if (!isField(value)) return;
+    if (!isField(value, fields)) return;
     setDraft({ field: value, value: initialValue(value) });
   }
 
@@ -248,9 +279,21 @@ export function LogsPage({ request, tenantId }: LogsPageProps) {
       cell: (row) => <CodeBadge outcome={row.outcome === 'failure' ? 'failure' : 'success'}>{row.type}</CodeBadge>,
     },
     { key: 'description', header: messages.logsColumnDescription, rowHeader: true, rowLink: true, cell: (row) => row.summary ?? row.type },
-    { key: 'user', header: messages.logsColumnUser, cell: (row) => <Reference id={referenceOf(row, 'user')} /> },
-    { key: 'application', header: messages.logsColumnApplication, cell: (row) => <Reference id={referenceOf(row, 'client')} /> },
+    ...(scope.kind === 'deployment'
+      ? [
+          { key: 'admin', header: messages.logsColumnAdmin, cell: (row: TenantLogEvent) => <Reference id={referenceOf(row, 'admin')} /> },
+          { key: 'tenant', header: messages.logsColumnTenant, cell: (row: TenantLogEvent) => <Reference id={referenceOf(row, 'tenant')} /> },
+        ]
+      : [
+          { key: 'user', header: messages.logsColumnUser, cell: (row: TenantLogEvent) => <Reference id={referenceOf(row, 'user')} /> },
+          {
+            key: 'application',
+            header: messages.logsColumnApplication,
+            cell: (row: TenantLogEvent) => <Reference id={referenceOf(row, 'client')} />,
+          },
+        ]),
   ];
+  const title = scope.kind === 'deployment' ? messages.navDeploymentLog : messages.navLogs;
 
   const invalid = read?.kind === 'failed' && read.failure.status === 400;
 
@@ -270,7 +313,7 @@ export function LogsPage({ request, tenantId }: LogsPageProps) {
           ipAddress: messages.logsEventIpAddress,
           userAgent: messages.logsEventUserAgent,
           email: messages.logsEventEmail,
-        }).map((line) => ({
+        }, scope.kind).map((line) => ({
           key: line.key,
           label: line.label,
           value: line.code ? <code className={styles.reference}>{line.value}</code> : line.value,
@@ -286,7 +329,13 @@ export function LogsPage({ request, tenantId }: LogsPageProps) {
         action={missing ? undefined : { label: messages.retry, onClick: () => setEventAttempt((n) => n + 1) }}
         data-testid={missing ? 'log-event-not-found' : 'log-event-failed'}
       >
-        <p>{missing ? messages.logsEventNotFound : messages.logsEventLoadFailed}</p>
+        <p>
+          {missing
+            ? scope.kind === 'deployment'
+              ? messages.logsDeploymentEventNotFound
+              : messages.logsEventNotFound
+            : messages.logsEventLoadFailed}
+        </p>
         <ErrorReference code={eventRead.failure.code || 'unavailable'} traceId={eventRead.failure.traceId} />
       </Banner>
     ) : undefined;
@@ -303,12 +352,16 @@ export function LogsPage({ request, tenantId }: LogsPageProps) {
   const raw = eventRead?.kind === 'ready' ? eventRead.event.raw : null;
 
   return (
-    <SectionPage eyebrow={messages.navMonitoring} title={messages.navLogs} data-testid="logs-page">
+    <SectionPage
+      eyebrow={scope.kind === 'deployment' ? messages.navDeployment : messages.navMonitoring}
+      title={title}
+      data-testid={scope.kind === 'deployment' ? 'deployment-logs-page' : 'logs-page'}
+    >
       <div className={styles.page}>
         <form className={styles.search} onSubmit={submit} role="search" data-testid="logs-search">
           <Field label={messages.logsField} className={styles.field}>
             <Select value={draft.field} onChange={(event) => pickField(event.target.value)} data-testid="logs-field">
-              {LOG_FIELDS.map((field) => (
+              {fields.map((field) => (
                 <option key={field} value={field}>
                   {fieldLabel(field, messages)}
                 </option>
@@ -353,7 +406,7 @@ export function LogsPage({ request, tenantId }: LogsPageProps) {
         {read?.kind === 'ready' && (
           <div data-testid="logs">
             <DataTable
-              caption={messages.navLogs}
+              caption={title}
               hideCaption
               columns={columns}
               rows={read.list.events}
@@ -382,7 +435,7 @@ export function LogsPage({ request, tenantId }: LogsPageProps) {
   );
 }
 
-/** A User or Application reference in the code type, or nothing when the event names none. */
+/** A User, Application, Admin or Tenant reference in the code type, or nothing when the event names none. */
 function Reference({ id }: { id: string | null }) {
   return id === null ? null : <code className={styles.reference}>{id}</code>;
 }

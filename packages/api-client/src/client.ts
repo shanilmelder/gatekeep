@@ -45,6 +45,8 @@ export type TenantLogRawDetail = components['schemas']['TenantLogRawDetailRespon
 
 /** A Log search's filters (Story 7.4), each optional and sent at most once, and the next page's cursor. */
 export type TenantLogsQuery = NonNullable<operations['SearchTenantLogs']['parameters']['query']>;
+/** A Deployment Log search's filters (Story 7.7): event type, Admin, Tenant, outcome, time range and cursor. */
+export type DeploymentLogsQuery = NonNullable<operations['SearchDeploymentLogs']['parameters']['query']>;
 export type SigningKeysResponse = components['schemas']['SigningKeysResponse'];
 export type SigningKey = components['schemas']['SigningKeyResponse'];
 export type SigningKeysJwksResponse = components['schemas']['SigningKeysJwksResponse'];
@@ -143,6 +145,7 @@ const STATE_CHANGING: ReadonlySet<string> = new Set(['post', 'put', 'patch', 'de
 
 /** A Log search's parameters, in the order the query string carries them. */
 const LOG_QUERY = ['type', 'user', 'application', 'outcome', 'from', 'to', 'cursor'] as const satisfies readonly (keyof TenantLogsQuery)[];
+const DEPLOYMENT_LOG_QUERY = ['type', 'admin', 'tenant', 'outcome', 'from', 'to', 'cursor'] as const satisfies readonly (keyof DeploymentLogsQuery)[];
 
 /**
  * `{ code, traceId }` from a problem body, or null for anything else, with `errors` too when the body
@@ -331,6 +334,26 @@ export function createApiClient(options: ApiClientOptions = {}) {
         `/api/v1/tenants/${encodeURIComponent(tenantId)}/logs/${encodeURIComponent(eventId)}` as '/api/v1/tenants/{tenantId}/logs/{eventId}',
         'get',
       ),
+    /**
+     * One page of the Deployment Log (Story 7.7), newest first, 50 a page: Deployment Owner only.
+     * Each filter in `query` that is set, and the previous page's `nextCursor` as `cursor`, goes
+     * into the query string encoded, in a fixed order.
+     */
+    searchDeploymentLogs: (query: DeploymentLogsQuery = {}) => {
+      const search = new URLSearchParams();
+      for (const name of DEPLOYMENT_LOG_QUERY) {
+        const value = query[name];
+        if (typeof value === 'string' && value !== '') search.set(name, value);
+      }
+      const text = search.toString();
+      return request(
+        `/api/v1/deployment/logs${text === '' ? '' : `?${text}`}` as '/api/v1/deployment/logs',
+        'get',
+      );
+    },
+    /** One event of the Deployment Log (Story 7.7), by its `evt_` ID, always with `raw`. The ID goes into the path encoded. */
+    getDeploymentLogEvent: (eventId: string) =>
+      request(`/api/v1/deployment/logs/${encodeURIComponent(eventId)}` as '/api/v1/deployment/logs/{eventId}', 'get'),
     /** Changes the Tenant's environment label. Removing Prod needs a fresh assertion bound to this Tenant. */
     setTenantLabel: (tenantId: string, body: SetTenantLabelRequest) =>
       request(`/api/v1/tenants/${encodeURIComponent(tenantId)}/label` as '/api/v1/tenants/{tenantId}/label', 'put', body),

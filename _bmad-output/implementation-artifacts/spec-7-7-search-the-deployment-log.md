@@ -2,7 +2,8 @@
 title: "Story 7.7: Search the Deployment Log"
 type: 'feature'
 created: '2026-11-14'
-status: 'ready-for-dev'
+status: 'in-review'
+baseline_revision: '26f5f22e53b6b14fff14e8e6498cb009ef149a00'
 review_loop_iteration: 0
 followup_review_recommended: false
 context:
@@ -120,17 +121,17 @@ deferred: []
 ## Tasks & Acceptance
 
 **Execution:**
-- [ ] `src/Adapters/Postgres/Migrations/Migration20261119000000DeploymentLogSearchIndexes.cs`, `tests/Isolation/MigrateCommandTests.cs` -- add the four indexes and bump the migration count, so the searches stay indexed.
-- [ ] `src/Modules/Audit/Contracts/IDeploymentLogReader.cs`, `src/Modules/Audit/Core/DeploymentLogReader.cs` (+ `AuditContract`) -- add a reader with `SearchAsync(context, DeploymentLogQuery, ct)` and `FindAsync(context, eventId, ct)` over `deployment_audit_event` and its detail. This keeps the reads in their module.
-- [ ] `src/Gatekeep.Host.Admin/DeploymentLogsApi.cs`, `AdminApi.cs`, `AdminApiServices.cs` (+ shared helpers from `TenantLogsApi.cs`) -- add both handlers and routes, each under `RequiresCapability(DeploymentLogRead)`, with OpenAPI 200/400/401/403(/404)/503. These are the API surface.
-- [ ] `tests/Architecture/LogRouteRuleTests.cs`, `tests/Isolation/Canary/CanaryFlows.cs`, and `RouteRegistry.cs` if applicable -- extend the GET-only rule and the route inventories, which keep the Log immutable and canary-scanned.
-- [ ] `tests/Isolation/Audit/DeploymentLogTests.cs` -- cover every server matrix row against a real database through `AdminHost`.
+- [x] `src/Adapters/Postgres/Migrations/Migration20261119000000DeploymentLogSearchIndexes.cs`, `tests/Isolation/MigrateCommandTests.cs` -- add the four indexes and bump the migration count, so the searches stay indexed.
+- [x] `src/Modules/Audit/Contracts/IDeploymentLogReader.cs`, `src/Modules/Audit/Core/DeploymentLogReader.cs` (+ `AuditContract`) -- add a reader with `SearchAsync(context, DeploymentLogQuery, ct)` and `FindAsync(context, eventId, ct)` over `deployment_audit_event` and its detail. This keeps the reads in their module.
+- [x] `src/Gatekeep.Host.Admin/DeploymentLogsApi.cs`, `AdminApi.cs`, `AdminApiServices.cs` (+ shared helpers from `TenantLogsApi.cs`) -- add both handlers and routes, each under `RequiresCapability(DeploymentLogRead)`, with OpenAPI 200/400/401/403(/404)/503. These are the API surface.
+- [x] `tests/Architecture/LogRouteRuleTests.cs`, `tests/Isolation/Canary/CanaryFlows.cs`, and `RouteRegistry.cs` if applicable -- extend the GET-only rule and the route inventories, which keep the Log immutable and canary-scanned.
+- [x] `tests/Isolation/Audit/DeploymentLogTests.cs` -- cover every server matrix row against a real database through `AdminHost`.
   - Produce bootstrap, sign-in and recovery events through their real flows where `AdminHost` already drives them. Insert Tenant events through the API.
   - Insert the three not-yet-built classes as fixture rows. This proves AC 1.
   - Cover the other Admin's 403, the 401, and the machine `Allows` check. This proves AC 2.
-- [ ] `docs/api/openapi-v1.json`, `packages/api-client/*` -- regenerate, and add the two client methods.
-- [ ] `apps/admin-dashboard/src/shell/{LogsPage.tsx,logs.ts,logEvent.ts,nav.ts,Shell.tsx}`, `packages/ui/src/messages.tsx` -- build the Deployment Log screen from the parameterised Logs page.
-- [ ] `apps/admin-dashboard/test/logs.test.mjs`, browser spec -- unit-test the Deployment fields' URL-to-query mapping. Browser-test that the page lists events, searches by Tenant, opens a row with raw JSON, and hides the nav item without the capability.
+- [x] `docs/api/openapi-v1.json`, `packages/api-client/*` -- regenerate, and add the two client methods.
+- [x] `apps/admin-dashboard/src/shell/{LogsPage.tsx,logs.ts,logEvent.ts,nav.ts,Shell.tsx}`, `packages/ui/src/messages.tsx` -- build the Deployment Log screen from the parameterised Logs page.
+- [x] `apps/admin-dashboard/test/logs.test.mjs`, browser spec -- unit-test the Deployment fields' URL-to-query mapping. Browser-test that the page lists events, searches by Tenant, opens a row with raw JSON, and hides the nav item without the capability.
 
 **Acceptance Criteria:**
 - Given a Deployment Owner, when they open Deployment › Log, then the bootstrap events are listed newest first, and searching by event type finds each of the bootstrap, Admin sign-in, recovery, Tenant, upgrade, restore and configuration classes. The last three are fixture rows.

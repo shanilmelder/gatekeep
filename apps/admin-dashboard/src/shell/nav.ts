@@ -10,11 +10,13 @@
 // first Tenant one, Settings → Tenant, which any Tenant Role in the path Tenant sees; Story 7.4
 // Monitoring → Logs, for tenant.logs.read; Story 9.1 Security → Signing keys, which any Tenant Role
 // sees too; Story 3.1 Applications → Applications, which any Tenant Role sees, and later Epic 3
-// stories the other Applications ones.
+// stories the other Applications ones; Story 7.7 Deployment → Log, for deployment.log.read, which
+// only the Deployment Owner holds.
 
 import type { AdminNavGroupId, AdminNavItem, Messages } from '@gatekeep/ui/admin';
 import { applicationsPath } from './applications';
 import type { Capability } from './capabilities';
+import { DEPLOYMENT_LOGS_PATH } from './logs';
 
 type DeploymentCapability = Extract<Capability, `deployment.${string}`>;
 type TenantCapability = Extract<Capability, `tenant.${string}`>;
@@ -34,6 +36,7 @@ export type NavEntry =
 
 export const NAV: readonly NavEntry[] = [
   { group: 'deployment', label: 'navTenants', href: '/deployment/tenants', requires: 'deployment.tenants.read' },
+  { group: 'deployment', label: 'navDeploymentLog', href: DEPLOYMENT_LOGS_PATH, requires: 'deployment.log.read' },
   {
     group: 'applications',
     label: 'applicationsTitle',

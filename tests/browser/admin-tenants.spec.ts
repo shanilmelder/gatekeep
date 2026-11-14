@@ -383,7 +383,7 @@ test.describe('landing', () => {
 });
 
 test.describe('sidebar', () => {
-  test('the Owner has the Deployment group with Tenants, current on the Tenants page', async ({ page, baseURL }) => {
+  test('the Owner has the Deployment group with Tenants and Log, Tenants current on its page', async ({ page, baseURL }) => {
     await answerApi(page, baseURL!, { tenants: [tenant(0)] });
 
     await page.goto('/deployment/tenants');
@@ -394,7 +394,7 @@ test.describe('sidebar', () => {
     const link = nav(page).getByRole('link', { name: 'Tenants' });
     await expect(link).toHaveAttribute('href', '/deployment/tenants');
     await expect(link).toHaveAttribute('aria-current', 'page');
-    await expect(nav(page).getByRole('link')).toHaveCount(1);
+    await expect(nav(page).getByRole('link')).toHaveText(['Tenants', 'Log']);
   });
 });
 

@@ -623,6 +623,58 @@ internal static class AdminApi
             .Produces<ApiProblem>(StatusCodes.Status404NotFound, AdminResponses.ProblemContentType)
             .Produces(StatusCodes.Status503ServiceUnavailable);
 
+        app.MapGet("/api/v1/deployment/logs", static (HttpContext context, AdminApiServices services) => DeploymentLogsApi.SearchAsync(context, services))
+            .WithMetadata(
+                DeploymentApiEndpoint.Instance,
+                new RequiresCapability(AdminCapabilities.DeploymentLogRead),
+                new QueryParameter(TenantLogsApi.TypeQuery, "One event type code, {domain}.{object}.{action}, as docs/audit-events.md publishes it."),
+                new QueryParameter(DeploymentLogsApi.AdminQuery, "An Admin's UUID: events whose Actor or target is that Admin."),
+                new QueryParameter(DeploymentLogsApi.TenantQuery, "A Tenant's ten_ public ID: events whose target is that Tenant."),
+                new QueryParameter(TenantLogsApi.OutcomeQuery, "success or failure: the events whose type the catalogue gives that outcome."),
+                new QueryParameter(TenantLogsApi.FromQuery, "An ISO 8601 instant with Z or an offset: events at or after it."),
+                new QueryParameter(TenantLogsApi.ToQuery, "An ISO 8601 instant with Z or an offset: events before it. It must come after from."),
+                new QueryParameter(TenantLogsApi.CursorQuery, "The previous page's nextCursor: an evt_ public ID."))
+            .WithName("SearchDeploymentLogs")
+            .WithTags(Tag)
+            .WithSummary("Search the Deployment Log: newest first, 50 a page.")
+            .WithDescription(
+                "Deployment Owner only. Read only, in one Deployment transaction, and the read isn't audited. The Deployment Log holds " +
+                "bootstrap, Admin sign-in, recovery, Tenant and other Deployment events, never a Tenant's own. Each event's evt_ ID, " +
+                "time, type code, the catalogue's outcome and summary (both null for a code no catalogue declares), and its Actor and " +
+                "target as internal references; never its detail. Every parameter is optional, at most once, and they combine; each " +
+                "filters an indexed envelope column. nextCursor is the last event's ID when an older page follows, else null; pass it " +
+                "back as cursor with the same filters. A parameter sent twice or empty, an unknown outcome, a code that isn't three " +
+                "lower-case parts, an Admin that isn't a UUID, a Tenant that isn't a ten_ ID, a time that isn't an instant, from not " +
+                "before to, or a malformed cursor is 400 invalid_request. Any other Admin is 403 access_denied, audited as every " +
+                "capability refusal is.")
+            .Produces<TenantLogsResponse>(StatusCodes.Status200OK)
+            .Produces<ApiProblem>(StatusCodes.Status400BadRequest, AdminResponses.ProblemContentType)
+            .Produces(StatusCodes.Status401Unauthorized)
+            .Produces<ApiProblem>(StatusCodes.Status403Forbidden, AdminResponses.ProblemContentType)
+            .Produces(StatusCodes.Status503ServiceUnavailable);
+
+        app.MapGet("/api/v1/deployment/logs/{eventId}", static (HttpContext context, AdminApiServices services) => DeploymentLogsApi.GetAsync(context, services))
+            .WithMetadata(
+                DeploymentApiEndpoint.Instance,
+                new RequiresCapability(AdminCapabilities.DeploymentLogRead),
+                new PathParameter(TenantLogsApi.EventRouteValue, "The event's public ID, as the search lists it: evt_ and 26 base32 characters."))
+            .WithName("GetDeploymentLogEvent")
+            .WithTags(Tag)
+            .WithSummary("One event of the Deployment Log, with its raw detail.")
+            .WithDescription(
+                "Deployment Owner only. Read only, in one Deployment transaction, and the read isn't audited. The same fields as a " +
+                "search row, and raw always: the envelope, the seal (seq, and prevHash and hash in lowercase hex; null while unsealed, " +
+                "prevHash null for the chain's first event) and the detail (IP address, User-Agent and email, each nullable; null when " +
+                "the event has none). An eventId that isn't an evt_ ID is 400 invalid_request. An event the Deployment Log doesn't " +
+                "have, including a Tenant Log event, is 404 not_found. Any other Admin is 403 access_denied, audited as every " +
+                "capability refusal is.")
+            .Produces<TenantLogEventDetailResponse>(StatusCodes.Status200OK)
+            .Produces<ApiProblem>(StatusCodes.Status400BadRequest, AdminResponses.ProblemContentType)
+            .Produces(StatusCodes.Status401Unauthorized)
+            .Produces<ApiProblem>(StatusCodes.Status403Forbidden, AdminResponses.ProblemContentType)
+            .Produces<ApiProblem>(StatusCodes.Status404NotFound, AdminResponses.ProblemContentType)
+            .Produces(StatusCodes.Status503ServiceUnavailable);
+
         app.MapGet("/api/v1/tenants/{tenantId}/signing-keys", static (HttpContext context, AdminApiServices services) => SigningKeysApi.ListAsync(context, services))
             .WithMetadata(TenantApiEndpoint.Instance, new RequiresCapability(AdminCapabilities.TenantConfigurationRead))
             .WithName("ListSigningKeys")
