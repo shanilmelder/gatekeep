@@ -2,7 +2,7 @@
 title: "Story 7.7: Search the Deployment Log"
 type: 'feature'
 created: '2026-11-14'
-status: 'in-review'
+status: 'done'
 baseline_revision: '26f5f22e53b6b14fff14e8e6498cb009ef149a00'
 review_loop_iteration: 0
 followup_review_recommended: false
@@ -142,6 +142,38 @@ deferred: []
 
 ## Review Triage Log
 
+### 2026-11-14 — Review pass
+- verdicts: 23 findings — high 0, medium 0, low 18, false 5, maybe-false 0
+- notes: the review diff was taken before merging `main` (Story 3.6), and leaves out the generated contract files and `_bmad-output`. The merge renamed the migration to `20261120000000`, set the count to 36, and added the `api` target kind to `StoredKinds`.
+- findings:
+  - Intent Alignment:
+    - `low` `reject` The page is browser-tested only against a mocked API without most of the seven classes. `DeploymentLogTests` proves every class searchable end to end on the real route, and mocked browser specs are the project's template (Stories 7.4 and 7.5).
+    - `low` `reject` The fixture classes are found only by type, not by outcome, Admin or Tenant. They are uncatalogued system events, so the outcome filter and the Admin and Tenant filters can't match them by design. The AC asks that they be searchable, which `?type=` and the unfiltered list prove.
+    - `low` `reject` Tenant events are proved with one code. Every code goes through the same indexed `type_code` filter, so more codes would add no new path.
+    - `false` `reject` Machine refusal is checked in the capability model, not by calling the route. Disproved as a gap: no machine principal can reach the Admin API before Epic 17, so a test-only principal through `Allows` is the precedent (Story 1.24), and a request with no Session is proved to get 401.
+    - `low` `reject` Only one non-Owner Admin is sampled. `Allows` grants a Deployment capability to `DeploymentOwner` only, whatever the Tenant roles, so every other Admin follows the same branch the Tenant-Owner case proves.
+    - `false` `reject` "Spec only" might mean the screen shouldn't be built. Disproved: the epic context says the page is specified but not drawn, and is composed from Logs.
+    - `false` `reject` The drawer and extra columns go beyond the AC. Disproved as a divergence: UX gives the Deployment Log's actions "As Logs", which includes opening a row.
+  - Verification Gap:
+    - `low` `patch` `searchDeploymentLogs` and `getDeploymentLogEvent` have no client test, so dropping `cursor`, `outcome` or `from` from the query list would pass CI. Fixed: two `client.test.mjs` cases mirror the Tenant ones.
+  - Blind Hunter:
+    - `false` `reject` The migration timestamp clashes with Story 3.6, and the count is off. Disproved for the merged tree: it was renamed to `20261120000000` and the count set to 36 when `main` was merged.
+    - `low` `patch` The unsealed-event test never asserts `raw.detail` is null. Fixed: assertion added.
+    - `low` `patch` The client methods have no unit tests. Same group as the Verification Gap row.
+    - `low` `reject` Each endpoint silently ignores the other Log's parameters. This is Story 7.4's accepted behaviour for unknown parameters (rejected there too); refusing them adds a guard.
+    - `low` `reject` `DeploymentLogReader` repeats much of the Tenant readers. Shared kind mapping and parsing were extracted; merging the SQL builders would couple two tables with different keys and scopes.
+    - `low` `reject` The Deployment routes use `TenantLog*` schema names. The spec reuses these shapes on purpose so one page and one drawer serve both Logs; renaming would edit the spec and churn the published contract.
+    - `low` `patch` The migration docblock claims every index ends in `id DESC`. Fixed: the comment states the indexes as written. The index design (no `id` on the time index, no `CONCURRENTLY`) follows Story 7.4's accepted pattern before the first release.
+    - `low` `reject` The Deployment-only drawer 404, Retry and 400 banners aren't browser-tested. They are the same code paths as the Tenant scope, which Stories 7.4 and 7.5 test; only the message key differs.
+    - `low` `patch` `logsAdminHelper` doesn't say a UUID is needed. Fixed: it now gives a UUID example, like the Tenant helper.
+    - `low` `reject` The Admin and Tenant cells aren't links. That is a new feature, not a defect.
+    - `low` `reject` `LogQuery` lets a query carry the other Log's filters. The client builds each request from its own allow-list, so a stray key is dropped, not sent; a scoped union adds type machinery.
+    - `low` `patch` `DEPLOYMENT_SCOPE`'s comment claims credit for what `LogsPage`'s memo does. Fixed: the comment names the real mechanism.
+    - `low` `reject` The Tenant filter matches only events that target the Tenant. The spec defines it that way, and the endpoint documents it.
+  - Edge Case Hunter:
+    - `low` `reject` The Deployment search ignores `user`, `application` and unknown parameters. Same as the Blind Hunter row.
+    - `low` `patch` With `admin=X`, a row where X is only the target shows the Actor Admin in the Admin column. Fixed: in the Deployment scope the column shows both Admin references when they differ, with a unit case.
+
 ## Design Notes
 
 - **Same shapes as the Tenant Log:** reusing the 7.4 and 7.5 response types lets one page component and one drawer serve both Logs. Raw is always sent, because `deployment.log.read` belongs to the Deployment Owner alone: there is no Viewer tier on the Deployment Log.
@@ -151,3 +183,60 @@ deferred: []
 
 **Commands:**
 - `dotnet build Gatekeep.slnx` (in the tests Docker image under a worktree-only tag) -- expected: 0 warnings. `pnpm -r build` passes. Tests run in CI only, after a push.
+
+## Auto Run Result
+
+Status: done
+
+**Summary:**
+- A Deployment Owner can search the Deployment Log through `GET /api/v1/deployment/logs` and open an event through `GET /api/v1/deployment/logs/{eventId}`. Both routes are under `deployment.log.read`, read only, and run in one Deployment transaction.
+- The search filters by event type, Admin, Tenant, outcome and time range, on indexes from a new migration. It pages 50 at a time, newest first.
+- Opening an event always sends `raw`: the envelope, the hex seal and the detail.
+- Any other Admin gets 403, audited. No Session gets 401, and a machine principal is denied by `Allows`.
+- Deployment › Log reuses the Logs page, now parameterised by scope, and the Story 7.5 drawer. It shows Admin and Tenant columns, and the Admin column lists both Admins when Actor and target differ.
+- Bootstrap, Admin sign-in, recovery and Tenant events are proved searchable through their real flows. Upgrade, restore and configuration are proved with fixture rows.
+
+**Files changed:**
+- `src/Adapters/Postgres/Migrations/Migration20261120000000DeploymentLogSearchIndexes.cs` and `tests/Isolation/MigrateCommandTests.cs`, now at 36 -- the indexes and the migration count.
+- `src/Modules/Audit/{Contracts/IDeploymentLogReader.cs,Core/DeploymentLogReader.cs,Core/StoredKinds.cs,Core/TenantLogSearch.cs,Core/TenantLogEventReader.cs,Contracts/AuditContract.cs}` -- the reader and the shared kind mapping.
+- `src/Gatekeep.Host.Admin/{DeploymentLogsApi.cs,TenantLogsApi.cs,AdminApi.cs,AdminApiServices.cs}` -- the handlers, the shared parsing and the routes.
+- `docs/api/openapi-v1.json` and `packages/api-client/*` -- the regenerated contract and the two client methods.
+- `apps/admin-dashboard/src/shell/{LogsPage.tsx,logs.ts,logEvent.ts,nav.ts,Shell.tsx}` and `packages/ui/src/messages.tsx` -- the Deployment Log screen.
+- `tests/Isolation/Audit/DeploymentLogTests.cs`, `tests/Isolation/{Canary/CanaryFlows.cs,CrossTenant/RouteRegistry.cs}` and `tests/Architecture/LogRouteRuleTests.cs` -- the server matrix, the canary flow and the route inventories.
+- `tests/browser/{admin-logs,admin-shell,admin-tenants}.spec.ts`, `apps/admin-dashboard/test/logs.test.mjs` and `packages/api-client/test/client.test.mjs` -- the screen, unit and client tests.
+
+**Review findings:**
+- 23 findings: 8 low ones patched as 6 fixes, 10 low ones rejected and 5 disproved. Nothing was deferred. The Review Triage Log gives each one's reason.
+- The 6 fixes:
+  - the Deployment client tests
+  - the null-detail assertion
+  - the migration comment
+  - the Admin helper copy
+  - the scope comment
+  - both Admins in the Admin column
+- Rejected:
+  - the page is tested only against mocks
+  - the fixtures are found only by type
+  - Tenant events are proved by one code
+  - only one non-Owner Admin is sampled
+  - the other Log's parameters are ignored, found by two reviewers
+  - the readers are duplicated
+  - the `TenantLog*` schema names
+  - the Deployment-only banners aren't browser-tested
+  - the cells aren't links
+  - the `LogQuery` type
+  - the Tenant filter matches targets only
+
+**Follow-up review recommended:** false. Only low entries were patched.
+
+**Verification:**
+- The implementer worked in Docker on `gatekeep/tests:story-7-7`, before and after merging Story 3.6:
+  - `dotnet build Gatekeep.slnx`: 0 warnings, 0 errors.
+  - The API-contract drift check passed.
+  - `pnpm -r build` passed.
+- Unit tests: admin-dashboard 119/119, then `logs.test.mjs` 21/21 after the patches. api-client 34/34.
+- The Isolation, Architecture and browser suites run in CI on PR #66, and it merges only on green.
+
+**Residual risks:**
+- The Deployment page is browser-tested only against a mocked API, and the real route is tested separately.
+- The time index has no `id`, as in Story 7.4.

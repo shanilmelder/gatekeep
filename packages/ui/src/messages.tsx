@@ -972,7 +972,7 @@ export const defaultMessages: Readonly<Messages> = Object.freeze({
   navDeploymentLog: 'Log',
   logsFieldAdmin: 'Admin',
   logsFieldTenant: 'Tenant',
-  logsAdminHelper: 'An Admin ID',
+  logsAdminHelper: "An Admin's UUID, such as 7c9e6679-7425-40de-944b-e07fc1f90ae7",
   logsTenantHelper: 'A Tenant ID, such as ten_…',
   logsColumnAdmin: 'Admin',
   logsColumnTenant: 'Tenant',

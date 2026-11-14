@@ -174,7 +174,7 @@ interface Mismatch {
  */
 const TENANT_ROUTE = /^\/tenants\/[^/]+(\/settings|\/logs|\/signing-keys|\/applications(\/[^/]+)?|\/apis(\/[^/]+)?)?$/;
 
-/** The Deployment Log page's scope: one value, so the page never reads again for a new but equal one. */
+/** The Deployment Log page's scope. LogsPage keys its reads on the scope's plain values, so any equal scope would do. */
 const DEPLOYMENT_SCOPE = { kind: 'deployment' } as const;
 
 /** Replaces the URL with `to` once mounted, as a redirect does: /tenants/{tenantId} is its Applications list (Story 3.1). */

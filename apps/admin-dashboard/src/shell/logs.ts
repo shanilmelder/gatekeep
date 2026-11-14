@@ -134,6 +134,17 @@ export function referenceOf(event: Pick<TenantLogEvent, 'actor' | 'target'>, kin
   return null;
 }
 
+/**
+ * The Admins an event names, as the Deployment Log's Admin column shows them: its Actor's, then
+ * its target's when that is a different Admin, so an Admin search always shows the Admin it found.
+ */
+export function adminsOf(event: Pick<TenantLogEvent, 'actor' | 'target'>): string[] {
+  const admins: string[] = [];
+  if (event.actor.kind === 'admin' && event.actor.id != null) admins.push(event.actor.id);
+  if (event.target?.kind === 'admin' && event.target.id != null && !admins.includes(event.target.id)) admins.push(event.target.id);
+  return admins;
+}
+
 /** An instant as the Time (UTC) column shows it: `YYYY-MM-DD HH:MM:SS`, or the text as sent when it doesn't parse. */
 export function utcTime(iso: string): string {
   const date = new Date(iso);

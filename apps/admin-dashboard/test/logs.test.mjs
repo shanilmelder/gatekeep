@@ -7,6 +7,7 @@ import { describe, it } from 'node:test';
 import {
   DEFAULT_FIELD,
   DEPLOYMENT_LOG_FIELDS,
+  adminsOf,
   LOG_FIELDS,
   choices,
   fieldsOf,
@@ -149,6 +150,15 @@ describe('Deployment Log field search', () => {
     ]) {
       assert.deepEqual(searchOf(paramsOf(search), FIELDS), search);
     }
+  });
+
+  it('shows both Admins an event names, Actor then target, and one when they are the same', () => {
+    const actor = { kind: 'admin', id: 'a-1' };
+    assert.deepEqual(adminsOf({ actor, target: { kind: 'admin', id: 'a-2' } }), ['a-1', 'a-2']);
+    assert.deepEqual(adminsOf({ actor, target: actor }), ['a-1']);
+    assert.deepEqual(adminsOf({ actor: { kind: 'system', id: null }, target: { kind: 'admin', id: 'a-2' } }), ['a-2']);
+    assert.deepEqual(adminsOf({ actor, target: { kind: 'tenant', id: 'ten_a' } }), ['a-1']);
+    assert.deepEqual(adminsOf({ actor: { kind: 'anonymous', id: null }, target: null }), []);
   });
 
   it('shows the Admin an event names, Actor first, and the Tenant it targets', () => {

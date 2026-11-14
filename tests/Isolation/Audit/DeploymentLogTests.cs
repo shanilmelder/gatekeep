@@ -298,6 +298,7 @@ public sealed class DeploymentLogTests(PostgresFixture postgres)
         var raw = json.RootElement.GetProperty("raw");
         Assert.Equal(JsonValueKind.Object, raw.ValueKind);
         Assert.Equal(JsonValueKind.Null, raw.GetProperty("seal").ValueKind);
+        Assert.Equal(JsonValueKind.Null, raw.GetProperty("detail").ValueKind);
         Assert.Equal(created.GetProperty("id").GetString(), raw.GetProperty("id").GetString());
     }
 

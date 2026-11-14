@@ -32,6 +32,7 @@ import {
   isField,
   paramsOf,
   queryOf,
+  adminsOf,
   referenceOf,
   searchOf,
   utcTime,
@@ -281,7 +282,12 @@ export function LogsPage({ request, scope }: LogsPageProps) {
     { key: 'description', header: messages.logsColumnDescription, rowHeader: true, rowLink: true, cell: (row) => row.summary ?? row.type },
     ...(scope.kind === 'deployment'
       ? [
-          { key: 'admin', header: messages.logsColumnAdmin, cell: (row: TenantLogEvent) => <Reference id={referenceOf(row, 'admin')} /> },
+          {
+            key: 'admin',
+            header: messages.logsColumnAdmin,
+            // Actor then target, a space between, when they are different Admins.
+            cell: (row: TenantLogEvent) => adminsOf(row).flatMap((id, i) => [...(i === 0 ? [] : [' ']), <Reference key={id} id={id} />]),
+          },
           { key: 'tenant', header: messages.logsColumnTenant, cell: (row: TenantLogEvent) => <Reference id={referenceOf(row, 'tenant')} /> },
         ]
       : [
