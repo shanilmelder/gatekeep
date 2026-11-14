@@ -520,6 +520,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/deployment/logs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Search the Deployment Log: newest first, 50 a page.
+         * @description Deployment Owner only. Read only, in one Deployment transaction, and the read isn't audited. The Deployment Log holds bootstrap, Admin sign-in, recovery, Tenant and other Deployment events, never a Tenant's own. Each event's evt_ ID, time, type code, the catalogue's outcome and summary (both null for a code no catalogue declares), and its Actor and target as internal references; never its detail. Every parameter is optional, at most once, and they combine; each filters an indexed envelope column. nextCursor is the last event's ID when an older page follows, else null; pass it back as cursor with the same filters. A parameter sent twice or empty, an unknown outcome, a code that isn't three lower-case parts, an Admin that isn't a UUID, a Tenant that isn't a ten_ ID, a time that isn't an instant, from not before to, or a malformed cursor is 400 invalid_request. Any other Admin is 403 access_denied, audited as every capability refusal is.
+         */
+        get: operations["SearchDeploymentLogs"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/deployment/logs/{eventId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * One event of the Deployment Log, with its raw detail.
+         * @description Deployment Owner only. Read only, in one Deployment transaction, and the read isn't audited. The same fields as a search row, and raw always: the envelope, the seal (seq, and prevHash and hash in lowercase hex; null while unsealed, prevHash null for the chain's first event) and the detail (IP address, User-Agent and email, each nullable; null when the event has none). An eventId that isn't an evt_ ID is 400 invalid_request. An event the Deployment Log doesn't have, including a Tenant Log event, is 404 not_found. Any other Admin is 403 access_denied, audited as every capability refusal is.
+         */
+        get: operations["GetDeploymentLogEvent"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/tenants/{tenantId}/signing-keys": {
         parameters: {
             query?: never;
@@ -2866,6 +2906,137 @@ export interface operations {
             path: {
                 /** @description The Tenant's public ID: ten_ and the UUID's 16 bytes in lowercase RFC 4648 base32 with no padding, whose last character carries two zero bits. Only this canonical spelling, after URL decoding, names a Tenant, and the empty UUID's never does; anything else is refused like a Tenant the Admin holds no role in. */
                 tenantId: string;
+                /** @description The event's public ID, as the search lists it: evt_ and 26 base32 characters. */
+                eventId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TenantLogEventDetailResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description access_denied, with the problem body, when the capability is refused. No body when an earlier check refuses first: a Session restricted to setup, or on a state-changing call a wrong Origin or CSRF token. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    SearchDeploymentLogs: {
+        parameters: {
+            query?: {
+                /** @description One event type code, {domain}.{object}.{action}, as docs/audit-events.md publishes it. */
+                type?: string;
+                /** @description An Admin's UUID: events whose Actor or target is that Admin. */
+                admin?: string;
+                /** @description A Tenant's ten_ public ID: events whose target is that Tenant. */
+                tenant?: string;
+                /** @description success or failure: the events whose type the catalogue gives that outcome. */
+                outcome?: string;
+                /** @description An ISO 8601 instant with Z or an offset: events at or after it. */
+                from?: string;
+                /** @description An ISO 8601 instant with Z or an offset: events before it. It must come after from. */
+                to?: string;
+                /** @description The previous page's nextCursor: an evt_ public ID. */
+                cursor?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TenantLogsResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description access_denied, with the problem body, when the capability is refused. No body when an earlier check refuses first: a Session restricted to setup, or on a state-changing call a wrong Origin or CSRF token. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    GetDeploymentLogEvent: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
                 /** @description The event's public ID, as the search lists it: evt_ and 26 base32 characters. */
                 eventId: string;
             };

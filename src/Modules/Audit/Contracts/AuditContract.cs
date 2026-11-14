@@ -24,6 +24,9 @@ public static class AuditContract
     /// <summary>One event of a Tenant's Log, opened (Story 7.5). It only reads, in the caller's Tenant scope: <c>gk_admin</c> runs it.</summary>
     public static ITenantLogEventReader CreateLogEventReader() => new TenantLogEventReader();
 
+    /// <summary>The Deployment Log's search and open read (Story 7.7). It only reads, in a Deployment scope: <c>gk_admin</c> runs it.</summary>
+    public static IDeploymentLogReader CreateDeploymentLogReader() => new DeploymentLogReader();
+
     /// <summary>
     /// RFC 8785 JSON for one flat object of string, integer and null values.
     /// </summary>

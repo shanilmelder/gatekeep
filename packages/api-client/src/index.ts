@@ -50,6 +50,7 @@ export {
   type CreateTenantRequest,
   type CredentialRegistrationResponse,
   type DeleteTenantRequest,
+  type DeploymentLogsQuery,
   type FreshAssertionBeginRequest,
   type OperationResponse,
   type SetTenantLabelRequest,

@@ -53,9 +53,9 @@ internal sealed class TenantLogEventReader : ITenantLogEventReader
                 reader.GetGuid(0),
                 reader.GetFieldValue<DateTimeOffset>(1),
                 new AuditTypeCode(reader.GetString(2)),
-                TenantLogSearch.ActorKindOf(reader.GetString(3)),
+                StoredKinds.ActorKindOf(reader.GetString(3)),
                 reader.IsDBNull(4) ? null : reader.GetGuid(4),
-                reader.IsDBNull(5) ? null : TenantLogSearch.TargetKindOf(reader.GetString(5)),
+                reader.IsDBNull(5) ? null : StoredKinds.TargetKindOf(reader.GetString(5)),
                 reader.IsDBNull(6) ? null : reader.GetGuid(6));
             seal = reader.IsDBNull(7)
                 ? null

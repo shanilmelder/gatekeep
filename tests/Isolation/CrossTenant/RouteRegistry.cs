@@ -82,6 +82,8 @@ public static class RouteRegistry
         new("GET", "/api/v1/deployment/tenants", CaseKind.NotTenantBound, Reason: "Deployment Owner only (deployment.tenants.read); lists the Deployment, names no Tenant"),
         new("POST", "/api/v1/deployment/tenants", CaseKind.NotTenantBound, Reason: "Deployment Owner only (deployment.tenants.create); creates a new Tenant, names no existing one"),
         new("POST", "/api/v1/deployment/operations/{operationId}/retry", CaseKind.NotTenantBound, Reason: "Deployment Owner only (deployment.tenants.create); names an Operation, not a Tenant"),
+        new("GET", "/api/v1/deployment/logs", CaseKind.NotTenantBound, Reason: "Deployment Owner only (deployment.log.read); reads the Deployment Log, names no path Tenant"),
+        new("GET", "/api/v1/deployment/logs/{eventId}", CaseKind.NotTenantBound, Reason: "Deployment Owner only (deployment.log.read); names a Deployment Log event, not a Tenant"),
 
         // Deployment Owner only, naming a target Tenant.
         new("POST", "/api/v1/deployment/tenants/{targetTenantId}/deletion", CaseKind.TargetTenant, Body: """{"confirmation":"cross-tenant.gatekeep.test"}"""),

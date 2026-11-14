@@ -2062,6 +2062,209 @@
         "x-gatekeep-recovery-allowed": false
       }
     },
+    "/api/v1/deployment/logs": {
+      "get": {
+        "tags": [
+          "Deployment"
+        ],
+        "summary": "Search the Deployment Log: newest first, 50 a page.",
+        "description": "Deployment Owner only. Read only, in one Deployment transaction, and the read isn't audited. The Deployment Log holds bootstrap, Admin sign-in, recovery, Tenant and other Deployment events, never a Tenant's own. Each event's evt_ ID, time, type code, the catalogue's outcome and summary (both null for a code no catalogue declares), and its Actor and target as internal references; never its detail. Every parameter is optional, at most once, and they combine; each filters an indexed envelope column. nextCursor is the last event's ID when an older page follows, else null; pass it back as cursor with the same filters. A parameter sent twice or empty, an unknown outcome, a code that isn't three lower-case parts, an Admin that isn't a UUID, a Tenant that isn't a ten_ ID, a time that isn't an instant, from not before to, or a malformed cursor is 400 invalid_request. Any other Admin is 403 access_denied, audited as every capability refusal is.",
+        "operationId": "SearchDeploymentLogs",
+        "parameters": [
+          {
+            "name": "type",
+            "in": "query",
+            "description": "One event type code, {domain}.{object}.{action}, as docs/audit-events.md publishes it.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "admin",
+            "in": "query",
+            "description": "An Admin's UUID: events whose Actor or target is that Admin.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "tenant",
+            "in": "query",
+            "description": "A Tenant's ten_ public ID: events whose target is that Tenant.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "outcome",
+            "in": "query",
+            "description": "success or failure: the events whose type the catalogue gives that outcome.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "description": "An ISO 8601 instant with Z or an offset: events at or after it.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "description": "An ISO 8601 instant with Z or an offset: events before it. It must come after from.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "The previous page's nextCursor: an evt_ public ID.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TenantLogsResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "access_denied, with the problem body, when the capability is refused. No body when an earlier check refuses first: a Session restricted to setup, or on a state-changing call a wrong Origin or CSRF token.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "adminSession": [ ]
+          }
+        ],
+        "x-gatekeep-setup-allowed": false,
+        "x-gatekeep-access": {
+          "kind": "capability",
+          "capability": "deployment.log.read",
+          "scope": "deployment",
+          "machineAllowed": false,
+          "freshAssertion": "never"
+        },
+        "x-gatekeep-recovery-allowed": false
+      }
+    },
+    "/api/v1/deployment/logs/{eventId}": {
+      "get": {
+        "tags": [
+          "Deployment"
+        ],
+        "summary": "One event of the Deployment Log, with its raw detail.",
+        "description": "Deployment Owner only. Read only, in one Deployment transaction, and the read isn't audited. The same fields as a search row, and raw always: the envelope, the seal (seq, and prevHash and hash in lowercase hex; null while unsealed, prevHash null for the chain's first event) and the detail (IP address, User-Agent and email, each nullable; null when the event has none). An eventId that isn't an evt_ ID is 400 invalid_request. An event the Deployment Log doesn't have, including a Tenant Log event, is 404 not_found. Any other Admin is 403 access_denied, audited as every capability refusal is.",
+        "operationId": "GetDeploymentLogEvent",
+        "parameters": [
+          {
+            "name": "eventId",
+            "in": "path",
+            "description": "The event's public ID, as the search lists it: evt_ and 26 base32 characters.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TenantLogEventDetailResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "access_denied, with the problem body, when the capability is refused. No body when an earlier check refuses first: a Session restricted to setup, or on a state-changing call a wrong Origin or CSRF token.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "adminSession": [ ]
+          }
+        ],
+        "x-gatekeep-setup-allowed": false,
+        "x-gatekeep-access": {
+          "kind": "capability",
+          "capability": "deployment.log.read",
+          "scope": "deployment",
+          "machineAllowed": false,
+          "freshAssertion": "never"
+        },
+        "x-gatekeep-recovery-allowed": false
+      }
+    },
     "/api/v1/tenants/{tenantId}/signing-keys": {
       "get": {
         "tags": [

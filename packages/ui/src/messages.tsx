@@ -440,6 +440,19 @@ export interface Messages {
   logsEventLoadFailed: string;
   /** The event drawer's banner when the Tenant's Log has no such event: no Retry. */
   logsEventNotFound: string;
+  /** The Deployment group's Log item (Story 7.7), and the Deployment Log page's title and its table's caption. */
+  navDeploymentLog: string;
+  /** The Deployment Log's own fields, in place of User and Application. */
+  logsFieldAdmin: string;
+  logsFieldTenant: string;
+  /** The value's helper for the Deployment Log's own typed fields. */
+  logsAdminHelper: string;
+  logsTenantHelper: string;
+  /** The Deployment Log table's own columns, in place of User and Application. */
+  logsColumnAdmin: string;
+  logsColumnTenant: string;
+  /** The event drawer's banner when the Deployment Log has no such event: no Retry. */
+  logsDeploymentEventNotFound: string;
   /** The Security group's Signing keys item (Story 9.1), which opens the Signing keys page. */
   navSigningKeys: string;
   /** The Signing keys page's heading and description (design GEN.keys). */
@@ -956,6 +969,14 @@ export const defaultMessages: Readonly<Messages> = Object.freeze({
   logsEventEmail: 'Email',
   logsEventLoadFailed: "We couldn't load this event.",
   logsEventNotFound: "This event isn't in this Tenant's Log.",
+  navDeploymentLog: 'Log',
+  logsFieldAdmin: 'Admin',
+  logsFieldTenant: 'Tenant',
+  logsAdminHelper: "An Admin's UUID, such as 7c9e6679-7425-40de-944b-e07fc1f90ae7",
+  logsTenantHelper: 'A Tenant ID, such as ten_…',
+  logsColumnAdmin: 'Admin',
+  logsColumnTenant: 'Tenant',
+  logsDeploymentEventNotFound: "This event isn't in the Deployment Log.",
   navSigningKeys: 'Signing keys',
   signingKeysTitle: 'Signing keys',
   signingKeysDescription: 'Keys used to sign ID and access tokens. Rotate regularly; revoke if compromised.',
