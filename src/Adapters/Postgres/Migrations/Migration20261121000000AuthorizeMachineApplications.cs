@@ -19,8 +19,8 @@ namespace Gatekeep.Adapters.Postgres.Migrations;
 /// It changes no earlier migration.
 /// </summary>
 [DbContext(typeof(MigrationsContext))]
-[Migration("20261120000000_AuthorizeMachineApplications")]
-public sealed class Migration20261120000000AuthorizeMachineApplications : Migration
+[Migration("20261121000000_AuthorizeMachineApplications")]
+public sealed class Migration20261121000000AuthorizeMachineApplications : Migration
 {
     protected override void Up(MigrationBuilder migrationBuilder)
     {
