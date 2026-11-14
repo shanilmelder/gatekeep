@@ -80,3 +80,42 @@ export function apiOfPath(path: string): string | null {
     return match[1]!;
   }
 }
+
+// Machine-to-machine grants (Story 3.7): the API detail page's table, every machine Application of the Tenant with its
+// grant on the API, if any.
+
+/** One Application's grant on an API, as the API detail returns it. */
+export interface ApiGrantView {
+  applicationId: string;
+  name: string;
+  permissions: readonly string[];
+}
+
+/** One row of the machine-to-machine table: authorized when it holds at least one of the API's Permissions. */
+export interface MachineGrantRow {
+  applicationId: string;
+  name: string;
+  authorized: boolean;
+  permissions: readonly string[];
+}
+
+/** Every machine Application of `applications`, in their order, each with its grant from `grants` or none. */
+export function machineGrantRows(
+  applications: readonly { id: string; name: string; type: string }[],
+  grants: readonly ApiGrantView[],
+): MachineGrantRow[] {
+  const byApplication = new Map(grants.map((grant) => [grant.applicationId, grant]));
+  return applications
+    .filter((application) => application.type === 'machine')
+    .map((application) => {
+      const permissions = byApplication.get(application.id)?.permissions ?? [];
+      return { applicationId: application.id, name: application.name, authorized: permissions.length > 0, permissions };
+    });
+}
+
+/** The grants once the Permission `value` is removed from the API: removed from each, and a grant left with none gone. */
+export function grantsWithout<G extends ApiGrantView>(grants: readonly G[], value: string): G[] {
+  return grants
+    .map((grant) => ({ ...grant, permissions: grant.permissions.filter((permission) => permission !== value) }))
+    .filter((grant) => grant.permissions.length > 0);
+}

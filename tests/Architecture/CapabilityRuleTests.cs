@@ -294,6 +294,10 @@ public class CapabilityRuleTests
         ("put /api/v1/tenants/{tenantId}/apis/{apiId}/settings", "tenant.apis.manage"),
         ("post /api/v1/tenants/{tenantId}/apis/{apiId}/permissions", "tenant.apis.manage"),
         ("delete /api/v1/tenants/{tenantId}/apis/{apiId}/permissions/{value}", "tenant.apis.manage"),
+
+        // Story 3.7: machine-to-machine grants, which never reach the built-in Management API (Epic 17's Owner flow).
+        ("put /api/v1/tenants/{tenantId}/apis/{apiId}/grants/{applicationId}", "tenant.apis.manage"),
+        ("delete /api/v1/tenants/{tenantId}/apis/{apiId}/grants/{applicationId}", "tenant.apis.manage"),
     ];
 
     private static readonly string[] ClientSecretRoutes =

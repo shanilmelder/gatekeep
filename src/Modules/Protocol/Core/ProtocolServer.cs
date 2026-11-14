@@ -58,8 +58,8 @@ internal static class ProtocolServer
 
         var openIddict = services.AddOpenIddict();
 
-        // AD-8: each store in its owner's adapters, on the request's own transaction. No scope store:
-        // no scope is known yet, and RefuseTokenTargets refuses any.
+        // AD-8: each store in its owner's adapters, on the request's own transaction. No scope store: Gatekeep's
+        // own handlers decide every scope, an API's Permissions included (Story 3.7), and take them out of the request.
         openIddict.AddCore(core =>
         {
             core.SetDefaultApplicationEntity<DirectoryApplication>()
@@ -142,8 +142,11 @@ internal static class ProtocolServer
             // The token endpoint (Story 2.5): counted, then one transaction, ended before the response.
             options.AddEventHandler(LimitTokenRequests<ExtractTokenRequestContext>.Descriptor);
             options.AddEventHandler(BeginTokenTransaction<ExtractTokenRequestContext>.Descriptor);
-            options.AddEventHandler(RefuseTokenTargets.Descriptor);
+            // Story 3.7: the API a request names, resolved and taken out of the request; Client Credentials' audience and
+            // Permissions; and a code exchange's API read again, with its offline access rule.
+            options.AddEventHandler(ResolveTokenTarget.Descriptor);
             options.AddEventHandler(SignInClient.Descriptor);
+            options.AddEventHandler(SignInCode.Descriptor);
 
             // The refresh grant (Story 2.10): its scope rule, its sign-in from the family's Session within
             // the absolute limit, its late refusals, and the absolute limit on every new refresh token.
@@ -199,6 +202,7 @@ internal static class ProtocolServer
             // the sign-in through the passthrough, and the static page for a request with no trusted
             // redirect target.
             options.AddEventHandler(BeginAuthorizeTransaction.Descriptor);
+            options.AddEventHandler(TakeAuthorizationTarget.Descriptor);
             options.AddEventHandler(TrustRedirectTarget.Descriptor);
 
             // TrustRedirectTarget is the one redirect URI check (Story 3.2): exact, but for a native client's

@@ -484,6 +484,13 @@ internal static class CanaryFlows
             + "logged by fixed code only, never the value.",
             "Story 3.6 build review",
             new DateOnly(2026, 11, 14)),
+        new(
+            new(SurfaceKind.Route, "/api/v1/tenants/{tenantId}/apis/{apiId}/grants/{applicationId}"),
+            "The set takes resource:action values only and the removal no body; each writes grant rows and an ID-only event, "
+            + "and returns the API with its Permissions and its grants' Application IDs and names. No credential or token is "
+            + "held or returned; refusals are logged by fixed code only, never a value.",
+            "Story 3.7 build review",
+            new DateOnly(2026, 11, 14)),
     ];
 
     /// <summary>Every production surface: the job and Operation registries, the Cli's commands and the hosts.</summary>

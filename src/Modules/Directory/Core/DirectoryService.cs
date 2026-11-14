@@ -255,7 +255,6 @@ internal sealed partial class DirectoryService(IAuditAppender audit, TimeProvide
             [],
             [],
             [],
-            [],
             now,
             ApplicationLifetimes.Defaults);
     }
@@ -678,7 +677,7 @@ internal static class ApplicationRows
     public const string Visible = "kind <> 'system' AND deleted_at IS NULL";
 
     private const string Columns =
-        "id, name, kind, grant_types, audiences, redirect_uris, post_logout_redirect_uris, web_origins, created_at, "
+        "id, name, kind, grant_types, redirect_uris, post_logout_redirect_uris, web_origins, created_at, "
         + "access_token_lifetime, id_token_lifetime, refresh_token_absolute_lifetime, refresh_token_inactivity_lifetime";
 
     private const string Select =
@@ -857,7 +856,6 @@ internal static class ApplicationRows
             [.. reader.GetFieldValue<string[]>(4)],
             [.. reader.GetFieldValue<string[]>(5)],
             [.. reader.GetFieldValue<string[]>(6)],
-            [.. reader.GetFieldValue<string[]>(7)],
-            reader.GetFieldValue<DateTimeOffset>(8),
-            new ApplicationLifetimes(reader.GetInt32(9), reader.GetInt32(10), reader.GetInt32(11), reader.GetInt32(12)));
+            reader.GetFieldValue<DateTimeOffset>(7),
+            new ApplicationLifetimes(reader.GetInt32(8), reader.GetInt32(9), reader.GetInt32(10), reader.GetInt32(11)));
 }

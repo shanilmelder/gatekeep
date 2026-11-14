@@ -88,4 +88,19 @@ public static class DirectoryEvents
         new AuditTypeCode("directory.api.permission_removed"),
         "A Permission was removed from an API. Names the API only.",
         AuditOutcome.Success);
+
+    /// <summary>
+    /// Written when an Editor, Owner or machine client changes the Permissions of an API granted to a machine-to-machine
+    /// Application (Story 3.7, FR-16). A save that changes nothing writes no event. The target is the API.
+    /// </summary>
+    public static readonly AuditEventDefinition ApiGrantUpdated = new(
+        new AuditTypeCode("directory.api.grant_updated"),
+        "The Permissions of an API granted to a machine-to-machine Application were changed. The next token it gets carries only those. Names the API only. A save that changes nothing writes no event.",
+        AuditOutcome.Success);
+
+    /// <summary>Written when a machine-to-machine Application's grant on an API is removed (Story 3.7). The target is the API.</summary>
+    public static readonly AuditEventDefinition ApiGrantRemoved = new(
+        new AuditTypeCode("directory.api.grant_removed"),
+        "A machine-to-machine Application's authorization on an API was removed: its next token for the API carries no Permission. Names the API only. Removing a grant that doesn't exist writes no event.",
+        AuditOutcome.Success);
 }

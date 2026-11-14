@@ -351,6 +351,53 @@ public interface IDirectory
     Task<PermissionWrite> RemovePermissionAsync(CommandContext context, Actor actor, Guid apiId, string value, CancellationToken cancellationToken);
 
     /// <summary>
+    /// The context Tenant's API whose identifier is exactly <paramref name="identifier"/> (Story 3.7, RFC 8707), the
+    /// built-in Management API included, so a caller can refuse it by name; or null when it has none. It reads only what a
+    /// token for the API needs, which is all <c>gk_hosted</c> may read of it.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The context has no Tenant.</exception>
+    Task<DirectoryApiTarget?> FindApiByIdentifierAsync(CommandContext context, string identifier, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// The values of the context Tenant's API <paramref name="apiId"/>'s Permissions granted to the Application
+    /// <paramref name="applicationId"/> (Story 3.7, FR-16), in ordinal order, as they stand now: empty when it holds no
+    /// grant. It only reads.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The context has no Tenant.</exception>
+    Task<IReadOnlyList<string>> ListGrantedPermissionsAsync(CommandContext context, Guid apiId, Guid applicationId, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Every grant on the context Tenant's API <paramref name="apiId"/> (Story 3.7), one per visible Application holding
+    /// any of its Permissions, by Application name then ID, each with its values in ordinal order. A deleted Application's grant,
+    /// which its purge removes, isn't among them. It only reads.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The context has no Tenant.</exception>
+    Task<IReadOnlyList<DirectoryApiGrant>> ListApiGrantsAsync(CommandContext context, Guid apiId, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Replaces the Permissions of the context Tenant's API <paramref name="apiId"/> granted to the Application
+    /// <paramref name="applicationId"/> with <paramref name="values"/> (Story 3.7, FR-16), under the API's row lock, in the
+    /// caller's transaction. When the set changes it writes the rows and <c>directory.api.grant_updated</c> by
+    /// <paramref name="actor"/>; when it doesn't, nothing. Only a <c>machine</c> Application may be granted, and never on
+    /// the built-in Management API (Epic 17). Every value must be one of the API's Permissions.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The context has no Tenant. Nothing is written.</exception>
+    /// <exception cref="ArgumentException"><paramref name="values"/> is empty, too long, or holds a duplicate. Nothing is written.</exception>
+    [StateChanging]
+    Task<ApiGrantWrite> SetApiGrantAsync(
+        CommandContext context, Actor actor, Guid apiId, Guid applicationId, IReadOnlyCollection<string> values, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Removes the Application <paramref name="applicationId"/>'s grant on the context Tenant's API <paramref name="apiId"/>
+    /// (Story 3.7), under the API's row lock, in the caller's transaction, and writes <c>directory.api.grant_removed</c> by
+    /// <paramref name="actor"/>. When it holds no grant, nothing is written and the result is <see cref="ApiGrantWriteStatus.Unchanged"/>.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The context has no Tenant. Nothing is written.</exception>
+    [StateChanging]
+    Task<ApiGrantWrite> RemoveApiGrantAsync(
+        CommandContext context, Actor actor, Guid apiId, Guid applicationId, CancellationToken cancellationToken);
+
+    /// <summary>
     /// Makes sure the context's Tenant has its built-in Management API (Story 3.6, FR-16), named
     /// <see cref="DirectoryContract.ManagementApiName"/> with the identifier <see cref="DirectoryContract.ManagementApiIdentifier"/>,
     /// offline access and RBAC off and the default lifetimes, and every one of <see cref="DirectoryContract.ManagementPermissions"/>:

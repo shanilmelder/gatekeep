@@ -142,8 +142,8 @@ public sealed class RefreshTokenTests(PostgresFixture postgres, OpenBaoFixture b
 
         var jwksA = await CodeFlow.JwksAsync(host, HostA);
         var jwksB = await CodeFlow.JwksAsync(host, HostB);
-        Assert.True(await CodeFlow.VerifiesAsync(refreshed.AccessToken, jwksA, flow.A.Issuer, ProtocolContract.PlaceholderAudience, "at+jwt"), "The refreshed access token doesn't verify with A's JWKS.");
-        Assert.False(await CodeFlow.VerifiesAsync(refreshed.AccessToken, jwksB, flow.A.Issuer, ProtocolContract.PlaceholderAudience, "at+jwt"), "The refreshed access token verifies with B's JWKS.");
+        Assert.True(await CodeFlow.VerifiesAsync(refreshed.AccessToken, jwksA, flow.A.Issuer, audience: null, "at+jwt"), "The refreshed access token doesn't verify with A's JWKS.");
+        Assert.False(await CodeFlow.VerifiesAsync(refreshed.AccessToken, jwksB, flow.A.Issuer, audience: null, "at+jwt"), "The refreshed access token verifies with B's JWKS.");
         Assert.True(await CodeFlow.VerifiesAsync(idToken, jwksA, flow.A.Issuer, flow.ClientA.ClientId, null), "The refreshed ID token doesn't verify with A's JWKS.");
     }
 

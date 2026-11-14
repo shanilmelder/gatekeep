@@ -15,7 +15,6 @@ public sealed class DirectoryApplication
         string name,
         string kind,
         ImmutableArray<string> grantTypes,
-        ImmutableArray<string> audiences,
         ImmutableArray<string> redirectUris,
         ImmutableArray<string> postLogoutRedirectUris,
         ImmutableArray<string> webOrigins,
@@ -27,7 +26,6 @@ public sealed class DirectoryApplication
         Name = name;
         Kind = kind;
         GrantTypes = grantTypes;
-        Audiences = audiences;
         RedirectUris = redirectUris;
         PostLogoutRedirectUris = postLogoutRedirectUris;
         WebOrigins = webOrigins;
@@ -70,9 +68,6 @@ public sealed class DirectoryApplication
 
     /// <summary>The OAuth grant types it may use, from the row's checked set, stored sorted.</summary>
     public ImmutableArray<string> GrantTypes { get; }
-
-    /// <summary>The audiences its tokens carry. Empty until Story 3.7 adds APIs.</summary>
-    public ImmutableArray<string> Audiences { get; }
 
     /// <summary>
     /// Its Allowed Callback URLs, the OAuth redirect URIs, matched exactly but for a <c>native</c>

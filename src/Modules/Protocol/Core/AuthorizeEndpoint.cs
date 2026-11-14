@@ -36,7 +36,7 @@ internal static class AuthorizeEndpoint
 
     /// <summary>
     /// The only scopes an authorization grants (Stories 2.9 and 2.10): <c>openid</c>, always, and
-    /// <c>offline_access</c>, for a refresh token. Story 3.7 adds APIs' scopes.
+    /// <c>offline_access</c>, for a refresh token. A User holds no API Permission until Epic 5 (Story 3.7).
     /// </summary>
     public static readonly IReadOnlySet<string> GrantableScopes = new HashSet<string>(StringComparer.Ordinal)
     {
@@ -255,14 +255,19 @@ internal sealed class TrustRedirectTarget(IOpenIddictApplicationManager applicat
 
 /// <summary>
 /// Gatekeep's own authorization request rules (Stories 2.9 and 2.10), where OpenIddict's scope check
-/// would run (it needs a scope store, which there is none of): <c>openid</c> is required, and the only
-/// other scope accepted is <c>offline_access</c>, for an Application allowed the <c>refresh_token</c>
-/// grant, so any other, or <c>offline_access</c> for any other Application, is <c>invalid_scope</c>; a
+/// would run (it needs a scope store, which there is none of). From Story 3.7 the request may name one API with
+/// <c>resource</c> or <c>audience</c> (<see cref="ApiTargets"/>): more than one, or one that isn't available, is
+/// <c>invalid_target</c>, and the authorization keeps it as its tokens' audience. <c>openid</c> is required, and the only
+/// other scope granted is <c>offline_access</c>, for an Application allowed the <c>refresh_token</c>
+/// grant. Without an API, any other scope is <c>invalid_scope</c>; with one, another scope is one of its Permissions,
+/// which a User can't hold until Epic 5, and is dropped silently. <c>offline_access</c> for any other Application is
+/// <c>invalid_scope</c>; a
 /// <c>max_age</c> that isn't a non-negative integer is <c>invalid_request</c> (Story 2.11); and no sign-in
 /// can complete without the User, so <c>prompt=none</c> is <c>login_required</c>. <c>prompt=login</c> and
 /// <c>max_age</c> are enforced against the sign-in's <c>auth_time</c> by <see cref="AuthorizePassthrough"/>.
 /// </summary>
-internal sealed class ValidateGatekeepAuthorizationRequest(IOpenIddictApplicationManager applications)
+internal sealed class ValidateGatekeepAuthorizationRequest(
+    IOpenIddictApplicationManager applications, TokenRequestTransaction transaction, TokenEndpointServices services)
     : IOpenIddictServerHandler<ValidateAuthorizationRequestContext>
 {
     public static OpenIddictServerHandlerDescriptor Descriptor { get; } =
@@ -276,8 +281,38 @@ internal sealed class ValidateGatekeepAuthorizationRequest(IOpenIddictApplicatio
     {
         ArgumentNullException.ThrowIfNull(context);
 
+        // Story 3.7: the one API the request names, if any, decided once the redirect target is trusted.
+        var named = context.Transaction.GetProperty<ApiTargets.Named>(ApiTargets.NamedProperty) ?? new ApiTargets.Named(false, null);
+        DirectoryApiTarget? api = null;
+        if (named.Many)
+        {
+            context.Reject(Errors.InvalidTarget, ApiTargets.OneApiDescription);
+            return;
+        }
+
+        if (named.Identifier is { } identifier)
+        {
+            api = await ApiTargets.ResolveAsync(services.Directory, transaction.Context, identifier, context.CancellationToken);
+            if (api is null)
+            {
+                context.Reject(Errors.InvalidTarget, ApiTargets.UnavailableDescription);
+                return;
+            }
+
+            context.Transaction.SetProperty(ApiTargets.ApiProperty, api);
+        }
+
         var scopes = context.Request.GetScopes();
-        if (!scopes.Contains(Scopes.OpenId, StringComparer.Ordinal) || scopes.Any(s => !AuthorizeEndpoint.GrantableScopes.Contains(s)))
+        if (api is not null && scopes.Any(s => !AuthorizeEndpoint.GrantableScopes.Contains(s)))
+        {
+            // Dropped before OpenIddict's own scope permission check, which would refuse them: they are the API's
+            // Permissions, which a User can't hold until Epic 5, and an ungranted scope is never an error (FR-16).
+            context.Request.Scope = string.Join(' ', scopes.Where(AuthorizeEndpoint.GrantableScopes.Contains));
+            scopes = context.Request.GetScopes();
+        }
+
+        if (!scopes.Contains(Scopes.OpenId, StringComparer.Ordinal)
+            || (api is null && scopes.Any(s => !AuthorizeEndpoint.GrantableScopes.Contains(s))))
         {
             context.Reject(Errors.InvalidScope, "openid is required, and the only other scope accepted is offline_access.");
         }
@@ -427,7 +462,8 @@ internal sealed class AnswerInvalidRequestPage(ProtocolPageHeaders headers) : IO
 /// <c>login_required</c>, so no code is issued and nothing is committed; Story 4.2 replaces the refusal
 /// with a new sign-in. A result fresh enough signs the User in: the
 /// claims are <c>sub</c> (the User's <c>usr_</c> ID), <c>sid</c>, <c>auth_time</c> and <c>amr</c>, the ID
-/// token gets those and the <c>nonce</c>, and the access token <c>sub</c> and its audience; one ad-hoc
+/// token gets those and the <c>nonce</c>, and the access token <c>sub</c> and, from Story 3.7, the named API as its
+/// audience, or none; one ad-hoc
 /// authorization, the Token Family, is anchored to the result's Session, and OpenIddict issues the code.
 /// No result is <c>temporarily_unavailable</c>. Either way OpenIddict's response, with <c>iss</c>, ends
 /// the transaction. The authorization grants <c>openid</c>, and <c>offline_access</c> when it was asked
@@ -494,14 +530,23 @@ internal static class AuthorizePassthrough
         }
 
         var subject = PublicId.Format(PublicIdType.User, result.UserId);
-        string[] audiences = application.Audiences.IsDefaultOrEmpty ? [ProtocolContract.PlaceholderAudience] : [.. application.Audiences];
+
+        // Story 3.7: the API the request named, kept as the authorization's audience; with none, no aud at all.
+        var api = transaction.GetProperty<DirectoryApiTarget>(ApiTargets.ApiProperty);
 
         // openid, and offline_access when it was asked for and allowed (Story 2.10): what the family grants.
         var scopes = request.GetScopes().Where(AuthorizeEndpoint.GrantableScopes.Contains).Distinct(StringComparer.Ordinal).ToImmutableArray();
 
         var identity = new ClaimsIdentity(TokenValidationParameters.DefaultAuthenticationType, Claims.Name, Claims.Role);
         identity.SetScopes(scopes);
-        identity.SetAudiences(audiences);
+        if (api is not null)
+        {
+            identity.SetAudiences(api.Identifier);
+
+            // Kept on the code and the family's refresh tokens, so each exchange and refresh reads the API again by it.
+            identity.SetClaim(ApiTargets.ApiClaim, api.Identifier);
+        }
+
         AuthorizeEndpoint.SetUserClaims(identity, result.UserId, result.SessionId, result.AuthTime, result.Amr);
 
         var principal = new ClaimsPrincipal(identity);

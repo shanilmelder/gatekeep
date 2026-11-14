@@ -168,6 +168,8 @@ public class AdminApiRuleTests
     /// <summary>
     /// Story 3.6: an API's identifier is never updatable. gk_admin updates only its offline access, RBAC and lifetimes,
     /// and adds and removes Permissions without editing one; gk_worker reads only what finds the built-in Management API.
+    /// Story 3.7: gk_admin sets and removes grants, never updating one; gk_hosted reads only what resolving a token's API
+    /// needs, never an API's name or RBAC or a Permission's description; gk_worker reads only what its purges' WHEREs name.
     /// </summary>
     [Theory]
     [InlineData(
@@ -176,12 +178,17 @@ public class AdminApiRuleTests
         new[]
         {
             "gk_admin UPDATE access_token_lifetime,id_token_lifetime,offline_access,rbac,refresh_token_absolute_lifetime,refresh_token_inactivity_lifetime",
+            "gk_hosted SELECT access_token_lifetime,built_in,id,id_token_lifetime,identifier,offline_access,refresh_token_absolute_lifetime,refresh_token_inactivity_lifetime,tenant_id",
             "gk_worker SELECT built_in,id,tenant_id",
         })]
     [InlineData(
         "permission",
         new[] { "gk_admin DELETE", "gk_admin INSERT", "gk_admin SELECT", "gk_worker DELETE", "gk_worker INSERT" },
-        new[] { "gk_worker SELECT api_id,tenant_id,value" })]
+        new[] { "gk_hosted SELECT api_id,tenant_id,value", "gk_worker SELECT api_id,tenant_id,value" })]
+    [InlineData(
+        "api_grant",
+        new[] { "gk_admin DELETE", "gk_admin INSERT", "gk_admin SELECT", "gk_hosted SELECT", "gk_worker DELETE" },
+        new[] { "gk_worker SELECT application_id,tenant_id" })]
     public void Registry_holds_APIs_and_Permissions_to_their_grants(string table, string[] grants, string[] columns)
     {
         var entry = Entry(table);

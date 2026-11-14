@@ -1043,8 +1043,9 @@ internal static class AdminApi
             .WithTags(TenantTag)
             .WithSummary("One of the path Tenant's APIs, with its Permissions.")
             .WithDescription(
-                "Any Tenant Role in the path Tenant. Read only, in the Tenant's own scope. The same fields as the list, and its " +
-                "Permissions by value, each with its description. An apiId that isn't an api_ ID, names no API of this Tenant " +
+                "Any Tenant Role in the path Tenant. Read only, in the Tenant's own scope. The same fields as the list, its " +
+                "Permissions by value, each with its description, and its grants: each machine-to-machine Application " +
+                "authorized on it, ordered by name, with its applicationId, name and the Permissions it holds. An apiId that isn't an api_ ID, names no API of this Tenant " +
                 "or names another Tenant's is the same 404 not_found. A malformed, unknown or role-less Tenant is 403 " +
                 "access_denied, audited as every Tenant capability refusal is.")
             .Produces<ApiResourceDetailResponse>(StatusCodes.Status200OK)
@@ -1119,6 +1120,55 @@ internal static class AdminApi
                 "directory.api.permission_removed by the caller: 204. The built-in Management API's Permissions are fixed: 409 " +
                 "api_built_in. An apiId that isn't an api_ ID, names no API of this Tenant or another Tenant's, and a value the " +
                 "API has no Permission by, are the same 404 not_found. Nothing is written on any refusal.")
+            .Produces(StatusCodes.Status204NoContent)
+            .Produces(StatusCodes.Status401Unauthorized)
+            .Produces<ApiProblem>(StatusCodes.Status403Forbidden, AdminResponses.ProblemContentType)
+            .Produces<ApiProblem>(StatusCodes.Status404NotFound, AdminResponses.ProblemContentType)
+            .Produces<ApiProblem>(StatusCodes.Status409Conflict, AdminResponses.ProblemContentType)
+            .Produces(StatusCodes.Status503ServiceUnavailable);
+
+        app.MapPut("/api/v1/tenants/{tenantId}/apis/{apiId}/grants/{applicationId}", static (HttpContext context, AdminApiServices services) => ApisApi.SetGrantAsync(context, services))
+            .WithMetadata(
+                TenantApiEndpoint.Instance,
+                new RequiresCapability(AdminCapabilities.TenantApisManage),
+                new JsonRequestBody(typeof(SetApiGrantRequest)))
+            .WithName("SetApiGrant")
+            .WithTags(TenantTag)
+            .WithSummary("Authorize a machine-to-machine Application on an API, with the Permissions it may be issued.")
+            .WithDescription(
+                "Tenant Editors and Owners, and machine principals that hold tenant.apis.manage; no fresh assertion. The body's " +
+                "permissions replace what the Application holds on this API: 1 to 200 distinct values, each one of this API's " +
+                "Permissions. Its next Client Credentials token for this API carries only granted Permissions, narrowed to the " +
+                "scope it asks for. A set that changes writes the grant and directory.api.grant_updated by the caller, naming the " +
+                "API; an unchanged set writes nothing and is 200. A body that isn't JSON, is over 32768 bytes or misses " +
+                "permissions is 400 api_invalid with no errors. An empty list is 400 api_invalid with one error on the field " +
+                "permissions, no index and reason invalid, and a list of more than 200 the same with reason too_many; otherwise " +
+                "each value that is malformed, repeated or not a Permission of this API is an error on permissions naming the " +
+                "value's index and the reason (invalid, duplicate or unknown). An Application that isn't " +
+                "machine-to-machine is 409 application_not_machine; the built-in Management API, which only a Tenant Owner grants " +
+                "in a later release, is 409 api_built_in. An apiId or applicationId that is malformed, unknown, another " +
+                "Tenant's, a deleted Application or the hidden system Application is the same 404 not_found. Nothing is written " +
+                "on any refusal. The answer is the API with its Permissions and grants.")
+            .Produces<ApiResourceDetailResponse>(StatusCodes.Status200OK)
+            .Produces<ApiProblem>(StatusCodes.Status400BadRequest, AdminResponses.ProblemContentType)
+            .Produces(StatusCodes.Status401Unauthorized)
+            .Produces<ApiProblem>(StatusCodes.Status403Forbidden, AdminResponses.ProblemContentType)
+            .Produces<ApiProblem>(StatusCodes.Status404NotFound, AdminResponses.ProblemContentType)
+            .Produces<ApiProblem>(StatusCodes.Status409Conflict, AdminResponses.ProblemContentType)
+            .Produces(StatusCodes.Status503ServiceUnavailable);
+
+        app.MapDelete("/api/v1/tenants/{tenantId}/apis/{apiId}/grants/{applicationId}", static (HttpContext context, AdminApiServices services) => ApisApi.RemoveGrantAsync(context, services))
+            .WithMetadata(TenantApiEndpoint.Instance, new RequiresCapability(AdminCapabilities.TenantApisManage))
+            .WithName("RemoveApiGrant")
+            .WithTags(TenantTag)
+            .WithSummary("Remove a machine-to-machine Application's authorization on an API.")
+            .WithDescription(
+                "Tenant Editors and Owners, and machine principals that hold tenant.apis.manage; no fresh assertion and no body. " +
+                "It deletes every Permission of this API granted to the Application and writes directory.api.grant_removed by " +
+                "the caller, naming the API: 204. Its next token for this API carries no Permission. An Application with no grant " +
+                "here is 204 too, with nothing written. The built-in Management API is 409 api_built_in. An apiId or " +
+                "applicationId that is malformed, unknown, another Tenant's, a deleted Application or the hidden system " +
+                "Application is the same 404 not_found.")
             .Produces(StatusCodes.Status204NoContent)
             .Produces(StatusCodes.Status401Unauthorized)
             .Produces<ApiProblem>(StatusCodes.Status403Forbidden, AdminResponses.ProblemContentType)

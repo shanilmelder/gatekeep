@@ -3,8 +3,8 @@ using Gatekeep.Kernel.Persistence;
 namespace Gatekeep.Modules.Directory.Core;
 
 /// <summary>
-/// Directory's Tenant purge (Story 2.5): its client secrets, then their Applications, children before
-/// parents. Sessions' and Authentication's purges run first, since their rows reference Applications.
+/// Directory's Tenant purge (Story 2.5): from Story 3.7 its grants, then its client secrets, then their Applications,
+/// children before parents. Sessions' and Authentication's purges run first, since their rows reference Applications.
 /// It runs in the Tenant's own scope, so row-level security holds it to that Tenant too, and deletes
 /// nothing of any other module (AD-1). A second run deletes nothing.
 /// </summary>
@@ -12,6 +12,8 @@ internal sealed class DirectoryPurge : ITenantPurge
 {
     private static readonly string[] Statements =
     [
+        // Story 3.7: grants reference both an Application and a Permission, so they go before either.
+        "DELETE FROM api_grant WHERE tenant_id = @tenant_id",
         "DELETE FROM client_secret WHERE tenant_id = @tenant_id",
         "DELETE FROM application WHERE tenant_id = @tenant_id",
 
@@ -38,7 +40,7 @@ internal sealed class DirectoryPurge : ITenantPurge
 
 /// <summary>
 /// Directory's side of deleted Applications' purge (Story 3.5, AD-30): it names the context Tenant's deleted
-/// Applications for Sessions' and Authentication's purges, which run first, and then deletes the client secrets and
+/// Applications for Sessions' and Authentication's purges, which run first, and then deletes the grants (Story 3.7), client secrets and
 /// the rows of exactly the Applications it is given, children before parents, and of those only the ones whose
 /// <c>deleted_at</c> is set: never a visible or <c>system</c> Application. It runs in the Tenant's own scope. A second
 /// run deletes nothing.
@@ -49,6 +51,13 @@ internal static class DirectoryApplicationPurge
 
     private static readonly string[] Statements =
     [
+        // Story 3.7: their grants first, which reference them.
+        """
+        DELETE FROM api_grant
+        WHERE tenant_id = @tenant_id
+          AND application_id IN (
+            SELECT id FROM application WHERE tenant_id = @tenant_id AND id = ANY (@application_ids) AND deleted_at IS NOT NULL)
+        """,
         """
         DELETE FROM client_secret
         WHERE tenant_id = @tenant_id

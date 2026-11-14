@@ -54,6 +54,29 @@ public sealed class AddApiPermissionRequest
     public string? Description { get; init; }
 }
 
+/// <summary>
+/// Set grant's body (Story 3.7): the values of the API's Permissions to grant the machine-to-machine Application, which
+/// replace whatever it holds.
+/// </summary>
+public sealed class SetApiGrantRequest
+{
+    /// <summary>1 to 200 distinct values, each one of this API's Permissions, such as <c>invoices:read</c>.</summary>
+    public required IReadOnlyList<string?> Permissions { get; init; }
+}
+
+/// <summary>One machine-to-machine Application's grant on an API (Story 3.7).</summary>
+public sealed class ApiGrantResponse
+{
+    /// <summary>The Application's public ID, <c>app_</c> and 26 base32 characters: its <c>client_id</c>.</summary>
+    public required string ApplicationId { get; init; }
+
+    /// <summary>The Application's name.</summary>
+    public required string Name { get; init; }
+
+    /// <summary>The values of this API's Permissions it holds, in ordinal order: never empty.</summary>
+    public required IReadOnlyList<string> Permissions { get; init; }
+}
+
 /// <summary>One API (Story 3.6).</summary>
 public sealed class ApiResourceResponse
 {
@@ -100,12 +123,18 @@ public sealed class ApiPermissionResponse
     public required string Description { get; init; }
 }
 
-/// <summary>One API with its Permissions, by value (Story 3.6).</summary>
+/// <summary>One API with its Permissions, by value (Story 3.6), and from Story 3.7 its grants.</summary>
 public sealed class ApiResourceDetailResponse
 {
     public required ApiResourceResponse Api { get; init; }
 
     public required IReadOnlyList<ApiPermissionResponse> Permissions { get; init; }
+
+    /// <summary>
+    /// Each machine-to-machine Application authorized on this API, ordered by name, with the Permissions it holds
+    /// (Story 3.7). Always empty for the built-in Management API, which only a Tenant Owner grants (Epic 17).
+    /// </summary>
+    public required IReadOnlyList<ApiGrantResponse> Grants { get; init; }
 }
 
 /// <summary>A page of the Tenant's APIs: the built-in Management API first, then the others newest first.</summary>
@@ -129,6 +158,15 @@ internal static class ApisApi
 
     /// <summary>The route value naming one of an API's Permissions: its value.</summary>
     public const string PermissionRouteValue = "value";
+
+    /// <summary>The route value naming the Application a grant is for: its <c>app_</c> public ID (Story 3.7).</summary>
+    public const string ApplicationRouteValue = "applicationId";
+
+    /// <summary>
+    /// The largest grant body (Story 3.7): room for 200 Permissions of the longest value. Anything bigger is 400
+    /// <c>api_invalid</c>, unread past it.
+    /// </summary>
+    public const int MaxGrantBody = 32768;
 
     /// <summary>The list's query parameter: the previous page's <c>nextCursor</c>.</summary>
     public const string CursorQuery = "cursor";
@@ -283,6 +321,42 @@ internal static class ApisApi
             noContent: true);
     }
 
+    public static async Task SetGrantAsync(HttpContext context, AdminApiServices services)
+    {
+        if (!TryApiId(context, out var apiId) || !TryApplicationId(context, out var applicationId))
+        {
+            await RefuseAsync(context, StatusCodes.Status404NotFound, AdminResponses.NotFound);
+            return;
+        }
+
+        var body = await AdminApi.ReadJsonAsync<SetApiGrantRequest>(context.Request, MaxGrantBody, context.RequestAborted);
+        if (body?.Permissions is null)
+        {
+            await RefuseAsync(context, StatusCodes.Status400BadRequest, AdminResponses.ApiInvalid);
+            return;
+        }
+
+        await RunAsync(context, services, write: true, (c, principal, path, ct) =>
+            services.Apis.SetGrantAsync(c, principal, path.Grant, path.TenantId, apiId, applicationId, body.Permissions, ct));
+    }
+
+    public static async Task RemoveGrantAsync(HttpContext context, AdminApiServices services)
+    {
+        if (!TryApiId(context, out var apiId) || !TryApplicationId(context, out var applicationId))
+        {
+            await RefuseAsync(context, StatusCodes.Status404NotFound, AdminResponses.NotFound);
+            return;
+        }
+
+        // A grant that doesn't exist is removed all the same: 204, with nothing written.
+        await RunAsync(
+            context,
+            services,
+            write: true,
+            (c, principal, path, ct) => services.Apis.RemoveGrantAsync(c, principal, path.Grant, path.TenantId, apiId, applicationId, ct),
+            noContent: true);
+    }
+
     /// <summary>
     /// One call in the path Tenant's own scope, and its answer: a write commits only when it wrote, past which a client gone
     /// mustn't undo it; 201 with <paramref name="created"/>'s Location for a create, 204 for <paramref name="noContent"/>.
@@ -323,7 +397,7 @@ internal static class ApisApi
 
         switch (result.Status)
         {
-            case ApiStatus.Done when noContent:
+            case ApiStatus.Done or ApiStatus.Unchanged when noContent:
                 context.Response.StatusCode = StatusCodes.Status204NoContent;
                 context.Response.Headers.CacheControl = "no-store";
                 return;
@@ -345,7 +419,7 @@ internal static class ApisApi
                     context,
                     StatusCodes.Status400BadRequest,
                     AdminResponses.ApiInvalid,
-                    [.. (result.Errors ?? []).Select(e => new ApiProblemError { Field = e.Field, Index = null, Reason = e.Reason, Maximum = e.Maximum })]);
+                    [.. (result.Errors ?? []).Select(e => new ApiProblemError { Field = e.Field, Index = e.Index, Reason = e.Reason, Maximum = e.Maximum })]);
                 return;
 
             case ApiStatus.NotFound:
@@ -368,6 +442,10 @@ internal static class ApisApi
                 await RefuseAsync(context, StatusCodes.Status409Conflict, AdminResponses.ApiBuiltIn);
                 return;
 
+            case ApiStatus.ApplicationNotMachine:
+                await RefuseAsync(context, StatusCodes.Status409Conflict, AdminResponses.ApplicationNotMachine);
+                return;
+
             case ApiStatus.Forbidden:
                 await RefuseAsync(context, StatusCodes.Status403Forbidden, AdminResponses.AccessDenied);
                 return;
@@ -381,10 +459,20 @@ internal static class ApisApi
     private static bool TryApiId(HttpContext context, out Guid apiId) =>
         PublicId.TryParse(PublicIdType.Api, context.GetRouteValue(ApiRouteValue) as string, out apiId);
 
+    /// <summary>The route's Application ID (Story 3.7): a malformed one names no Application, the same 404 as an unknown one.</summary>
+    private static bool TryApplicationId(HttpContext context, out Guid applicationId) =>
+        PublicId.TryParse(PublicIdType.Application, context.GetRouteValue(ApplicationRouteValue) as string, out applicationId);
+
     private static ApiResourceDetailResponse Detail(ApiResult result) => new()
     {
         Api = Response(result.Api!),
         Permissions = [.. (result.Permissions ?? []).Select(p => new ApiPermissionResponse { Value = p.Value, Description = p.Description })],
+        Grants = [.. (result.Grants ?? []).Select(g => new ApiGrantResponse
+        {
+            ApplicationId = PublicId.Format(PublicIdType.Application, g.ApplicationId),
+            Name = g.Name,
+            Permissions = g.Permissions,
+        })],
     };
 
     private static ApiResourceResponse Response(ManagedApi api) => new()

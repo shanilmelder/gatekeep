@@ -177,8 +177,14 @@ internal static class AdminResponses
     /// <summary>A Permission add to an API that already holds the most Permissions (Story 3.6). Nothing was written.</summary>
     public const string PermissionLimitReached = "permission_limit_reached";
 
-    /// <summary>A Permission add or removal on the built-in Management API, whose Permissions are fixed (Story 3.6). Nothing was written.</summary>
+    /// <summary>
+    /// A Permission add or removal on the built-in Management API, whose Permissions are fixed (Story 3.6), and from Story
+    /// 3.7 a grant on it, which only a Tenant Owner makes (Epic 17). Nothing was written.
+    /// </summary>
     public const string ApiBuiltIn = "api_built_in";
+
+    /// <summary>A grant on an API for an Application that isn't a machine-to-machine one (Story 3.7). Nothing was written.</summary>
+    public const string ApplicationNotMachine = "application_not_machine";
 
     /// <summary>
     /// A Signing Key rotation on demand (Story 9.2) while the next key was published less than 15 minutes ago,
@@ -262,6 +268,7 @@ internal static class AdminResponses
         PermissionLimitReached,
         ApiBuiltIn,
         SigningKeyNotReady,
+        ApplicationNotMachine,
     ];
 
     /// <summary>The Session cookie, expired: sent with a sign-out and a 401 for a stale cookie.</summary>

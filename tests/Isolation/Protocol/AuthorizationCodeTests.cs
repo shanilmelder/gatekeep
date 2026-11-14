@@ -84,7 +84,8 @@ public sealed class AuthorizationCodeTests(PostgresFixture postgres, OpenBaoFixt
         Assert.Equal(SecurityAlgorithms.RsaSha256, access.Alg);
         Assert.Equal(await CodeFlow.CurrentKidAsync(flow.Database, flow.A.TenantId), access.Kid);
         Assert.Equal(subject, access.Subject);
-        Assert.Equal([ProtocolContract.PlaceholderAudience], access.Audiences);
+        // Story 3.7: no API named, so no aud at all, and never the Story 2.5 placeholder.
+        Assert.Empty(access.Audiences);
 
         var idToken = token.Body.RootElement.GetProperty("id_token").GetString()!;
         var id = new JsonWebToken(idToken);
@@ -102,8 +103,8 @@ public sealed class AuthorizationCodeTests(PostgresFixture postgres, OpenBaoFixt
 
         var jwksA = await CodeFlow.JwksAsync(host, HostA);
         var jwksB = await CodeFlow.JwksAsync(host, HostB);
-        Assert.True(await CodeFlow.VerifiesAsync(token.AccessToken, jwksA, flow.A.Issuer, ProtocolContract.PlaceholderAudience, "at+jwt"), "A's access token doesn't verify with A's JWKS.");
-        Assert.False(await CodeFlow.VerifiesAsync(token.AccessToken, jwksB, flow.A.Issuer, ProtocolContract.PlaceholderAudience, "at+jwt"), "A's access token verifies with B's JWKS.");
+        Assert.True(await CodeFlow.VerifiesAsync(token.AccessToken, jwksA, flow.A.Issuer, audience: null, "at+jwt"), "A's access token doesn't verify with A's JWKS.");
+        Assert.False(await CodeFlow.VerifiesAsync(token.AccessToken, jwksB, flow.A.Issuer, audience: null, "at+jwt"), "A's access token verifies with B's JWKS.");
         Assert.True(await CodeFlow.VerifiesAsync(idToken, jwksA, flow.A.Issuer, flow.ClientA.ClientId, null), "A's ID token doesn't verify with A's JWKS.");
         Assert.False(await CodeFlow.VerifiesAsync(idToken, jwksB, flow.A.Issuer, flow.ClientA.ClientId, null), "A's ID token verifies with B's JWKS.");
 
@@ -985,12 +986,19 @@ internal static class CodeFlow
         return new TokenResponse(response, System.Text.Json.JsonDocument.Parse(body));
     }
 
-    public static async Task<bool> VerifiesAsync(string token, JsonWebKeySet jwks, string issuer, string audience, string? type)
+    /// <summary>Whether the token verifies; with no <paramref name="audience"/> (Story 3.7), it must carry no <c>aud</c>.</summary>
+    public static async Task<bool> VerifiesAsync(string token, JsonWebKeySet jwks, string issuer, string? audience, string? type)
     {
+        if (audience is null && new JsonWebToken(token).Audiences.Any())
+        {
+            return false;
+        }
+
         var result = await new JsonWebTokenHandler().ValidateTokenAsync(token, new TokenValidationParameters
         {
             IssuerSigningKeys = jwks.GetSigningKeys(),
             ValidIssuer = issuer,
+            ValidateAudience = audience is not null,
             ValidAudience = audience,
             ValidateLifetime = true,
             ValidAlgorithms = [SecurityAlgorithms.RsaSha256],

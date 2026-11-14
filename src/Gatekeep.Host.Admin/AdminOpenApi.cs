@@ -243,6 +243,28 @@ internal static class AdminOpenApi
                         array.MaxItems = ManagementContract.MaxPermissionsPerApi;
                     }
                 }
+                else if (type == typeof(SetApiGrantRequest))
+                {
+                    // Feedback for clients: the server decides each value and names each one it refuses (Story 3.7).
+                    if (schema.Properties?.TryGetValue("permissions", out var values) == true && values is OpenApiSchema list)
+                    {
+                        list.MinItems = 1;
+                        list.MaxItems = ManagementContract.MaxPermissionsPerApi;
+                    }
+                }
+                else if (type == typeof(ApiGrantResponse))
+                {
+                    Bound(schema, "applicationId", ApplicationIdPattern, maxLength: null);
+                    if (schema.Properties?.TryGetValue("permissions", out var values) == true && values is OpenApiSchema list)
+                    {
+                        list.MinItems = 1;
+                        list.MaxItems = ManagementContract.MaxPermissionsPerApi;
+                        if (list.Items is OpenApiSchema items)
+                        {
+                            items.Pattern = PermissionPattern;
+                        }
+                    }
+                }
                 else if (type == typeof(ApiResourceListResponse))
                 {
                     Bound(schema, "nextCursor", ApiIdPattern, maxLength: null);

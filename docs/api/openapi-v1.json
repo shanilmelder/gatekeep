@@ -3648,7 +3648,7 @@
           "Tenants"
         ],
         "summary": "One of the path Tenant's APIs, with its Permissions.",
-        "description": "Any Tenant Role in the path Tenant. Read only, in the Tenant's own scope. The same fields as the list, and its Permissions by value, each with its description. An apiId that isn't an api_ ID, names no API of this Tenant or names another Tenant's is the same 404 not_found. A malformed, unknown or role-less Tenant is 403 access_denied, audited as every Tenant capability refusal is.",
+        "description": "Any Tenant Role in the path Tenant. Read only, in the Tenant's own scope. The same fields as the list, its Permissions by value, each with its description, and its grants: each machine-to-machine Application authorized on it, ordered by name, with its applicationId, name and the Permissions it holds. An apiId that isn't an api_ ID, names no API of this Tenant or names another Tenant's is the same 404 not_found. A malformed, unknown or role-less Tenant is 403 access_denied, audited as every Tenant capability refusal is.",
         "operationId": "GetApi",
         "parameters": [
           {
@@ -3954,6 +3954,207 @@
         "summary": "Remove one of an API's Permissions.",
         "description": "Tenant Editors and Owners, and machine principals that hold tenant.apis.manage; no fresh assertion and no body. The value is the Permission's, such as invoices:read. It deletes the Permission and writes directory.api.permission_removed by the caller: 204. The built-in Management API's Permissions are fixed: 409 api_built_in. An apiId that isn't an api_ ID, names no API of this Tenant or another Tenant's, and a value the API has no Permission by, are the same 404 not_found. Nothing is written on any refusal.",
         "operationId": "RemoveApiPermission",
+        "parameters": [
+          {
+            "name": "tenantId",
+            "in": "path",
+            "description": "The Tenant's public ID: ten_ and the UUID's 16 bytes in lowercase RFC 4648 base32 with no padding, whose last character carries two zero bits. Only this canonical spelling, after URL decoding, names a Tenant, and the empty UUID's never does; anything else is refused like a Tenant the Admin holds no role in.",
+            "required": true,
+            "schema": {
+              "pattern": "^ten_[a-z2-7]{25}[aeimquy4]$",
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Gatekeep-Tenant",
+            "in": "header",
+            "description": "The Tenant the page shows, its ten_ ID: it must equal {tenantId}, or 409 tenant_mismatch. It never selects a Tenant.",
+            "required": true,
+            "schema": {
+              "pattern": "^ten_[a-z2-7]{25}[aeimquy4]$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "access_denied, with the problem body, when the capability is refused. No body when an earlier check refuses first: a Session restricted to setup, or on a state-changing call a wrong Origin or CSRF token.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "tenant_mismatch, with the problem body, when X-Gatekeep-Tenant is missing, sent twice or isn't {tenantId}, and nothing ran; or another conflict the operation's description names.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "adminSession": [ ],
+            "csrf": [ ]
+          }
+        ],
+        "x-gatekeep-setup-allowed": false,
+        "x-gatekeep-access": {
+          "kind": "capability",
+          "capability": "tenant.apis.manage",
+          "scope": "tenant",
+          "machineAllowed": true,
+          "freshAssertion": "never"
+        },
+        "x-gatekeep-recovery-allowed": false
+      }
+    },
+    "/api/v1/tenants/{tenantId}/apis/{apiId}/grants/{applicationId}": {
+      "put": {
+        "tags": [
+          "Tenants"
+        ],
+        "summary": "Authorize a machine-to-machine Application on an API, with the Permissions it may be issued.",
+        "description": "Tenant Editors and Owners, and machine principals that hold tenant.apis.manage; no fresh assertion. The body's permissions replace what the Application holds on this API: 1 to 200 distinct values, each one of this API's Permissions. Its next Client Credentials token for this API carries only granted Permissions, narrowed to the scope it asks for. A set that changes writes the grant and directory.api.grant_updated by the caller, naming the API; an unchanged set writes nothing and is 200. A body that isn't JSON, is over 32768 bytes or misses permissions is 400 api_invalid with no errors. An empty list is 400 api_invalid with one error on the field permissions, no index and reason invalid, and a list of more than 200 the same with reason too_many; otherwise each value that is malformed, repeated or not a Permission of this API is an error on permissions naming the value's index and the reason (invalid, duplicate or unknown). An Application that isn't machine-to-machine is 409 application_not_machine; the built-in Management API, which only a Tenant Owner grants in a later release, is 409 api_built_in. An apiId or applicationId that is malformed, unknown, another Tenant's, a deleted Application or the hidden system Application is the same 404 not_found. Nothing is written on any refusal. The answer is the API with its Permissions and grants.",
+        "operationId": "SetApiGrant",
+        "parameters": [
+          {
+            "name": "tenantId",
+            "in": "path",
+            "description": "The Tenant's public ID: ten_ and the UUID's 16 bytes in lowercase RFC 4648 base32 with no padding, whose last character carries two zero bits. Only this canonical spelling, after URL decoding, names a Tenant, and the empty UUID's never does; anything else is refused like a Tenant the Admin holds no role in.",
+            "required": true,
+            "schema": {
+              "pattern": "^ten_[a-z2-7]{25}[aeimquy4]$",
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Gatekeep-Tenant",
+            "in": "header",
+            "description": "The Tenant the page shows, its ten_ ID: it must equal {tenantId}, or 409 tenant_mismatch. It never selects a Tenant.",
+            "required": true,
+            "schema": {
+              "pattern": "^ten_[a-z2-7]{25}[aeimquy4]$",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetApiGrantRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResourceDetailResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "access_denied, with the problem body, when the capability is refused. No body when an earlier check refuses first: a Session restricted to setup, or on a state-changing call a wrong Origin or CSRF token.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "tenant_mismatch, with the problem body, when X-Gatekeep-Tenant is missing, sent twice or isn't {tenantId}, and nothing ran; or another conflict the operation's description names.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "adminSession": [ ],
+            "csrf": [ ]
+          }
+        ],
+        "x-gatekeep-setup-allowed": false,
+        "x-gatekeep-access": {
+          "kind": "capability",
+          "capability": "tenant.apis.manage",
+          "scope": "tenant",
+          "machineAllowed": true,
+          "freshAssertion": "never"
+        },
+        "x-gatekeep-recovery-allowed": false
+      },
+      "delete": {
+        "tags": [
+          "Tenants"
+        ],
+        "summary": "Remove a machine-to-machine Application's authorization on an API.",
+        "description": "Tenant Editors and Owners, and machine principals that hold tenant.apis.manage; no fresh assertion and no body. It deletes every Permission of this API granted to the Application and writes directory.api.grant_removed by the caller, naming the API: 204. Its next token for this API carries no Permission. An Application with no grant here is 204 too, with nothing written. The built-in Management API is 409 api_built_in. An apiId or applicationId that is malformed, unknown, another Tenant's, a deleted Application or the hidden system Application is the same 404 not_found.",
+        "operationId": "RemoveApiGrant",
         "parameters": [
           {
             "name": "tenantId",
@@ -4454,6 +4655,32 @@
           }
         }
       },
+      "ApiGrantResponse": {
+        "required": [
+          "applicationId",
+          "name",
+          "permissions"
+        ],
+        "type": "object",
+        "properties": {
+          "applicationId": {
+            "pattern": "^app_[a-z2-7]{25}[aeimquy4]$",
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "permissions": {
+            "maxItems": 200,
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "pattern": "^[a-z0-9][a-z0-9_.-]{0,63}:[a-z0-9][a-z0-9_.-]{0,63}$",
+              "type": "string"
+            }
+          }
+        }
+      },
       "ApiPermissionResponse": {
         "required": [
           "value",
@@ -4511,7 +4738,8 @@
               "permission_taken",
               "permission_limit_reached",
               "api_built_in",
-              "signing_key_not_ready"
+              "signing_key_not_ready",
+              "application_not_machine"
             ],
             "type": "string"
           },
@@ -4557,7 +4785,8 @@
               "name",
               "identifier",
               "value",
-              "description"
+              "description",
+              "permissions"
             ],
             "type": "string"
           },
@@ -4580,7 +4809,8 @@
               "below_minimum",
               "above_maximum",
               "invalid",
-              "reserved"
+              "reserved",
+              "unknown"
             ],
             "type": "string"
           },
@@ -4596,7 +4826,8 @@
       "ApiResourceDetailResponse": {
         "required": [
           "api",
-          "permissions"
+          "permissions",
+          "grants"
         ],
         "type": "object",
         "properties": {
@@ -4608,6 +4839,12 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/ApiPermissionResponse"
+            }
+          },
+          "grants": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ApiGrantResponse"
             }
           }
         }
@@ -5568,6 +5805,22 @@
         "properties": {
           "revokeAccess": {
             "type": "boolean"
+          }
+        }
+      },
+      "SetApiGrantRequest": {
+        "required": [
+          "permissions"
+        ],
+        "type": "object",
+        "properties": {
+          "permissions": {
+            "maxItems": 200,
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           }
         }
       },

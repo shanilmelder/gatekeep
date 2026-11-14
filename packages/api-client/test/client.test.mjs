@@ -651,6 +651,26 @@ describe('api-client', () => {
     assert.equal(added.problem?.code, 'permission_taken');
   });
 
+  it("sets and removes an Application's grant on an API with every ID encoded, the page Tenant and the CSRF header", async () => {
+    const { fetch, calls } = fakeFetch(409, JSON.stringify({ code: 'application_not_machine', traceId: 't' }), 'application/problem+json');
+    const client = createApiClient({ fetch, csrfToken: () => 'csrf-1', pageTenant: () => 'ten_a' });
+
+    const set = await client.setApiGrant('ten_a', 'api_b', 'app/c', { permissions: ['invoices:read', 'payments:write'] });
+    await client.removeApiGrant('ten_a', 'api_b', 'app_c');
+
+    assert.equal(calls[0].input, '/api/v1/tenants/ten_a/apis/api_b/grants/app%2Fc');
+    assert.equal(calls[0].init.method, 'PUT');
+    assert.equal(calls[0].init.body, JSON.stringify({ permissions: ['invoices:read', 'payments:write'] }));
+    assert.equal(calls[0].init.headers[TENANT_HEADER], 'ten_a');
+    assert.equal(calls[0].init.headers[CSRF_HEADER], 'csrf-1');
+    assert.equal(calls[1].input, '/api/v1/tenants/ten_a/apis/api_b/grants/app_c');
+    assert.equal(calls[1].init.method, 'DELETE');
+    assert.equal(calls[1].init.body, undefined);
+    assert.equal(calls[1].init.headers[CSRF_HEADER], 'csrf-1');
+    assert.equal(set.ok, false);
+    assert.equal(set.problem?.code, 'application_not_machine');
+  });
+
   it('reads an Application deletion refusal as its problem code', async () => {
     const { fetch } = fakeFetch(404, JSON.stringify({ code: 'not_found', traceId: 't' }), 'application/problem+json');
     const client = createApiClient({ fetch, csrfToken: () => 'csrf-1', pageTenant: () => 'ten_a' });

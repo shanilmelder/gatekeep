@@ -2,6 +2,7 @@ import type { ApiPermission, ApiProblemError, ApiResourceDetail, ApiSettingsRequ
 import {
   Banner,
   Button,
+  Checkbox,
   DataTable,
   EmptyState,
   ErrorReference,
@@ -12,6 +13,7 @@ import {
   SectionPage,
   SettingsRow,
   SkeletonRows,
+  StatusBadge,
   Toggle,
   formatMessage,
   useMessages,
@@ -21,7 +23,7 @@ import {
 import { useEffect, useRef, useState, type FormEvent, type MouseEvent, type RefObject } from 'react';
 import { navigate } from '../navigation';
 import { api } from '../session';
-import { apisPath, isPermissionDescription, isPermissionValue } from './apis';
+import { apisPath, grantsWithout, isPermissionDescription, isPermissionValue, machineGrantRows, type MachineGrantRow } from './apis';
 import { LIFETIME_DEFAULTS, LIFETIME_FIELDS, checkLifetime, type LifetimeField } from './applications';
 import { durationText } from './ApplicationTokens';
 import { failureOf } from './ApplicationsPage';
@@ -59,8 +61,10 @@ export interface ApiDetailPageProps {
  * badge on the Gatekeep Management API, then Settings and Permissions. Settings shows the identifier read-only ("Can't be
  * changed."), offline access, Enable RBAC and the four token lifetimes as an Application's Tokens tab does; Permissions
  * lists each resource:action with its description, Add and Remove, except on the built-in API, whose Permissions are
- * fixed. Without tenant.apis.manage everything is read-only. A 404 says the Tenant has no such API, a 403 is the forbidden
- * page, and any other failure a banner with Retry.
+ * fixed. From Story 3.7, Machine-to-machine applications lists every machine Application of the Tenant, whether it is
+ * authorized on this API and with which Permissions, with Edit and Remove authorization; on the built-in API it only says
+ * that a Tenant Owner grants Management API access in a later release. Without tenant.apis.manage everything is
+ * read-only. A 404 says the Tenant has no such API, a 403 is the forbidden page, and any other failure a banner with Retry.
  */
 export function ApiDetailPage({ request, tenantId, apiId }: ApiDetailPageProps) {
   const messages = useMessages();
@@ -167,6 +171,9 @@ export function ApiDetailPage({ request, tenantId, apiId }: ApiDetailPageProps) 
       </div>
       <div className={pageStyles.section}>
         <ApiPermissions request={request} tenantId={tenantId} detail={detail} canManage={canManage} onChanged={saved} />
+      </div>
+      <div className={pageStyles.section}>
+        <ApiGrants request={request} tenantId={tenantId} detail={detail} canManage={canManage} onChanged={saved} />
       </div>
     </SectionPage>
   );
@@ -457,7 +464,12 @@ function ApiPermissions({ request, tenantId, detail, canManage, onChanged }: Api
     setRemoving(null);
     // A 404 is a Permission already removed elsewhere: it is gone either way, so its row goes too.
     if (answer?.ok || answer?.status === 404) {
-      onChanged({ ...detail, permissions: detail.permissions.filter((p) => p.value !== permission.value) });
+      // Its grants went with it (Story 3.7).
+      onChanged({
+        ...detail,
+        permissions: detail.permissions.filter((p) => p.value !== permission.value),
+        grants: grantsWithout(detail.grants, permission.value),
+      });
       if (answer.ok) toast(messages.apiPermissionRemoved);
       return;
     }
@@ -728,6 +740,370 @@ function AddPermissionModal({ open, request, tenantId, apiId, onClose, onAdded }
             data-testid="add-api-permission-description"
           />
         </Field>
+        <button type="submit" hidden aria-hidden tabIndex={-1} />
+      </form>
+    </Modal>
+  );
+}
+
+type Machines = { kind: 'loading' } | { kind: 'ready'; applications: { id: string; name: string; type: string }[] } | { kind: 'failed'; failure: Failure };
+
+/** The most pages of Applications the table reads: 50 a page, so 1,000 Applications. */
+const MAX_APPLICATION_PAGES = 20;
+
+/** Every Application of the Tenant, page by page, or why not. */
+async function readApplications(request: ShellRequest, tenantId: string, signal: AbortSignal): Promise<Exclude<Machines, { kind: 'loading' }>> {
+  const applications: { id: string; name: string; type: string }[] = [];
+  let cursor: string | undefined;
+  for (let page = 0; page < MAX_APPLICATION_PAGES; page++) {
+    let result;
+    try {
+      result = await request('get', () => api.listApplications(tenantId, cursor), signal);
+    } catch {
+      result = null;
+    }
+    const list = result?.ok ? result.data : undefined;
+    if (!list || !Array.isArray(list.applications)) return { kind: 'failed', failure: failureOf(result) };
+    applications.push(...list.applications);
+    if (!list.nextCursor) break;
+    cursor = list.nextCursor;
+  }
+  return { kind: 'ready', applications };
+}
+
+interface ApiGrantsProps {
+  request: ShellRequest;
+  tenantId: string;
+  detail: ApiResourceDetail;
+  canManage: boolean;
+  onChanged: (detail: ApiResourceDetail) => void;
+}
+
+/**
+ * Machine-to-machine applications (Story 3.7, FR-16; design API detail's machine-to-machine table): every machine
+ * Application of the Tenant with Application, Authorized (Yes or No) and the Permissions it holds on this API. Edit opens
+ * a checkbox per Permission and saves the set; Remove authorization takes it all away. "No machine-to-machine applications
+ * yet" when the Tenant has none. On the built-in Management API, which only a Tenant Owner grants in a later release
+ * (Epic 17), it says so and has no table or controls; without tenant.apis.manage the table is read-only.
+ */
+function ApiGrants({ request, tenantId, detail, canManage, onChanged }: ApiGrantsProps) {
+  const messages = useMessages();
+  const toast = useToast();
+  const builtIn = detail.api.builtIn;
+  const [machines, setMachines] = useState<Machines>({ kind: 'loading' });
+  const [attempt, setAttempt] = useState(0);
+  const [editing, setEditing] = useState<MachineGrantRow | null>(null);
+  const [removing, setRemoving] = useState<string | null>(null);
+  const [failure, setFailure] = useState<Failure | { kind: 'forbidden' } | null>(null);
+
+  useEffect(() => {
+    if (builtIn) return undefined;
+    const controller = new AbortController();
+    setMachines({ kind: 'loading' });
+    void (async () => {
+      const read = await readApplications(request, tenantId, controller.signal);
+      if (!controller.signal.aborted) setMachines(read);
+    })();
+    return () => controller.abort();
+  }, [request, tenantId, builtIn, attempt]);
+
+  async function remove(row: MachineGrantRow) {
+    if (removing !== null) return;
+    setRemoving(row.applicationId);
+    setFailure(null);
+    let answer;
+    try {
+      answer = await request('delete', () => api.removeApiGrant(tenantId, detail.api.id, row.applicationId));
+    } catch {
+      answer = null;
+    }
+    setRemoving(null);
+    if (answer?.ok) {
+      onChanged({ ...detail, grants: detail.grants.filter((g) => g.applicationId !== row.applicationId) });
+      toast(messages.apiGrantRemoved);
+      return;
+    }
+    if (answer?.status === 401) return;
+    const problem = answer && !answer.ok ? answer.problem : null;
+    if (answer?.status === 409 && problem?.code === 'tenant_mismatch') return;
+    if (answer?.status === 403) {
+      setFailure({ kind: 'forbidden' });
+      return;
+    }
+    setFailure({ code: problem?.code ?? 'unavailable', traceId: problem?.traceId ?? '' });
+  }
+
+  if (builtIn) {
+    return (
+      <section className={cards.card} aria-labelledby="api-grants-heading" data-testid="api-grants">
+        <header className={cards.cardHeader}>
+          <h2 id="api-grants-heading">{messages.apiGrantsTitle}</h2>
+          <p data-testid="api-grants-built-in">{messages.apiGrantsBuiltIn}</p>
+        </header>
+      </section>
+    );
+  }
+
+  const rows = machines.kind === 'ready' ? machineGrantRows(machines.applications, detail.grants) : [];
+  const columns: DataTableColumn<MachineGrantRow>[] = [
+    { key: 'application', header: messages.apiGrantsColumnApplication, rowHeader: true, cell: (row) => <bdi data-testid="api-grant-application">{row.name}</bdi> },
+    {
+      key: 'authorized',
+      header: messages.apiGrantsColumnAuthorized,
+      cell: (row) =>
+        row.authorized ? (
+          <StatusBadge status="active" data-testid="api-grant-authorized">
+            {messages.apiGrantAuthorizedYes}
+          </StatusBadge>
+        ) : (
+          <span className={styles.muted} data-testid="api-grant-authorized">
+            {messages.apiGrantAuthorizedNo}
+          </span>
+        ),
+    },
+    {
+      key: 'permissions',
+      header: messages.apiGrantsColumnPermissions,
+      cell: (row) =>
+        row.permissions.length > 0 ? (
+          <code className={styles.value} data-testid="api-grant-permissions">
+            {row.permissions.join(' ')}
+          </code>
+        ) : (
+          <span className={styles.muted} data-testid="api-grant-permissions">
+            —
+          </span>
+        ),
+    },
+  ];
+  if (canManage) {
+    columns.push({
+      key: 'actions',
+      header: messages.apiGrantsActions,
+      cell: (row) => (
+        <span className={styles.actions}>
+          <Button
+            variant="secondary"
+            aria-label={formatMessage(messages.apiGrantEditLabel, { name: row.name })}
+            onClick={() => setEditing(row)}
+            data-testid="api-grant-edit"
+          >
+            {messages.apiGrantEdit}
+          </Button>
+          {row.authorized && (
+            <Button
+              variant="secondary"
+              pending={removing === row.applicationId}
+              aria-label={formatMessage(messages.apiGrantRemoveLabel, { name: row.name })}
+              onClick={() => void remove(row)}
+              data-testid="api-grant-remove"
+            >
+              {messages.apiGrantRemove}
+            </Button>
+          )}
+        </span>
+      ),
+    });
+  }
+
+  return (
+    <section className={cards.card} aria-labelledby="api-grants-heading" data-testid="api-grants">
+      <header className={cards.cardHeader}>
+        <h2 id="api-grants-heading">{messages.apiGrantsTitle}</h2>
+        <p>{messages.apiGrantsDescription}</p>
+      </header>
+      <div className={styles.table}>
+        {failure && 'kind' in failure && (
+          <Banner tone="bad" data-testid="api-grant-forbidden">
+            {messages.actionForbidden}
+          </Banner>
+        )}
+        {failure && !('kind' in failure) && (
+          <Banner tone="bad" data-testid="api-grant-failed">
+            <p>{messages.apiGrantFailed}</p>
+            <ErrorReference code={failure.code} traceId={failure.traceId} />
+          </Banner>
+        )}
+        {machines.kind === 'loading' && <SkeletonRows rows={2} caption={false} />}
+        {machines.kind === 'failed' && (
+          <Banner tone="bad" action={{ label: messages.retry, onClick: () => setAttempt((n) => n + 1) }} data-testid="api-grants-load-failed">
+            <p>{messages.apiGrantsLoadFailed}</p>
+            <ErrorReference code={machines.failure.code} traceId={machines.failure.traceId} />
+          </Banner>
+        )}
+        {machines.kind === 'ready' && (
+          <DataTable
+            caption={messages.apiGrantsTitle}
+            hideCaption
+            columns={columns}
+            rows={rows}
+            rowKey={(row) => row.applicationId}
+            pageSize={Math.max(rows.length, 1)}
+            empty={<EmptyState message={messages.apiGrantsEmpty} />}
+          />
+        )}
+      </div>
+      {canManage && (
+        <GrantModal
+          row={editing}
+          request={request}
+          tenantId={tenantId}
+          detail={detail}
+          onClose={() => setEditing(null)}
+          onSaved={(next) => {
+            setEditing(null);
+            onChanged(next);
+            toast(messages.apiGrantSaved);
+          }}
+        />
+      )}
+    </section>
+  );
+}
+
+interface GrantModalProps {
+  /** The Application being edited; the modal is open while it is set. */
+  row: MachineGrantRow | null;
+  request: ShellRequest;
+  tenantId: string;
+  detail: ApiResourceDetail;
+  onClose: () => void;
+  onSaved: (detail: ApiResourceDetail) => void;
+}
+
+/** Authorize {name}: a checkbox per Permission of the API, checked for what it holds, and Save sends the whole set. */
+function GrantModal({ row, request, tenantId, detail, onClose, onSaved }: GrantModalProps) {
+  const messages = useMessages();
+  const [selected, setSelected] = useState<string[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const [failure, setFailure] = useState<Failure | { kind: 'forbidden' | 'signedInAgain' } | null>(null);
+  const [pending, setPending] = useState(false);
+  const inFlight = useRef(false);
+  const first = useRef<HTMLInputElement>(null);
+  const permissions = detail.permissions.map((p) => p.value);
+
+  useEffect(() => {
+    setSelected(row ? [...row.permissions] : []);
+    setError(null);
+    setFailure(null);
+  }, [row]);
+
+  function close() {
+    if (pending) return;
+    onClose();
+  }
+
+  async function submit(event?: FormEvent<HTMLFormElement>) {
+    event?.preventDefault();
+    if (!row || inFlight.current) return;
+    // In the API's order, so the request names them as the page lists them.
+    const values = permissions.filter((value) => selected.includes(value));
+    if (values.length === 0) {
+      setError(messages.apiGrantNoneSelected);
+      first.current?.focus();
+      return;
+    }
+
+    inFlight.current = true;
+    setPending(true);
+    setFailure(null);
+    let answer;
+    try {
+      answer = await request('put', () => api.setApiGrant(tenantId, detail.api.id, row.applicationId, { permissions: values }));
+    } catch {
+      answer = null;
+    }
+    inFlight.current = false;
+    setPending(false);
+
+    if (answer?.ok && answer.data && typeof answer.data.api?.id === 'string') {
+      onSaved(answer.data);
+      return;
+    }
+    if (answer?.status === 401) {
+      setFailure({ kind: 'signedInAgain' });
+      return;
+    }
+    const problem = answer && !answer.ok ? answer.problem : null;
+    if (answer?.status === 409 && problem?.code === 'tenant_mismatch') {
+      close();
+      return;
+    }
+    if (answer?.status === 403) {
+      setFailure({ kind: 'forbidden' });
+      return;
+    }
+    setFailure({ code: problem?.code ?? 'unavailable', traceId: problem?.traceId ?? '' });
+  }
+
+  return (
+    <Modal
+      open={row !== null}
+      onClose={close}
+      dismissible={!pending}
+      title={formatMessage(messages.apiGrantEditTitle, { name: row?.name ?? '' })}
+      initialFocus={() => first.current}
+      fallbackFocus={() => document.querySelector<HTMLElement>('main h1')}
+      data-testid="api-grant-modal"
+      footer={
+        <>
+          <Button aria-disabled={pending || undefined} onClick={close}>
+            {messages.cancel}
+          </Button>
+          {permissions.length > 0 && (
+            <Button variant="primary" pending={pending} onClick={() => void submit()} data-testid="api-grant-save">
+              {messages.apiGrantSave}
+            </Button>
+          )}
+        </>
+      }
+    >
+      <form className={pageStyles.form} noValidate onSubmit={(event) => void submit(event)}>
+        {failure && !('kind' in failure) && (
+          <Banner tone="bad" data-testid="api-grant-modal-failed">
+            <p>{messages.apiGrantFailed}</p>
+            <ErrorReference code={failure.code} traceId={failure.traceId} />
+          </Banner>
+        )}
+        {failure && 'kind' in failure && failure.kind === 'signedInAgain' && (
+          <Banner tone="bad" data-testid="api-grant-signed-in-again">
+            {messages.actionRetryAfterSignIn}
+          </Banner>
+        )}
+        {failure && 'kind' in failure && failure.kind === 'forbidden' && (
+          <Banner tone="bad" data-testid="api-grant-modal-forbidden">
+            {messages.actionForbidden}
+          </Banner>
+        )}
+        {permissions.length === 0 ? (
+          <p className={styles.muted} data-testid="api-grant-no-permissions">
+            {messages.apiGrantNoPermissions}
+          </p>
+        ) : (
+          <fieldset className={styles.choices} aria-describedby={error ? 'api-grant-error' : undefined}>
+            <legend>{messages.apiGrantPermissionsLegend}</legend>
+            {permissions.map((value, index) => (
+              <Checkbox
+                key={value}
+                ref={index === 0 ? first : undefined}
+                label={<code className={styles.value}>{value}</code>}
+                checked={selected.includes(value)}
+                disabled={pending}
+                onChange={(event) => {
+                  const on = event.currentTarget.checked;
+                  setSelected((now) => (on ? [...now, value] : now.filter((v) => v !== value)));
+                  setError(null);
+                }}
+                data-testid="api-grant-permission"
+              />
+            ))}
+            {error && (
+              <p id="api-grant-error" className={styles.error} role="alert" data-testid="api-grant-error">
+                {error}
+              </p>
+            )}
+          </fieldset>
+        )}
         <button type="submit" hidden aria-hidden tabIndex={-1} />
       </form>
     </Modal>

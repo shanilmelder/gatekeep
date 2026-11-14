@@ -45,8 +45,7 @@ internal sealed class ApiManagement(IAuditAppender appender) : IApiManagement
             return new ApiResult(ApiStatus.NotFound);
         }
 
-        var permissions = await _directory.ListPermissionsAsync(tenantContext, apiId, cancellationToken) ?? [];
-        return new ApiResult(ApiStatus.Done, Managed(api), [.. permissions.Select(Managed)]);
+        return await DetailAsync(tenantContext, ApiStatus.Done, api, cancellationToken);
     }
 
     public async Task<ApiResult> CreateAsync(
@@ -116,8 +115,7 @@ internal sealed class ApiManagement(IAuditAppender appender) : IApiManagement
             return new ApiResult(ApiStatus.NotFound);
         }
 
-        var permissions = await _directory.ListPermissionsAsync(tenantContext, apiId, cancellationToken) ?? [];
-        return new ApiResult(write.Changed ? ApiStatus.Done : ApiStatus.Unchanged, Managed(write.Api), [.. permissions.Select(Managed)]);
+        return await DetailAsync(tenantContext, write.Changed ? ApiStatus.Done : ApiStatus.Unchanged, write.Api, cancellationToken);
     }
 
     public async Task<ApiResult> AddPermissionAsync(
@@ -179,7 +177,7 @@ internal sealed class ApiManagement(IAuditAppender appender) : IApiManagement
             case PermissionWriteStatus.Done:
                 var api = await _directory.FindApiAsync(tenantContext, apiId, cancellationToken)
                     ?? throw new InvalidOperationException("An API just written to is gone in the same transaction.");
-                return new ApiResult(ApiStatus.Done, Managed(api), [.. (write.Permissions ?? []).Select(Managed)]);
+                return await DetailAsync(tenantContext, ApiStatus.Done, api, cancellationToken);
 
             case PermissionWriteStatus.NotFound:
                 return new ApiResult(ApiStatus.NotFound);
@@ -196,6 +194,138 @@ internal sealed class ApiManagement(IAuditAppender appender) : IApiManagement
             default:
                 throw new System.Diagnostics.UnreachableException($"Unhandled Permission write status {write.Status}.");
         }
+    }
+
+    public async Task<ApiResult> SetGrantAsync(
+        CommandContext tenantContext,
+        Principal principal,
+        TenantRoleGrant? grant,
+        Guid tenantId,
+        Guid apiId,
+        Guid applicationId,
+        IReadOnlyList<string?> permissions,
+        CancellationToken cancellationToken)
+    {
+        RequireOwnContext(tenantContext, tenantId);
+        ArgumentNullException.ThrowIfNull(principal);
+        ArgumentNullException.ThrowIfNull(permissions);
+
+        if (!AdminCapabilities.Allows(AdminCapabilities.TenantApisManage, principal, grant, tenantId))
+        {
+            return new ApiResult(ApiStatus.Forbidden);
+        }
+
+        // Every problem with the list named, by index, before anything is locked or written.
+        var errors = CheckGrant(permissions);
+        if (errors.Count != 0)
+        {
+            return new ApiResult(ApiStatus.Invalid, Errors: errors);
+        }
+
+        var values = permissions.Select(v => v!).ToList();
+        var write = await _directory.SetApiGrantAsync(tenantContext, ActorOf(principal), apiId, applicationId, values, cancellationToken);
+        if (write.Status == ApiGrantWriteStatus.UnknownPermissions)
+        {
+            return new ApiResult(
+                ApiStatus.Invalid,
+                Errors: [.. (write.UnknownValues ?? []).Select(v => new ApiFieldError(ApiFields.Permissions, ApiReasons.Unknown, null, IndexOf(values, v)))]);
+        }
+
+        return await GrantWrittenAsync(tenantContext, apiId, write, cancellationToken);
+    }
+
+    public async Task<ApiResult> RemoveGrantAsync(
+        CommandContext tenantContext,
+        Principal principal,
+        TenantRoleGrant? grant,
+        Guid tenantId,
+        Guid apiId,
+        Guid applicationId,
+        CancellationToken cancellationToken)
+    {
+        RequireOwnContext(tenantContext, tenantId);
+        ArgumentNullException.ThrowIfNull(principal);
+
+        if (!AdminCapabilities.Allows(AdminCapabilities.TenantApisManage, principal, grant, tenantId))
+        {
+            return new ApiResult(ApiStatus.Forbidden);
+        }
+
+        var write = await _directory.RemoveApiGrantAsync(tenantContext, ActorOf(principal), apiId, applicationId, cancellationToken);
+        return await GrantWrittenAsync(tenantContext, apiId, write, cancellationToken);
+    }
+
+    /// <summary>
+    /// A grant's list, as Story 3.7 bounds it: 1 to the most Permissions an API holds, each a well-formed value given once.
+    /// Each bad value is named by its index; a list empty or too long, as a whole.
+    /// </summary>
+    private static List<ApiFieldError> CheckGrant(IReadOnlyList<string?> permissions)
+    {
+        if (permissions.Count == 0)
+        {
+            return [new ApiFieldError(ApiFields.Permissions, ApiReasons.Invalid, null)];
+        }
+
+        if (permissions.Count > Gatekeep.Kernel.Limits.SecurityLimits.MaxPermissionsPerApi)
+        {
+            return [new ApiFieldError(ApiFields.Permissions, ApiReasons.TooMany, null)];
+        }
+
+        var errors = new List<ApiFieldError>();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        for (var index = 0; index < permissions.Count; index++)
+        {
+            var value = permissions[index];
+            if (value is null || DirectoryContract.CheckPermission(value, string.Empty).Count != 0)
+            {
+                errors.Add(new ApiFieldError(ApiFields.Permissions, ApiReasons.Invalid, null, index));
+            }
+            else if (!seen.Add(value))
+            {
+                errors.Add(new ApiFieldError(ApiFields.Permissions, ApiReasons.Duplicate, null, index));
+            }
+        }
+
+        return errors;
+    }
+
+    private static int IndexOf(List<string> values, string value) => values.FindIndex(v => string.Equals(v, value, StringComparison.Ordinal));
+
+    private async Task<ApiResult> GrantWrittenAsync(CommandContext tenantContext, Guid apiId, ApiGrantWrite write, CancellationToken cancellationToken)
+    {
+        switch (write.Status)
+        {
+            case ApiGrantWriteStatus.Done:
+            case ApiGrantWriteStatus.Unchanged:
+                var api = await _directory.FindApiAsync(tenantContext, apiId, cancellationToken)
+                    ?? throw new InvalidOperationException("An API just locked is gone in the same transaction.");
+                return await DetailAsync(tenantContext, write.Status == ApiGrantWriteStatus.Done ? ApiStatus.Done : ApiStatus.Unchanged, api, cancellationToken);
+
+            case ApiGrantWriteStatus.NotFound:
+            case ApiGrantWriteStatus.ApplicationNotFound:
+                return new ApiResult(ApiStatus.NotFound);
+
+            case ApiGrantWriteStatus.BuiltIn:
+                return new ApiResult(ApiStatus.BuiltIn);
+
+            case ApiGrantWriteStatus.NotMachine:
+                return new ApiResult(ApiStatus.ApplicationNotMachine);
+
+            default:
+                throw new System.Diagnostics.UnreachableException($"Unhandled grant write status {write.Status}.");
+        }
+    }
+
+    /// <summary>The API as it stands, with its Permissions and, from Story 3.7, its grants.</summary>
+    private async Task<ApiResult> DetailAsync(CommandContext tenantContext, ApiStatus status, DirectoryApi api, CancellationToken cancellationToken)
+    {
+        var permissions = await _directory.ListPermissionsAsync(tenantContext, api.Id, cancellationToken) ?? [];
+        var grants = await _directory.ListApiGrantsAsync(tenantContext, api.Id, cancellationToken);
+        return new ApiResult(
+            status,
+            Managed(api),
+            [.. permissions.Select(Managed)],
+            Grants: [.. grants.Select(g => new ManagedApiGrant(g.ApplicationId, g.ApplicationName, g.Permissions))]);
     }
 
     private static ApiResult Invalid(IReadOnlyList<ApiFieldProblem> problems) =>

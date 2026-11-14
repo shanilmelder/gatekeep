@@ -557,7 +557,7 @@ public sealed class ApisApiTests(PostgresFixture postgres)
 
     /// <summary>
     /// The shorter-wins row (FR-15), at Protocol's one lifetime lookup: each lifetime is the shorter of the Application's
-    /// and the API's, and with no API it is the Application's. No token names an API until Story 3.7.
+    /// and the API's, and with no API it is the Application's.
     /// </summary>
     [Theory]
     [InlineData(900, 600, 600)]
@@ -567,7 +567,7 @@ public sealed class ApisApiTests(PostgresFixture postgres)
     {
         var app = Application(new ApplicationLifetimes(application, 900, 2592000, 604800));
         var resource = api is { } seconds
-            ? new DirectoryApi(Guid.CreateVersion7(), "API", "https://api.example.com", false, false, false, new ApplicationLifetimes(seconds, 600, 86400, 3600), DateTimeOffset.UtcNow)
+            ? new DirectoryApiTarget(Guid.CreateVersion7(), "https://api.example.com", false, false, new ApplicationLifetimes(seconds, 600, 86400, 3600))
             : null;
 
         var lifetimes = Of(app, resource);
@@ -579,7 +579,7 @@ public sealed class ApisApiTests(PostgresFixture postgres)
     }
 
     /// <summary>Protocol's internal <c>ApplicationTokenLifetimes.Of</c>, by reflection: no seam opens it to tests.</summary>
-    private static (TimeSpan AccessToken, TimeSpan IdentityToken, TimeSpan RefreshTokenAbsolute, TimeSpan RefreshTokenInactivity) Of(DirectoryApplication application, DirectoryApi? api)
+    private static (TimeSpan AccessToken, TimeSpan IdentityToken, TimeSpan RefreshTokenAbsolute, TimeSpan RefreshTokenInactivity) Of(DirectoryApplication application, DirectoryApiTarget? api)
     {
         var type = typeof(ProtocolContract).Assembly.GetType("Gatekeep.Modules.Protocol.Core.ApplicationTokenLifetimes", throwOnError: true)!;
         var issued = type.GetMethod("Of", BindingFlags.Public | BindingFlags.Static)!.Invoke(null, [application, api])!;
@@ -602,7 +602,6 @@ public sealed class ApisApiTests(PostgresFixture postgres)
                 "App",
                 "machine",
                 System.Collections.Immutable.ImmutableArray.Create("client_credentials"),
-                System.Collections.Immutable.ImmutableArray<string>.Empty,
                 System.Collections.Immutable.ImmutableArray<string>.Empty,
                 System.Collections.Immutable.ImmutableArray<string>.Empty,
                 System.Collections.Immutable.ImmutableArray<string>.Empty,

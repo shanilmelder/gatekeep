@@ -46,3 +46,33 @@
 .value {
   overflow-wrap: anywhere;
 }
+
+/* Story 3.7: the machine-to-machine table's actions, its Permissions list, and the grant modal's checkboxes. */
+.actions {
+  display: flex;
+  gap: var(--gk-space-8);
+  flex-wrap: wrap;
+}
+
+.choices {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gk-space-4);
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+
+.choices > legend {
+  padding: 0;
+  margin-bottom: var(--gk-space-8);
+  font: var(--gk-ui-label-font);
+  color: var(--gk-ui-text);
+}
+
+.error {
+  margin: 0;
+  font: var(--gk-font-helper);
+  color: var(--gk-ui-input-error-helper);
+}

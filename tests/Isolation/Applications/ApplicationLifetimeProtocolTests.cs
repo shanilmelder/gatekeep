@@ -94,6 +94,60 @@ public sealed class ApplicationLifetimeProtocolTests(PostgresFixture postgres, O
         AssertLifetimes(other, SecurityLimits.DefaultAccessTokenLifetime, SecurityLimits.DefaultIdentityTokenLifetime);
     }
 
+    /// <summary>Story 3.7's shorter-wins row (FR-15): an Application's 900 seconds and its API's 300 issue a 300-second token.</summary>
+    [Fact]
+    public async Task A_client_credentials_token_lives_the_shorter_of_its_Applications_and_its_APIs_lifetime()
+    {
+        var flow = await CodeFlowSetup.CreateAsync(postgres, bao, HostA, HostB);
+        var machine = await flow.Database.CreateClientAsync(flow.A.TenantId);
+        await SetAsync(flow, machine.ApplicationId, 900, 900, 2592000, 604800);
+        await flow.Database.ExecuteAsync(
+            $"UPDATE api SET access_token_lifetime = 300 WHERE tenant_id = '{flow.A.TenantId}' AND identifier = '{ProtocolDatabase.TestApi}'");
+        await using var host = await flow.StartHostAsync();
+
+        using var response = await ClientCredentialsTests.TokenAsync(host, HostA, machine.ClientId, machine.Secret);
+
+        Assert.Equal(HttpStatusCode.OK, response.Status);
+        Assert.Equal(300, response.Body.RootElement.GetProperty("expires_in").GetInt32());
+        var token = new JsonWebToken(response.AccessToken);
+        Assert.Equal(TimeSpan.FromSeconds(300), token.ValidTo - token.IssuedAt);
+
+        // The API's longer lifetime never lengthens the Application's shorter one.
+        await SetAsync(flow, machine.ApplicationId, 120, 900, 2592000, 604800);
+        using var shorter = await ClientCredentialsTests.TokenAsync(host, HostA, machine.ClientId, machine.Secret);
+        Assert.Equal(120, shorter.Body.RootElement.GetProperty("expires_in").GetInt32());
+    }
+
+    /// <summary>
+    /// Story 3.7's shorter-wins row on the code flow (FR-15): an authorization naming an API whose access and refresh absolute
+    /// lifetimes are shorter than its Application's issues the exchange's and each refresh's tokens for the API's, and caps
+    /// every refresh token of the family at the API's absolute end.
+    /// </summary>
+    [Fact]
+    public async Task A_code_flow_naming_an_API_lives_the_shorter_of_its_Applications_and_its_APIs_lifetimes()
+    {
+        var flow = await CodeFlowSetup.CreateAsync(postgres, bao, HostA, HostB);
+        await flow.Database.ExecuteAsync(
+            $"UPDATE api SET offline_access = true, access_token_lifetime = 300, refresh_token_absolute_lifetime = 3600 " +
+            $"WHERE tenant_id = '{flow.A.TenantId}' AND identifier = '{ProtocolDatabase.TestApi}'");
+        await using var host = await flow.StartHostAsync();
+
+        var pkce = Pkce.New();
+        using var authorize = await CodeFlow.AuthorizeAsync(
+            host, HostA, flow.ClientA.ClientId, CodeFlowSetup.Callback, pkce, flow.UserA, scope: Offline, extra: [("resource", ProtocolDatabase.TestApi)]);
+        var code = Microsoft.AspNetCore.WebUtilities.QueryHelpers.ParseQuery(authorize.Headers.Location!.Query)["code"].ToString();
+        using var issued = await CodeFlow.ExchangeAsync(host, HostA, flow.ClientA.ClientId, flow.ClientA.Secret, code, CodeFlowSetup.Callback, pkce.Verifier);
+
+        Assert.Equal(HttpStatusCode.OK, issued.Status);
+        AssertLifetimes(issued, TimeSpan.FromSeconds(300), SecurityLimits.DefaultIdentityTokenLifetime);
+        Assert.Equal(1L, await RefreshRowsAsync(flow, Lasting("1 hour")));
+
+        using var refreshed = await CodeFlow.RefreshAsync(host, HostA, flow.ClientA.ClientId, flow.ClientA.Secret, issued.RefreshToken);
+        Assert.Equal(HttpStatusCode.OK, refreshed.Status);
+        AssertLifetimes(refreshed, TimeSpan.FromSeconds(300), SecurityLimits.DefaultIdentityTokenLifetime);
+        Assert.Equal(2L, await RefreshRowsAsync(flow, Lasting("1 hour")));
+    }
+
     [Fact]
     public async Task A_public_clients_refresh_uses_its_own_lifetimes()
     {

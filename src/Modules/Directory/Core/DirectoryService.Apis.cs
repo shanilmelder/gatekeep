@@ -165,6 +165,8 @@ internal sealed partial class DirectoryService
             return new PermissionWrite(PermissionWriteStatus.BuiltIn);
         }
 
+        // Story 3.7: its grants go with it, in this same command, never by a cascade; the foreign key refuses the
+        // Permission's delete while any is left. Under the API's lock, no grant of it can be added meanwhile.
         if (value is null || !await ApiRows.DeletePermissionAsync(context, apiId, value, cancellationToken))
         {
             return new PermissionWrite(PermissionWriteStatus.NotFound);
@@ -177,6 +179,124 @@ internal sealed partial class DirectoryService
             cancellationToken);
 
         return new PermissionWrite(PermissionWriteStatus.Done, await ApiRows.PermissionsAsync(context, apiId, cancellationToken));
+    }
+
+    public Task<DirectoryApiTarget?> FindApiByIdentifierAsync(CommandContext context, string identifier, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        ArgumentNullException.ThrowIfNull(identifier);
+        return ApiRows.FindTargetAsync(context, identifier, cancellationToken);
+    }
+
+    public Task<IReadOnlyList<string>> ListGrantedPermissionsAsync(
+        CommandContext context, Guid apiId, Guid applicationId, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        return ApiRows.GrantedValuesAsync(context, apiId, applicationId, cancellationToken);
+    }
+
+    public Task<IReadOnlyList<DirectoryApiGrant>> ListApiGrantsAsync(CommandContext context, Guid apiId, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        return ApiRows.GrantsAsync(context, apiId, cancellationToken);
+    }
+
+    public async Task<ApiGrantWrite> SetApiGrantAsync(
+        CommandContext context, Actor actor, Guid apiId, Guid applicationId, IReadOnlyCollection<string> values, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        ArgumentNullException.ThrowIfNull(actor);
+        ArgumentNullException.ThrowIfNull(values);
+        _ = context.TenantId ?? throw new InvalidOperationException("A grant is written only in a Tenant context.");
+
+        if (values.Count is 0 || values.Count > SecurityLimits.MaxPermissionsPerApi
+            || values.Any(v => v is null) || values.Distinct(StringComparer.Ordinal).Count() != values.Count)
+        {
+            throw new ArgumentException("A grant holds 1 to the most Permissions an API has, each once.", nameof(values));
+        }
+
+        // Under the API's row lock, held to the end of the caller's transaction: a Permission's removal, which takes the
+        // same lock, can't remove a value between the check and the insert.
+        if (await ApiRows.FindAsync(context, apiId, locked: true, cancellationToken) is not { } api)
+        {
+            return new ApiGrantWrite(ApiGrantWriteStatus.NotFound);
+        }
+
+        if (await ApplicationRows.FindAsync(context, applicationId, cancellationToken) is not { } application)
+        {
+            return new ApiGrantWrite(ApiGrantWriteStatus.ApplicationNotFound);
+        }
+
+        if (api.BuiltIn)
+        {
+            return new ApiGrantWrite(ApiGrantWriteStatus.BuiltIn);
+        }
+
+        if (application.Kind != DirectoryContract.MachineKind)
+        {
+            return new ApiGrantWrite(ApiGrantWriteStatus.NotMachine);
+        }
+
+        var held = await ApiRows.PermissionValuesAsync(context, apiId, cancellationToken);
+        var unknown = values.Where(v => !held.Contains(v)).ToList();
+        if (unknown.Count != 0)
+        {
+            return new ApiGrantWrite(ApiGrantWriteStatus.UnknownPermissions, unknown);
+        }
+
+        // Nothing to change: no write and no event.
+        var current = await ApiRows.GrantedValuesAsync(context, apiId, applicationId, cancellationToken);
+        if (current.Count == values.Count && current.All(values.Contains))
+        {
+            return new ApiGrantWrite(ApiGrantWriteStatus.Unchanged);
+        }
+
+        await ApiRows.ReplaceGrantAsync(context, apiId, applicationId, values, cancellationToken);
+
+        await _audit.AppendAsync(
+            context,
+            new AuditEvent(DirectoryEvents.ApiGrantUpdated.Code, actor, AuditTargetKind.Api, apiId),
+            detail: null,
+            cancellationToken);
+
+        return new ApiGrantWrite(ApiGrantWriteStatus.Done);
+    }
+
+    public async Task<ApiGrantWrite> RemoveApiGrantAsync(
+        CommandContext context, Actor actor, Guid apiId, Guid applicationId, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        ArgumentNullException.ThrowIfNull(actor);
+        _ = context.TenantId ?? throw new InvalidOperationException("A grant is removed only in a Tenant context.");
+
+        if (await ApiRows.FindAsync(context, apiId, locked: true, cancellationToken) is not { } api)
+        {
+            return new ApiGrantWrite(ApiGrantWriteStatus.NotFound);
+        }
+
+        if (await ApplicationRows.FindAsync(context, applicationId, cancellationToken) is null)
+        {
+            return new ApiGrantWrite(ApiGrantWriteStatus.ApplicationNotFound);
+        }
+
+        if (api.BuiltIn)
+        {
+            return new ApiGrantWrite(ApiGrantWriteStatus.BuiltIn);
+        }
+
+        // No grant: nothing to remove, no event.
+        if (!await ApiRows.DeleteGrantAsync(context, apiId, applicationId, cancellationToken))
+        {
+            return new ApiGrantWrite(ApiGrantWriteStatus.Unchanged);
+        }
+
+        await _audit.AppendAsync(
+            context,
+            new AuditEvent(DirectoryEvents.ApiGrantRemoved.Code, actor, AuditTargetKind.Api, apiId),
+            detail: null,
+            cancellationToken);
+
+        return new ApiGrantWrite(ApiGrantWriteStatus.Done);
     }
 
     public async Task<bool> EnsureBuiltInApiAsync(CommandContext context, CancellationToken cancellationToken)
@@ -248,8 +368,50 @@ internal static class ApiRows
         ON CONFLICT DO NOTHING
         """;
 
+    // Story 3.7: the Permission's grant rows go first, so api_grant's foreign key holds when the Permission goes.
+    private const string DeletePermissionGrants =
+        "DELETE FROM api_grant WHERE tenant_id = @tenant_id AND api_id = @api_id AND value = @value";
+
     private const string DeletePermission =
         "DELETE FROM permission WHERE tenant_id = @tenant_id AND api_id = @api_id AND value = @value";
+
+    // Story 3.7: what a token for the API needs, and only the columns gk_hosted may read.
+    private const string SelectTarget =
+        """
+        SELECT id, identifier, built_in, offline_access,
+               access_token_lifetime, id_token_lifetime, refresh_token_absolute_lifetime, refresh_token_inactivity_lifetime
+        FROM api WHERE tenant_id = @tenant_id AND identifier = @identifier
+        """;
+
+    // Story 3.7: joined to permission, so only a value the API still has is ever granted, whatever a row says.
+    private const string GrantedValues =
+        """
+        SELECT g.value FROM api_grant g
+        JOIN permission p ON p.tenant_id = g.tenant_id AND p.api_id = g.api_id AND p.value = g.value
+        WHERE g.tenant_id = @tenant_id AND g.api_id = @api_id AND g.application_id = @application_id
+        """;
+
+    // Story 3.7: every visible Application's grant on the API, by name; a deleted one's waits for its purge, unseen.
+    private const string Grants =
+        $"""
+        SELECT g.application_id, a.name, g.value FROM api_grant g
+        JOIN application a ON a.tenant_id = g.tenant_id AND a.id = g.application_id
+        WHERE g.tenant_id = @tenant_id AND g.api_id = @api_id AND {ApplicationRows.Visible}
+        ORDER BY a.name, g.application_id
+        """;
+
+    private const string DeleteGrantValues =
+        "DELETE FROM api_grant WHERE tenant_id = @tenant_id AND api_id = @api_id AND application_id = @application_id AND NOT (value = ANY (@values))";
+
+    private const string InsertGrantValues =
+        """
+        INSERT INTO api_grant (tenant_id, api_id, application_id, value)
+        SELECT @tenant_id, @api_id, @application_id, v.value FROM unnest(@values::text[]) AS v(value)
+        ON CONFLICT DO NOTHING
+        """;
+
+    private const string DeleteGrant =
+        "DELETE FROM api_grant WHERE tenant_id = @tenant_id AND api_id = @api_id AND application_id = @application_id";
 
     private const string Select = $"SELECT {Columns} FROM api WHERE tenant_id = @tenant_id AND id = @id";
 
@@ -333,14 +495,110 @@ internal static class ApiRows
         return await command.ExecuteNonQueryAsync(cancellationToken) > 0;
     }
 
+    /// <summary>Deletes the Permission and, first, every grant of it (Story 3.7). Whether the Permission was there.</summary>
     public static async Task<bool> DeletePermissionAsync(CommandContext context, Guid apiId, string value, CancellationToken cancellationToken)
     {
+        await using (var grants = context.CreateCommand())
+        {
+            grants.CommandText = DeletePermissionGrants;
+            DirectoryService.Add(grants, "tenant_id", TenantOf(context));
+            DirectoryService.Add(grants, "api_id", apiId);
+            DirectoryService.Add(grants, "value", value);
+            await grants.ExecuteNonQueryAsync(cancellationToken);
+        }
+
         await using var command = context.CreateCommand();
         command.CommandText = DeletePermission;
         DirectoryService.Add(command, "tenant_id", TenantOf(context));
         DirectoryService.Add(command, "api_id", apiId);
         DirectoryService.Add(command, "value", value);
         return await command.ExecuteNonQueryAsync(cancellationToken) == 1;
+    }
+
+    public static async Task<DirectoryApiTarget?> FindTargetAsync(CommandContext context, string identifier, CancellationToken cancellationToken)
+    {
+        await using var command = context.CreateCommand();
+        command.CommandText = SelectTarget;
+        DirectoryService.Add(command, "tenant_id", TenantOf(context));
+        DirectoryService.Add(command, "identifier", identifier);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        return await reader.ReadAsync(cancellationToken)
+            ? new DirectoryApiTarget(
+                reader.GetGuid(0),
+                reader.GetString(1),
+                reader.GetBoolean(2),
+                reader.GetBoolean(3),
+                new ApplicationLifetimes(reader.GetInt32(4), reader.GetInt32(5), reader.GetInt32(6), reader.GetInt32(7)))
+            : null;
+    }
+
+    /// <summary>The values of the API granted to the Application, in ordinal order.</summary>
+    public static async Task<IReadOnlyList<string>> GrantedValuesAsync(CommandContext context, Guid apiId, Guid applicationId, CancellationToken cancellationToken)
+    {
+        await using var command = context.CreateCommand();
+        command.CommandText = GrantedValues;
+        DirectoryService.Add(command, "tenant_id", TenantOf(context));
+        DirectoryService.Add(command, "api_id", apiId);
+        DirectoryService.Add(command, "application_id", applicationId);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        var values = new List<string>();
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            values.Add(reader.GetString(0));
+        }
+
+        values.Sort(StringComparer.Ordinal);
+        return values;
+    }
+
+    /// <summary>Every visible Application's grant on the API, by Application name then ID, each one's values in ordinal order.</summary>
+    public static async Task<IReadOnlyList<DirectoryApiGrant>> GrantsAsync(CommandContext context, Guid apiId, CancellationToken cancellationToken)
+    {
+        await using var command = context.CreateCommand();
+        command.CommandText = Grants;
+        DirectoryService.Add(command, "tenant_id", TenantOf(context));
+        DirectoryService.Add(command, "api_id", apiId);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        var grants = new List<(Guid Id, string Name, List<string> Values)>();
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            var id = reader.GetGuid(0);
+            if (grants.Count == 0 || grants[^1].Id != id)
+            {
+                grants.Add((id, reader.GetString(1), []));
+            }
+
+            grants[^1].Values.Add(reader.GetString(2));
+        }
+
+        return [.. grants.Select(g => new DirectoryApiGrant(g.Id, g.Name, [.. g.Values.Order(StringComparer.Ordinal)]))];
+    }
+
+    /// <summary>Makes the Application's grant on the API exactly <paramref name="values"/>: the others deleted, the missing inserted.</summary>
+    public static async Task ReplaceGrantAsync(
+        CommandContext context, Guid apiId, Guid applicationId, IReadOnlyCollection<string> values, CancellationToken cancellationToken)
+    {
+        foreach (var statement in new[] { DeleteGrantValues, InsertGrantValues })
+        {
+            await using var command = context.CreateCommand();
+            command.CommandText = statement;
+            DirectoryService.Add(command, "tenant_id", TenantOf(context));
+            DirectoryService.Add(command, "api_id", apiId);
+            DirectoryService.Add(command, "application_id", applicationId);
+            DirectoryService.Add(command, "values", values.ToArray());
+            await command.ExecuteNonQueryAsync(cancellationToken);
+        }
+    }
+
+    /// <summary>Deletes the Application's grant on the API. Whether it held one.</summary>
+    public static async Task<bool> DeleteGrantAsync(CommandContext context, Guid apiId, Guid applicationId, CancellationToken cancellationToken)
+    {
+        await using var command = context.CreateCommand();
+        command.CommandText = DeleteGrant;
+        DirectoryService.Add(command, "tenant_id", TenantOf(context));
+        DirectoryService.Add(command, "api_id", apiId);
+        DirectoryService.Add(command, "application_id", applicationId);
+        return await command.ExecuteNonQueryAsync(cancellationToken) > 0;
     }
 
     public static async Task<DirectoryApi?> FindAsync(CommandContext context, Guid id, bool locked, CancellationToken cancellationToken)
