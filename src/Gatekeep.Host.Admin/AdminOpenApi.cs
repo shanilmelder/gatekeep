@@ -170,6 +170,16 @@ internal static class AdminOpenApi
                     Bound(schema, "id", EventIdPattern, maxLength: null);
                     Bound(schema, "type", TypeCodePattern, maxLength: 128);
                 }
+                else if (type == typeof(TenantLogEventDetailResponse) || type == typeof(TenantLogRawResponse))
+                {
+                    Bound(schema, "id", EventIdPattern, maxLength: null);
+                    Bound(schema, "type", TypeCodePattern, maxLength: 128);
+                }
+                else if (type == typeof(TenantLogSealResponse))
+                {
+                    Bound(schema, "prevHash", HashPattern, maxLength: null);
+                    Bound(schema, "hash", HashPattern, maxLength: null);
+                }
                 else if (type == typeof(TenantLogsResponse))
                 {
                     Bound(schema, "nextCursor", EventIdPattern, maxLength: null);
@@ -201,8 +211,41 @@ internal static class AdminOpenApi
                 }
                 else if (type == typeof(ApiProblemError))
                 {
-                    Enumerate(schema, "field", [.. ManagementContract.ApplicationSettingsFields, .. ManagementContract.ApplicationLifetimeFields]);
-                    Enumerate(schema, "reason", [.. ManagementContract.ApplicationSettingsReasons, .. ManagementContract.ApplicationLifetimeReasons]);
+                    Enumerate(
+                        schema,
+                        "field",
+                        [.. ManagementContract.ApplicationSettingsFields.Concat(ManagementContract.ApplicationLifetimeFields).Concat(ManagementContract.ApiFields).Distinct(StringComparer.Ordinal)]);
+                    Enumerate(
+                        schema,
+                        "reason",
+                        [.. ManagementContract.ApplicationSettingsReasons.Concat(ManagementContract.ApplicationLifetimeReasons).Concat(ManagementContract.ApiReasons).Distinct(StringComparer.Ordinal)]);
+                }
+                else if (type == typeof(CreateApiRequest))
+                {
+                    Bound(schema, "name", pattern: null, maxLength: ManagementContract.MaxApiNameLength);
+                    Bound(schema, "identifier", pattern: null, maxLength: ManagementContract.MaxApiIdentifierLength);
+                }
+                else if (type == typeof(AddApiPermissionRequest) || type == typeof(ApiPermissionResponse))
+                {
+                    Bound(schema, "value", PermissionPattern, maxLength: null);
+                    Bound(schema, "description", pattern: null, maxLength: ManagementContract.MaxPermissionDescriptionLength);
+                }
+                else if (type == typeof(ApiResourceResponse))
+                {
+                    Bound(schema, "id", ApiIdPattern, maxLength: null);
+                    Bound(schema, "name", pattern: null, maxLength: ManagementContract.MaxApiNameLength);
+                    Bound(schema, "identifier", pattern: null, maxLength: ManagementContract.MaxApiIdentifierLength);
+                }
+                else if (type == typeof(ApiResourceDetailResponse))
+                {
+                    if (schema.Properties?.TryGetValue("permissions", out var permissions) == true && permissions is OpenApiSchema array)
+                    {
+                        array.MaxItems = ManagementContract.MaxPermissionsPerApi;
+                    }
+                }
+                else if (type == typeof(ApiResourceListResponse))
+                {
+                    Bound(schema, "nextCursor", ApiIdPattern, maxLength: null);
                 }
                 else if (type == typeof(ApplicationSecretCreatedResponse))
                 {
@@ -279,6 +322,25 @@ internal static class AdminOpenApi
                         "fresh_assertion_required, with the problem body, when no fresh assertion for this action and target is bound to " +
                         "the Session" + (declaration.Kind == AccessKind.Capability ? "; access_denied when the capability is refused" : string.Empty) +
                         ". No body when an earlier check refuses first: a restricted Session, or a wrong Origin or CSRF token.";
+                }
+
+                foreach (var segment in metadata.OfType<PathParameter>())
+                {
+                    // A sub-resource's own segment, described: it replaces the bare parameter the route implies.
+                    operation.Parameters ??= [];
+                    if (operation.Parameters.FirstOrDefault(p => p.Name == segment.Name) is { } implied)
+                    {
+                        operation.Parameters.Remove(implied);
+                    }
+
+                    operation.Parameters.Add(new OpenApiParameter
+                    {
+                        Name = segment.Name,
+                        In = ParameterLocation.Path,
+                        Required = true,
+                        Description = segment.Description,
+                        Schema = new OpenApiSchema { Type = JsonSchemaType.String },
+                    });
                 }
 
                 foreach (var query in metadata.OfType<QueryParameter>())
@@ -496,9 +558,17 @@ internal static class AdminOpenApi
 
     private const string EventIdPattern = "^evt_[a-z2-7]{25}[aeimquy4]$";
 
+    /// <summary>A SHA-256 hash in lowercase hex.</summary>
+    private const string HashPattern = "^[0-9a-f]{64}$";
+
     private const string ApplicationIdPattern = "^app_[a-z2-7]{25}[aeimquy4]$";
 
     private const string ClientSecretIdPattern = "^sec_[a-z2-7]{25}[aeimquy4]$";
+
+    private const string ApiIdPattern = "^api_[a-z2-7]{25}[aeimquy4]$";
+
+    /// <summary>A Permission's value (Story 3.6): <c>resource:action</c>, as Directory and the table check it.</summary>
+    private const string PermissionPattern = "^[a-z0-9][a-z0-9_.-]{0,63}:[a-z0-9][a-z0-9_.-]{0,63}$";
 
     /// <summary>A client secret's value (Story 3.3): the Tenant's public ID, a dot, then 32 bytes in base64url, unpadded.</summary>
     private const string ClientSecretPattern = "^ten_[a-z2-7]{25}[aeimquy4]\\.[A-Za-z0-9_-]{43}$";
@@ -581,6 +651,14 @@ internal static class AdminOpenApi
 
 /// <summary>An optional query parameter an endpoint reads itself, for the OpenAPI document only (Story 1.27).</summary>
 internal sealed class QueryParameter(string name, string description)
+{
+    public string Name { get; } = name;
+
+    public string Description { get; } = description;
+}
+
+/// <summary>A path segment an endpoint parses itself, described for the OpenAPI document only (Story 7.5).</summary>
+internal sealed class PathParameter(string name, string description)
 {
     public string Name { get; } = name;
 

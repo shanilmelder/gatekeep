@@ -7,8 +7,8 @@ namespace Gatekeep.Tests.Architecture;
 /// <summary>
 /// Story 7.4, FR-40: no route, on any surface, can change or delete a Log. The committed OpenAPI
 /// document, which the build generates from the route table and the drift check holds byte-equal
-/// to it, has a Log path only under <c>/api/v1/tenants/{tenantId}/logs</c>, and only <c>GET</c>
-/// there; and no source under <c>src/</c> maps a Log route with any other method.
+/// to it, has a Log path only under <c>/api/v1/tenants/{tenantId}/logs</c> and, from Story 7.5,
+/// <c>/api/v1/tenants/{tenantId}/logs/{eventId}</c>, and only <c>GET</c> there; and no source under <c>src/</c> maps a Log route with any other method.
 /// <c>AdminEndpointTests</c> holds the live route table equal to the document, so that is the
 /// running host's route set too. The database triggers keep the rows immutable underneath.
 /// Each rule has a self-check that it catches a violation.
@@ -18,6 +18,8 @@ public class LogRouteRuleTests
     private const string Document = "docs/api/openapi-v1.json";
 
     private const string TenantLogs = "/api/v1/tenants/{tenantId}/logs";
+
+    private const string TenantLogEvent = TenantLogs + "/{eventId}";
 
     private static readonly string Root = EdgeList.FindRepositoryRoot(AppContext.BaseDirectory);
 
@@ -38,6 +40,7 @@ public class LogRouteRuleTests
         var operations = Operations(document).ToList();
 
         Assert.Contains(operations, o => o.Path == TenantLogs && o.Method == "get");
+        Assert.Equal(["get"], operations.Where(o => o.Path == TenantLogEvent).Select(o => o.Method));
         Assert.Empty(DocumentProblems(operations));
     }
 
@@ -46,7 +49,10 @@ public class LogRouteRuleTests
     [InlineData(TenantLogs, "put")]
     [InlineData(TenantLogs, "patch")]
     [InlineData(TenantLogs, "delete")]
-    [InlineData(TenantLogs + "/{eventId}", "delete")]
+    [InlineData(TenantLogEvent, "delete")]
+    [InlineData(TenantLogEvent, "put")]
+    [InlineData(TenantLogEvent, "patch")]
+    [InlineData(TenantLogEvent, "post")]
     [InlineData("/api/v1/deployment/logs", "post")]
     [InlineData("/api/v1/deployment/audit/events", "delete")]
     [InlineData("/api/v1/tenants/{tenantId}/Logs", "put")]
@@ -61,7 +67,7 @@ public class LogRouteRuleTests
     {
         Assert.Empty(DocumentProblems([
             (TenantLogs, "get"),
-            (TenantLogs + "/{eventId}", "get"),
+            (TenantLogEvent, "get"),
             ("/api/v1/deployment/catalogue", "post"),
             ("/api/v1/tenants/{tenantId}/login-settings", "put"),
             ("/api/v1/tenants/{tenantId}/blogs", "delete"),
@@ -79,6 +85,7 @@ public class LogRouteRuleTests
         // The rule reads the real route, so it isn't vacuous.
         var api = File.ReadAllText(Path.Combine(Root, "src/Gatekeep.Host.Admin/AdminApi.cs"));
         Assert.Contains(RouteMap.Matches(api), m => m.Groups["pattern"].Value == TenantLogs && m.Groups["method"].Value == "Get");
+        Assert.Contains(RouteMap.Matches(api), m => m.Groups["pattern"].Value == TenantLogEvent && m.Groups["method"].Value == "Get");
     }
 
     [Theory]

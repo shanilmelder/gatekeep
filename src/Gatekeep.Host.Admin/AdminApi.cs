@@ -600,6 +600,29 @@ internal static class AdminApi
             .Produces<ApiProblem>(StatusCodes.Status403Forbidden, AdminResponses.ProblemContentType)
             .Produces(StatusCodes.Status503ServiceUnavailable);
 
+        app.MapGet("/api/v1/tenants/{tenantId}/logs/{eventId}", static (HttpContext context, AdminApiServices services) => TenantLogsApi.GetAsync(context, services))
+            .WithMetadata(
+                TenantApiEndpoint.Instance,
+                new RequiresCapability(AdminCapabilities.TenantLogsRead),
+                new PathParameter(TenantLogsApi.EventRouteValue, "The event's public ID, as the search lists it: evt_ and 26 base32 characters."))
+            .WithName("GetTenantLogEvent")
+            .WithTags(TenantTag)
+            .WithSummary("One event of the path Tenant's Log, with its raw detail for an Editor or Owner.")
+            .WithDescription(
+                "Any Tenant Role in the path Tenant. Read only, in the Tenant's own scope, and the read isn't audited. The same " +
+                "fields as a search row. raw is set only when the caller holds tenant.log_detail.read in this Tenant (Editor and " +
+                "Owner): the envelope, the seal (seq, and prevHash and hash in lowercase hex; null while unsealed, prevHash null " +
+                "for a chain's first event) and the detail (IP address, User-Agent and email, each nullable; null when the event " +
+                "has none). For anyone else raw is null and no detail is read. An eventId that isn't an evt_ ID is 400 " +
+                "invalid_request. An event this Tenant doesn't have, including another Tenant's, is 404 not_found. A malformed, " +
+                "unknown or role-less Tenant is 403 access_denied, audited as every Tenant capability refusal is.")
+            .Produces<TenantLogEventDetailResponse>(StatusCodes.Status200OK)
+            .Produces<ApiProblem>(StatusCodes.Status400BadRequest, AdminResponses.ProblemContentType)
+            .Produces(StatusCodes.Status401Unauthorized)
+            .Produces<ApiProblem>(StatusCodes.Status403Forbidden, AdminResponses.ProblemContentType)
+            .Produces<ApiProblem>(StatusCodes.Status404NotFound, AdminResponses.ProblemContentType)
+            .Produces(StatusCodes.Status503ServiceUnavailable);
+
         app.MapGet("/api/v1/tenants/{tenantId}/signing-keys", static (HttpContext context, AdminApiServices services) => SigningKeysApi.ListAsync(context, services))
             .WithMetadata(TenantApiEndpoint.Instance, new RequiresCapability(AdminCapabilities.TenantConfigurationRead))
             .WithName("ListSigningKeys")
@@ -911,6 +934,143 @@ internal static class AdminApi
             .Produces<ApiProblem>(StatusCodes.Status403Forbidden, AdminResponses.ProblemContentType)
             .Produces<ApiProblem>(StatusCodes.Status404NotFound, AdminResponses.ProblemContentType)
             // The request checks' tenant_mismatch: every state-changing Tenant route declares it (AdminOpenApi).
+            .Produces<ApiProblem>(StatusCodes.Status409Conflict, AdminResponses.ProblemContentType)
+            .Produces(StatusCodes.Status503ServiceUnavailable);
+
+        app.MapGet("/api/v1/tenants/{tenantId}/apis", static (HttpContext context, AdminApiServices services) => ApisApi.ListAsync(context, services))
+            .WithMetadata(
+                TenantApiEndpoint.Instance,
+                new RequiresCapability(AdminCapabilities.TenantConfigurationRead),
+                new QueryParameter(ApisApi.CursorQuery, "The previous page's nextCursor: an api_ public ID."))
+            .WithName("ListApis")
+            .WithTags(TenantTag)
+            .WithSummary("The path Tenant's APIs: the built-in Management API first, then newest first, 50 a page.")
+            .WithDescription(
+                "Any Tenant Role in the path Tenant. Read only, in the Tenant's own scope: no other Tenant's API is ever listed. " +
+                "Every Tenant has its built-in Gatekeep Management API (urn:gatekeep:management), so the list is never empty. " +
+                "Each API's ID, name, identifier, whether it is built in, offline access, RBAC, its four token lifetimes and when " +
+                "it was created. nextCursor is the last API's ID when another page follows, else null; pass it back as cursor. A " +
+                "cursor sent twice, empty or that isn't an api_ ID is 400 invalid_request. A malformed, unknown or role-less " +
+                "Tenant is 403 access_denied, audited as every Tenant capability refusal is.")
+            .Produces<ApiResourceListResponse>(StatusCodes.Status200OK)
+            .Produces<ApiProblem>(StatusCodes.Status400BadRequest, AdminResponses.ProblemContentType)
+            .Produces(StatusCodes.Status401Unauthorized)
+            .Produces<ApiProblem>(StatusCodes.Status403Forbidden, AdminResponses.ProblemContentType)
+            .Produces(StatusCodes.Status503ServiceUnavailable);
+
+        app.MapPost("/api/v1/tenants/{tenantId}/apis", static (HttpContext context, AdminApiServices services) => ApisApi.CreateAsync(context, services))
+            .WithMetadata(
+                TenantApiEndpoint.Instance,
+                new RequiresCapability(AdminCapabilities.TenantApisManage),
+                new JsonRequestBody(typeof(CreateApiRequest)))
+            .WithName("CreateApi")
+            .WithTags(TenantTag)
+            .WithSummary("Create an API in the path Tenant, with a name and an identifier that never changes.")
+            .WithDescription(
+                "Tenant Editors and Owners, and machine principals that hold tenant.apis.manage; no fresh assertion. The name " +
+                "is trimmed, then 1 to 200 characters with no control character, and two APIs may share one. The identifier is " +
+                "the audience its tokens will name: 1 to 255 characters, an absolute URI with a scheme and no fragment or white " +
+                "space, such as https://api.example.com, matched exactly, case included. Use a different identifier in each " +
+                "environment. It can't be changed later. An identifier under urn:gatekeep: is reserved for the built-in " +
+                "Management API. The API starts with offline access and RBAC off, the default token lifetimes and no Permission. " +
+                "In one transaction it writes the API and directory.api.created by the caller. A body that isn't JSON, is over " +
+                "4096 bytes, misses a field or has the wrong type is 400 api_invalid with no errors; an invalid name or " +
+                "identifier is 400 api_invalid with errors naming each field and reason (invalid or reserved); an identifier " +
+                "another API of this Tenant has is 409 api_identifier_taken. Nothing is written on any of them. The answer is " +
+                "the API with its Permissions, and Location names it.")
+            .Produces<ApiResourceDetailResponse>(StatusCodes.Status201Created)
+            .Produces<ApiProblem>(StatusCodes.Status400BadRequest, AdminResponses.ProblemContentType)
+            .Produces(StatusCodes.Status401Unauthorized)
+            .Produces<ApiProblem>(StatusCodes.Status403Forbidden, AdminResponses.ProblemContentType)
+            .Produces<ApiProblem>(StatusCodes.Status409Conflict, AdminResponses.ProblemContentType)
+            .Produces(StatusCodes.Status503ServiceUnavailable);
+
+        app.MapGet("/api/v1/tenants/{tenantId}/apis/{apiId}", static (HttpContext context, AdminApiServices services) => ApisApi.GetAsync(context, services))
+            .WithMetadata(TenantApiEndpoint.Instance, new RequiresCapability(AdminCapabilities.TenantConfigurationRead))
+            .WithName("GetApi")
+            .WithTags(TenantTag)
+            .WithSummary("One of the path Tenant's APIs, with its Permissions.")
+            .WithDescription(
+                "Any Tenant Role in the path Tenant. Read only, in the Tenant's own scope. The same fields as the list, and its " +
+                "Permissions by value, each with its description. An apiId that isn't an api_ ID, names no API of this Tenant " +
+                "or names another Tenant's is the same 404 not_found. A malformed, unknown or role-less Tenant is 403 " +
+                "access_denied, audited as every Tenant capability refusal is.")
+            .Produces<ApiResourceDetailResponse>(StatusCodes.Status200OK)
+            .Produces(StatusCodes.Status401Unauthorized)
+            .Produces<ApiProblem>(StatusCodes.Status403Forbidden, AdminResponses.ProblemContentType)
+            .Produces<ApiProblem>(StatusCodes.Status404NotFound, AdminResponses.ProblemContentType)
+            .Produces(StatusCodes.Status503ServiceUnavailable);
+
+        app.MapPut("/api/v1/tenants/{tenantId}/apis/{apiId}/settings", static (HttpContext context, AdminApiServices services) => ApisApi.UpdateSettingsAsync(context, services))
+            .WithMetadata(
+                TenantApiEndpoint.Instance,
+                new RequiresCapability(AdminCapabilities.TenantApisManage),
+                new JsonRequestBody(typeof(ApiSettingsRequest)))
+            .WithName("UpdateApiSettings")
+            .WithTags(TenantTag)
+            .WithSummary("Save an API's offline access, RBAC and token lifetimes.")
+            .WithDescription(
+                "Tenant Editors and Owners, and machine principals that hold tenant.apis.manage; no fresh assertion. The body is " +
+                "every setting and replaces what is stored: offlineAccess and rbac, and the four lifetimes in whole seconds with " +
+                "an Application's limits: accessTokenLifetime and idTokenLifetime 1 to 3600, refreshTokenAbsoluteLifetime 1 to " +
+                "7776000 and refreshTokenInactivityLifetime 1 to 2592000. The defaults are 900, 900, 2592000 and 604800. A token " +
+                "for this API lives the shorter of its lifetime and its Application's. A value over its limit is 400 api_invalid " +
+                "with errors naming each field, reason above_maximum and the limit as maximum; under 1 is below_minimum. A body " +
+                "that isn't JSON, is over 4096 bytes, misses a field, or holds a lifetime that isn't a JSON whole number in the " +
+                "32-bit range is 400 api_invalid with no errors. The built-in Management API's settings may be saved too; its " +
+                "identifier and Permissions can't. A save that changes something writes directory.api.updated; one that changes " +
+                "nothing writes nothing and is 200. The answer is the API with its Permissions. An apiId that isn't an api_ ID, " +
+                "names no API of this Tenant or names another Tenant's is the same 404 not_found.")
+            .Produces<ApiResourceDetailResponse>(StatusCodes.Status200OK)
+            .Produces<ApiProblem>(StatusCodes.Status400BadRequest, AdminResponses.ProblemContentType)
+            .Produces(StatusCodes.Status401Unauthorized)
+            .Produces<ApiProblem>(StatusCodes.Status403Forbidden, AdminResponses.ProblemContentType)
+            .Produces<ApiProblem>(StatusCodes.Status404NotFound, AdminResponses.ProblemContentType)
+            .Produces<ApiProblem>(StatusCodes.Status409Conflict, AdminResponses.ProblemContentType)
+            .Produces(StatusCodes.Status503ServiceUnavailable);
+
+        app.MapPost("/api/v1/tenants/{tenantId}/apis/{apiId}/permissions", static (HttpContext context, AdminApiServices services) => ApisApi.AddPermissionAsync(context, services))
+            .WithMetadata(
+                TenantApiEndpoint.Instance,
+                new RequiresCapability(AdminCapabilities.TenantApisManage),
+                new JsonRequestBody(typeof(AddApiPermissionRequest)))
+            .WithName("AddApiPermission")
+            .WithTags(TenantTag)
+            .WithSummary("Add a resource:action Permission to an API.")
+            .WithDescription(
+                "Tenant Editors and Owners, and machine principals that hold tenant.apis.manage; no fresh assertion. The value " +
+                "is resource:action, lowercase, each part a letter or digit followed by up to 63 letters, digits, _, . or -, " +
+                "such as invoices:read, and unique in the API; the description is trimmed, then 0 to 200 characters with no " +
+                "control character, and may be left out. An API holds at most 200 Permissions. It writes the Permission and " +
+                "directory.api.permission_added by the caller. A body that isn't JSON, is over 4096 bytes or misses the value is " +
+                "400 api_invalid with no errors; an invalid value or description is 400 api_invalid with errors naming each " +
+                "field; a value the API has is 409 permission_taken; an API at its limit is 409 permission_limit_reached; the " +
+                "built-in Management API, whose Permissions are fixed, is 409 api_built_in. Nothing is written on any of them. " +
+                "The answer is the API with its Permissions, and Location names the API. An apiId that isn't an api_ ID, names " +
+                "no API of this Tenant or names another Tenant's is the same 404 not_found.")
+            .Produces<ApiResourceDetailResponse>(StatusCodes.Status201Created)
+            .Produces<ApiProblem>(StatusCodes.Status400BadRequest, AdminResponses.ProblemContentType)
+            .Produces(StatusCodes.Status401Unauthorized)
+            .Produces<ApiProblem>(StatusCodes.Status403Forbidden, AdminResponses.ProblemContentType)
+            .Produces<ApiProblem>(StatusCodes.Status404NotFound, AdminResponses.ProblemContentType)
+            .Produces<ApiProblem>(StatusCodes.Status409Conflict, AdminResponses.ProblemContentType)
+            .Produces(StatusCodes.Status503ServiceUnavailable);
+
+        app.MapDelete("/api/v1/tenants/{tenantId}/apis/{apiId}/permissions/{value}", static (HttpContext context, AdminApiServices services) => ApisApi.RemovePermissionAsync(context, services))
+            .WithMetadata(TenantApiEndpoint.Instance, new RequiresCapability(AdminCapabilities.TenantApisManage))
+            .WithName("RemoveApiPermission")
+            .WithTags(TenantTag)
+            .WithSummary("Remove one of an API's Permissions.")
+            .WithDescription(
+                "Tenant Editors and Owners, and machine principals that hold tenant.apis.manage; no fresh assertion and no body. " +
+                "The value is the Permission's, such as invoices:read. It deletes the Permission and writes " +
+                "directory.api.permission_removed by the caller: 204. The built-in Management API's Permissions are fixed: 409 " +
+                "api_built_in. An apiId that isn't an api_ ID, names no API of this Tenant or another Tenant's, and a value the " +
+                "API has no Permission by, are the same 404 not_found. Nothing is written on any refusal.")
+            .Produces(StatusCodes.Status204NoContent)
+            .Produces(StatusCodes.Status401Unauthorized)
+            .Produces<ApiProblem>(StatusCodes.Status403Forbidden, AdminResponses.ProblemContentType)
+            .Produces<ApiProblem>(StatusCodes.Status404NotFound, AdminResponses.ProblemContentType)
             .Produces<ApiProblem>(StatusCodes.Status409Conflict, AdminResponses.ProblemContentType)
             .Produces(StatusCodes.Status503ServiceUnavailable);
 

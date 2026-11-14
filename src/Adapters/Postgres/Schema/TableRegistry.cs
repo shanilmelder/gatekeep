@@ -664,6 +664,49 @@ public static class TableRegistry
             },
             SystemApplicationGuard),
 
+        // Story 3.6 (FR-16): each Tenant's APIs, the resource servers its tokens are for. Host.Admin creates them and
+        // changes only their offline access, RBAC and lifetimes: never the identifier, which is fixed at creation, or
+        // the name. Host.Worker writes the built-in Management API at Tenant activation and in the hourly backfill,
+        // finding it by built_in, and a Tenant's deletion purges, reading only tenant_id.
+        new(
+            "api",
+            TableClass.Tenant,
+            "Directory",
+            TableUse.Configuration,
+            new Dictionary<string, IReadOnlyList<string>>
+            {
+                [Admin] = [Select, Insert],
+                [Worker] = [Insert, Delete],
+            },
+            new Dictionary<string, IReadOnlyList<ColumnGrant>>
+            {
+                [Worker] = [new ColumnGrant(Select, ["tenant_id", "id", "built_in"])],
+                [Admin] = [new ColumnGrant(Update, [
+                    "offline_access", "rbac",
+                    "access_token_lifetime", "id_token_lifetime",
+                    "refresh_token_absolute_lifetime", "refresh_token_inactivity_lifetime",
+                ])],
+            },
+            RowGuard),
+        // Story 3.6: an API's resource:action Permissions. Host.Admin adds and removes them, never edits one; Host.Worker
+        // writes the built-in Management API's, reading which values it has so it inserts only the missing ones, and a
+        // Tenant's deletion purges.
+        new(
+            "permission",
+            TableClass.Tenant,
+            "Directory",
+            TableUse.Configuration,
+            new Dictionary<string, IReadOnlyList<string>>
+            {
+                [Admin] = [Select, Insert, Delete],
+                [Worker] = [Insert, Delete],
+            },
+            new Dictionary<string, IReadOnlyList<ColumnGrant>>
+            {
+                [Worker] = [new ColumnGrant(Select, ["tenant_id", "api_id", "value"])],
+            },
+            RowGuard),
+
         // Story 2.5 (AD-14): Tenant attempt counters, such as token requests per Tenant and per source,
         // and cross-Tenant mismatches per source. Host.Hosted counts; only a Tenant's deletion deletes.
         new(

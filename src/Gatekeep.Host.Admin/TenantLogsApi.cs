@@ -4,6 +4,7 @@ using System.Text.RegularExpressions;
 using Gatekeep.Kernel.Audit;
 using Gatekeep.Kernel.Identifiers;
 using Gatekeep.Kernel.Persistence;
+using Gatekeep.Modules.Admins.Contracts;
 using Gatekeep.Modules.Audit.Contracts;
 using Microsoft.Extensions.Primitives;
 
@@ -12,12 +13,12 @@ namespace Gatekeep.Host.Admin;
 /// <summary>Who caused an event, or what it acted on, as a Log shows it: a kind and an ID, never a name or an email.</summary>
 public sealed class LogReference
 {
-    /// <summary><c>system</c>, <c>anonymous</c>, <c>admin</c>, <c>user</c> or <c>client</c> (an Application), or <c>tenant</c> as a target.</summary>
+    /// <summary><c>system</c>, <c>anonymous</c>, <c>admin</c>, <c>user</c> or <c>client</c> (an Application), or <c>tenant</c> or <c>api</c> (Story 3.6) as a target.</summary>
     public required string Kind { get; init; }
 
     /// <summary>
     /// The internal reference: a UUID for an Admin, a User or an Application, the <c>ten_</c> public ID
-    /// for a Tenant, and null for <c>system</c> and <c>anonymous</c>.
+    /// for a Tenant, the <c>api_</c> public ID for an API (Story 3.6), and null for <c>system</c> and <c>anonymous</c>.
     /// </summary>
     public required string? Id { get; init; }
 }
@@ -55,6 +56,86 @@ public sealed class TenantLogsResponse
     public required string? NextCursor { get; init; }
 }
 
+/// <summary>An event's seal as raw detail shows it: its place in the chain and its hashes in lowercase hex.</summary>
+public sealed class TenantLogSealResponse
+{
+    /// <summary>Its sequence number in the Tenant's chain.</summary>
+    public required long Seq { get; init; }
+
+    /// <summary>The previous event's hash, lowercase hex; null for the chain's first event.</summary>
+    public required string? PrevHash { get; init; }
+
+    /// <summary>This event's hash, <c>SHA-256(prevHash || canonical envelope)</c>, lowercase hex.</summary>
+    public required string Hash { get; init; }
+}
+
+/// <summary>An event's detail row: the personal data kept outside the hash.</summary>
+public sealed class TenantLogRawDetailResponse
+{
+    /// <summary>The client's IP address, when one was recorded.</summary>
+    public required string? IpAddress { get; init; }
+
+    /// <summary>The client's User-Agent, when one was recorded.</summary>
+    public required string? UserAgent { get; init; }
+
+    /// <summary>The email the event concerns, when one was recorded.</summary>
+    public required string? Email { get; init; }
+}
+
+/// <summary>An event's raw detail (Story 7.5): its envelope as the search shows it, its seal and its detail row.</summary>
+public sealed class TenantLogRawResponse
+{
+    /// <summary>The event's public ID: <c>evt_</c> and 26 base32 characters.</summary>
+    public required string Id { get; init; }
+
+    /// <summary>When the database recorded it.</summary>
+    public required DateTimeOffset OccurredAt { get; init; }
+
+    /// <summary>Its type code.</summary>
+    public required string Type { get; init; }
+
+    public required LogReference Actor { get; init; }
+
+    /// <summary>What it acted on, or null when it names nothing.</summary>
+    public required LogReference? Target { get; init; }
+
+    /// <summary>Its seal, or null while it is unsealed.</summary>
+    public required TenantLogSealResponse? Seal { get; init; }
+
+    /// <summary>Its detail row, or null when it has none.</summary>
+    public required TenantLogRawDetailResponse? Detail { get; init; }
+}
+
+/// <summary>
+/// One event of a Tenant's Log, opened (Story 7.5): the same fields as a search row, and its raw
+/// detail only for a caller who holds <c>tenant.log_detail.read</c>.
+/// </summary>
+public sealed class TenantLogEventDetailResponse
+{
+    /// <summary>The event's public ID: <c>evt_</c> and 26 base32 characters.</summary>
+    public required string Id { get; init; }
+
+    /// <summary>When the database recorded it.</summary>
+    public required DateTimeOffset OccurredAt { get; init; }
+
+    /// <summary>Its type code, <c>{domain}.{object}.{action}</c>, as <c>docs/audit-events.md</c> publishes it.</summary>
+    public required string Type { get; init; }
+
+    /// <summary><c>success</c> or <c>failure</c>, from the type's catalogue entry; null for a code no catalogue declares.</summary>
+    public required string? Outcome { get; init; }
+
+    /// <summary>The type's one-line catalogue summary; null for a code no catalogue declares.</summary>
+    public required string? Summary { get; init; }
+
+    public required LogReference Actor { get; init; }
+
+    /// <summary>What it acted on, or null when it names nothing.</summary>
+    public required LogReference? Target { get; init; }
+
+    /// <summary>The raw detail: null unless the caller holds <c>tenant.log_detail.read</c> in this Tenant.</summary>
+    public required TenantLogRawResponse? Raw { get; init; }
+}
+
 /// <summary>
 /// A Tenant's Log search (Story 7.4, FR-40): read-only, in the path Tenant's own scope, so
 /// row-level security holds it to that Tenant. Every parameter is optional, sent at most once and
@@ -79,6 +160,9 @@ internal static partial class TenantLogsApi
 
     public const string CursorQuery = "cursor";
 
+    /// <summary>The route value that names one event: its <c>evt_</c> public ID.</summary>
+    public const string EventRouteValue = "eventId";
+
     /// <summary>Events per page (Conventions).</summary>
     public const int PageSize = TenantLogQuery.MaxLimit;
 
@@ -86,7 +170,7 @@ internal static partial class TenantLogsApi
     public static readonly IReadOnlyList<string> Outcomes = ["success", "failure"];
 
     /// <summary>The reference kinds an Actor or target can have, as the API spells them.</summary>
-    public static readonly IReadOnlyList<string> ReferenceKinds = ["system", "anonymous", "admin", "user", "client", "tenant"];
+    public static readonly IReadOnlyList<string> ReferenceKinds = ["system", "anonymous", "admin", "user", "client", "tenant", "api"];
 
     private const int MaxEmailLength = 320;
 
@@ -117,6 +201,58 @@ internal static partial class TenantLogsApi
         {
             Events = [.. page.Events.Select(Event)],
             NextCursor = page.NextAfter is { } next ? PublicId.Format(PublicIdType.AuditEvent, next) : null,
+        });
+    }
+
+    /// <summary>
+    /// One event, opened (Story 7.5). The route needs <c>tenant.logs.read</c>; the raw detail is
+    /// decided here, by <c>tenant.log_detail.read</c>, and without it <c>audit_detail</c> isn't read.
+    /// Another Tenant's event is the same 404 as an unknown one. Reading isn't audited.
+    /// </summary>
+    public static async Task GetAsync(HttpContext context, AdminApiServices services)
+    {
+        var cancellationToken = context.RequestAborted;
+        if (!PublicId.TryParse(PublicIdType.AuditEvent, context.GetRouteValue(EventRouteValue) as string, out var eventId))
+        {
+            await RefuseEventAsync(context, StatusCodes.Status400BadRequest, AdminResponses.InvalidRequest);
+            return;
+        }
+
+        var path = AdminRequestChecks.PathTenantGrant(context);
+        var withDetail = AdminCapabilities.Allows(
+            AdminCapabilities.TenantLogDetailRead, AdminRequestChecks.Principal(context), path.Grant, path.TenantId);
+
+        TenantLogEvent? found;
+        try
+        {
+            await using var scope = await TenantScope.BeginAsync(services.Source, AdminRequestChecks.PathTenant(context), cancellationToken);
+            found = await services.LogEvents.FindAsync(scope.CreateCommandContext(), eventId, withDetail, cancellationToken);
+            await scope.CommitAsync(cancellationToken);
+        }
+        catch (DbException e) when (!context.Response.HasStarted)
+        {
+            AdminRequestChecks.Log(context, e);
+            await AdminResponses.UnavailableAsync(context);
+            return;
+        }
+
+        if (found is null)
+        {
+            await RefuseEventAsync(context, StatusCodes.Status404NotFound, AdminResponses.NotFound);
+            return;
+        }
+
+        var summary = Event(found.Entry);
+        await AdminResponses.JsonAsync(context, new TenantLogEventDetailResponse
+        {
+            Id = summary.Id,
+            OccurredAt = summary.OccurredAt,
+            Type = summary.Type,
+            Outcome = summary.Outcome,
+            Summary = summary.Summary,
+            Actor = summary.Actor,
+            Target = summary.Target,
+            Raw = withDetail ? Raw(summary, found) : null,
         });
     }
 
@@ -241,13 +377,36 @@ internal static partial class TenantLogsApi
                 ? new LogReference
                 {
                     Kind = Stored(kind),
-                    Id = kind == AuditTargetKind.Tenant
-                        ? PublicId.Format(PublicIdType.Tenant, entry.TargetId!.Value)
-                        : entry.TargetId!.Value.ToString("D"),
+                    Id = kind switch
+                    {
+                        AuditTargetKind.Tenant => PublicId.Format(PublicIdType.Tenant, entry.TargetId!.Value),
+                        AuditTargetKind.Api => PublicId.Format(PublicIdType.Api, entry.TargetId!.Value),
+                        _ => entry.TargetId!.Value.ToString("D"),
+                    },
                 }
                 : null,
         };
     }
+
+    private static TenantLogRawResponse Raw(TenantLogEventResponse summary, TenantLogEvent found) => new()
+    {
+        Id = summary.Id,
+        OccurredAt = summary.OccurredAt,
+        Type = summary.Type,
+        Actor = summary.Actor,
+        Target = summary.Target,
+        Seal = found.Seal is { } seal
+            ? new TenantLogSealResponse
+            {
+                Seq = seal.Seq,
+                PrevHash = seal.PrevHash is { } previous ? Convert.ToHexStringLower(previous) : null,
+                Hash = Convert.ToHexStringLower(seal.Hash),
+            }
+            : null,
+        Detail = found.Detail is { } detail
+            ? new TenantLogRawDetailResponse { IpAddress = detail.IpAddress, UserAgent = detail.UserAgent, Email = detail.Email }
+            : null,
+    };
 
     private static string Stored<TKind>(TKind kind)
         where TKind : struct, Enum =>
@@ -310,6 +469,18 @@ internal static partial class TenantLogsApi
                 AdminResponses.InvalidRequest,
                 AdminResponses.TraceId(context));
         return AdminResponses.ProblemAsync(context, StatusCodes.Status400BadRequest, AdminResponses.InvalidRequest);
+    }
+
+    private static Task RefuseEventAsync(HttpContext context, int status, string problem)
+    {
+        // The fixed code only: never the route value.
+        context.RequestServices.GetRequiredService<ILoggerFactory>()
+            .CreateLogger("Gatekeep.Host.Admin")
+            .LogInformation(
+                "A Log event read was refused with {Problem}, trace {TraceId}.",
+                problem,
+                AdminResponses.TraceId(context));
+        return AdminResponses.ProblemAsync(context, status, problem);
     }
 
     [GeneratedRegex(@"\A[^@\s\p{C}]+@[^@\s\p{C}]+\z")]

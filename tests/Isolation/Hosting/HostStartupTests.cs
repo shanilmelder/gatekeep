@@ -431,8 +431,7 @@ public sealed class HostStartupTests(PostgresFixture postgres) : IDisposable
     [MemberData(nameof(Hosts))]
     public async Task Unreachable_database_answers_503_naming_database(string host)
     {
-        var health = HostProcess.FreePort();
-        var closed = HostProcess.FreePort();
+        var (health, closed) = HostProcess.FreePorts();
         var arguments = Databases(host)
             .Select(d => $"--ConnectionStrings:{d.Name}=Host=127.0.0.1;Port={closed};Database=gatekeep;Username={d.Role};Password={Canary}")
             .Concat(Custody())
@@ -499,8 +498,7 @@ public sealed class HostStartupTests(PostgresFixture postgres) : IDisposable
     public async Task Health_is_served_only_on_the_health_port()
     {
         var database = await postgres.NewMigratedDatabaseAsync();
-        var health = HostProcess.FreePort();
-        var publicPort = HostProcess.FreePort();
+        var (health, publicPort) = HostProcess.FreePorts();
 
         using var process = HostProcess.Start(
             "Hosted",
@@ -528,8 +526,7 @@ public sealed class HostStartupTests(PostgresFixture postgres) : IDisposable
         Assert.NotNull(address);
 
         var database = await postgres.NewMigratedDatabaseAsync();
-        var health = HostProcess.FreePort();
-        var publicPort = HostProcess.FreePort();
+        var (health, publicPort) = HostProcess.FreePorts();
 
         using var process = HostProcess.Start(
             "Admin",
@@ -556,8 +553,7 @@ public sealed class HostStartupTests(PostgresFixture postgres) : IDisposable
     public async Task Worker_listens_on_no_port_but_health_even_when_given_a_public_port()
     {
         var database = await postgres.NewMigratedDatabaseAsync();
-        var health = HostProcess.FreePort();
-        var publicPort = HostProcess.FreePort();
+        var (health, publicPort) = HostProcess.FreePorts();
 
         using var process = HostProcess.Start(
             "Worker",

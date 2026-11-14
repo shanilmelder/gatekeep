@@ -415,15 +415,14 @@ public sealed class TenantLogSearchTests(PostgresFixture postgres)
         var a = await host.InsertTenantAsync();
         var (cookie, _, _) = await TenantRequests.RoleSessionAsync(host, a, "viewer");
         var catalogue = Catalogue();
-        Assert.InRange(catalogue.Count, 1, 50);
+        Assert.NotEmpty(catalogue);
         for (var i = 0; i < catalogue.Count; i++)
         {
             await InsertEventAsync(host, a, i + 1, catalogue[i].Code, "system", null, null, null);
         }
 
-        using var response = await host.SendAsync(HttpMethod.Get, PathFor(a), cookie);
-        using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync(Cancellation));
-        var listed = json.RootElement.GetProperty("events").EnumerateArray()
+        // The catalogue outgrew one page of 50 (Story 3.6): every page, by its cursor.
+        var listed = (await AllPagesAsync(host, a, cookie, string.Empty))
             .ToDictionary(e => e.GetProperty("type").GetString()!, e => (Summary: e.GetProperty("summary").GetString(), Outcome: e.GetProperty("outcome").GetString()));
 
         Assert.Equal(catalogue.Select(e => e.Code).Order(StringComparer.Ordinal), listed.Keys.Order(StringComparer.Ordinal));
@@ -432,17 +431,34 @@ public sealed class TenantLogSearchTests(PostgresFixture postgres)
         // An outcome search is exactly the catalogue's codes of that outcome.
         foreach (var outcome in new[] { "Success", "Failure" })
         {
-            using var filtered = await host.SendAsync(HttpMethod.Get, PathFor(a) + $"?outcome={outcome.ToLowerInvariant()}", cookie);
-            using var page = JsonDocument.Parse(await filtered.Content.ReadAsStringAsync(Cancellation));
             Assert.Equal(
                 catalogue.Where(e => e.Outcome == outcome).Select(e => e.Code).Order(StringComparer.Ordinal),
-                page.RootElement.GetProperty("events").EnumerateArray().Select(e => e.GetProperty("type").GetString()!).Order(StringComparer.Ordinal));
+                (await AllPagesAsync(host, a, cookie, $"outcome={outcome.ToLowerInvariant()}")).Select(e => e.GetProperty("type").GetString()!).Order(StringComparer.Ordinal));
         }
     }
 
     private static IReadOnlyList<CatalogueEvent> Catalogue() => AuditCatalogue.Load(BuildOutput.RepositoryRoot(), "tests/Isolation");
 
     private static string Summary(string code) => Catalogue().Single(e => e.Code == code).Summary;
+
+    /// <summary>Every event a search answers, page after page by <c>nextCursor</c>, with <paramref name="query"/> (no leading ?) on each.</summary>
+    private static async Task<List<JsonElement>> AllPagesAsync(AdminHost host, Guid tenant, string cookie, string query)
+    {
+        var events = new List<JsonElement>();
+        string? cursor = null;
+        do
+        {
+            var parameters = string.Join("&", new[] { query, cursor is null ? string.Empty : $"cursor={cursor}" }.Where(p => p.Length > 0));
+            using var response = await host.SendAsync(HttpMethod.Get, PathFor(tenant) + (parameters.Length > 0 ? "?" + parameters : string.Empty), cookie);
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync(Cancellation));
+            events.AddRange(json.RootElement.GetProperty("events").EnumerateArray().Select(e => e.Clone()));
+            cursor = json.RootElement.GetProperty("nextCursor").GetString();
+        }
+        while (cursor is not null);
+
+        return events;
+    }
 
     private static string PathFor(Guid tenant) => $"/api/v1/tenants/{PublicId.Format(PublicIdType.Tenant, tenant)}/logs";
 

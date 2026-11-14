@@ -32,8 +32,7 @@ public sealed class TenantHostBeforeBootstrapTests(PostgresFixture postgres) : I
         Assert.Equal(tokenIssued ? 1L : 0L, await PostgresFixture.ScalarAsync<long>(postgres.SuperuserConnection(database), "SELECT count(*) FROM bootstrap_state WHERE completed_at IS NULL"));
 
         using var socket = new FakeOpenBaoSocket();
-        var health = HostProcess.FreePort();
-        var port = HostProcess.FreePort();
+        var (health, port) = HostProcess.FreePorts();
         using var process = HostProcess.Start(
             "Hosted",
             $"--ConnectionStrings:Hosted={postgres.RoleConnection(TableRegistry.Hosted, database)}",

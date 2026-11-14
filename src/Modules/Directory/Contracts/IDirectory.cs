@@ -288,4 +288,76 @@ public interface IDirectory
     /// </summary>
     /// <exception cref="InvalidOperationException">The context has no Tenant.</exception>
     Task<IReadOnlyList<DirectoryApplication>> ListApplicationsAsync(CommandContext context, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Writes an API an Admin or machine client registers (Story 3.6, FR-16): <paramref name="name"/>, already trimmed,
+    /// and <paramref name="identifier"/> exactly as given, with offline access and RBAC off, the default lifetimes and
+    /// no Permission, and one <c>directory.api.created</c> by <paramref name="actor"/>, in the caller's context and only
+    /// in its Tenant. When another of the Tenant's APIs has that identifier, exactly, it writes nothing and returns
+    /// <see cref="ApiCreateStatus.IdentifierTaken"/>.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The context has no Tenant. Nothing is written.</exception>
+    /// <exception cref="ArgumentException">The name or identifier breaks a rule of <see cref="DirectoryContract.CheckApi"/>. Nothing is written.</exception>
+    [StateChanging]
+    Task<ApiCreate> CreateApiAsync(CommandContext context, Actor actor, string name, string identifier, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// One page of the context Tenant's APIs (Story 3.6): at most <paramref name="limit"/>, the built-in Management API
+    /// first, then the others newest first by ID (UUIDv7), after <paramref name="after"/> when it is given. It only reads.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The context has no Tenant.</exception>
+    Task<DirectoryApiPage> ListApisPageAsync(CommandContext context, Guid? after, int limit, CancellationToken cancellationToken);
+
+    /// <summary>The context Tenant's API <paramref name="id"/>, or null when it has none by that ID (Story 3.6). It only reads.</summary>
+    /// <exception cref="InvalidOperationException">The context has no Tenant.</exception>
+    Task<DirectoryApi?> FindApiAsync(CommandContext context, Guid id, CancellationToken cancellationToken);
+
+    /// <summary>The Permissions of the context Tenant's API <paramref name="apiId"/>, by value, or null when it has no API by that ID (Story 3.6). It only reads.</summary>
+    /// <exception cref="InvalidOperationException">The context has no Tenant.</exception>
+    Task<IReadOnlyList<DirectoryPermission>?> ListPermissionsAsync(CommandContext context, Guid apiId, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Replaces the context Tenant's API <paramref name="id"/>'s offline access, RBAC and four token lifetimes (Story
+    /// 3.6), under the row's lock, in the caller's transaction. When they differ from what is stored it writes them
+    /// and <c>directory.api.updated</c> by <paramref name="actor"/>; when they don't it writes nothing and no event. The
+    /// built-in Management API's settings may change too. Returns the API as it now stands and whether it changed, or
+    /// null when the Tenant has no API by that ID.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The context has no Tenant. Nothing is written.</exception>
+    /// <exception cref="ArgumentException">A lifetime breaks a limit of <see cref="DirectoryContract.CheckLifetimes"/>. Nothing is written.</exception>
+    [StateChanging]
+    Task<ApiSettingsWrite?> UpdateApiSettingsAsync(CommandContext context, Actor actor, Guid id, ApiSettings settings, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Adds the Permission <paramref name="value"/> with <paramref name="description"/> to the context Tenant's API
+    /// <paramref name="apiId"/> (Story 3.6), under the API's row lock, in the caller's transaction, and writes
+    /// <c>directory.api.permission_added</c> by <paramref name="actor"/>. The built-in Management API's Permissions are
+    /// fixed; a value the API already has, or an API already at <see cref="Gatekeep.Kernel.Limits.SecurityLimits.MaxPermissionsPerApi"/>,
+    /// writes nothing.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The context has no Tenant. Nothing is written.</exception>
+    /// <exception cref="ArgumentException">The value or description breaks a rule of <see cref="DirectoryContract.CheckPermission"/>. Nothing is written.</exception>
+    [StateChanging]
+    Task<PermissionWrite> AddPermissionAsync(
+        CommandContext context, Actor actor, Guid apiId, string value, string description, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Removes the Permission <paramref name="value"/> from the context Tenant's API <paramref name="apiId"/> (Story 3.6),
+    /// under the API's row lock, in the caller's transaction, and writes <c>directory.api.permission_removed</c> by
+    /// <paramref name="actor"/>. The built-in Management API's Permissions are fixed.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The context has no Tenant. Nothing is written.</exception>
+    [StateChanging]
+    Task<PermissionWrite> RemovePermissionAsync(CommandContext context, Actor actor, Guid apiId, string value, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Makes sure the context's Tenant has its built-in Management API (Story 3.6, FR-16), named
+    /// <see cref="DirectoryContract.ManagementApiName"/> with the identifier <see cref="DirectoryContract.ManagementApiIdentifier"/>,
+    /// offline access and RBAC off and the default lifetimes, and every one of <see cref="DirectoryContract.ManagementPermissions"/>:
+    /// it inserts only what is missing and returns whether it inserted anything. Like the <c>system</c> Application it writes no
+    /// audit event: the Tenant's activation, or the backfill, is the record.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The context has no Tenant. Nothing is written.</exception>
+    [StateChanging]
+    Task<bool> EnsureBuiltInApiAsync(CommandContext context, CancellationToken cancellationToken);
 }

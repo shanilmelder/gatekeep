@@ -4,7 +4,7 @@
 
 ## Goal
 
-Make every Gatekeep audit event tamper-evident and provable, and let Admins use it. Events already written by `IAuditAppender` are sealed into hash chains, one per Tenant plus one Deployment chain. Security evidence is copied off the server to a store the server can't rewrite. A verification command and a fixed retention floor prove the Logs are intact. Admins can search a Tenant's Logs, open raw detail as their role allows, see a User's history, and (Deployment Owner only) search the Deployment Log. A canary scan and a generated event catalogue keep "no secret ever reaches a log" true as features are added. This epic is the evidence base that compromise response, restore and Security Alerts rely on.
+Turn the audit events that every state change already writes into tamper-evident, searchable evidence. Events are sealed into hash chains, copied off the server to a store the server can't rewrite, verified by a CLI command and kept for a fixed retention. Admins can search a Tenant's Logs and open raw detail, with the amount shown depending on their role. Deployment Owners can search the Deployment Log. A canary scan and a generated event catalogue keep secrets out of every log as features are added. This matters because after a compromise the Operator must still be able to prove what happened.
 
 ## Stories
 
@@ -19,45 +19,44 @@ Make every Gatekeep audit event tamper-evident and provable, and let Admins use 
 
 ## Requirements & Constraints
 
-- **Coverage:** Tenant Logs cover sign-ins, failures, password resets, email changes, Factor and Recovery Code events, Session and token revocation, Admin changes, key operations, Management API grants, Token Family revocations and rejected cross-Tenant attempts. The Deployment Log covers bootstrap, Admin sign-in, recovery, Tenant creation and deletion, upgrades, restores and Deployment configuration.
-- **Immutability:** no route, setting or surface (Admin Dashboard, Management API, Cli) can change or delete a Log. Only retention deletes rows.
-- **Verification:** the chain is hash-linked, and `gatekeep audit verify` reports the position of any altered or missing row.
-- **Off-server copy:** security events and revocations are copied off the server in near real time (within 60 seconds) to a store the server can't rewrite or delete.
-- **No credentials in logs:** credential-equivalent values never reach Logs, errors, debug output, exports or operational logs. A canary test planted through each flow proves it, including when flows fail with debug logging on.
-- **Retention (exact values):** "Log retention | 90 days | 90-day floor in Prod Tenants". v1 has no setting for Log retention. It's fixed at its default, and only a release can change it, within the hard limit. "Logs have the retention in §5.2, fixed in v1. The floor can't be lowered." A deleted Tenant's security Logs are kept for 90 days. A test must assert the constant meets the floor and that no route, setting or Cli command changes it.
-- **Access:** raw detail follows the Admin capability matrix. Viewers get summary only, enforced server-side. Editors and Owners see raw JSON. Deployment Log is Deployment Owner only, and machine principals are refused.
-- **Event codes** are a public contract. A changed code is a contract break.
-- **Erasure:** erasing a User removes `audit_detail` only, so the chain still verifies afterwards.
+- Tenant Logs cover sign-ins, failures, password resets, email changes, Factor and Recovery Code events, Session and token revocation, Admin changes, key operations, Management API grants, Token Family revocations and rejected cross-Tenant attempts.
+- The Deployment Log covers bootstrap, Admin sign-in, recovery, Tenant creation and deletion, upgrades, restores and Deployment configuration. Only a Deployment Owner can read it. Every other Admin and every machine principal is refused.
+- Event type codes are part of the public contract. Changing one is a contract break.
+- No surface (Admin Dashboard, Management API or any route) can change or delete a Log.
+- Logs, error responses, debug output, operational logs and the database never hold a credential-equivalent value. A canary planted through each flow must never appear raw, including when a flow is forced to fail with debug logging on.
+- Raw Log detail that holds personal data is visible to Editors and Owners only. A Viewer gets the summary only, and the server enforces this, not just the UI.
+- Log retention is 90 days and fixed in v1. No route, setting or CLI command can change it, and the floor can't be lowered.
+- Off-server copies arrive within 60 seconds of sealing. Sealing targets 5 seconds.
+- Configurable Log streams, live tail and a query bar are out of scope (v2).
 
 ## Technical Decisions
 
-- **Write path (already built in Story 1.5):** audit is written only through Kernel `IAuditAppender` on the `CommandContext` connection. Tables are `audit_event` and `audit_detail` (tenant), plus `deployment_audit_event` and `deployment_audit_detail` (`control`), with the same shape. No module depends on Audit to write.
-- **Envelope vs detail:** the envelope holds a stable type code and internal references only. Personal data (IP, user agent, email) lives in the `*_detail` tables, outside the hash. Erasure and raw-detail permissions act on detail only.
-- **Sealing:** a sealer job in `Host.Worker`, under `gk_sealer`, assigns `epoch`, `seq`, `prev_hash` and `hash = SHA-256(prev_hash || canonical envelope)`. Canonical form is RFC 8785 JSON. Sealing is separate from writing, so writers never serialize on a chain head during a sign-in flood. The target is 5 seconds. Lag above 60 seconds is reported through the heartbeat.
-- **DB enforcement:** triggers make the envelope immutable. Registry-granted roles have only `INSERT` and `SELECT`. `gk_sealer` may set only the seal columns, once. `gk_retention` alone deletes `audit_event` rows. `gk_worker` deletes `audit_detail` rows for erasure. No role has `BYPASSRLS`.
-- **Jobs:** sealing runs under `gk_sealer` and retention under `gk_retention`, as the job registry states. `gk_sealer` can enqueue only alert types.
-- **Retention:** deletes only whole sealed ranges and writes a checkpoint event carrying the last deleted hash. A deleted Tenant's chain stays until its retention ends, then an Operation purges it. §5.2 values are constants in one Kernel file.
-- **Verify:** walks each chain and every off-server head. A checkpoint is accepted only if it's past retention and its hash matches the off-server record. A break between epochs is accepted only where a signed restore record names it (restore starts a new `epoch` per chain).
-- **Off-server record:** Worker jobs copy sealed security events, revocations and one chain head per `(epoch, seq)` within 60 seconds of sealing to an S3-API bucket on a separate provider, with Object Lock in compliance mode. Retention matches §5.2. The server's credential can write but not delete or shorten retention. Records are signed by a Deployment Transit key that only `Host.Worker` and `Gatekeep.Cli` can use. Replayable revocations come from a code-owned event-type table carrying internal IDs only, with no personal data.
-- **Alerts:** the sealing job checks sealed events against one code-owned table in Notifications and enqueues one alert job per match, keyed on event ID, in the same `gk_sealer` transaction. An alert therefore can't precede its event. The heartbeat to an external dead-man's check carries the latest sealed and shipped positions, the oldest unsealed age and the oldest undelivered alert age.
-- **Codes:** `{domain}.{object}.{action}`, lower case. They replace the export's short sample codes. The catalogue is generated into `docs/`.
-- **Search:** filters on indexed envelope columns only. A User or email search resolves to the internal reference first. Lists use cursor pagination, default 50.
-- **Credential handling:** `Secret<T>` has no serializable form. Operational logging runs through the scrubbing sink. The canary scan covers Logs, operational logs and the database.
-- **Release gates:** canary scan and catalogue test are mandatory release gates.
+- **Writing:** audit is written only through the Kernel `IAuditAppender`, on the `CommandContext` connection. No module depends on Audit to write.
+- **Chains:** there is one chain per Tenant in `audit_event` and one Deployment chain in the `control` table `deployment_audit_event`, with the same shape. The envelope holds the type code and internal references only. Personal data (IP address, user agent, email) lives in `audit_detail` / `deployment_audit_detail`, outside the hash. Erasure and raw-detail permissions act only on those detail tables, so erasing a User doesn't break the chain.
+- **Sealing:** a sealer in `Host.Worker` runs as `gk_sealer` and assigns `epoch`, `seq`, `prev_hash` and `hash = SHA-256(prev_hash || RFC 8785 canonical envelope)`. Sealing runs separately from the write so writers never serialize on a chain head. If sealing lags more than 60 seconds, the dead-man heartbeat reports it and a Security Alert is raised.
+- **Immutability:** triggers make the envelope immutable. Registry roles get only `INSERT` and `SELECT`. `gk_sealer` may set the seal columns once. Only `gk_retention` deletes `audit_event` rows. `gk_worker` deletes `audit_detail` rows for erasure.
+- **Retention:** whole sealed ranges are deleted, then a checkpoint event is written carrying the last deleted hash. A deleted Tenant's chain stays until its retention ends, then an Operation purges it.
+- **Verification:** `gatekeep audit verify` (in `Gatekeep.Cli`) walks the chain and every off-server head, and reports the position of any change or gap. A checkpoint is accepted only if it is past retention and its hash matches the off-server record. A break between epochs is accepted only where a signed restore record names it.
+- **Off-server record:** worker jobs copy sealed security events, revocations and one chain head per `(epoch, seq)` to an S3-API bucket on a separate provider, with Object Lock in compliance mode and retention matching the Log retention. The server's credential can write but can't delete or shorten retention. Records are signed by a Deployment Transit key that only `Host.Worker` and `Gatekeep.Cli` can use. Replayable revocations come from a code-owned table of event types and carry only the internal IDs needed to re-apply them, with no personal data.
+- **Alerts:** the sealing job checks sealed events against Notifications' code-owned alert table and enqueues one alert job per match, keyed on event ID, in the same `gk_sealer` transaction. An alert can't come before its committed event.
+- **Codes:** event codes take the form `{domain}.{object}.{action}`, in lower case. The catalogue is generated into `docs/`, and the build fails when a code changes.
+- **Search:** search filters on indexed envelope columns. A User or email search first resolves to the internal reference.
+- **Authorization:** the "read raw Log detail" capability comes from the single capability table in the Admins contract. Handlers evaluate it, and the UI reads the caller's capabilities from an endpoint.
+- **Credentials:** values that are credential-equivalent use `Secret<T>`, which has no serializable form. Operational logging goes through the scrubbing sink. The canary scan covers Logs, operational logs and the database, and a flow registered with no canary fails the build.
 
 ## UX & Interaction Patterns
 
-- Logs uses a field search: one field `select` plus a value (event type, User, Application, outcome, time range), kept in the URL. No Live view, Log streams or query bar in v1. Empty state: "No events in this range".
-- A row opens a `drawer` with code badge, summary rows and raw JSON with Copy. Esc closes it. Viewers see summary only.
-- User · History: empty state "No events yet". Viewers see summaries only, and Editors open the drawer for raw detail.
-- Deployment Log is Spec only, composed from Logs. It always has bootstrap events and appears under the Deployment nav for Deployment Owners only.
-- Apply the Admin Dashboard Design Delta (for example, real Tenant Subdomains instead of sample domains).
+- **Logs page:** field search is one field `select` plus a mono value. Fields are event type, User, Application, outcome and time range, and the values are kept in the URL. The empty state reads "No events in this range". The retention note reads 90 days. The design's Live view, Log streams, query bar and SIEM sentence are removed.
+- **Event drawer:** a row opens a right-hand `drawer` (440px, capped at half the window) with a code badge, summary rows and raw JSON with Copy. Esc closes it. A Viewer sees the summary only.
+- **User · History:** this tab lists a User's recent events. The empty state reads "No events yet". Viewers see summaries only. For an Editor, a row opens the same drawer with raw detail.
+- **Deployment Log:** this page is specified but not drawn. It is built from the Logs page and is never empty, because bootstrap events always exist.
+- Replace sample domains with Tenant Subdomains.
 
 ## Cross-Story Dependencies
 
-- Builds on Epic 1: audit tables and `IAuditAppender` (1.5), scrubbing sink and first canary scanner (1.6), OpenBao/Transit (1.7), Object Lock adapter and alert channel (1.30), DB roles and RLS (1.4).
-- 7.1 comes before 7.2 and 7.3 (both need sealed ranges and heads). Verify in 7.3 checks off-server heads from 7.2.
-- 7.5 and 7.6 rely on the Admin capability matrix (Epic 8 / FR-39). 7.6 extends the User detail from Epic 5. User erasure (5.9) must leave chains verifiable.
-- 7.7 tests Deployment events not yet built by fixture.
-- 7.8 leaves email change and Management API grant event classes on a pending list, closed by Story 16.8 and Story 17.2.
-- Later consumers: Security Alerts and the heartbeat (Epic 11), restore and revocation replay with a new epoch (Epic 12), compromise response (Epic 13).
+- These are already built: the audit event write per state change (Story 1.5), the scrubbing sink and canary scan (Story 1.6), Tenant-scoped jobs and Operations (Stories 1.8 and 1.9), the capability table (Story 1.24), the alert channel and off-server store (Story 1.30), Tenant deletion (Story 1.29) and User data erasure (Story 5.9).
+- Story 7.1's sealing comes before shipping (7.2), verification and retention (7.3), and the off-server heads that 7.3 verifies against.
+- Story 7.5's drawer and its summary-only rule for Viewers are reused by 7.6 and 7.7. Story 7.4's search page is the base for 7.7.
+- Story 7.6 adds a History tab to the User profile from Epic 5.
+- Story 7.7 tests the Deployment event classes that aren't built yet by fixture. Story 7.8 puts the email change and Management API grant event classes on a pending list, which Stories 16.8 and 17.2 close.
+- Admin invites and Role management come in Epic 8. Epic 7 enforces the existing Viewer, Editor and Owner capabilities.

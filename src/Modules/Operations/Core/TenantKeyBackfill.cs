@@ -19,7 +19,8 @@ namespace Gatekeep.Modules.Operations.Core;
 /// created is its creation Operation's, not this job's. Story 2.8: in the same scope, it also gives every
 /// active Tenant its hidden <c>system</c> Application (AD-12) when it has none, through
 /// <see cref="IDirectory.EnsureSystemApplicationAsync"/>, so a Tenant an older Worker activated during an
-/// upgrade, after the migration's one-time backfill, gets one too.
+/// upgrade, after the migration's one-time backfill, gets one too. Story 3.6: likewise its built-in Management API and
+/// every Management Permission it lacks, through <see cref="IDirectory.EnsureBuiltInApiAsync"/>.
 /// </summary>
 internal static class TenantKeyBackfill
 {
@@ -61,6 +62,9 @@ internal static class TenantKeyBackfill
                     await Applications.EnsureSystemApplicationAsync(context, cancellationToken);
                     changed = true;
                 }
+
+                // Story 3.6: the built-in Management API and any Management Permission it lacks.
+                changed |= await Applications.EnsureBuiltInApiAsync(context, cancellationToken);
 
                 if (changed)
                 {

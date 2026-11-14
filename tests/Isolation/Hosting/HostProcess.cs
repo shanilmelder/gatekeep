@@ -221,6 +221,22 @@ internal sealed class HostProcess : IDisposable
         return ((IPEndPoint)listener.LocalEndpoint).Port;
     }
 
+    /// <summary>
+    /// Two different ports, each free right now on every address, such as a host's health and
+    /// public ports. Both probes stay open until both are chosen: two <see cref="FreePort"/> calls
+    /// can return the same just-released port, which a host refuses as an unsafe HealthPort.
+    /// </summary>
+    public static (int First, int Second) FreePorts()
+    {
+        using var first = new TcpListener(IPAddress.IPv6Any, 0);
+        first.Server.DualMode = true;
+        first.Start();
+        using var second = new TcpListener(IPAddress.IPv6Any, 0);
+        second.Server.DualMode = true;
+        second.Start();
+        return (((IPEndPoint)first.LocalEndpoint).Port, ((IPEndPoint)second.LocalEndpoint).Port);
+    }
+
     private async Task Pump(StreamReader reader, StringBuilder stream)
     {
         var buffer = new char[4096];

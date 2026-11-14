@@ -63,4 +63,34 @@ public static class ManagementContract
         ArgumentNullException.ThrowIfNull(appender);
         return new ApplicationManagement(appender);
     }
+
+    /// <summary>
+    /// A Tenant's APIs and their Permissions (Story 3.6), as <c>gk_admin</c>, in the path Tenant's own scope, over
+    /// Directory's contract. Each write's event goes through <paramref name="appender"/>.
+    /// </summary>
+    public static IApiManagement CreateApis(IAuditAppender appender)
+    {
+        ArgumentNullException.ThrowIfNull(appender);
+        return new ApiManagement(appender);
+    }
+
+    /// <summary>The fields an API or Permission write's errors name (Story 3.6), lifetimes included.</summary>
+    public static IReadOnlyList<string> ApiFields =>
+        [.. Gatekeep.Modules.Directory.Contracts.ApiFields.All, .. Gatekeep.Modules.Directory.Contracts.ApplicationLifetimeFields.All];
+
+    /// <summary>The reasons an API or Permission write's errors give (Story 3.6), lifetimes' included.</summary>
+    public static IReadOnlyList<string> ApiReasons =>
+        [.. Gatekeep.Modules.Directory.Contracts.ApiReasons.All, .. Gatekeep.Modules.Directory.Contracts.ApplicationLifetimeReasons.All];
+
+    /// <summary>The longest API name, after trimming (Story 3.6).</summary>
+    public const int MaxApiNameLength = Gatekeep.Kernel.Limits.SecurityLimits.MaxApiNameLength;
+
+    /// <summary>The longest API identifier (Story 3.6).</summary>
+    public const int MaxApiIdentifierLength = Gatekeep.Kernel.Limits.SecurityLimits.MaxApiIdentifierLength;
+
+    /// <summary>The longest Permission description (Story 3.6).</summary>
+    public const int MaxPermissionDescriptionLength = Gatekeep.Kernel.Limits.SecurityLimits.MaxPermissionDescriptionLength;
+
+    /// <summary>The most Permissions one API holds (Story 3.6).</summary>
+    public const int MaxPermissionsPerApi = Gatekeep.Kernel.Limits.SecurityLimits.MaxPermissionsPerApi;
 }

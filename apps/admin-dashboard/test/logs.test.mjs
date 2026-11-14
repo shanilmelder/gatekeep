@@ -15,6 +15,7 @@ import {
   searchOf,
   utcTime,
 } from '../src/shell/logs.ts';
+import { eventSummary, referenceText } from '../src/shell/logEvent.ts';
 
 const NOW = Date.parse('2026-11-06T12:00:00.000Z');
 
@@ -102,5 +103,67 @@ describe('Logs field search', () => {
     assert.equal(utcTime('2026-11-06T09:00:02.123+00:00'), '2026-11-06 09:00:02');
     assert.equal(utcTime('2026-11-06T10:00:02+01:00'), '2026-11-06 09:00:02');
     assert.equal(utcTime('not a time'), 'not a time');
+  });
+});
+
+// Story 7.5: the event drawer's summary rows. Detail rows come only from `raw`, which the server
+// sends to an Editor or Owner alone.
+describe('Log event summary', () => {
+  const LABELS = {
+    time: 'Time (UTC)',
+    actor: 'Actor',
+    target: 'Target',
+    user: 'User',
+    application: 'Application',
+    ipAddress: 'IP address',
+    userAgent: 'User-Agent',
+    email: 'Email',
+  };
+  const envelope = {
+    id: 'evt_a',
+    occurredAt: '2026-11-14T09:30:05.000Z',
+    type: 'sessions.session.started',
+    actor: { kind: 'user', id: 'u-1' },
+    target: { kind: 'client', id: 'c-1' },
+  };
+  const summaryEvent = { ...envelope, outcome: 'success', summary: "A User's Session started.", raw: null };
+  const detail = { ipAddress: '198.51.100.23', userAgent: 'Agent/1.0', email: 'u1@example.test' };
+  const raw = { ...envelope, seal: { seq: 2, prevHash: 'a1'.repeat(32), hash: 'b2'.repeat(32) }, detail };
+
+  const keys = (rows) => rows.map((row) => row.key);
+
+  it('lists Time, Actor, Target, User and Application from the envelope, without detail when raw is null', () => {
+    const rows = eventSummary(summaryEvent, LABELS);
+    assert.deepEqual(keys(rows), ['time', 'actor', 'target', 'user', 'application']);
+    assert.deepEqual(rows[0], { key: 'time', label: 'Time (UTC)', value: '2026-11-14 09:30:05', code: false });
+    assert.equal(rows[1].value, 'user u-1');
+    assert.equal(rows[2].value, 'client c-1');
+    assert.equal(rows[3].value, 'u-1');
+    assert.equal(rows[4].value, 'c-1');
+    const text = JSON.stringify(rows);
+    for (const planted of Object.values(detail)) assert.equal(text.includes(planted), false);
+  });
+
+  it('adds IP address, User-Agent and Email only from raw.detail, and only the ones it holds', () => {
+    assert.deepEqual(keys(eventSummary({ ...summaryEvent, raw }, LABELS)), [
+      'time',
+      'actor',
+      'target',
+      'user',
+      'application',
+      'ipAddress',
+      'userAgent',
+      'email',
+    ]);
+    const rows = eventSummary({ ...summaryEvent, raw: { ...raw, detail: { ipAddress: null, userAgent: 'Agent/1.0', email: null } } }, LABELS);
+    assert.deepEqual(keys(rows).slice(5), ['userAgent']);
+    assert.deepEqual(keys(eventSummary({ ...summaryEvent, raw: { ...raw, detail: null } }, LABELS)), ['time', 'actor', 'target', 'user', 'application']);
+  });
+
+  it('leaves out a Target, User or Application the envelope does not name', () => {
+    const system = { ...summaryEvent, actor: { kind: 'system', id: null }, target: null };
+    assert.deepEqual(keys(eventSummary(system, LABELS)), ['time', 'actor']);
+    assert.equal(eventSummary(system, LABELS)[1].value, 'system');
+    assert.equal(referenceText({ kind: 'tenant', id: 'ten_a' }), 'tenant ten_a');
   });
 });

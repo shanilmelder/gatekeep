@@ -122,13 +122,17 @@ internal static class TenantCreation
     /// <summary>
     /// Does nothing to a Tenant that isn't creating, so a deleted one never gets settings back (Story 1.29).
     /// Only the call that activates it writes its <c>system</c> Application (Story 2.8), in the Tenant's own
-    /// scope and transaction, so activation and that row commit together or not at all.
+    /// scope and transaction, so activation and that row commit together or not at all. Story 3.6 adds the built-in
+    /// Management API and its Permissions the same way.
     /// </summary>
     private static async Task ActivateAsync(OperationCompletion completion, CancellationToken cancellationToken)
     {
         if (await Tenants.ActivateAsync(completion.Context, completion.TenantId, cancellationToken))
         {
             await Applications.EnsureSystemApplicationAsync(completion.Context, cancellationToken);
+
+            // Story 3.6: the built-in Management API and its Permissions, in the same scope and transaction.
+            await Applications.EnsureBuiltInApiAsync(completion.Context, cancellationToken);
         }
     }
 }

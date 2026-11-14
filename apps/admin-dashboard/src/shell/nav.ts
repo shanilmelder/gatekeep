@@ -10,9 +10,10 @@
 // first Tenant one, Settings → Tenant, which any Tenant Role in the path Tenant sees; Story 7.4
 // Monitoring → Logs, for tenant.logs.read; Story 9.1 Security → Signing keys, which any Tenant Role
 // sees too; Story 3.1 Applications → Applications, which any Tenant Role sees, and later Epic 3
-// stories the other Applications ones.
+// stories the other Applications ones: Story 3.6 Applications → APIs, which any Tenant Role sees too.
 
 import type { AdminNavGroupId, AdminNavItem, Messages } from '@gatekeep/ui/admin';
+import { apisPath } from './apis';
 import { applicationsPath } from './applications';
 import type { Capability } from './capabilities';
 
@@ -38,6 +39,12 @@ export const NAV: readonly NavEntry[] = [
     group: 'applications',
     label: 'applicationsTitle',
     href: applicationsPath,
+    requires: 'tenant.configuration.read',
+  },
+  {
+    group: 'applications',
+    label: 'apisTitle',
+    href: apisPath,
     requires: 'tenant.configuration.read',
   },
   {

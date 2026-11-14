@@ -1969,6 +1969,99 @@
         "x-gatekeep-recovery-allowed": false
       }
     },
+    "/api/v1/tenants/{tenantId}/logs/{eventId}": {
+      "get": {
+        "tags": [
+          "Tenants"
+        ],
+        "summary": "One event of the path Tenant's Log, with its raw detail for an Editor or Owner.",
+        "description": "Any Tenant Role in the path Tenant. Read only, in the Tenant's own scope, and the read isn't audited. The same fields as a search row. raw is set only when the caller holds tenant.log_detail.read in this Tenant (Editor and Owner): the envelope, the seal (seq, and prevHash and hash in lowercase hex; null while unsealed, prevHash null for a chain's first event) and the detail (IP address, User-Agent and email, each nullable; null when the event has none). For anyone else raw is null and no detail is read. An eventId that isn't an evt_ ID is 400 invalid_request. An event this Tenant doesn't have, including another Tenant's, is 404 not_found. A malformed, unknown or role-less Tenant is 403 access_denied, audited as every Tenant capability refusal is.",
+        "operationId": "GetTenantLogEvent",
+        "parameters": [
+          {
+            "name": "tenantId",
+            "in": "path",
+            "description": "The Tenant's public ID: ten_ and the UUID's 16 bytes in lowercase RFC 4648 base32 with no padding, whose last character carries two zero bits. Only this canonical spelling, after URL decoding, names a Tenant, and the empty UUID's never does; anything else is refused like a Tenant the Admin holds no role in.",
+            "required": true,
+            "schema": {
+              "pattern": "^ten_[a-z2-7]{25}[aeimquy4]$",
+              "type": "string"
+            }
+          },
+          {
+            "name": "eventId",
+            "in": "path",
+            "description": "The event's public ID, as the search lists it: evt_ and 26 base32 characters.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TenantLogEventDetailResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "access_denied, with the problem body, when the capability is refused. No body when an earlier check refuses first: a Session restricted to setup, or on a state-changing call a wrong Origin or CSRF token.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "adminSession": [ ]
+          }
+        ],
+        "x-gatekeep-setup-allowed": false,
+        "x-gatekeep-access": {
+          "kind": "capability",
+          "capability": "tenant.logs.read",
+          "scope": "tenant",
+          "machineAllowed": true,
+          "freshAssertion": "never"
+        },
+        "x-gatekeep-recovery-allowed": false
+      }
+    },
     "/api/v1/tenants/{tenantId}/signing-keys": {
       "get": {
         "tags": [
@@ -3161,6 +3254,583 @@
         }
       }
     },
+    "/api/v1/tenants/{tenantId}/apis": {
+      "get": {
+        "tags": [
+          "Tenants"
+        ],
+        "summary": "The path Tenant's APIs: the built-in Management API first, then newest first, 50 a page.",
+        "description": "Any Tenant Role in the path Tenant. Read only, in the Tenant's own scope: no other Tenant's API is ever listed. Every Tenant has its built-in Gatekeep Management API (urn:gatekeep:management), so the list is never empty. Each API's ID, name, identifier, whether it is built in, offline access, RBAC, its four token lifetimes and when it was created. nextCursor is the last API's ID when another page follows, else null; pass it back as cursor. A cursor sent twice, empty or that isn't an api_ ID is 400 invalid_request. A malformed, unknown or role-less Tenant is 403 access_denied, audited as every Tenant capability refusal is.",
+        "operationId": "ListApis",
+        "parameters": [
+          {
+            "name": "tenantId",
+            "in": "path",
+            "description": "The Tenant's public ID: ten_ and the UUID's 16 bytes in lowercase RFC 4648 base32 with no padding, whose last character carries two zero bits. Only this canonical spelling, after URL decoding, names a Tenant, and the empty UUID's never does; anything else is refused like a Tenant the Admin holds no role in.",
+            "required": true,
+            "schema": {
+              "pattern": "^ten_[a-z2-7]{25}[aeimquy4]$",
+              "type": "string"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "The previous page's nextCursor: an api_ public ID.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResourceListResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "access_denied, with the problem body, when the capability is refused. No body when an earlier check refuses first: a Session restricted to setup, or on a state-changing call a wrong Origin or CSRF token.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "adminSession": [ ]
+          }
+        ],
+        "x-gatekeep-setup-allowed": false,
+        "x-gatekeep-access": {
+          "kind": "capability",
+          "capability": "tenant.configuration.read",
+          "scope": "tenant",
+          "machineAllowed": true,
+          "freshAssertion": "never"
+        },
+        "x-gatekeep-recovery-allowed": false
+      },
+      "post": {
+        "tags": [
+          "Tenants"
+        ],
+        "summary": "Create an API in the path Tenant, with a name and an identifier that never changes.",
+        "description": "Tenant Editors and Owners, and machine principals that hold tenant.apis.manage; no fresh assertion. The name is trimmed, then 1 to 200 characters with no control character, and two APIs may share one. The identifier is the audience its tokens will name: 1 to 255 characters, an absolute URI with a scheme and no fragment or white space, such as https://api.example.com, matched exactly, case included. Use a different identifier in each environment. It can't be changed later. An identifier under urn:gatekeep: is reserved for the built-in Management API. The API starts with offline access and RBAC off, the default token lifetimes and no Permission. In one transaction it writes the API and directory.api.created by the caller. A body that isn't JSON, is over 4096 bytes, misses a field or has the wrong type is 400 api_invalid with no errors; an invalid name or identifier is 400 api_invalid with errors naming each field and reason (invalid or reserved); an identifier another API of this Tenant has is 409 api_identifier_taken. Nothing is written on any of them. The answer is the API with its Permissions, and Location names it.",
+        "operationId": "CreateApi",
+        "parameters": [
+          {
+            "name": "tenantId",
+            "in": "path",
+            "description": "The Tenant's public ID: ten_ and the UUID's 16 bytes in lowercase RFC 4648 base32 with no padding, whose last character carries two zero bits. Only this canonical spelling, after URL decoding, names a Tenant, and the empty UUID's never does; anything else is refused like a Tenant the Admin holds no role in.",
+            "required": true,
+            "schema": {
+              "pattern": "^ten_[a-z2-7]{25}[aeimquy4]$",
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Gatekeep-Tenant",
+            "in": "header",
+            "description": "The Tenant the page shows, its ten_ ID: it must equal {tenantId}, or 409 tenant_mismatch. It never selects a Tenant.",
+            "required": true,
+            "schema": {
+              "pattern": "^ten_[a-z2-7]{25}[aeimquy4]$",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateApiRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResourceDetailResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "access_denied, with the problem body, when the capability is refused. No body when an earlier check refuses first: a Session restricted to setup, or on a state-changing call a wrong Origin or CSRF token.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "tenant_mismatch, with the problem body, when X-Gatekeep-Tenant is missing, sent twice or isn't {tenantId}, and nothing ran; or another conflict the operation's description names.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "adminSession": [ ],
+            "csrf": [ ]
+          }
+        ],
+        "x-gatekeep-setup-allowed": false,
+        "x-gatekeep-access": {
+          "kind": "capability",
+          "capability": "tenant.apis.manage",
+          "scope": "tenant",
+          "machineAllowed": true,
+          "freshAssertion": "never"
+        },
+        "x-gatekeep-recovery-allowed": false
+      }
+    },
+    "/api/v1/tenants/{tenantId}/apis/{apiId}": {
+      "get": {
+        "tags": [
+          "Tenants"
+        ],
+        "summary": "One of the path Tenant's APIs, with its Permissions.",
+        "description": "Any Tenant Role in the path Tenant. Read only, in the Tenant's own scope. The same fields as the list, and its Permissions by value, each with its description. An apiId that isn't an api_ ID, names no API of this Tenant or names another Tenant's is the same 404 not_found. A malformed, unknown or role-less Tenant is 403 access_denied, audited as every Tenant capability refusal is.",
+        "operationId": "GetApi",
+        "parameters": [
+          {
+            "name": "tenantId",
+            "in": "path",
+            "description": "The Tenant's public ID: ten_ and the UUID's 16 bytes in lowercase RFC 4648 base32 with no padding, whose last character carries two zero bits. Only this canonical spelling, after URL decoding, names a Tenant, and the empty UUID's never does; anything else is refused like a Tenant the Admin holds no role in.",
+            "required": true,
+            "schema": {
+              "pattern": "^ten_[a-z2-7]{25}[aeimquy4]$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResourceDetailResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "access_denied, with the problem body, when the capability is refused. No body when an earlier check refuses first: a Session restricted to setup, or on a state-changing call a wrong Origin or CSRF token.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "adminSession": [ ]
+          }
+        ],
+        "x-gatekeep-setup-allowed": false,
+        "x-gatekeep-access": {
+          "kind": "capability",
+          "capability": "tenant.configuration.read",
+          "scope": "tenant",
+          "machineAllowed": true,
+          "freshAssertion": "never"
+        },
+        "x-gatekeep-recovery-allowed": false
+      }
+    },
+    "/api/v1/tenants/{tenantId}/apis/{apiId}/settings": {
+      "put": {
+        "tags": [
+          "Tenants"
+        ],
+        "summary": "Save an API's offline access, RBAC and token lifetimes.",
+        "description": "Tenant Editors and Owners, and machine principals that hold tenant.apis.manage; no fresh assertion. The body is every setting and replaces what is stored: offlineAccess and rbac, and the four lifetimes in whole seconds with an Application's limits: accessTokenLifetime and idTokenLifetime 1 to 3600, refreshTokenAbsoluteLifetime 1 to 7776000 and refreshTokenInactivityLifetime 1 to 2592000. The defaults are 900, 900, 2592000 and 604800. A token for this API lives the shorter of its lifetime and its Application's. A value over its limit is 400 api_invalid with errors naming each field, reason above_maximum and the limit as maximum; under 1 is below_minimum. A body that isn't JSON, is over 4096 bytes, misses a field, or holds a lifetime that isn't a JSON whole number in the 32-bit range is 400 api_invalid with no errors. The built-in Management API's settings may be saved too; its identifier and Permissions can't. A save that changes something writes directory.api.updated; one that changes nothing writes nothing and is 200. The answer is the API with its Permissions. An apiId that isn't an api_ ID, names no API of this Tenant or names another Tenant's is the same 404 not_found.",
+        "operationId": "UpdateApiSettings",
+        "parameters": [
+          {
+            "name": "tenantId",
+            "in": "path",
+            "description": "The Tenant's public ID: ten_ and the UUID's 16 bytes in lowercase RFC 4648 base32 with no padding, whose last character carries two zero bits. Only this canonical spelling, after URL decoding, names a Tenant, and the empty UUID's never does; anything else is refused like a Tenant the Admin holds no role in.",
+            "required": true,
+            "schema": {
+              "pattern": "^ten_[a-z2-7]{25}[aeimquy4]$",
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Gatekeep-Tenant",
+            "in": "header",
+            "description": "The Tenant the page shows, its ten_ ID: it must equal {tenantId}, or 409 tenant_mismatch. It never selects a Tenant.",
+            "required": true,
+            "schema": {
+              "pattern": "^ten_[a-z2-7]{25}[aeimquy4]$",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApiSettingsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResourceDetailResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "access_denied, with the problem body, when the capability is refused. No body when an earlier check refuses first: a Session restricted to setup, or on a state-changing call a wrong Origin or CSRF token.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "tenant_mismatch, with the problem body, when X-Gatekeep-Tenant is missing, sent twice or isn't {tenantId}, and nothing ran; or another conflict the operation's description names.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "adminSession": [ ],
+            "csrf": [ ]
+          }
+        ],
+        "x-gatekeep-setup-allowed": false,
+        "x-gatekeep-access": {
+          "kind": "capability",
+          "capability": "tenant.apis.manage",
+          "scope": "tenant",
+          "machineAllowed": true,
+          "freshAssertion": "never"
+        },
+        "x-gatekeep-recovery-allowed": false
+      }
+    },
+    "/api/v1/tenants/{tenantId}/apis/{apiId}/permissions": {
+      "post": {
+        "tags": [
+          "Tenants"
+        ],
+        "summary": "Add a resource:action Permission to an API.",
+        "description": "Tenant Editors and Owners, and machine principals that hold tenant.apis.manage; no fresh assertion. The value is resource:action, lowercase, each part a letter or digit followed by up to 63 letters, digits, _, . or -, such as invoices:read, and unique in the API; the description is trimmed, then 0 to 200 characters with no control character, and may be left out. An API holds at most 200 Permissions. It writes the Permission and directory.api.permission_added by the caller. A body that isn't JSON, is over 4096 bytes or misses the value is 400 api_invalid with no errors; an invalid value or description is 400 api_invalid with errors naming each field; a value the API has is 409 permission_taken; an API at its limit is 409 permission_limit_reached; the built-in Management API, whose Permissions are fixed, is 409 api_built_in. Nothing is written on any of them. The answer is the API with its Permissions, and Location names the API. An apiId that isn't an api_ ID, names no API of this Tenant or names another Tenant's is the same 404 not_found.",
+        "operationId": "AddApiPermission",
+        "parameters": [
+          {
+            "name": "tenantId",
+            "in": "path",
+            "description": "The Tenant's public ID: ten_ and the UUID's 16 bytes in lowercase RFC 4648 base32 with no padding, whose last character carries two zero bits. Only this canonical spelling, after URL decoding, names a Tenant, and the empty UUID's never does; anything else is refused like a Tenant the Admin holds no role in.",
+            "required": true,
+            "schema": {
+              "pattern": "^ten_[a-z2-7]{25}[aeimquy4]$",
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Gatekeep-Tenant",
+            "in": "header",
+            "description": "The Tenant the page shows, its ten_ ID: it must equal {tenantId}, or 409 tenant_mismatch. It never selects a Tenant.",
+            "required": true,
+            "schema": {
+              "pattern": "^ten_[a-z2-7]{25}[aeimquy4]$",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddApiPermissionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResourceDetailResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "access_denied, with the problem body, when the capability is refused. No body when an earlier check refuses first: a Session restricted to setup, or on a state-changing call a wrong Origin or CSRF token.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "tenant_mismatch, with the problem body, when X-Gatekeep-Tenant is missing, sent twice or isn't {tenantId}, and nothing ran; or another conflict the operation's description names.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "adminSession": [ ],
+            "csrf": [ ]
+          }
+        ],
+        "x-gatekeep-setup-allowed": false,
+        "x-gatekeep-access": {
+          "kind": "capability",
+          "capability": "tenant.apis.manage",
+          "scope": "tenant",
+          "machineAllowed": true,
+          "freshAssertion": "never"
+        },
+        "x-gatekeep-recovery-allowed": false
+      }
+    },
+    "/api/v1/tenants/{tenantId}/apis/{apiId}/permissions/{value}": {
+      "delete": {
+        "tags": [
+          "Tenants"
+        ],
+        "summary": "Remove one of an API's Permissions.",
+        "description": "Tenant Editors and Owners, and machine principals that hold tenant.apis.manage; no fresh assertion and no body. The value is the Permission's, such as invoices:read. It deletes the Permission and writes directory.api.permission_removed by the caller: 204. The built-in Management API's Permissions are fixed: 409 api_built_in. An apiId that isn't an api_ ID, names no API of this Tenant or another Tenant's, and a value the API has no Permission by, are the same 404 not_found. Nothing is written on any refusal.",
+        "operationId": "RemoveApiPermission",
+        "parameters": [
+          {
+            "name": "tenantId",
+            "in": "path",
+            "description": "The Tenant's public ID: ten_ and the UUID's 16 bytes in lowercase RFC 4648 base32 with no padding, whose last character carries two zero bits. Only this canonical spelling, after URL decoding, names a Tenant, and the empty UUID's never does; anything else is refused like a Tenant the Admin holds no role in.",
+            "required": true,
+            "schema": {
+              "pattern": "^ten_[a-z2-7]{25}[aeimquy4]$",
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Gatekeep-Tenant",
+            "in": "header",
+            "description": "The Tenant the page shows, its ten_ ID: it must equal {tenantId}, or 409 tenant_mismatch. It never selects a Tenant.",
+            "required": true,
+            "schema": {
+              "pattern": "^ten_[a-z2-7]{25}[aeimquy4]$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "access_denied, with the problem body, when the capability is refused. No body when an earlier check refuses first: a Session restricted to setup, or on a state-changing call a wrong Origin or CSRF token.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "tenant_mismatch, with the problem body, when X-Gatekeep-Tenant is missing, sent twice or isn't {tenantId}, and nothing ran; or another conflict the operation's description names.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "adminSession": [ ],
+            "csrf": [ ]
+          }
+        ],
+        "x-gatekeep-setup-allowed": false,
+        "x-gatekeep-access": {
+          "kind": "capability",
+          "capability": "tenant.apis.manage",
+          "scope": "tenant",
+          "machineAllowed": true,
+          "freshAssertion": "never"
+        },
+        "x-gatekeep-recovery-allowed": false
+      }
+    },
     "/api/v1/tenants/{tenantId}/assertions": {
       "post": {
         "tags": [
@@ -3289,6 +3959,25 @@
   },
   "components": {
     "schemas": {
+      "AddApiPermissionRequest": {
+        "required": [
+          "value"
+        ],
+        "type": "object",
+        "properties": {
+          "value": {
+            "pattern": "^[a-z0-9][a-z0-9_.-]{0,63}:[a-z0-9][a-z0-9_.-]{0,63}$",
+            "type": "string"
+          },
+          "description": {
+            "maxLength": 200,
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        }
+      },
       "AdminCredentialRemovalResponse": {
         "required": [
           "sessionEnded"
@@ -3562,6 +4251,23 @@
           }
         }
       },
+      "ApiPermissionResponse": {
+        "required": [
+          "value",
+          "description"
+        ],
+        "type": "object",
+        "properties": {
+          "value": {
+            "pattern": "^[a-z0-9][a-z0-9_.-]{0,63}:[a-z0-9][a-z0-9_.-]{0,63}$",
+            "type": "string"
+          },
+          "description": {
+            "maxLength": 200,
+            "type": "string"
+          }
+        }
+      },
       "ApiProblem": {
         "required": [
           "code",
@@ -3597,6 +4303,11 @@
               "custom_scheme_acknowledgement_required",
               "client_secret_not_applicable",
               "client_secret_limit_reached",
+              "api_invalid",
+              "api_identifier_taken",
+              "permission_taken",
+              "permission_limit_reached",
+              "api_built_in",
               "signing_key_not_ready"
             ],
             "type": "string"
@@ -3639,7 +4350,11 @@
               "accessTokenLifetime",
               "idTokenLifetime",
               "refreshTokenAbsoluteLifetime",
-              "refreshTokenInactivityLifetime"
+              "refreshTokenInactivityLifetime",
+              "name",
+              "identifier",
+              "value",
+              "description"
             ],
             "type": "string"
           },
@@ -3660,7 +4375,9 @@
               "duplicate",
               "not_allowed_for_type",
               "below_minimum",
-              "above_maximum"
+              "above_maximum",
+              "invalid",
+              "reserved"
             ],
             "type": "string"
           },
@@ -3669,6 +4386,140 @@
               "null",
               "integer"
             ],
+            "format": "int32"
+          }
+        }
+      },
+      "ApiResourceDetailResponse": {
+        "required": [
+          "api",
+          "permissions"
+        ],
+        "type": "object",
+        "properties": {
+          "api": {
+            "$ref": "#/components/schemas/ApiResourceResponse"
+          },
+          "permissions": {
+            "maxItems": 200,
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ApiPermissionResponse"
+            }
+          }
+        }
+      },
+      "ApiResourceListResponse": {
+        "required": [
+          "apis",
+          "nextCursor"
+        ],
+        "type": "object",
+        "properties": {
+          "apis": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ApiResourceResponse"
+            }
+          },
+          "nextCursor": {
+            "pattern": "^api_[a-z2-7]{25}[aeimquy4]$",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        }
+      },
+      "ApiResourceResponse": {
+        "required": [
+          "id",
+          "name",
+          "identifier",
+          "builtIn",
+          "offlineAccess",
+          "rbac",
+          "accessTokenLifetime",
+          "idTokenLifetime",
+          "refreshTokenAbsoluteLifetime",
+          "refreshTokenInactivityLifetime",
+          "createdAt"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "pattern": "^api_[a-z2-7]{25}[aeimquy4]$",
+            "type": "string"
+          },
+          "name": {
+            "maxLength": 200,
+            "type": "string"
+          },
+          "identifier": {
+            "maxLength": 255,
+            "type": "string"
+          },
+          "builtIn": {
+            "type": "boolean"
+          },
+          "offlineAccess": {
+            "type": "boolean"
+          },
+          "rbac": {
+            "type": "boolean"
+          },
+          "accessTokenLifetime": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "idTokenLifetime": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "refreshTokenAbsoluteLifetime": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "refreshTokenInactivityLifetime": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "createdAt": {
+            "type": "string"
+          }
+        }
+      },
+      "ApiSettingsRequest": {
+        "required": [
+          "offlineAccess",
+          "rbac",
+          "accessTokenLifetime",
+          "idTokenLifetime",
+          "refreshTokenAbsoluteLifetime",
+          "refreshTokenInactivityLifetime"
+        ],
+        "type": "object",
+        "properties": {
+          "offlineAccess": {
+            "type": "boolean"
+          },
+          "rbac": {
+            "type": "boolean"
+          },
+          "accessTokenLifetime": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "idTokenLifetime": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "refreshTokenAbsoluteLifetime": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "refreshTokenInactivityLifetime": {
+            "type": "integer",
             "format": "int32"
           }
         }
@@ -4000,6 +4851,23 @@
           }
         }
       },
+      "CreateApiRequest": {
+        "required": [
+          "name",
+          "identifier"
+        ],
+        "type": "object",
+        "properties": {
+          "name": {
+            "maxLength": 200,
+            "type": "string"
+          },
+          "identifier": {
+            "maxLength": 255,
+            "type": "string"
+          }
+        }
+      },
       "CreateApplicationRequest": {
         "required": [
           "name",
@@ -4245,7 +5113,8 @@
               "admin",
               "user",
               "client",
-              "tenant"
+              "tenant",
+              "api"
             ],
             "type": "string"
           },
@@ -4675,6 +5544,69 @@
           }
         }
       },
+      "TenantLogEventDetailResponse": {
+        "required": [
+          "id",
+          "occurredAt",
+          "type",
+          "outcome",
+          "summary",
+          "actor",
+          "target",
+          "raw"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "pattern": "^evt_[a-z2-7]{25}[aeimquy4]$",
+            "type": "string"
+          },
+          "occurredAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "type": {
+            "maxLength": 128,
+            "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*$",
+            "type": "string"
+          },
+          "outcome": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "summary": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "actor": {
+            "$ref": "#/components/schemas/LogReference"
+          },
+          "target": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/LogReference"
+              }
+            ]
+          },
+          "raw": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/TenantLogRawResponse"
+              }
+            ]
+          }
+        }
+      },
       "TenantLogEventResponse": {
         "required": [
           "id",
@@ -4724,6 +5656,119 @@
                 "$ref": "#/components/schemas/LogReference"
               }
             ]
+          }
+        }
+      },
+      "TenantLogRawDetailResponse": {
+        "required": [
+          "ipAddress",
+          "userAgent",
+          "email"
+        ],
+        "type": "object",
+        "properties": {
+          "ipAddress": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "userAgent": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "email": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        }
+      },
+      "TenantLogRawResponse": {
+        "required": [
+          "id",
+          "occurredAt",
+          "type",
+          "actor",
+          "target",
+          "seal",
+          "detail"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "pattern": "^evt_[a-z2-7]{25}[aeimquy4]$",
+            "type": "string"
+          },
+          "occurredAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "type": {
+            "maxLength": 128,
+            "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*$",
+            "type": "string"
+          },
+          "actor": {
+            "$ref": "#/components/schemas/LogReference"
+          },
+          "target": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/LogReference"
+              }
+            ]
+          },
+          "seal": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/TenantLogSealResponse"
+              }
+            ]
+          },
+          "detail": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/TenantLogRawDetailResponse"
+              }
+            ]
+          }
+        }
+      },
+      "TenantLogSealResponse": {
+        "required": [
+          "seq",
+          "prevHash",
+          "hash"
+        ],
+        "type": "object",
+        "properties": {
+          "seq": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "prevHash": {
+            "pattern": "^[0-9a-f]{64}$",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "hash": {
+            "pattern": "^[0-9a-f]{64}$",
+            "type": "string"
           }
         }
       },
