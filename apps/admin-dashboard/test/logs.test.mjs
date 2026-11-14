@@ -6,8 +6,11 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
   DEFAULT_FIELD,
+  DEPLOYMENT_LOG_FIELDS,
+  adminsOf,
   LOG_FIELDS,
   choices,
+  fieldsOf,
   initialValue,
   paramsOf,
   queryOf,
@@ -106,6 +109,68 @@ describe('Logs field search', () => {
   });
 });
 
+// Story 7.7: the Deployment Log's field search, the same mapping over its own fields: Admin and
+// Tenant in place of User and Application.
+describe('Deployment Log field search', () => {
+  const FIELDS = DEPLOYMENT_LOG_FIELDS;
+
+  it('offers its five fields in order, and each scope its own', () => {
+    assert.deepEqual([...FIELDS], ['type', 'admin', 'tenant', 'outcome', 'range']);
+    assert.equal(fieldsOf('deployment'), DEPLOYMENT_LOG_FIELDS);
+    assert.equal(fieldsOf('tenant'), LOG_FIELDS);
+  });
+
+  it('maps Admin and Tenant to their one API parameter, and the shared fields as a Tenant Log does', () => {
+    assert.deepEqual(queryOf({ field: 'admin', value: ' 7c9e6679-7425-40de-944b-e07fc1f90ae7 ' }, NOW, FIELDS), {
+      admin: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
+    });
+    assert.deepEqual(queryOf({ field: 'tenant', value: 'ten_aaaaaaaaaaaaaaaaaaaaaaaaaa' }, NOW, FIELDS), { tenant: 'ten_aaaaaaaaaaaaaaaaaaaaaaaaaa' });
+    assert.deepEqual(queryOf({ field: 'type', value: 'bootstrap.admin.created' }, NOW, FIELDS), { type: 'bootstrap.admin.created' });
+    assert.deepEqual(queryOf({ field: 'outcome', value: 'failure' }, NOW, FIELDS), { outcome: 'failure' });
+    assert.deepEqual(queryOf({ field: 'range', value: '7d' }, NOW, FIELDS), { from: '2026-10-30T12:00:00.000Z' });
+    assert.deepEqual(queryOf({ field: 'tenant', value: '' }, NOW, FIELDS), {});
+  });
+
+  it("reads only its own fields from the URL: a Tenant Log's User or Application is the default field", () => {
+    assert.deepEqual(searchOf({ field: 'admin', value: 'a-1' }, FIELDS), { field: 'admin', value: 'a-1' });
+    assert.deepEqual(searchOf({ field: 'tenant', value: 'ten_a' }, FIELDS), { field: 'tenant', value: 'ten_a' });
+    assert.deepEqual(searchOf({ field: 'user', value: 'u-1' }, FIELDS), { field: 'type', value: 'u-1' });
+    assert.deepEqual(searchOf({ field: 'application', value: 'c-1' }, FIELDS), { field: 'type', value: 'c-1' });
+    assert.deepEqual(queryOf({ field: 'user', value: 'u-1' }, NOW, FIELDS), { type: 'u-1' });
+    // And a Tenant's Log never reads the Deployment Log's.
+    assert.deepEqual(searchOf({ field: 'admin', value: 'a-1' }), { field: 'type', value: 'a-1' });
+    assert.deepEqual(queryOf({ field: 'tenant', value: 'ten_a' }, NOW), { type: 'ten_a' });
+  });
+
+  it('round-trips a Deployment search through the URL', () => {
+    for (const search of [
+      { field: 'admin', value: '7c9e6679-7425-40de-944b-e07fc1f90ae7' },
+      { field: 'tenant', value: 'ten_aaaaaaaaaaaaaaaaaaaaaaaaaa' },
+      { field: 'outcome', value: 'success' },
+    ]) {
+      assert.deepEqual(searchOf(paramsOf(search), FIELDS), search);
+    }
+  });
+
+  it('shows both Admins an event names, Actor then target, and one when they are the same', () => {
+    const actor = { kind: 'admin', id: 'a-1' };
+    assert.deepEqual(adminsOf({ actor, target: { kind: 'admin', id: 'a-2' } }), ['a-1', 'a-2']);
+    assert.deepEqual(adminsOf({ actor, target: actor }), ['a-1']);
+    assert.deepEqual(adminsOf({ actor: { kind: 'system', id: null }, target: { kind: 'admin', id: 'a-2' } }), ['a-2']);
+    assert.deepEqual(adminsOf({ actor, target: { kind: 'tenant', id: 'ten_a' } }), ['a-1']);
+    assert.deepEqual(adminsOf({ actor: { kind: 'anonymous', id: null }, target: null }), []);
+  });
+
+  it('shows the Admin an event names, Actor first, and the Tenant it targets', () => {
+    const admin = { kind: 'admin', id: 'a-1' };
+    const tenant = { kind: 'tenant', id: 'ten_a' };
+    assert.equal(referenceOf({ actor: admin, target: tenant }, 'admin'), 'a-1');
+    assert.equal(referenceOf({ actor: admin, target: tenant }, 'tenant'), 'ten_a');
+    assert.equal(referenceOf({ actor: { kind: 'anonymous', id: null }, target: { kind: 'admin', id: 'a-2' } }, 'admin'), 'a-2');
+    assert.equal(referenceOf({ actor: { kind: 'system', id: null }, target: null }, 'tenant'), null);
+  });
+});
+
 // Story 7.5: the event drawer's summary rows. Detail rows come only from `raw`, which the server
 // sends to an Editor or Owner alone.
 describe('Log event summary', () => {
@@ -158,6 +223,16 @@ describe('Log event summary', () => {
     const rows = eventSummary({ ...summaryEvent, raw: { ...raw, detail: { ipAddress: null, userAgent: 'Agent/1.0', email: null } } }, LABELS);
     assert.deepEqual(keys(rows).slice(5), ['userAgent']);
     assert.deepEqual(keys(eventSummary({ ...summaryEvent, raw: { ...raw, detail: null } }, LABELS)), ['time', 'actor', 'target', 'user', 'application']);
+  });
+
+  it('in the Deployment Log, lists no User or Application row, and the detail rows from raw', () => {
+    const deployment = { ...summaryEvent, actor: { kind: 'admin', id: 'a-1' }, target: { kind: 'tenant', id: 'ten_a' }, raw };
+    const rows = eventSummary(deployment, LABELS, 'deployment');
+    assert.deepEqual(keys(rows), ['time', 'actor', 'target', 'ipAddress', 'userAgent', 'email']);
+    assert.equal(rows[1].value, 'admin a-1');
+    assert.equal(rows[2].value, 'tenant ten_a');
+    // A User or Application the envelope names is still only in Actor and Target.
+    assert.deepEqual(keys(eventSummary({ ...summaryEvent, raw: { ...raw, detail: null } }, LABELS, 'deployment')), ['time', 'actor', 'target']);
   });
 
   it('leaves out a Target, User or Application the envelope does not name', () => {

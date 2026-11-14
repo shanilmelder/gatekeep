@@ -157,9 +157,9 @@ internal sealed class TenantLogSearch : ITenantLogSearch
                     reader.GetGuid(0),
                     reader.GetFieldValue<DateTimeOffset>(1),
                     new AuditTypeCode(reader.GetString(2)),
-                    ActorKindOf(reader.GetString(3)),
+                    StoredKinds.ActorKindOf(reader.GetString(3)),
                     reader.IsDBNull(4) ? null : reader.GetGuid(4),
-                    reader.IsDBNull(5) ? null : TargetKindOf(reader.GetString(5)),
+                    reader.IsDBNull(5) ? null : StoredKinds.TargetKindOf(reader.GetString(5)),
                     reader.IsDBNull(6) ? null : reader.GetGuid(6)));
             }
         }
@@ -192,26 +192,6 @@ internal sealed class TenantLogSearch : ITenantLogSearch
     }
 
     private static string[] Codes(IEnumerable<AuditTypeCode> codes) => [.. codes.Select(c => c.Value).Distinct(StringComparer.Ordinal)];
-
-    internal static ActorKind ActorKindOf(string stored) => stored switch
-    {
-        "system" => ActorKind.System,
-        "anonymous" => ActorKind.Anonymous,
-        "admin" => ActorKind.Admin,
-        "user" => ActorKind.User,
-        "client" => ActorKind.Client,
-        _ => throw new InvalidOperationException("An audit event has an unknown Actor kind."),
-    };
-
-    internal static AuditTargetKind TargetKindOf(string stored) => stored switch
-    {
-        "tenant" => AuditTargetKind.Tenant,
-        "admin" => AuditTargetKind.Admin,
-        "user" => AuditTargetKind.User,
-        "client" => AuditTargetKind.Client,
-        "api" => AuditTargetKind.Api,
-        _ => throw new InvalidOperationException("An audit event has an unknown target kind."),
-    };
 
     private static void Add(DbCommand command, string name, object value)
     {

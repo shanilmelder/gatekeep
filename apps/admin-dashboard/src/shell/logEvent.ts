@@ -50,18 +50,25 @@ function named(event: Pick<TenantLogEventDetail, 'actor' | 'target'>, kind: 'use
 /**
  * The drawer's summary rows for an event, in order: Time (UTC) and Actor always; Target, User and
  * Application when the envelope names one; then IP address, User-Agent and Email, each only when
- * `raw.detail` holds it. Without `raw`, no detail row.
+ * `raw.detail` holds it. Without `raw`, no detail row. The Deployment Log (Story 7.7) has no User
+ * or Application row: its Actor and Target rows already name its Admins and Tenants.
  */
-export function eventSummary(event: TenantLogEventDetail, labels: EventSummaryLabels): EventSummaryLine[] {
+export function eventSummary(
+  event: TenantLogEventDetail,
+  labels: EventSummaryLabels,
+  scope: 'tenant' | 'deployment' = 'tenant',
+): EventSummaryLine[] {
   const rows: EventSummaryLine[] = [
     { key: 'time', label: labels.time, value: utc(event.occurredAt), code: false },
     { key: 'actor', label: labels.actor, value: referenceText(event.actor), code: true },
   ];
   if (event.target != null) rows.push({ key: 'target', label: labels.target, value: referenceText(event.target), code: true });
-  const user = named(event, 'user');
-  if (user !== null) rows.push({ key: 'user', label: labels.user, value: user, code: true });
-  const application = named(event, 'client');
-  if (application !== null) rows.push({ key: 'application', label: labels.application, value: application, code: true });
+  if (scope === 'tenant') {
+    const user = named(event, 'user');
+    if (user !== null) rows.push({ key: 'user', label: labels.user, value: user, code: true });
+    const application = named(event, 'client');
+    if (application !== null) rows.push({ key: 'application', label: labels.application, value: application, code: true });
+  }
 
   const detail = event.raw?.detail;
   if (detail != null) {

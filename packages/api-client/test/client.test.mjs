@@ -413,6 +413,52 @@ describe('api-client', () => {
     assert.deepEqual(read.data, event);
   });
 
+  it('searches the Deployment Log with only its own set filters, encoded, in a fixed order, as a read', async () => {
+    const { calls, fetch } = fakeFetch(200, JSON.stringify({ events: [], nextCursor: null }));
+    const client = createApiClient({ fetch, csrfToken: () => 'csrf-1', pageTenant: () => 'ten_a' });
+
+    await client.searchDeploymentLogs();
+    await client.searchDeploymentLogs({
+      cursor: 'evt_c',
+      to: '2026-11-14T10:00:00.000Z',
+      from: '2026-11-14T09:00:00.000Z',
+      outcome: 'failure',
+      tenant: 'ten_b',
+      admin: 'x&y=z',
+      type: 'a.b.c',
+    });
+    await client.searchDeploymentLogs({ type: '', admin: undefined, tenant: 'ten_a', user: 'u-1', application: 'c-1' });
+
+    assert.equal(calls[0].input, '/api/v1/deployment/logs');
+    assert.equal(calls[0].init.method, 'GET');
+    assert.equal(
+      calls[1].input,
+      '/api/v1/deployment/logs?type=a.b.c&admin=x%26y%3Dz&tenant=ten_b&outcome=failure&from=2026-11-14T09%3A00%3A00.000Z&to=2026-11-14T10%3A00%3A00.000Z&cursor=evt_c',
+    );
+    // Empty and undefined filters are dropped, and a Tenant Log's User and Application are never sent.
+    assert.equal(calls[2].input, '/api/v1/deployment/logs?tenant=ten_a');
+    // A read carries neither the CSRF token nor the page Tenant.
+    for (const call of calls) {
+      assert.equal(call.init.method, 'GET');
+      assert.equal(CSRF_HEADER in call.init.headers, false);
+      assert.equal(TENANT_HEADER in call.init.headers, false);
+    }
+  });
+
+  it('opens one Deployment Log event as a read, its ID encoded', async () => {
+    const event = { id: 'evt_a', occurredAt: '2026-11-14T09:30:00.000Z', type: 'a.b.c', outcome: null, summary: null, actor: { kind: 'system', id: null }, target: null, raw: null };
+    const { calls, fetch } = fakeFetch(200, JSON.stringify(event));
+    const client = createApiClient({ fetch, csrfToken: () => 'csrf-1', pageTenant: () => 'ten_a' });
+
+    const read = await client.getDeploymentLogEvent('evt_c?d/e');
+
+    assert.equal(calls[0].input, '/api/v1/deployment/logs/evt_c%3Fd%2Fe');
+    assert.equal(calls[0].init.method, 'GET');
+    assert.equal(CSRF_HEADER in calls[0].init.headers, false);
+    assert.equal(TENANT_HEADER in calls[0].init.headers, false);
+    assert.deepEqual(read.data, event);
+  });
+
   it('parses only a string code, and a missing trace ID as empty', () => {
     assert.equal(parseProblem(null), null);
     assert.equal(parseProblem('x'), null);
