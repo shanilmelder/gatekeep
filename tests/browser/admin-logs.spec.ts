@@ -8,6 +8,8 @@
 // carries raw, shown as JSON with Copy JSON; a Viewer's raw is null, so only the limited note
 // shows. Esc closes it, a failed read offers Retry, and the keyboard opens a row. The server's
 // raw-detail decision is tests/Isolation/Audit/TenantLogEventTests.cs's.
+//
+// Story 7.7: the Deployment Log, the same page at /deployment/logs, is the last describe.
 
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type Page, type Route } from '@playwright/test';
@@ -507,5 +509,175 @@ test.describe('Logs', () => {
     await page.keyboard.press('Escape');
     await expect.poll(() => isOpen(page)).toBe(false);
     await expect(link).toBeFocused();
+  });
+});
+
+// Story 7.7: the Deployment Log, the same page for the Deployment Owner at /deployment/logs. Its
+// search is by Admin and Tenant in place of User and Application, and its drawer always has the
+// raw JSON. The server's search and its refusals are tests/Isolation/Audit/DeploymentLogTests.cs's.
+const DEPLOYMENT_LOGS = '/deployment/logs';
+const DEPLOYMENT_LOG_API = '/api/v1/deployment/logs';
+const OWNER_ID = '01900000-0000-7000-8000-000000000777';
+const OTHER_TENANT = `ten_${'b'.repeat(25)}a`;
+
+/** The Deployment Log as bootstrap leaves it, newest first, after two Tenants were created. */
+function deploymentEvents(): LogEvent[] {
+  const at = (n: number) => new Date(Date.UTC(2026, 10, 14, 8, 0, n)).toISOString();
+  const owner = { kind: 'admin', id: OWNER_ID };
+  const created = 'A Deployment Owner created a Tenant.';
+  return [
+    { id: evt(7), occurredAt: at(7), type: 'tenancy.tenant.created', outcome: 'success', summary: created, actor: owner, target: { kind: 'tenant', id: OTHER_TENANT } },
+    { id: evt(6), occurredAt: at(6), type: 'tenancy.tenant.created', outcome: 'success', summary: created, actor: owner, target: { kind: 'tenant', id: TENANT } },
+    { id: evt(5), occurredAt: at(5), type: 'admin.signin.succeeded', outcome: 'success', summary: 'An Admin signed in.', actor: owner, target: owner },
+    { id: evt(4), occurredAt: at(4), type: 'admin.setup.completed', outcome: 'success', summary: 'An Admin completed setup.', actor: owner, target: owner },
+    { id: evt(3), occurredAt: at(3), type: 'admin.credential.registered', outcome: 'success', summary: 'An Admin registered a credential.', actor: owner, target: owner },
+    { id: evt(2), occurredAt: at(2), type: 'bootstrap.admin.created', outcome: 'success', summary: 'The bootstrap token was claimed.', actor: owner, target: owner },
+    { id: evt(1), occurredAt: at(1), type: 'bootstrap.token.issued', outcome: 'success', summary: 'The first bootstrap token was issued.', actor: { kind: 'system', id: null }, target: null },
+  ];
+}
+
+/** The Admin API for an Admin holding `capabilities`, the Deployment Owner's unless said: the Deployment Log holds `deploymentEvents()`. */
+async function answerDeploymentApi(page: Page, capabilities: string[] = ['deployment.tenants.read', 'deployment.log.read']) {
+  const logReads: URLSearchParams[] = [];
+  const eventReads: string[] = [];
+  const list = deploymentEvents();
+
+  await page.route(
+    (url) => url.pathname.startsWith('/api/'),
+    async (route) => {
+      const url = new URL(route.request().url());
+      const { pathname } = url;
+      if (pathname === SESSION) {
+        return json(route, 200, {
+          adminId: OWNER_ID,
+          kind: 'full',
+          deploymentOwner: capabilities.includes('deployment.log.read'),
+          setupComplete: true,
+          credentials: 2,
+          recoveryCodeAllowed: false,
+          csrfToken: CSRF,
+        });
+      }
+      if (pathname === CAPABILITIES) return json(route, 200, { capabilities });
+      if (pathname === MY_TENANTS) return json(route, 200, { tenants: [] });
+      if (pathname === '/api/v1/deployment/tenants') return json(route, 200, { tenantZone: ZONE, tenants: [], nextCursor: null });
+      if (pathname === DEPLOYMENT_LOG_API) {
+        const query = url.searchParams;
+        logReads.push(query);
+        let found = list;
+        const type = query.get('type');
+        const admin = query.get('admin');
+        const tenant = query.get('tenant');
+        if (type) found = found.filter((e) => e.type === type);
+        if (admin) found = found.filter((e) => e.actor.id === admin || e.target?.id === admin);
+        if (tenant) found = found.filter((e) => e.target?.kind === 'tenant' && e.target.id === tenant);
+        return json(route, 200, { events: found, nextCursor: null });
+      }
+      if (pathname.startsWith(`${DEPLOYMENT_LOG_API}/`)) {
+        const id = decodeURIComponent(pathname.slice(DEPLOYMENT_LOG_API.length + 1));
+        eventReads.push(id);
+        const event = list.find((e) => e.id === id);
+        if (!event) return problem(route, 404, 'not_found');
+        return json(route, 200, opened(event, true));
+      }
+      return route.fulfill({ status: 404 });
+    },
+  );
+
+  return { logReads, eventReads, list };
+}
+
+test.describe('Deployment Log', () => {
+  test('lists the bootstrap events newest first with its own columns, and a Tenant search keeps field and value in the URL', async ({ page }) => {
+    const api = await answerDeploymentApi(page);
+    await page.goto(DEPLOYMENT_LOGS);
+    await expect(heading(page)).toHaveText('Log');
+    await expect(page.getByTestId('deployment-logs-page')).toBeVisible();
+
+    await expect(table(page).locator('thead th')).toHaveText(['Time (UTC)', 'Type', 'Description', 'Admin', 'Tenant']);
+    await expect(rows(page)).toHaveCount(7);
+    await expect(rows(page).first()).toContainText('2026-11-14 08:00:07');
+    await expect(rows(page).first()).toContainText(OWNER_ID);
+    await expect(rows(page).first()).toContainText(OTHER_TENANT);
+    await expect(rows(page).last().locator('[data-badge="code"]')).toHaveText('bootstrap.token.issued');
+    expect(api.logReads[0]!.toString()).toBe('');
+
+    // Its fields: Admin and Tenant in place of User and Application.
+    await expect(field(page).locator('option')).toHaveText(['Event type', 'Admin', 'Tenant', 'Outcome', 'Time range']);
+    await field(page).selectOption('tenant');
+    await value(page).fill(TENANT);
+    await searchButton(page).click();
+
+    await expect(page).toHaveURL(new RegExp(`${DEPLOYMENT_LOGS}\\?field=tenant&value=${TENANT}$`));
+    await expect(rows(page)).toHaveCount(1);
+    await expect(rows(page).first()).toContainText(TENANT);
+    expect(api.logReads.at(-1)!.get('tenant')).toBe(TENANT);
+    expect(api.logReads.at(-1)!.has('user')).toBe(false);
+
+    // A reload restores it.
+    await page.reload();
+    await expect(field(page)).toHaveValue('tenant');
+    await expect(value(page)).toHaveValue(TENANT);
+    await expect(rows(page)).toHaveCount(1);
+
+    // An Admin search goes out as admin.
+    await field(page).selectOption('admin');
+    await value(page).fill(OWNER_ID);
+    await searchButton(page).click();
+    await expect(rows(page)).toHaveCount(6);
+    expect(api.logReads.at(-1)!.get('admin')).toBe(OWNER_ID);
+
+    expect(await axe(page)).toEqual([]);
+  });
+
+  test('a row opens the drawer with its summary rows and the raw JSON', async ({ page }) => {
+    const api = await answerDeploymentApi(page);
+    await page.goto(DEPLOYMENT_LOGS);
+    await expect(rows(page)).toHaveCount(7);
+    const event = api.list[1]!;
+
+    await rows(page).nth(1).locator('td').first().click();
+    await expect.poll(() => isOpen(page)).toBe(true);
+    expect(api.eventReads).toEqual([event.id]);
+    await expect(drawer(page).getByRole('heading', { level: 2 }).locator('[data-badge="code"]')).toHaveText(event.type);
+    await expect(drawer(page).locator('dl dt')).toHaveText(['Time (UTC)', 'Actor', 'Target', 'IP address', 'User-Agent', 'Email']);
+    await expect(drawer(page).locator('dl dd')).toHaveText([
+      '2026-11-14 08:00:06',
+      `admin ${OWNER_ID}`,
+      `tenant ${TENANT}`,
+      DETAIL.ipAddress,
+      DETAIL.userAgent,
+      DETAIL.email,
+    ]);
+    const viewer = drawer(page).getByRole('region', { name: 'Raw event' });
+    await expect(viewer).toContainText(HASH);
+    await expect(drawer(page).getByRole('button', { name: 'Copy JSON' })).toBeVisible();
+    await expect(drawer(page).getByText(LIMITED)).toHaveCount(0);
+
+    await page.keyboard.press('Escape');
+    await expect.poll(() => isOpen(page)).toBe(false);
+    await expect(page).toHaveURL(new RegExp(`${DEPLOYMENT_LOGS}$`));
+  });
+
+  test('the Deployment group lists Log only with deployment.log.read, and the page is otherwise forbidden', async ({ page }) => {
+    const api = await answerDeploymentApi(page);
+    await page.goto(DEPLOYMENT_LOGS);
+    await expect(heading(page)).toHaveText('Log');
+    const link = nav(page).getByRole('link', { name: 'Log', exact: true });
+    await expect(link).toHaveAttribute('href', DEPLOYMENT_LOGS);
+    await expect(link).toHaveAttribute('aria-current', 'page');
+
+    await page.unrouteAll({ behavior: 'wait' });
+    const without = await answerDeploymentApi(page, ['deployment.tenants.read']);
+    await page.goto('/deployment/tenants');
+    await expect(heading(page)).toHaveText('Tenants');
+    await expect(nav(page).getByRole('link', { name: 'Tenants', exact: true })).toBeVisible();
+    await expect(nav(page).getByRole('link', { name: 'Log', exact: true })).toHaveCount(0);
+
+    // Typed in, the page is forbidden and reads nothing.
+    await page.goto(DEPLOYMENT_LOGS);
+    await expect(page.getByTestId('forbidden')).toBeVisible();
+    expect(without.logReads).toHaveLength(0);
+    expect(api.logReads.length).toBeGreaterThan(0);
   });
 });

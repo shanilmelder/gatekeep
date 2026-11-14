@@ -274,6 +274,13 @@ internal static class CanaryFlows
                 new(SurfaceKind.Route, "/api/v1/tenants/{tenantId}/logs/{eventId}"),
             ],
             TenantLogsAsync),
+        new(
+            "admin.deployment-logs",
+            [
+                new(SurfaceKind.Route, "/api/v1/deployment/logs"),
+                new(SurfaceKind.Route, "/api/v1/deployment/logs/{eventId}"),
+            ],
+            DeploymentLogsAsync),
 
         new(
             "admin.application-secrets",
@@ -1480,6 +1487,75 @@ internal static class CanaryFlows
             using var detail = await host.SendAsync(HttpMethod.Get, eventPath, editorCookie);
             run.Capture("event detail response", await ResponseTextAsync(detail));
             Assert.Equal(HttpStatusCode.OK, detail.StatusCode);
+        }
+
+        await host.StopAsync();
+        run.Capture("Admin output", host.Output);
+        Assert.Matches(@"""LogLevel"":""(?:Trace|Debug)""", host.Output);
+    }
+
+    /// <summary>
+    /// Story 7.7: the Deployment Owner's Session searching the Deployment Log and opening an event,
+    /// with its raw detail; failing, malformed filters, an unknown and a malformed event ID, and both
+    /// routes refused to an Admin who isn't the Deployment Owner (the audited 403).
+    /// </summary>
+    private static async Task DeploymentLogsAsync(CanaryFlowContext context, FlowRun run, bool failing)
+    {
+        await using var host = await Admins.AdminHost.StartAsync(context.Postgres, null, DebugArguments);
+        run.Database = host.Database;
+        run.Plant("role-password", PostgresFixture.Password);
+        var (cookie, csrf, _) = await host.OwnerSessionAsync();
+        run.Plant("admin-session-id", cookie);
+        run.Plant("admin-csrf-token", csrf);
+        const string path = "/api/v1/deployment/logs";
+        var eventId = Guid.CreateVersion7();
+        await PostgresFixture.ExecuteAsync(
+            host.Superuser,
+            $"INSERT INTO deployment_audit_event (id, type_code, actor_kind) VALUES ('{eventId}', 'operations.job.dead', 'system')");
+        var eventPath = $"{path}/{PublicId.Format(PublicIdType.AuditEvent, eventId)}";
+
+        if (failing)
+        {
+            using (var unknown = await host.SendAsync(HttpMethod.Get, $"{path}/{PublicId.Format(PublicIdType.AuditEvent, Guid.CreateVersion7())}", cookie))
+            {
+                run.Capture("unknown event response", await ResponseTextAsync(unknown));
+                Assert.Equal(HttpStatusCode.NotFound, unknown.StatusCode);
+            }
+
+            using (var malformed = await host.SendAsync(HttpMethod.Get, $"{path}/evt_x", cookie))
+            {
+                run.Capture("malformed event response", await ResponseTextAsync(malformed));
+                Assert.Equal(HttpStatusCode.BadRequest, malformed.StatusCode);
+            }
+
+            foreach (var query in new[] { "?outcome=maybe", "?cursor=evt_x", "?admin=not%20an%20id", "?tenant=ten_x", "?from=2026-01-01" })
+            {
+                using var refused = await host.SendAsync(HttpMethod.Get, path + query, cookie);
+                run.Capture($"malformed deployment logs response {query}", await ResponseTextAsync(refused));
+                Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
+            }
+
+            // Another Admin, Owner of a Tenant but not the Deployment Owner, is refused both routes.
+            var tenant = await host.InsertTenantAsync();
+            var (other, otherCsrf, _) = await Tenancy.TenantRequests.RoleSessionAsync(host, tenant, "owner");
+            run.Plant("other-session-id", other);
+            run.Plant("other-csrf-token", otherCsrf);
+            foreach (var refusedPath in new[] { path, eventPath })
+            {
+                using var refused = await host.SendAsync(HttpMethod.Get, refusedPath, other);
+                run.Capture($"non-Owner response {refusedPath}", await ResponseTextAsync(refused));
+                Assert.Equal(HttpStatusCode.Forbidden, refused.StatusCode);
+            }
+        }
+        else
+        {
+            using var read = await host.SendAsync(HttpMethod.Get, path, cookie);
+            run.Capture("deployment logs response", await ResponseTextAsync(read));
+            Assert.Equal(HttpStatusCode.OK, read.StatusCode);
+
+            using var opened = await host.SendAsync(HttpMethod.Get, eventPath, cookie);
+            run.Capture("deployment event response", await ResponseTextAsync(opened));
+            Assert.Equal(HttpStatusCode.OK, opened.StatusCode);
         }
 
         await host.StopAsync();

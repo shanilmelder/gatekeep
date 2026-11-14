@@ -20,8 +20,8 @@ namespace Gatekeep.Adapters.Postgres.Migrations;
 /// It changes no earlier migration.
 /// </summary>
 [DbContext(typeof(MigrationsContext))]
-[Migration("20261120000000_RevokeSigningKeys")]
-public sealed class Migration20261120000000RevokeSigningKeys : Migration
+[Migration("20261121000000_RevokeSigningKeys")]
+public sealed class Migration20261121000000RevokeSigningKeys : Migration
 {
     protected override void Up(MigrationBuilder migrationBuilder)
     {

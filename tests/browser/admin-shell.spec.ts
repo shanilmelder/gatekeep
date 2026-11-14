@@ -279,7 +279,7 @@ test.describe('shell', () => {
     await expect(header.getByRole('button', { name: /alerts|help/i })).toHaveCount(0);
     await expect(page.getByRole('link', { name: /help|api reference/i })).toHaveCount(0);
 
-    // The registry's one item (Story 1.27): the Deployment group, closed off its page, with Tenants.
+    // The Deployment group, closed off its page, with Tenants (Story 1.27) and Log (Story 7.7).
     await expect(nav(page)).toBeVisible();
     expect((await nav(page).boundingBox())!.width).toBe(236);
     const deployment = nav(page).getByRole('button', { name: 'Deployment' });
@@ -287,7 +287,7 @@ test.describe('shell', () => {
     await expect(deployment).toHaveAttribute('aria-expanded', 'false');
     await expect(nav(page).getByRole('link')).toHaveCount(0);
     await deployment.click();
-    await expect(nav(page).getByRole('link')).toHaveText(['Tenants']);
+    await expect(nav(page).getByRole('link')).toHaveText(['Tenants', 'Log']);
     await expect(nav(page).getByRole('link', { name: 'Tenants' })).toHaveAttribute('href', '/deployment/tenants');
 
     // The account menu holds Your credentials, then Sign out (Story 1.26).

@@ -280,7 +280,7 @@ Status: done
   - **Page:** a per-row Revoke action with a destructive ConfirmModal. It carries the impact text, the current-key line and the Session checkbox. The assertion and any failure stay inside the modal.
 - **Files changed:**
   - Keys contract and lifecycle, `KeysEvents`;
-  - `ProductionJobs`, the migration (renamed to `20261120000000` after Story 3.6 took `20261119000000`), `TableRegistry`;
+  - `ProductionJobs`, the migration (renamed to `20261121000000` after Stories 3.6 and 7.7 took `20261119000000` and `20261120000000`), `TableRegistry`;
   - Management `RevokeAsync`;
   - Host.Admin `AdminApi`, `SigningKeysApi`, the request type;
   - api-client, `SigningKeysPage`, `Shell`, messages;

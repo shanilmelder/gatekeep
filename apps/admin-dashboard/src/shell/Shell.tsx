@@ -35,6 +35,7 @@ import { createFreshAssertion } from './freshAssertion';
 import { ForbiddenPage } from './ForbiddenPage';
 import { LandingPage } from './LandingPage';
 import { LogsPage } from './LogsPage';
+import { DEPLOYMENT_LOGS_PATH } from './logs';
 import { NAV, visibleItems } from './nav';
 import { NotFoundPage } from './NotFoundPage';
 import { createRenewal, type Renewal, type RenewalState } from './renewal';
@@ -172,6 +173,9 @@ interface Mismatch {
  * Signing keys (Story 9.1), its Applications and one Application (Story 3.1), or its APIs and one API (Story 3.6).
  */
 const TENANT_ROUTE = /^\/tenants\/[^/]+(\/settings|\/logs|\/signing-keys|\/applications(\/[^/]+)?|\/apis(\/[^/]+)?)?$/;
+
+/** The Deployment Log page's scope. LogsPage keys its reads on the scope's plain values, so any equal scope would do. */
+const DEPLOYMENT_SCOPE = { kind: 'deployment' } as const;
 
 /** Replaces the URL with `to` once mounted, as a redirect does: /tenants/{tenantId} is its Applications list (Story 3.1). */
 function Redirect({ to }: { to: string }) {
@@ -507,6 +511,13 @@ function ShellFrame({ adminId }: { adminId: string }) {
     ) : (
       <ForbiddenPage code="access_denied" traceId="" />
     );
+  // The Deployment Log (Story 7.7): the Deployment Owner's alone, as the server decides too.
+  else if (answered.path === DEPLOYMENT_LOGS_PATH)
+    page = capabilities.has('deployment.log.read') ? (
+      <LogsPage request={shellRequest} scope={DEPLOYMENT_SCOPE} />
+    ) : (
+      <ForbiddenPage code="access_denied" traceId="" />
+    );
   else if (answered.path === NEW_TENANT_PATH)
     page = capabilities.has('deployment.tenants.create') ? <CreateTenantPage request={shellRequest} /> : <ForbiddenPage code="access_denied" traceId="" />;
   // Your credentials (Story 1.26): self-service, so the Deployment read the shell makes is all it needs.
@@ -539,7 +550,7 @@ function ShellFrame({ adminId }: { adminId: string }) {
     // Logs (Story 7.4): with tenant.logs.read only, which the path Tenant's read has answered.
     else if (answered.path.endsWith('/logs'))
       page = capabilities.has('tenant.logs.read') ? (
-        <LogsPage key={tenantId} request={shellRequest} tenantId={tenantId} />
+        <LogsPage key={tenantId} request={shellRequest} scope={{ kind: 'tenant', tenantId }} />
       ) : (
         <ForbiddenPage code="access_denied" traceId="" />
       );
