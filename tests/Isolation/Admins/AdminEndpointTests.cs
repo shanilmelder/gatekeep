@@ -35,6 +35,8 @@ public sealed class AdminEndpointTests
                 "/api/v1/deployment/credentials/registration",
                 "/api/v1/deployment/credentials/registration/complete",
                 "/api/v1/deployment/credentials/{credentialId}",
+                "/api/v1/deployment/logs",
+                "/api/v1/deployment/logs/{eventId}",
                 "/api/v1/deployment/my-tenants",
                 "/api/v1/deployment/operations/{operationId}/retry",
                 "/api/v1/deployment/session",
