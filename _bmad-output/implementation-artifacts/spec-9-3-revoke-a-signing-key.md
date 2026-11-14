@@ -2,7 +2,7 @@
 title: 'Story 9.3: Revoke a Signing Key'
 type: 'feature'
 created: '2026-11-14'
-status: 'in-review'
+status: 'done'
 baseline_revision: '15abe768f3aa3a093a29fe760be4f65c905369d7'
 review_loop_iteration: 0
 followup_review_recommended: false
@@ -265,3 +265,39 @@ deferred:
 **Commands:**
 - Don't run the suite locally (CI is the source of truth). Generated files only, in Docker under the worktree tag `gatekeep/tests:epic-9`: `sh deploy/docker/api-contract.sh --write /out`, and `dotnet build Gatekeep.slnx` then `dotnet run --project tests/Architecture/Generator` (copy the two catalogue files out). The re-rendered guard SQL comes from `OperationsContract.RenderGuard`.
 - Push and open a draft PR; CI's build, stack and release jobs must be green.
+
+## Auto Run Result
+
+Status: done
+
+- **Implemented:** a Tenant Owner revokes a published Signing Key (next, current or previous) with a fresh assertion bound to that key.
+  - **Keys:** `KeysContract.RevokeSigningKeyAsync`.
+    - It takes the per-Tenant lock and parses the key ID strictly; anything else is the same 404.
+    - The replacement Transit key is created first. Then the rows move: revoke, then promote for current (even unaged), then insert a new next whenever next was consumed or revoked.
+    - In the same command it queues the destroy job, writes the events (`revoked`, `promoted` or the new `promoted_unaged`, `created`) with the Admin as Actor, and sends the NOTIFY.
+  - **Sessions:** the optional `revokeAccess` ends the Tenant's Sessions and tokens through `ISessions.RevokeAccessAsync`, in the same transaction.
+  - **Destruction:** the destroy job, the `destroyed_at` CHECK and the daily dead-job re-queue now accept revoked rows. `gk_admin` may enqueue the destroy job (re-rendered guard) and end Sessions (`user_session` column grants).
+  - **Page:** a per-row Revoke action with a destructive ConfirmModal. It carries the impact text, the current-key line and the Session checkbox. The assertion and any failure stay inside the modal.
+- **Files changed:**
+  - Keys contract and lifecycle, `KeysEvents`;
+  - `ProductionJobs`, the migration (renamed to `20261120000000` after Story 3.6 took `20261119000000`), `TableRegistry`;
+  - Management `RevokeAsync`;
+  - Host.Admin `AdminApi`, `SigningKeysApi`, the request type;
+  - api-client, `SigningKeysPage`, `Shell`, messages;
+  - the regenerated OpenAPI, schema and audit catalogue;
+  - install.md and the threat model;
+  - new tests: `SigningKeyRevokeTests`, `SigningKeyRevokeApiTests`, `Protocol/RevokedSigningKeyTests`; updated tests: rotation, grants, guard, session-table, matrix, rule, route, canary and browser.
+- **Review:**
+  - 25 findings: 6 patches applied (low), 1 medium deferred (the bodiless 503 carries no trace ID, an API-wide decision from Story 1.27).
+  - The rest were rejected with reasons in the triage log.
+  - Patched by verdict: high 0, medium 0, low 6 entries.
+  - Follow-up review recommended: false.
+- **Verification:** CI on PR #65 is the test run.
+  - **Run 1:** two test-side failures. A setup rotation's events were not counted, and a log check ran before the logger wrote. Both fixed.
+  - **Run 2:** the merge ref carried Story 3.6's migration with the same timestamp, so ours was renamed and `MigrateCommandTests` now expects 36. The log check's apostrophe is escaped as `'` in the JSON console output, so it matches a substring without one.
+  - **Run 3:** Browser 670/670, Architecture 781/781, Isolation 3568/3569. The one failure was a port-collision flake in `TenantDeletionTests` (a host failed to bind), which touches no 9.3 code; the failed job was rerun.
+- **Matrix audit:** every domain, API, Protocol, database-rule and browser row is covered, and those tests passed in run 3 (see the PR screenshot).
+- **Residual risks:**
+  - A rolled-back revoke's 503 has no trace ID (deferred).
+  - Revocations aren't throttled beyond the fresh assertion.
+  - A client abort after the Transit create leaves an orphan for the sweep.

@@ -158,10 +158,10 @@ development_status:
   8-6-export-tenant-configuration: backlog
   epic-8-retrospective: optional
 
-  epic-9: in-progress
+  epic-9: done
   9-1-view-signing-keys: done
   9-2-rotate-a-signing-key-on-demand: done
-  9-3-revoke-a-signing-key: backlog
+  9-3-revoke-a-signing-key: done
   epic-9-retrospective: optional
 
   epic-10: backlog
