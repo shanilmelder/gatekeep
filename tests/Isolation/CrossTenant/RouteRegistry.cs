@@ -109,6 +109,12 @@ public static class RouteRegistry
         new("GET", "/api/v1/tenants/{tenantId}/applications/{applicationId}/secrets", CaseKind.TenantPath, RouteValues: new Dictionary<string, string> { ["applicationId"] = "app_aaaaaaaaaaaaaaaaaaaaaaaaaa" }),
         new("POST", "/api/v1/tenants/{tenantId}/applications/{applicationId}/secrets", CaseKind.TenantPath, RouteValues: new Dictionary<string, string> { ["applicationId"] = "app_aaaaaaaaaaaaaaaaaaaaaaaaaa" }),
         new("POST", "/api/v1/tenants/{tenantId}/applications/{applicationId}/secrets/{secretId}/revoke", CaseKind.TenantPath, RouteValues: new Dictionary<string, string> { ["applicationId"] = "app_aaaaaaaaaaaaaaaaaaaaaaaaaa", ["secretId"] = "sec_aaaaaaaaaaaaaaaaaaaaaaaaaa" }),
+        new("GET", "/api/v1/tenants/{tenantId}/apis", CaseKind.TenantPath),
+        new("POST", "/api/v1/tenants/{tenantId}/apis", CaseKind.TenantPath, Body: """{"name":"Cross-Tenant","identifier":"https://cross-tenant.example"}"""),
+        new("GET", "/api/v1/tenants/{tenantId}/apis/{apiId}", CaseKind.TenantPath, RouteValues: new Dictionary<string, string> { ["apiId"] = "api_aaaaaaaaaaaaaaaaaaaaaaaaaa" }),
+        new("PUT", "/api/v1/tenants/{tenantId}/apis/{apiId}/settings", CaseKind.TenantPath, RouteValues: new Dictionary<string, string> { ["apiId"] = "api_aaaaaaaaaaaaaaaaaaaaaaaaaa" }, Body: """{"offlineAccess":true,"rbac":true,"accessTokenLifetime":300,"idTokenLifetime":300,"refreshTokenAbsoluteLifetime":86400,"refreshTokenInactivityLifetime":3600}"""),
+        new("POST", "/api/v1/tenants/{tenantId}/apis/{apiId}/permissions", CaseKind.TenantPath, RouteValues: new Dictionary<string, string> { ["apiId"] = "api_aaaaaaaaaaaaaaaaaaaaaaaaaa" }, Body: """{"value":"cross:tenant","description":""}"""),
+        new("DELETE", "/api/v1/tenants/{tenantId}/apis/{apiId}/permissions/{value}", CaseKind.TenantPath, RouteValues: new Dictionary<string, string> { ["apiId"] = "api_aaaaaaaaaaaaaaaaaaaaaaaaaa", ["value"] = "cross:tenant" }),
         new("POST", "/api/v1/tenants/{tenantId}/assertions", CaseKind.TenantPath, Body: """{"action":"tenant.label.manage","target":null}"""),
 
         // Program.cs's fallbacks.

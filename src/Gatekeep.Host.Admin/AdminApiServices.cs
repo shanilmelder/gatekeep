@@ -78,6 +78,9 @@ internal sealed class AdminApiServices : IAsyncDisposable
     /// <summary>A Tenant's Applications (Story 3.1): listed, read and created in the path Tenant's scope.</summary>
     public IApplicationManagement Applications { get; } = ManagementContract.CreateApplications(AuditContract.CreateAppender());
 
+    /// <summary>A Tenant's APIs and their Permissions (Story 3.6): listed, read and written in the path Tenant's scope.</summary>
+    public IApiManagement Apis { get; } = ManagementContract.CreateApis(AuditContract.CreateAppender());
+
     public IRateLimiter Limiter { get; } = AdminsContract.CreateAttemptLimiter();
 
     public IAdminSessions Sessions { get; }

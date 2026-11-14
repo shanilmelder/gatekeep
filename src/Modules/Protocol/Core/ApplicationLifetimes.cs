@@ -17,8 +17,9 @@ internal sealed record IssuedTokenLifetimes(
     TimeSpan RefreshTokenInactivity);
 
 /// <summary>
-/// Where a token request's lifetimes come from (Story 3.4, FR-15). <see cref="Of"/> is the one lookup: today
-/// the client's Application alone; Story 3.6 adds the API's lifetime there, the shorter of the two winning.
+/// Where a token request's lifetimes come from (Stories 3.4 and 3.6, FR-15). <see cref="Of"/> is the one lookup: the
+/// client's Application and the API the request names, the shorter of each lifetime winning. Until Story 3.7 resolves
+/// the audience, no request names an API.
 /// The global OpenIddict lifetimes stay the Deployment defaults, and <see cref="ApplyApplicationLifetimes"/>
 /// replaces them on every token the request issues.
 /// </summary>
@@ -27,15 +28,36 @@ internal static class ApplicationTokenLifetimes
     /// <summary>Where <see cref="ForClientAsync"/> leaves the request's lifetimes, so each handler reads the Application once.</summary>
     public const string Property = ".gatekeep_token_lifetimes";
 
-    /// <summary>The lifetimes <paramref name="application"/>'s tokens are issued with: its own, as saved.</summary>
-    public static IssuedTokenLifetimes Of(DirectoryApplication application)
+    /// <summary>
+    /// The lifetimes <paramref name="application"/>'s tokens for <paramref name="api"/> are issued with (Stories 3.4 and
+    /// 3.6, FR-15): each of the four the shorter of the Application's and the API's; with no API, the Application's own,
+    /// as saved. Until Story 3.7 resolves a request's audience, every caller passes no API.
+    /// </summary>
+    public static IssuedTokenLifetimes Of(DirectoryApplication application, DirectoryApi? api)
     {
         ArgumentNullException.ThrowIfNull(application);
-        return new IssuedTokenLifetimes(
+        var own = new IssuedTokenLifetimes(
             application.AccessTokenLifetime,
             application.IdTokenLifetime,
             application.RefreshTokenAbsoluteLifetime,
             application.RefreshTokenInactivityLifetime);
+
+        if (api is null)
+        {
+            return own;
+        }
+
+        return new IssuedTokenLifetimes(
+            Shorter(own.AccessToken, api.Lifetimes.AccessTokenLifetime),
+            Shorter(own.IdentityToken, api.Lifetimes.IdTokenLifetime),
+            Shorter(own.RefreshTokenAbsolute, api.Lifetimes.RefreshTokenAbsoluteLifetime),
+            Shorter(own.RefreshTokenInactivity, api.Lifetimes.RefreshTokenInactivityLifetime));
+    }
+
+    private static TimeSpan Shorter(TimeSpan application, int apiSeconds)
+    {
+        var api = TimeSpan.FromSeconds(apiSeconds);
+        return api < application ? api : application;
     }
 
     /// <summary>
@@ -60,7 +82,8 @@ internal static class ApplicationTokenLifetimes
         var application = (string.IsNullOrEmpty(clientId) ? null : await applications.FindByClientIdAsync(clientId, cancellationToken)) as DirectoryApplication
             ?? throw new InvalidOperationException("A token is issued only to a known Application.");
 
-        var lifetimes = Of(application);
+        // Story 3.7 passes the API the request's audience names; until then, none.
+        var lifetimes = Of(application, api: null);
         transaction.SetProperty(Property, lifetimes);
         return lifetimes;
     }

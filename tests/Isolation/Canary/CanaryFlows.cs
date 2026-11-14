@@ -444,6 +444,37 @@ internal static class CanaryFlows
             + "only.",
             "Story 3.4 build review",
             new DateOnly(2026, 11, 13)),
+        new(
+            new(SurfaceKind.Route, "/api/v1/tenants/{tenantId}/apis"),
+            "The list reads the path Tenant's APIs' IDs, names, identifiers, settings and lifetimes; the create takes a name and "
+            + "an identifier only, writes the row and an ID-only event. An API holds no credential, and refusals are logged by "
+            + "fixed code only, never the name or identifier.",
+            "Story 3.6 build review",
+            new DateOnly(2026, 11, 14)),
+        new(
+            new(SurfaceKind.Route, "/api/v1/tenants/{tenantId}/apis/{apiId}"),
+            "The read has no body: it returns one of the path Tenant's APIs and its Permission values and descriptions, and "
+            + "writes nothing. No credential is held or returned; refusals are logged by fixed code only.",
+            "Story 3.6 build review",
+            new DateOnly(2026, 11, 14)),
+        new(
+            new(SurfaceKind.Route, "/api/v1/tenants/{tenantId}/apis/{apiId}/settings"),
+            "The save takes two switches and four whole-second lifetimes only, writes them and an ID-only event, and returns the "
+            + "API. A refused lifetime is named by field, reason and limit; refusals are logged by fixed code only.",
+            "Story 3.6 build review",
+            new DateOnly(2026, 11, 14)),
+        new(
+            new(SurfaceKind.Route, "/api/v1/tenants/{tenantId}/apis/{apiId}/permissions"),
+            "The add takes a resource:action value and a description only, writes them and an ID-only event, and returns the "
+            + "API with its Permissions. Refusals are logged by fixed code only, never the value.",
+            "Story 3.6 build review",
+            new DateOnly(2026, 11, 14)),
+        new(
+            new(SurfaceKind.Route, "/api/v1/tenants/{tenantId}/apis/{apiId}/permissions/{value}"),
+            "The removal has no body: it deletes one Permission row and writes an ID-only event, answering 204. Refusals are "
+            + "logged by fixed code only, never the value.",
+            "Story 3.6 build review",
+            new DateOnly(2026, 11, 14)),
     ];
 
     /// <summary>Every production surface: the job and Operation registries, the Cli's commands and the hosts.</summary>

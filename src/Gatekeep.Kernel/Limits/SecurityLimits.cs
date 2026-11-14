@@ -263,4 +263,16 @@ public static class SecurityLimits
     /// overlaps never pile up.
     /// </summary>
     public const int MaxLiveClientSecrets = 2;
+
+    /// <summary>The longest API name, after trimming: 200 characters (Story 3.6), as the table checks.</summary>
+    public const int MaxApiNameLength = 200;
+
+    /// <summary>The longest API identifier, the audience its tokens will name: 255 characters (Story 3.6), as the table checks.</summary>
+    public const int MaxApiIdentifierLength = 255;
+
+    /// <summary>The most Permissions one API holds: 200 (Story 3.6). Another is refused until one is removed.</summary>
+    public const int MaxPermissionsPerApi = 200;
+
+    /// <summary>The longest Permission description: 200 characters (Story 3.6), as the table checks. It may be empty.</summary>
+    public const int MaxPermissionDescriptionLength = 200;
 }

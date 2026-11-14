@@ -163,6 +163,24 @@ internal static class AdminResponses
     public const string ClientSecretLimitReached = "client_secret_limit_reached";
 
     /// <summary>
+    /// An API or Permission write (Story 3.6) that is malformed: not JSON, over its size cap, a field missing or of the
+    /// wrong type (no errors), or a field that breaks a rule (errors name each). Nothing was written.
+    /// </summary>
+    public const string ApiInvalid = "api_invalid";
+
+    /// <summary>An API create whose identifier another of the Tenant's APIs has, exactly (Story 3.6). Nothing was written.</summary>
+    public const string ApiIdentifierTaken = "api_identifier_taken";
+
+    /// <summary>A Permission add whose value the API already has (Story 3.6). Nothing was written.</summary>
+    public const string PermissionTaken = "permission_taken";
+
+    /// <summary>A Permission add to an API that already holds the most Permissions (Story 3.6). Nothing was written.</summary>
+    public const string PermissionLimitReached = "permission_limit_reached";
+
+    /// <summary>A Permission add or removal on the built-in Management API, whose Permissions are fixed (Story 3.6). Nothing was written.</summary>
+    public const string ApiBuiltIn = "api_built_in";
+
+    /// <summary>
     /// A Signing Key rotation on demand (Story 9.2) while the next key was published less than 15 minutes ago,
     /// the JWKS cache limit. The body's <c>retryAfterSeconds</c> and the <c>Retry-After</c> header say how long
     /// remains. Nothing was written.
@@ -238,6 +256,11 @@ internal static class AdminResponses
         CustomSchemeAcknowledgementRequired,
         ClientSecretNotApplicable,
         ClientSecretLimitReached,
+        ApiInvalid,
+        ApiIdentifierTaken,
+        PermissionTaken,
+        PermissionLimitReached,
+        ApiBuiltIn,
         SigningKeyNotReady,
     ];
 

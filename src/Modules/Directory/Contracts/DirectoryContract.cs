@@ -81,6 +81,85 @@ public static class DirectoryContract
     public static IReadOnlyList<ApplicationLifetimeProblem> CheckLifetimes(ApplicationLifetimes lifetimes) =>
         ApplicationLifetimeRules.Check(lifetimes);
 
+    /// <summary>The name of each Tenant's built-in Management API (Story 3.6). The migration that backfills existing Tenants writes the same text.</summary>
+    public const string ManagementApiName = "Gatekeep Management API";
+
+    /// <summary>
+    /// The identifier of each Tenant's built-in Management API (Story 3.6): the only one under the reserved
+    /// <c>urn:gatekeep:</c> prefix. The migration that backfills existing Tenants writes the same text.
+    /// </summary>
+    public const string ManagementApiIdentifier = "urn:gatekeep:management";
+
+    /// <summary>
+    /// The built-in Management API's Permissions (Story 3.6, FR-42): one <c>resource:action</c> for each Tenant
+    /// capability a machine client may be allowed, <c>tenant.applications.manage</c> becoming <c>applications:manage</c>,
+    /// in the capability table's order. An Architecture test holds this list to that table, and the migration that
+    /// backfills existing Tenants writes the same values.
+    /// </summary>
+    public static readonly IReadOnlyList<string> ManagementPermissions =
+    [
+        "configuration:read",
+        "users:read",
+        "logs:read",
+        "log_detail:read",
+        "applications:manage",
+        "apis:manage",
+        "roles:manage",
+        "users:manage",
+        "theme:manage",
+        "templates:manage",
+        "settings:manage",
+        "connections:toggle",
+        "configuration:export",
+        "password_policy:manage",
+        "connection_credentials:manage",
+        "user_data:export",
+        "user_data:erase",
+    ];
+
+    /// <summary>
+    /// Each of <see cref="ManagementPermissions"/>'s description, as the built-in Management API shows it. The migration that
+    /// backfills existing Tenants writes the same pairs; an Architecture test holds them equal.
+    /// </summary>
+    public static readonly IReadOnlyDictionary<string, string> ManagementPermissionDescriptions = new Dictionary<string, string>(StringComparer.Ordinal)
+    {
+        ["configuration:read"] = "Read Tenant configuration",
+        ["users:read"] = "Read Users",
+        ["logs:read"] = "Read Log summaries",
+        ["log_detail:read"] = "Read raw Log detail",
+        ["applications:manage"] = "Manage Applications",
+        ["apis:manage"] = "Manage APIs",
+        ["roles:manage"] = "Manage Roles",
+        ["users:manage"] = "Manage Users",
+        ["theme:manage"] = "Manage the theme",
+        ["templates:manage"] = "Manage email templates",
+        ["settings:manage"] = "Manage Tenant settings",
+        ["connections:toggle"] = "Enable or disable Connections",
+        ["configuration:export"] = "Export Tenant configuration",
+        ["password_policy:manage"] = "Manage the password policy",
+        ["connection_credentials:manage"] = "Manage Connection credentials",
+        ["user_data:export"] = "Export User data",
+        ["user_data:erase"] = "Erase User data",
+    };
+
+    /// <summary>
+    /// Every problem with an API create (Story 3.6): the <paramref name="name"/>, already trimmed, 1 to 200 characters
+    /// with no control character; the <paramref name="identifier"/> 1 to 255 characters, an absolute URI with a scheme,
+    /// no fragment and no white space (<see cref="ApiReasons.Invalid"/>), and not under <c>urn:gatekeep:</c>
+    /// (<see cref="ApiReasons.Reserved"/>). Empty when the API may be created.
+    /// </summary>
+    public static IReadOnlyList<ApiFieldProblem> CheckApi(string name, string identifier) => ApiRules.CheckCreate(name, identifier);
+
+    /// <summary>
+    /// Every problem with a Permission (Story 3.6): the <paramref name="value"/> <c>resource:action</c>, lowercase, each
+    /// part a letter or digit then up to 63 of letters, digits, <c>_</c>, <c>.</c> and <c>-</c>; the
+    /// <paramref name="description"/> 0 to 200 characters with no control character. Empty when it may be added.
+    /// </summary>
+    public static IReadOnlyList<ApiFieldProblem> CheckPermission(string value, string description) => ApiRules.CheckPermission(value, description);
+
+    /// <summary>Whether <paramref name="value"/> is a <c>resource:action</c> Permission value (Story 3.6).</summary>
+    public static bool IsPermissionValue(string? value) => ApiRules.ValidPermission(value);
+
     /// <summary>
     /// Whether <paramref name="url"/> has a custom scheme, such as <c>com.example.app:/callback</c>: one that
     /// isn't <c>http</c> or <c>https</c> (Story 3.2). Only a <c>native</c> Application may register one, and
@@ -119,7 +198,7 @@ public static class DirectoryContract
 
     /// <summary>
     /// Directory's Tenant purge (Story 2.5, AD-30): deletes the context Tenant's <c>client_secret</c>, then
-    /// <c>application</c> rows. Sessions' and Authentication's purges must run first: their rows reference Applications.
+    /// <c>application</c> rows, and from Story 3.6 its <c>permission</c>, then <c>api</c> rows. Sessions' and Authentication's purges must run first: their rows reference Applications.
     /// </summary>
     public static ITenantPurge TenantPurge { get; } = new DirectoryPurge();
 

@@ -19,6 +19,9 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { navigate, useLocation } from '../navigation';
 import { api, setCsrfToken } from '../session';
 import { assertWithSheet } from '../webauthn';
+import { ApiDetailPage } from './ApiDetailPage';
+import { apiOfPath } from './apis';
+import { ApisPage } from './ApisPage';
 import { ApplicationDetailPage } from './ApplicationDetailPage';
 import { applicationOfPath, applicationsPath } from './applications';
 import { ApplicationsPage } from './ApplicationsPage';
@@ -167,9 +170,9 @@ interface Mismatch {
 
 /**
  * A Tenant path's page (Story 1.28): the Tenant's landing, its settings, its Logs (Story 7.4), its
- * Signing keys (Story 9.1), or its Applications and one Application (Story 3.1).
+ * Signing keys (Story 9.1), its Applications and one Application (Story 3.1), or its APIs and one API (Story 3.6).
  */
-const TENANT_ROUTE = /^\/tenants\/[^/]+(\/settings|\/logs|\/signing-keys|\/applications(\/[^/]+)?)?$/;
+const TENANT_ROUTE = /^\/tenants\/[^/]+(\/settings|\/logs|\/signing-keys|\/applications(\/[^/]+)?|\/apis(\/[^/]+)?)?$/;
 
 /** The Deployment Log page's scope: one value, so the page never reads again for a new but equal one. */
 const DEPLOYMENT_SCOPE = { kind: 'deployment' } as const;
@@ -527,6 +530,7 @@ function ShellFrame({ adminId }: { adminId: string }) {
     const tenantId = tenant !== null && tenant !== 'malformed' ? tenant.tenantId : null;
     // One Application's page first (Story 3.1), so an Application ID such as "logs" names no other page.
     const applicationId = applicationOfPath(answered.path);
+    const apiId = apiOfPath(answered.path);
     if (tenantId === null) page = <NotFoundPage />;
     else if (applicationId !== null)
       page = (
@@ -540,6 +544,9 @@ function ShellFrame({ adminId }: { adminId: string }) {
         />
       );
     else if (/^\/tenants\/[^/]+\/applications\//.test(answered.path)) page = <NotFoundPage />;
+    // One API's page (Story 3.6), then the APIs list: any Tenant Role reads them.
+    else if (apiId !== null) page = <ApiDetailPage key={`${tenantId} ${apiId}`} request={shellRequest} tenantId={tenantId} apiId={apiId} />;
+    else if (answered.path.endsWith('/apis')) page = <ApisPage key={tenantId} request={shellRequest} tenantId={tenantId} />;
     // Logs (Story 7.4): with tenant.logs.read only, which the path Tenant's read has answered.
     else if (answered.path.endsWith('/logs'))
       page = capabilities.has('tenant.logs.read') ? (

@@ -15,6 +15,8 @@ public class TokenLifetimeLimitTests
 {
     private const string Migration = "src/Adapters/Postgres/Migrations/Migration20261116000000SetTokenLifetimes.cs";
 
+    private const string ApiMigration = "src/Adapters/Postgres/Migrations/Migration20261119000000DefineApis.cs";
+
     private static readonly string Root = EdgeList.FindRepositoryRoot(AppContext.BaseDirectory);
 
     public static TheoryData<string, int, int> Columns => new()
@@ -37,6 +39,26 @@ public class TokenLifetimeLimitTests
 
         var check = Regex.Match(source, $@"CHECK \({column} BETWEEN (\d+) AND (\d+)\)");
         Assert.True(check.Success, $"{column} has no BETWEEN CHECK.");
+        Assert.Equal(1, int.Parse(check.Groups[1].Value, CultureInfo.InvariantCulture));
+        Assert.Equal(maximumSeconds, int.Parse(check.Groups[2].Value, CultureInfo.InvariantCulture));
+    }
+
+    /// <summary>Story 3.6: an API's four lifetime columns have the same defaults and CHECKs, in the migration that creates <c>api</c>.</summary>
+    [Theory]
+    [MemberData(nameof(Columns))]
+    public void The_API_migrations_default_and_CHECK_are_the_limits_files(string column, int defaultSeconds, int maximumSeconds)
+    {
+        var source = File.ReadAllText(Path.Combine(Root, ApiMigration));
+        var table = Regex.Match(source, @"CREATE TABLE api \((?<body>.*?)\n\s*\);", RegexOptions.Singleline);
+        Assert.True(table.Success, "The migration doesn't create api.");
+        var body = table.Groups["body"].Value;
+
+        var added = Regex.Match(body, $@"\b{column} integer NOT NULL DEFAULT (\d+),");
+        Assert.True(added.Success, $"api.{column} isn't integer NOT NULL with a default.");
+        Assert.Equal(defaultSeconds, int.Parse(added.Groups[1].Value, CultureInfo.InvariantCulture));
+
+        var check = Regex.Match(body, $@"CONSTRAINT api_{column} CHECK \({column} BETWEEN (\d+) AND (\d+)\)");
+        Assert.True(check.Success, $"api.{column} has no BETWEEN CHECK.");
         Assert.Equal(1, int.Parse(check.Groups[1].Value, CultureInfo.InvariantCulture));
         Assert.Equal(maximumSeconds, int.Parse(check.Groups[2].Value, CultureInfo.InvariantCulture));
     }

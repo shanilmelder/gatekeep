@@ -1,0 +1,48 @@
+/*
+ * One API's page (Story 3.6): the Settings card's rows, and the Permissions card's header with its Add. The cards
+ * themselves are the Tokens tab's (ApplicationTokens.module.css). Tokens only.
+ */
+
+.rows {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: 0 var(--gk-space-16);
+}
+
+.identifier {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gk-space-4);
+  padding: var(--gk-space-16);
+  border-bottom: 1px solid var(--gk-color-bd);
+  min-width: 0;
+}
+
+.identifier > code {
+  overflow-wrap: anywhere;
+}
+
+.identifier > span,
+.muted {
+  margin: 0;
+  font: var(--gk-font-small);
+  color: var(--gk-color-tx2);
+}
+
+.headerRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--gk-space-12);
+  flex-wrap: wrap;
+}
+
+.table {
+  padding: var(--gk-space-16);
+  min-width: 0;
+}
+
+.value {
+  overflow-wrap: anywhere;
+}

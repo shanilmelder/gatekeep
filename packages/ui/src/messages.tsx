@@ -655,6 +655,65 @@ export interface Messages {
   durationSecond: string;
   durationSeconds: string;
   durationJoin: string;
+  /** The APIs page (Story 3.6): its nav label and title, its description, the table's columns and the built-in badge. */
+  apisTitle: string;
+  apisDescription: string;
+  apisColumnName: string;
+  apisColumnIdentifier: string;
+  apisColumnRbac: string;
+  apisColumnAccessToken: string;
+  apisRbacOn: string;
+  apisRbacOff: string;
+  apiBuiltIn: string;
+  apisLoadMore: string;
+  /** Create API: the modal, its fields, the environment advice under the identifier, and its refusals. */
+  createApi: string;
+  createApiTitle: string;
+  createApiName: string;
+  createApiIdentifier: string;
+  createApiIdentifierAdvice: string;
+  createApiSubmit: string;
+  createApiNameRequired: string;
+  createApiNameInvalid: string;
+  createApiIdentifierRequired: string;
+  createApiIdentifierInvalid: string;
+  createApiIdentifierReserved: string;
+  createApiIdentifierTaken: string;
+  createApiFailed: string;
+  createApiCreated: string;
+  /** The API detail page: breadcrumb, not found, its Settings and Permissions sections. */
+  apiBreadcrumb: string;
+  apiNotFound: string;
+  apiSettingsTitle: string;
+  apiIdentifier: string;
+  apiIdentifierLocked: string;
+  apiOfflineAccess: string;
+  apiOfflineAccessDescription: string;
+  apiRbac: string;
+  apiRbacDescription: string;
+  apiTokensTitle: string;
+  apiTokensDescription: string;
+  apiReadOnly: string;
+  apiPermissionsTitle: string;
+  apiPermissionsEmpty: string;
+  apiPermissionsBuiltIn: string;
+  apiPermissionsColumnValue: string;
+  apiPermissionsColumnDescription: string;
+  apiPermissionAdd: string;
+  apiPermissionAddTitle: string;
+  apiPermissionValue: string;
+  apiPermissionValueHelper: string;
+  apiPermissionDescription: string;
+  apiPermissionValueInvalid: string;
+  apiPermissionDescriptionInvalid: string;
+  apiPermissionTaken: string;
+  apiPermissionLimit: string;
+  apiPermissionAdded: string;
+  apiPermissionRemove: string;
+  /** Placeholder: {value}. */
+  apiPermissionRemoveLabel: string;
+  apiPermissionRemoved: string;
+  apiPermissionFailed: string;
 }
 
 export const defaultMessages: Readonly<Messages> = Object.freeze({
@@ -1066,6 +1125,62 @@ export const defaultMessages: Readonly<Messages> = Object.freeze({
   durationSecond: '1 second',
   durationSeconds: '{count} seconds',
   durationJoin: '{first} {second}',
+  apisTitle: 'APIs',
+  apisDescription: 'The resource servers your tokens are for, and the permissions each one defines.',
+  apisColumnName: 'Name',
+  apisColumnIdentifier: 'Identifier',
+  apisColumnRbac: 'RBAC',
+  apisColumnAccessToken: 'Access token lifetime',
+  apisRbacOn: 'On',
+  apisRbacOff: 'Off',
+  apiBuiltIn: 'Built-in',
+  apisLoadMore: 'Load more',
+  createApi: 'Create API',
+  createApiTitle: 'Create API',
+  createApiName: 'Name',
+  createApiIdentifier: 'Identifier',
+  createApiIdentifierAdvice:
+    "Use a different identifier in each environment, such as Dev, Staging and Prod, so a token for one is never accepted by another. It can't be changed later.",
+  createApiSubmit: 'Create API',
+  createApiNameRequired: 'Enter a name.',
+  createApiNameInvalid: 'Use at most 200 characters, with no control characters.',
+  createApiIdentifierRequired: 'Enter an identifier.',
+  createApiIdentifierInvalid: 'Use an absolute URI of at most 255 characters, such as https://api.example.com, with no fragment.',
+  createApiIdentifierReserved: 'Identifiers starting with urn:gatekeep: are reserved.',
+  createApiIdentifierTaken: 'Another API in this tenant already uses this identifier.',
+  createApiFailed: "Couldn't create the API.",
+  createApiCreated: 'API created',
+  apiBreadcrumb: 'Breadcrumb',
+  apiNotFound: 'This tenant has no such API.',
+  apiSettingsTitle: 'Settings',
+  apiIdentifier: 'Identifier',
+  apiIdentifierLocked: "Can't be changed.",
+  apiOfflineAccess: 'Offline access',
+  apiOfflineAccessDescription: 'Issue refresh tokens for this API',
+  apiRbac: 'Enable RBAC',
+  apiRbacDescription: "Check users' roles against this API's permissions.",
+  apiTokensTitle: 'Token lifetimes',
+  apiTokensDescription: "A token for this API lives the shorter of these and its application's.",
+  apiReadOnly: 'Your role can view these settings but not change them.',
+  apiPermissionsTitle: 'Permissions',
+  apiPermissionsEmpty: 'No permissions yet',
+  apiPermissionsBuiltIn: "The Gatekeep Management API's permissions are fixed.",
+  apiPermissionsColumnValue: 'Permission',
+  apiPermissionsColumnDescription: 'Description',
+  apiPermissionAdd: 'Add',
+  apiPermissionAddTitle: 'Add permission',
+  apiPermissionValue: 'Permission',
+  apiPermissionValueHelper: 'resource:action, such as invoices:read',
+  apiPermissionDescription: 'Description',
+  apiPermissionValueInvalid: 'Use resource:action in lowercase letters, digits, _, . or -, such as invoices:read.',
+  apiPermissionDescriptionInvalid: 'Use at most 200 characters, with no control characters.',
+  apiPermissionTaken: 'This API already has that permission.',
+  apiPermissionLimit: 'This API already has 200 permissions. Remove one first.',
+  apiPermissionAdded: 'Permission added',
+  apiPermissionRemove: 'Remove',
+  apiPermissionRemoveLabel: 'Remove {value}',
+  apiPermissionRemoved: 'Permission removed',
+  apiPermissionFailed: "Couldn't change the permissions.",
 });
 
 /**

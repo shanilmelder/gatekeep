@@ -94,7 +94,7 @@ deferred: []
 - **DDL:** `src/Adapters/Postgres/Migrations/Migration20261102010000CreateAuditTables.cs`:
   - `deployment_audit_event`, and `deployment_audit_detail (event_id, ip_address, user_agent, email)`.
   - `gk_admin` has SELECT on both.
-- **Migration:** add `Migration20261119000000DeploymentLogSearchIndexes.cs`, following `Migration20261106000000AuditSearchIndexes.cs`. Bump the count in `tests/Isolation/MigrateCommandTests.cs` (`Applied 34` becomes `35`, 3 places plus `Assert.Equal`).
+- **Migration:** add `Migration20261120000000DeploymentLogSearchIndexes.cs`, following `Migration20261106000000AuditSearchIndexes.cs`. Bump the count in `tests/Isolation/MigrateCommandTests.cs` (`Applied 35` becomes `36` after merging Story 3.6's `20261119000000_DefineApis`, 3 places plus `Assert.Equal`).
 - **Route inventories:**
   - `tests/Architecture/LogRouteRuleTests.cs`: add GET only for the two Deployment paths.
   - `tests/Isolation/Canary/CanaryFlows.cs`: list the routes in a flow, as Story 7.5 did for `admin.tenant-logs`.
@@ -121,7 +121,7 @@ deferred: []
 ## Tasks & Acceptance
 
 **Execution:**
-- [x] `src/Adapters/Postgres/Migrations/Migration20261119000000DeploymentLogSearchIndexes.cs`, `tests/Isolation/MigrateCommandTests.cs` -- add the four indexes and bump the migration count, so the searches stay indexed.
+- [x] `src/Adapters/Postgres/Migrations/Migration20261120000000DeploymentLogSearchIndexes.cs`, `tests/Isolation/MigrateCommandTests.cs` -- add the four indexes and bump the migration count, so the searches stay indexed.
 - [x] `src/Modules/Audit/Contracts/IDeploymentLogReader.cs`, `src/Modules/Audit/Core/DeploymentLogReader.cs` (+ `AuditContract`) -- add a reader with `SearchAsync(context, DeploymentLogQuery, ct)` and `FindAsync(context, eventId, ct)` over `deployment_audit_event` and its detail. This keeps the reads in their module.
 - [x] `src/Gatekeep.Host.Admin/DeploymentLogsApi.cs`, `AdminApi.cs`, `AdminApiServices.cs` (+ shared helpers from `TenantLogsApi.cs`) -- add both handlers and routes, each under `RequiresCapability(DeploymentLogRead)`, with OpenAPI 200/400/401/403(/404)/503. These are the API surface.
 - [x] `tests/Architecture/LogRouteRuleTests.cs`, `tests/Isolation/Canary/CanaryFlows.cs`, and `RouteRegistry.cs` if applicable -- extend the GET-only rule and the route inventories, which keep the Log immutable and canary-scanned.

@@ -11,8 +11,8 @@ namespace Gatekeep.Adapters.Postgres.Migrations;
 /// and its hash are untouched.
 /// </summary>
 [DbContext(typeof(MigrationsContext))]
-[Migration("20261119000000_DeploymentLogSearchIndexes")]
-public sealed class Migration20261119000000DeploymentLogSearchIndexes : Migration
+[Migration("20261120000000_DeploymentLogSearchIndexes")]
+public sealed class Migration20261120000000DeploymentLogSearchIndexes : Migration
 {
     protected override void Up(MigrationBuilder migrationBuilder)
     {
