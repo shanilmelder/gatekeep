@@ -477,6 +477,26 @@ export interface Messages {
   signingKeysRotateNotReady: string;
   /** The banner when a rotation failed: nothing was changed. */
   signingKeysRotateFailed: string;
+  /** A Revoke button's accessible name (Story 9.3), naming its row's key. Placeholder: {keyId}. */
+  signingKeysRevokeNamed: string;
+  /** A published key's row action (Story 9.3): open the revoke confirmation. */
+  signingKeysRevoke: string;
+  /** The revoke confirmation's title. */
+  signingKeysRevokeTitle: string;
+  /** The revoke confirmation's key line. Placeholder: {keyId}, the key's ID in code type. */
+  signingKeysRevokeKey: string;
+  /** The revoke confirmation's token impact. */
+  signingKeysRevokeImpact: string;
+  /** The revoke confirmation's line for the current key: next is promoted now. */
+  signingKeysRevokeCurrent: string;
+  /** The revoke confirmation's checkbox: also revoke every Session and refresh token in the Tenant. */
+  signingKeysRevokeAccess: string;
+  /** The revoke confirmation's destructive confirm button. */
+  signingKeysRevokeConfirm: string;
+  /** The toast once a key is revoked. */
+  signingKeysRevoked: string;
+  /** The banner in the revoke confirmation when it failed: nothing was changed. */
+  signingKeysRevokeFailed: string;
   /** A Signing Key's state badges: the text carries the state. */
   keyStateNext: string;
   keyStateCurrent: string;
@@ -1018,6 +1038,17 @@ export const defaultMessages: Readonly<Messages> = Object.freeze({
   signingKeysRotated: 'Signing key rotated.',
   signingKeysRotateNotReady: 'The next key was published less than 15 minutes ago. Try again in {minutes} min.',
   signingKeysRotateFailed: "Couldn't rotate the signing key. Nothing was changed.",
+  signingKeysRevokeNamed: 'Revoke key {keyId}',
+  signingKeysRevoke: 'Revoke',
+  signingKeysRevokeTitle: 'Revoke signing key?',
+  signingKeysRevokeKey: 'Key {keyId}',
+  signingKeysRevokeImpact:
+    'Tokens signed with this key stop being trusted. Relying parties that cached the JWKS can accept them for up to 15 minutes.',
+  signingKeysRevokeCurrent: "The next key becomes current now, even if relying parties haven't fetched it yet.",
+  signingKeysRevokeAccess: 'Also end every Session and refresh token in this Tenant',
+  signingKeysRevokeConfirm: 'Revoke key',
+  signingKeysRevoked: 'Signing key revoked.',
+  signingKeysRevokeFailed: "Couldn't revoke the signing key. Nothing was changed.",
   keyStateNext: 'Next',
   keyStateCurrent: 'Current',
   keyStatePrevious: 'Previous',

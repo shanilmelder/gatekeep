@@ -272,6 +272,23 @@ describe('api-client', () => {
     assert.deepEqual(rotated.data, keys);
   });
 
+  it('revokes a Signing Key on its own path, both IDs encoded, with its body, the CSRF token and the page Tenant', async () => {
+    const keys = { keys: [{ keyId: 'sig-b.v1', algorithm: 'RS256', state: 'current', createdAt: '2026-11-14T09:00:00.000Z' }] };
+    const { calls, fetch } = fakeFetch(200, JSON.stringify(keys));
+    const client = createApiClient({ fetch, csrfToken: () => 'csrf-1', pageTenant: () => 'ten_a' });
+
+    const revoked = await client.revokeSigningKey('ten_a/b', 'sig-a.v1/../x?y', { revokeAccess: true });
+
+    assert.equal(calls[0].input, '/api/v1/tenants/ten_a%2Fb/signing-keys/sig-a.v1%2F..%2Fx%3Fy/revoke');
+    assert.equal(calls[0].init.method, 'POST');
+    assert.equal(calls[0].init.body, JSON.stringify({ revokeAccess: true }));
+    assert.equal(calls[0].init.headers['Content-Type'], 'application/json');
+    assert.equal(calls[0].init.headers[CSRF_HEADER], 'csrf-1');
+    assert.equal(calls[0].init.headers[TENANT_HEADER], 'ten_a');
+    assert.equal(revoked.ok, true);
+    assert.deepEqual(revoked.data, keys);
+  });
+
   it("keeps a not-ready rotation's retryAfterSeconds, and only a positive whole number", async () => {
     const { fetch } = fakeFetch(409, JSON.stringify({ code: 'signing_key_not_ready', traceId: 't-1', retryAfterSeconds: 600 }), 'application/problem+json');
     const client = createApiClient({ fetch, csrfToken: () => 'csrf-1', pageTenant: () => 'ten_a' });

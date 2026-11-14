@@ -32,7 +32,8 @@ public static class KeysEvents
 
     /// <summary>
     /// Written by either rotation in the same transaction, with the same Actor, as the <c>next</c> key
-    /// becomes <c>current</c>.
+    /// becomes <c>current</c>; and by a revocation of <c>current</c> (Story 9.3) when <c>next</c> had been
+    /// published for at least the 15-minute JWKS cache limit.
     /// </summary>
     public static readonly AuditEventDefinition SigningKeyPromoted = new(
         new AuditTypeCode("keys.signing_key.promoted"),
@@ -41,12 +42,32 @@ public static class KeysEvents
         TenantLogClass.KeyOperation);
 
     /// <summary>
-    /// Written by either rotation in the same transaction, with the same Actor, for the new <c>next</c>
-    /// key it created.
+    /// Written by either rotation, or a revocation of <c>current</c> or <c>next</c> (Story 9.3), in the same
+    /// transaction, with the same Actor, for the new <c>next</c> key it created.
     /// </summary>
     public static readonly AuditEventDefinition SigningKeyCreated = new(
         new AuditTypeCode("keys.signing_key.created"),
         "A Tenant's replacement next Signing or Management key was created in key custody. Names no key.",
+        AuditOutcome.Success,
+        TenantLogClass.KeyOperation);
+
+    /// <summary>
+    /// Written on the Tenant's chain, with the Tenant Owner as Actor, in the transaction that revokes a
+    /// published Signing Key (Story 9.3) and enqueues its destruction.
+    /// </summary>
+    public static readonly AuditEventDefinition SigningKeyRevoked = new(
+        new AuditTypeCode("keys.signing_key.revoked"),
+        "A Tenant Owner revoked a Signing Key: it left the JWKS and its private material is queued for destruction. Names no key.",
+        AuditOutcome.Success,
+        TenantLogClass.KeyOperation);
+
+    /// <summary>
+    /// Written by a revocation of <c>current</c> (Story 9.3), in place of <see cref="SigningKeyPromoted"/>,
+    /// when <c>next</c> had been published for less than the 15-minute JWKS cache limit by database time.
+    /// </summary>
+    public static readonly AuditEventDefinition SigningKeyPromotedUnaged = new(
+        new AuditTypeCode("keys.signing_key.promoted_unaged"),
+        "A revoked Signing Key's next key became current before it had been published for 15 minutes; relying parties may not have it yet. Names no key.",
         AuditOutcome.Success,
         TenantLogClass.KeyOperation);
 
@@ -59,10 +80,10 @@ public static class KeysEvents
         "A Tenant's previous Signing or Management key retired and its destruction was queued. Names no key.",
         AuditOutcome.Success);
 
-    /// <summary>Written by the destruction job once a retired key's Transit key is deleted.</summary>
+    /// <summary>Written by the destruction job once a retired or revoked key's Transit key is deleted.</summary>
     public static readonly AuditEventDefinition SigningKeyDestroyed = new(
         new AuditTypeCode("keys.signing_key.destroyed"),
-        "A Tenant's retired Signing or Management key was destroyed in key custody. Names no key.",
+        "A Tenant's retired or revoked Signing or Management key was destroyed in key custody. Names no key.",
         AuditOutcome.Success);
 
     /// <summary>
@@ -71,7 +92,7 @@ public static class KeysEvents
     /// </summary>
     public static readonly AuditEventDefinition SigningKeyDestructionFailed = new(
         new AuditTypeCode("keys.signing_key.destruction_failed"),
-        "Key custody failed to destroy a Tenant's retired Signing or Management key; the destruction retries. Names no key.",
+        "Key custody failed to destroy a Tenant's retired or revoked Signing or Management key; the destruction retries. Names no key.",
         AuditOutcome.Failure);
 
     /// <summary>

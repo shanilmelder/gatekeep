@@ -160,7 +160,7 @@ deferred:
 ## Tasks & Acceptance
 
 **Execution:**
-- [ ] **Migration** `Migration20261121000000AuthorizeMachineApplications.cs` with `TableRegistry.cs`:
+- [ ] **Migration** `Migration20261122000000AuthorizeMachineApplications.cs` with `TableRegistry.cs`:
   - `api_grant` with RLS, foreign keys and grants (Admin writes; Hosted reads; Worker purges);
   - the Hosted reads on `api` and `permission`.
   - Update the migration count to 36 and every grant pin.
@@ -256,7 +256,7 @@ deferred:
 **Summary:** Directory gains `api_grant` (the Permissions of one API granted to one machine-to-machine Application), managed from the API detail page and two Admin routes. Hosted resolves the one API a request names by `resource` or `audience`: Client Credentials tokens carry it as `aud` with exactly the requested Permissions that are currently granted (in `permissions` and `scope`), the Story 2.5 placeholder audience is gone, the Management API audience is refused, an API with offline access off gets no refresh token, and token lifetimes take the shorter of the Application's and the API's.
 
 **Files changed:**
-- `src/Adapters/Postgres/Migrations/Migration20261121000000AuthorizeMachineApplications.cs` — `api_grant` with RLS, row guard, RESTRICT foreign keys and role grants (Hosted reads only what resolution needs).
+- `src/Adapters/Postgres/Migrations/Migration20261122000000AuthorizeMachineApplications.cs` — `api_grant` with RLS, row guard, RESTRICT foreign keys and role grants (Hosted reads only what resolution needs).
 - `src/Adapters/Postgres/Schema/TableRegistry.cs` — the new table and column grants.
 - `src/Modules/Directory/**` — grant read/write methods, events `directory.api.grant_updated`/`grant_removed`, Permission removal deleting its grants, purges deleting grants first, `DirectoryApplication.Audiences` removed.
 - `src/Modules/Management/**`, `src/Gatekeep.Host.Admin/**` — `PUT`/`DELETE /apis/{apiId}/grants/{applicationId}`, `grants` on the API detail, `application_not_machine`, OpenAPI text.

@@ -166,8 +166,40 @@ public static class KeysContract
         SigningKeyLifecycle.RotateNowAsync(context, custody, appender, actor, tenantId, cancellationToken);
 
     /// <summary>
-    /// Destroys a retired key's Transit key (Story 2.4), in its Tenant's own <paramref name="context"/>.
-    /// The row is re-read and locked: only a <c>retired</c> row not yet destroyed is acted on, and
+    /// The Tenant Owner's revocation of one published Signing Key (Story 9.3, FR-38), in its own
+    /// <paramref name="context"/>, under the same per-Tenant lock as the rotations. <paramref name="keyId"/>
+    /// is the <c>kid</c>, <c>{transit name}.v{version}</c>, of this Tenant's <c>signing</c> row in state
+    /// <c>next</c>, <c>current</c> or <c>previous</c>; any other ID is <see cref="SigningKeyRevocationStatus.NotFound"/>
+    /// and nothing is written. Otherwise every replacement Transit key is created first, then the row
+    /// becomes <c>revoked</c>; a revoked <c>current</c> has <c>next</c> promoted at once whatever its age,
+    /// and a revoked <c>current</c> or <c>next</c> gets a new <c>next</c>. <paramref name="destroyJob"/> is
+    /// enqueued for the revoked row, <see cref="KeysEvents.SigningKeyRevoked"/>, then
+    /// <see cref="KeysEvents.SigningKeyPromoted"/> or <see cref="KeysEvents.SigningKeyPromotedUnaged"/> and
+    /// <see cref="KeysEvents.SigningKeyCreated"/> as they apply, are written as <paramref name="actor"/>,
+    /// and one <see cref="SigningKeysChannel"/> notification is sent.
+    /// </summary>
+    /// <exception cref="KeyCustodyException">
+    /// Custody failed to create the replacement. Nothing may be committed: the caller rolls the command back.
+    /// </exception>
+    /// <exception cref="InvalidOperationException">
+    /// The context isn't <paramref name="tenantId"/>'s, or the Tenant has no signing <c>next</c> to promote.
+    /// </exception>
+    [StateChanging]
+    public static Task<SigningKeyRevocation> RevokeSigningKeyAsync(
+        CommandContext context,
+        IKeyCustody custody,
+        IAuditAppender appender,
+        IJobEnqueuer enqueuer,
+        JobType destroyJob,
+        Actor actor,
+        Guid tenantId,
+        string keyId,
+        CancellationToken cancellationToken) =>
+        SigningKeyLifecycle.RevokeAsync(context, custody, appender, enqueuer, destroyJob, actor, tenantId, keyId, cancellationToken);
+
+    /// <summary>
+    /// Destroys a retired or revoked key's Transit key (Stories 2.4 and 9.3), in its Tenant's own <paramref name="context"/>.
+    /// The row is re-read and locked: only a <c>retired</c> or <c>revoked</c> row not yet destroyed is acted on, and
     /// then its Transit key is deleted, <c>destroyed_at</c> set and one event written. Any other row,
     /// or none, is left alone and false returned. No other row or key is touched.
     /// </summary>

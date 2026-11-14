@@ -81,3 +81,19 @@ public enum SigningKeyRotationStatus
 /// 15 minutes, by database time, never under one second.
 /// </summary>
 public sealed record SigningKeyRotation(SigningKeyRotationStatus Status, TimeSpan? RetryAfter);
+
+/// <summary>How a revocation of one of a Tenant's Signing Keys ended (Story 9.3).</summary>
+public enum SigningKeyRevocationStatus
+{
+    /// <summary>The key left JWKS, its destruction was queued, and a revoked <c>current</c> or <c>next</c> was replaced.</summary>
+    Revoked,
+
+    /// <summary>
+    /// The key ID names no published Signing Key of this Tenant: unknown, malformed, a Management key,
+    /// retired, already revoked or another Tenant's. Nothing was written.
+    /// </summary>
+    NotFound,
+}
+
+/// <summary>A Signing Key revocation's outcome (Story 9.3).</summary>
+public sealed record SigningKeyRevocation(SigningKeyRevocationStatus Status);

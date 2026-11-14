@@ -2,7 +2,9 @@ import type { SigningKey, SigningKeysJwksResponse } from '@gatekeep/api-client';
 import {
   Banner,
   Button,
+  Checkbox,
   CodeBlock,
+  ConfirmModal,
   CopyButton,
   DataTable,
   ErrorReference,
@@ -19,8 +21,11 @@ import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { api } from '../session';
 import { useCapabilities } from './capabilities';
 import type { ShellRequest } from './CredentialsPage';
+import { fillNodes } from './DeleteTenantModal';
 import { ForbiddenPage } from './ForbiddenPage';
+import type { FreshAssertion } from './freshAssertion';
 import styles from './SigningKeysPage.module.css';
+import { confirmationText } from './TenantSettingsPage';
 
 type Failure = { code: string; traceId: string };
 
@@ -34,6 +39,12 @@ type JwksLoad = { kind: 'loading' } | { kind: 'ready'; sample: SigningKeysJwksRe
 
 /** Why the last Rotate didn't rotate: the next key too young, with the whole minutes left; refused; or failed. */
 type Refusal = { kind: 'notReady'; minutes: number; failure: Failure } | { kind: 'forbidden' } | { kind: 'failed'; failure: Failure } | null;
+
+/** What the revoke confirmation's slot shows: nothing, the sheet's prompt, or a failure, with its reference when it has one. */
+type RevokeSlot = { kind: 'none' } | { kind: 'prompt' } | { kind: 'failed'; text: string; reference?: Failure };
+
+/** The states a key can be revoked from: the published ones. Retired and revoked keys have left the JWKS. */
+const REVOCABLE = new Set(['next', 'current', 'previous']);
 
 const DATE = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' });
 
@@ -56,6 +67,8 @@ function failureOf(result: { ok: boolean; problem?: { code?: string; traceId?: s
 
 export interface SigningKeysPageProps {
   request: ShellRequest;
+  /** The shell's re-authentication sheet: a revocation needs a fresh assertion (Story 9.3). */
+  fresh: FreshAssertion;
   /** The path Tenant this page was mounted with: every request it sends names this one. */
   tenantId: string;
 }
@@ -71,10 +84,17 @@ export interface SigningKeysPageProps {
  * Owners hold. Without it, an Admin who manages anything else in the Tenant sees it read-only,
  * "Tenant Owner only", and one who manages nothing sees no action and the view-only banner. A
  * rotation replaces the table with the keys it left and reads the sample again; a next key too young
- * to promote, or any failure, shows a banner with its reference. Revoke arrives with Story 9.3, and
- * the server decides every request: the page follows the capability lists, never a role (AD-20).
+ * to promote, or any failure, shows a banner with its reference.
+ *
+ * Story 9.3: each published key (next, current, previous) has Revoke, with tenant.signing_keys.revoke,
+ * read-only as "Tenant Owner only" for anyone else who manages the Tenant, and absent for a Viewer.
+ * It opens a destructive confirmation stating the token impact, which can also end every Session and
+ * refresh token in the Tenant. Confirming confirms it's the Admin, bound to the key, in that same modal
+ * when the server asks; success replaces the table, reads the sample again and says so, and a failure
+ * shows in the modal with its reference. The server decides every request: the page follows the
+ * capability lists, never a role (AD-20).
  */
-export function SigningKeysPage({ request, tenantId }: SigningKeysPageProps) {
+export function SigningKeysPage({ request, fresh, tenantId }: SigningKeysPageProps) {
   const messages = useMessages();
   const toast = useToast();
   const { has, tenantCapabilities } = useCapabilities();
@@ -87,8 +107,17 @@ export function SigningKeysPage({ request, tenantId }: SigningKeysPageProps) {
   const [refusal, setRefusal] = useState<Refusal>(null);
   // Set at once, before React re-renders, so a second press sends nothing.
   const inFlight = useRef(false);
+  // The revocation's own, so a rotation still running never swallows a confirmed revoke.
+  const revokeInFlight = useRef(false);
+  const [revoking, setRevoking] = useState<SigningKey | null>(null);
+  const [revokeAccess, setRevokeAccess] = useState(false);
+  const [revokePending, setRevokePending] = useState(false);
+  const [revokeSlot, setRevokeSlot] = useState<RevokeSlot>({ kind: 'none' });
+  // The row whose Revoke opened the modal, for focus once it closes.
+  const focusAfter = useRef<string | null>(null);
   const listed = list.kind === 'ready';
   const canRotate = has('tenant.signing_keys.rotate');
+  const canRevoke = has('tenant.signing_keys.revoke');
   const viewOnly = ![...tenantCapabilities].some((capability) => capability.startsWith('tenant.') && capability.endsWith('.manage'));
 
   useEffect(() => {
@@ -182,6 +211,82 @@ export function SigningKeysPage({ request, tenantId }: SigningKeysPageProps) {
     setRefusal({ kind: 'failed', failure });
   }
 
+  /** Opens the revoke confirmation for a published key, with its Sessions box unchecked. */
+  function openRevoke(row: SigningKey) {
+    if (!canRevoke || revokePending) return;
+    focusAfter.current = row.keyId;
+    setRevokeAccess(false);
+    setRevokeSlot({ kind: 'none' });
+    setRevoking(row);
+  }
+
+  function closeRevoke() {
+    if (revokePending) return;
+    setRevokeSlot({ kind: 'none' });
+    setRevoking(null);
+  }
+
+  /** Revokes the key the modal is for, once at a time, confirming it's the Admin when the server asks. */
+  async function revoke() {
+    if (!canRevoke || !revoking || revokeInFlight.current) return;
+    revokeInFlight.current = true;
+    setRevokePending(true);
+    setRevokeSlot({ kind: 'prompt' });
+    const { keyId } = revoking;
+    const body = { revokeAccess };
+
+    let outcome;
+    try {
+      outcome = await fresh.withFreshAssertion({ action: 'tenant.signing_keys.revoke', target: keyId, tenantId }, () =>
+        request('post', () => api.revokeSigningKey(tenantId, keyId, body)),
+      );
+    } catch {
+      outcome = null;
+    }
+    revokeInFlight.current = false;
+    setRevokePending(false);
+
+    if (outcome?.kind === 'unconfirmed') {
+      setRevokeSlot({ kind: 'failed', text: confirmationText(outcome.confirmation, messages) });
+      return;
+    }
+    const answer = outcome?.answer ?? null;
+    if (answer?.ok) {
+      // The keys as the revocation left them, or, if they can't be read, the list read again; the sample changed too.
+      const keys = answer.data?.keys;
+      if (Array.isArray(keys)) setList({ kind: 'ready', keys });
+      else setAttempt((n) => n + 1);
+      setJwksAttempt((n) => n + 1);
+      setRevokeSlot({ kind: 'none' });
+      setRevoking(null);
+      toast(messages.signingKeysRevoked);
+      return;
+    }
+    const problem = answer && !answer.ok ? (answer.problem ?? null) : null;
+    if (answer?.status === 409 && problem?.code === 'tenant_mismatch') {
+      // The shell's banner names both Tenants: nothing was changed. The modal closes so the banner shows.
+      setRevokeSlot({ kind: 'none' });
+      setRevoking(null);
+      return;
+    }
+    if (answer?.status === 401) {
+      // The renewal brought the Admin back and didn't send it again: nothing changed.
+      setRevokeSlot({ kind: 'failed', text: messages.actionRetryAfterSignIn });
+      return;
+    }
+    if (answer?.status === 403) {
+      setRevokeSlot({ kind: 'failed', text: messages.actionForbidden });
+      return;
+    }
+    // The key changed elsewhere (revoked, rotated out or retired): read the list again, and still say so here.
+    if (answer?.status === 404) setAttempt((n) => n + 1);
+    setRevokeSlot({
+      kind: 'failed',
+      text: messages.signingKeysRevokeFailed,
+      reference: { code: problem?.code ?? 'unavailable', traceId: problem?.traceId ?? '' },
+    });
+  }
+
   if (list.kind === 'forbidden') return <ForbiddenPage code={list.failure.code} traceId={list.failure.traceId} />;
 
   const columns: DataTableColumn<SigningKey>[] = [
@@ -200,6 +305,28 @@ export function SigningKeysPage({ request, tenantId }: SigningKeysPageProps) {
     { key: 'state', header: messages.signingKeysColumnStatus, cell: (row) => <KeyStateBadge state={row.state as KeyState} /> },
     { key: 'created', header: messages.signingKeysColumnCreated, cell: (row) => day(row.createdAt) },
   ];
+  // A Viewer, who manages nothing in the Tenant, gets no Revoke column; anyone else sees it, off without the capability.
+  if (!viewOnly) {
+    columns.push({
+      key: 'revoke',
+      header: messages.signingKeysRevoke,
+      cell: (row) =>
+        REVOCABLE.has(row.state) ? (
+          <Button
+            variant="destructive"
+            size="sm"
+            data-key-id={row.keyId}
+            aria-label={formatMessage(messages.signingKeysRevokeNamed, { keyId: row.keyId })}
+            aria-disabled={!canRevoke || undefined}
+            aria-describedby={!canRevoke ? ownerOnlyId : undefined}
+            onClick={() => openRevoke(row)}
+            data-testid="signing-key-revoke"
+          >
+            {messages.signingKeysRevoke}
+          </Button>
+        ) : null,
+    });
+  }
 
   let body: ReactNode;
   if (list.kind === 'loading') {
@@ -285,13 +412,30 @@ export function SigningKeysPage({ request, tenantId }: SigningKeysPageProps) {
       >
         {messages.signingKeysRotate}
       </Button>
-      {!canRotate && (
+      {/* It describes the read-only Rotate and every read-only Revoke alike. */}
+      {(!canRotate || !canRevoke) && (
         <p id={ownerOnlyId} className={styles.note} data-testid="signing-keys-owner-only">
           {messages.tenantOwnerOnly}
         </p>
       )}
     </div>
   );
+
+  const revokeReauthentication =
+    revokeSlot.kind === 'prompt' ? (
+      <p data-testid="fresh-assertion-prompt">{messages.freshAssertionPrompt}</p>
+    ) : revokeSlot.kind === 'failed' ? (
+      <Banner tone="bad" data-testid="revoke-signing-key-failed">
+        {revokeSlot.reference ? (
+          <>
+            <p>{revokeSlot.text}</p>
+            <ErrorReference code={revokeSlot.reference.code} traceId={revokeSlot.reference.traceId} />
+          </>
+        ) : (
+          revokeSlot.text
+        )}
+      </Banner>
+    ) : null;
 
   return (
     <SectionPage
@@ -308,6 +452,32 @@ export function SigningKeysPage({ request, tenantId }: SigningKeysPageProps) {
         </div>
       )}
       {body}
+      <ConfirmModal
+        open={revoking !== null}
+        onCancel={closeRevoke}
+        onConfirm={() => void revoke()}
+        tone="destructive"
+        title={messages.signingKeysRevokeTitle}
+        confirmLabel={messages.signingKeysRevokeConfirm}
+        pending={revokePending}
+        reauthentication={revokeReauthentication}
+        fallbackFocus={() =>
+          (focusAfter.current ? document.querySelector<HTMLElement>(`[data-key-id="${CSS.escape(focusAfter.current)}"]`) : null) ??
+          document.querySelector<HTMLElement>('main h1')
+        }
+        data-testid="revoke-signing-key"
+      >
+        <p>{fillNodes(messages.signingKeysRevokeKey, { keyId: <code data-testid="revoke-signing-key-id">{revoking?.keyId}</code> })}</p>
+        <p>{messages.signingKeysRevokeImpact}</p>
+        {revoking?.state === 'current' && <p data-testid="revoke-signing-key-current">{messages.signingKeysRevokeCurrent}</p>}
+        <Checkbox
+          label={messages.signingKeysRevokeAccess}
+          checked={revokeAccess}
+          disabled={revokePending}
+          onChange={(event) => setRevokeAccess(event.currentTarget.checked)}
+          data-testid="revoke-signing-key-access"
+        />
+      </ConfirmModal>
     </SectionPage>
   );
 }

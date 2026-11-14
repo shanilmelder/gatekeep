@@ -51,6 +51,7 @@ export type SigningKeysResponse = components['schemas']['SigningKeysResponse'];
 export type SigningKey = components['schemas']['SigningKeyResponse'];
 export type SigningKeysJwksResponse = components['schemas']['SigningKeysJwksResponse'];
 export type Jwk = components['schemas']['JwkResponse'];
+export type RevokeSigningKeyRequest = components['schemas']['RevokeSigningKeyRequest'];
 export type ApplicationResponse = components['schemas']['ApplicationResponse'];
 export type ApplicationListResponse = components['schemas']['ApplicationListResponse'];
 export type CreateApplicationRequest = components['schemas']['CreateApplicationRequest'];
@@ -391,6 +392,18 @@ export function createApiClient(options: ApiClientOptions = {}) {
       request(
         `/api/v1/tenants/${encodeURIComponent(tenantId)}/signing-keys/rotate` as '/api/v1/tenants/{tenantId}/signing-keys/rotate',
         'post',
+      ),
+    /**
+     * Revokes one of the Tenant's published Signing Keys by its key ID (Story 9.3): it leaves the JWKS at once and its
+     * private material is destroyed; a revoked current or next key is replaced. With `revokeAccess`, every Session and
+     * refresh token of the Tenant is revoked too. The answer is the keys after it. Tenant Owners only, after a fresh
+     * assertion for tenant.signing_keys.revoke with the key ID as its target. Both IDs go into the path encoded.
+     */
+    revokeSigningKey: (tenantId: string, keyId: string, body: RevokeSigningKeyRequest) =>
+      request(
+        `/api/v1/tenants/${encodeURIComponent(tenantId)}/signing-keys/${encodeURIComponent(keyId)}/revoke` as '/api/v1/tenants/{tenantId}/signing-keys/{keyId}/revoke',
+        'post',
+        body,
       ),
     /**
      * One page of the Tenant's Applications (Story 3.1), newest first, 50 a page. `cursor` is the

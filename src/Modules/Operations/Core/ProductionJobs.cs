@@ -136,7 +136,8 @@ internal static class ProductionJobs
         new JobDefinition(
             DestroySigningKey,
             JobScope.Tenant,
-            enqueuingRoles: [JobRole.Worker],
+            // Story 9.3: a Tenant Owner's revocation, through Host.Admin, queues its key's destruction in the same command.
+            enqueuingRoles: [JobRole.Worker, JobRole.Admin],
             runAs: JobRole.Worker,
             maxAttempts: 20,
             handler: SigningKeyJobs.DestroyAsync,
@@ -144,7 +145,7 @@ internal static class ProductionJobs
                 "Story 2.4 build review",
                 new DateOnly(2026, 11, 5),
                 "Its only parameter is one signing_key row ID, never a key name. In its Tenant's scope it re-reads and "
-                + "locks that row and, only if it is retired and not yet destroyed, deletes the Transit key the row's "
+                + "locks that row and, only if it is retired or revoked and not yet destroyed, deletes the Transit key the row's "
                 + "own IDs name and sets destroyed_at with one audit event. A custody failure commits one failure event "
                 + "and retries. No other row or key is touched.")),
         new JobDefinition(
