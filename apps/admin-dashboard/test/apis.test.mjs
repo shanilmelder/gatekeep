@@ -11,8 +11,10 @@ import {
   apisPath,
   checkApiIdentifier,
   checkApiName,
+  grantsWithout,
   isPermissionDescription,
   isPermissionValue,
+  machineGrantRows,
 } from '../src/shell/apis.ts';
 
 describe('apis', () => {
@@ -55,5 +57,30 @@ describe('apis', () => {
     assert.equal(apiOfPath('/tenants/ten_a/apis/%E0%A4%A'), '%E0%A4%A');
     assert.equal(apiOfPath('/tenants/ten_a/apis'), null);
     assert.equal(apiOfPath('/tenants/ten_a/applications/app_b'), null);
+  });
+
+  it('lists every machine Application, authorized only when it holds a Permission (Story 3.7)', () => {
+    const rows = machineGrantRows(
+      [
+        { id: 'app_b', name: 'Billing worker', type: 'machine' },
+        { id: 'app_s', name: 'Storefront', type: 'spa' },
+        { id: 'app_r', name: 'Reports', type: 'machine' },
+      ],
+      [{ applicationId: 'app_b', name: 'Billing worker', permissions: ['invoices:read', 'payments:write'] }],
+    );
+    assert.deepEqual(rows, [
+      { applicationId: 'app_b', name: 'Billing worker', authorized: true, permissions: ['invoices:read', 'payments:write'] },
+      { applicationId: 'app_r', name: 'Reports', authorized: false, permissions: [] },
+    ]);
+    assert.deepEqual(machineGrantRows([], []), []);
+  });
+
+  it("drops a removed Permission from every grant, and a grant left with none (Story 3.7)", () => {
+    const grants = [
+      { applicationId: 'app_a', name: 'A', permissions: ['invoices:read', 'payments:write'] },
+      { applicationId: 'app_b', name: 'B', permissions: ['invoices:read'] },
+    ];
+    assert.deepEqual(grantsWithout(grants, 'invoices:read'), [{ applicationId: 'app_a', name: 'A', permissions: ['payments:write'] }]);
+    assert.deepEqual(grantsWithout(grants, 'reports:read'), grants);
   });
 });

@@ -56,7 +56,10 @@ public static class ApiFields
 
     public const string Description = "description";
 
-    public static readonly IReadOnlyList<string> All = [Name, Identifier, Value, Description];
+    /// <summary>A grant's Permissions (Story 3.7): each error names the value's 0-based index in the list sent.</summary>
+    public const string Permissions = "permissions";
+
+    public static readonly IReadOnlyList<string> All = [Name, Identifier, Value, Description, Permissions];
 }
 
 /// <summary>Why an API or Permission field is refused (Story 3.6), as the Admin API spells it.</summary>
@@ -68,7 +71,16 @@ public static class ApiReasons
     /// <summary>An identifier under <c>urn:gatekeep:</c>, which only the built-in Management API uses.</summary>
     public const string Reserved = "reserved";
 
-    public static readonly IReadOnlyList<string> All = [Invalid, Reserved];
+    /// <summary>A grant's Permission value the list already holds at an earlier index (Story 3.7).</summary>
+    public const string Duplicate = "duplicate";
+
+    /// <summary>A grant's Permission value the API has no Permission by (Story 3.7).</summary>
+    public const string Unknown = "unknown";
+
+    /// <summary>A grant's Permissions list holding more values than an API can have Permissions (Story 3.7).</summary>
+    public const string TooMany = "too_many";
+
+    public static readonly IReadOnlyList<string> All = [Invalid, Reserved, Duplicate, Unknown, TooMany];
 }
 
 /// <summary>How an API create ended (Story 3.6).</summary>
@@ -105,3 +117,45 @@ public enum PermissionWriteStatus
 
 /// <summary>A Permission write's result (Story 3.6): its status, and the API's Permissions after it when done.</summary>
 public sealed record PermissionWrite(PermissionWriteStatus Status, IReadOnlyList<DirectoryPermission>? Permissions = null);
+
+/// <summary>
+/// An API as the protocol endpoints resolve it by its identifier (Story 3.7, RFC 8707): what a token for it needs, and
+/// nothing more. <paramref name="BuiltIn"/> marks the Tenant's Management API, which <c>Host.Hosted</c> refuses (AD-33);
+/// <paramref name="OfflineAccess"/> says whether a refresh token may be issued for it; a token for it lives the shorter of
+/// its <paramref name="Lifetimes"/> and its Application's (FR-15).
+/// </summary>
+public sealed record DirectoryApiTarget(Guid Id, string Identifier, bool BuiltIn, bool OfflineAccess, ApplicationLifetimes Lifetimes);
+
+/// <summary>
+/// One machine-to-machine Application's grant on an API (Story 3.7, FR-16): the Application, its name, and the values of
+/// the API's Permissions it holds, in ordinal order. An Application with no value holds no grant.
+/// </summary>
+public sealed record DirectoryApiGrant(Guid ApplicationId, string ApplicationName, IReadOnlyList<string> Permissions);
+
+/// <summary>How a grant write ended (Story 3.7).</summary>
+public enum ApiGrantWriteStatus
+{
+    /// <summary>Written, with its event.</summary>
+    Done,
+
+    /// <summary>Nothing to change: the set was already that, or a removal found no grant. Nothing was written, and no event.</summary>
+    Unchanged,
+
+    /// <summary>The Tenant has no API by that ID. Nothing was written.</summary>
+    NotFound,
+
+    /// <summary>The Tenant has no visible Application by that ID: unknown, deleted or the hidden system one. Nothing was written.</summary>
+    ApplicationNotFound,
+
+    /// <summary>The API is the built-in Management API, granted only by Epic 17's Owner flow. Nothing was written.</summary>
+    BuiltIn,
+
+    /// <summary>The Application isn't a <c>machine</c> one. Nothing was written.</summary>
+    NotMachine,
+
+    /// <summary>Some value isn't a Permission of the API: <see cref="ApiGrantWrite.UnknownValues"/> names each. Nothing was written.</summary>
+    UnknownPermissions,
+}
+
+/// <summary>A grant write's result (Story 3.7): its status, and for <see cref="ApiGrantWriteStatus.UnknownPermissions"/> the values the API lacks.</summary>
+public sealed record ApiGrantWrite(ApiGrantWriteStatus Status, IReadOnlyList<string>? UnknownValues = null);

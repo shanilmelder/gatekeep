@@ -84,14 +84,14 @@ development_status:
   2-11-offer-userinfo-and-revocation: done
   epic-2-retrospective: optional
 
-  epic-3: in-progress
+  epic-3: done
   3-1-list-and-create-applications: done
   3-2-configure-application-urls-and-grants: done
   3-3-create-rotate-and-revoke-client-secrets: done
   3-4-set-token-lifetimes: done
   3-5-delete-an-application: done
   3-6-define-apis-and-permissions: done
-  3-7-authorize-a-machine-to-machine-application: backlog
+  3-7-authorize-a-machine-to-machine-application: done
   epic-3-retrospective: optional
 
   epic-4: backlog

@@ -40,14 +40,6 @@ public static class ProtocolContract
     /// </summary>
     public const string RevocationPath = "/connect/revoke";
 
-    /// <summary>
-    /// The one audience a token carries while its Application has none (Story 2.5): a Client Credentials
-    /// token, and from Story 2.9 a code flow's access token. Story 3.7 replaces it with real APIs. No
-    /// request may name an audience or resource here, so the Management API audience is never minted on
-    /// a Tenant host.
-    /// </summary>
-    public const string PlaceholderAudience = "urn:gatekeep:placeholder";
-
     /// <summary>The <c>kid</c> of the global signing credential, which is inert: no Tenant's JWKS or token carries it.</summary>
     public const string InertSigningKeyId = InertCredentials.SigningKeyId;
 

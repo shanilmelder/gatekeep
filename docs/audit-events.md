@@ -29,6 +29,8 @@ Every audit type code Gatekeep writes, declared in its module's contract. Codes 
 | `bootstrap.token.issued` | Admins | Success | gatekeep init issued the first one-time bootstrap token. It expires 15 minutes after issue. Holds no token or hash. | None |
 | `bootstrap.token.reissued` | Admins | Success | gatekeep init reissued the bootstrap token, voiding the previous one. It expires 15 minutes after issue. Holds no token or hash. | None |
 | `directory.api.created` | Directory | Success | An API was created with its identifier, which can't be changed. Names the API only. | None |
+| `directory.api.grant_removed` | Directory | Success | A machine-to-machine Application's authorization on an API was removed: its next token for the API carries no Permission. Names the API only. Removing a grant that doesn't exist writes no event. | None |
+| `directory.api.grant_updated` | Directory | Success | The Permissions of an API granted to a machine-to-machine Application were changed. The next token it gets carries only those. Names the API only. A save that changes nothing writes no event. | None |
 | `directory.api.permission_added` | Directory | Success | A Permission was added to an API. Names the API only. | None |
 | `directory.api.permission_removed` | Directory | Success | A Permission was removed from an API. Names the API only. | None |
 | `directory.api.updated` | Directory | Success | An API's offline access, RBAC or token lifetimes were changed. Names the API only. A save that changes nothing writes no event. | None |

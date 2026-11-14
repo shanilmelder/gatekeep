@@ -120,6 +120,9 @@ internal sealed class RefuseUngrantedRefreshScopes : IOpenIddictServerHandler<Va
 /// <item><c>sub</c>, <c>sid</c>, <c>auth_time</c> and <c>amr</c> are set again from the family's anchored
 /// Session, so the new ID token says what that Session says.</item>
 /// <item>A requested <c>scope</c> narrows its scopes.</item>
+/// <item>From Story 3.7, the API its tokens are for is read again by its identifier: one since removed is
+/// <c>invalid_grant</c>, and one whose offline access is now off loses <c>offline_access</c>, so no new refresh token is
+/// issued. No <c>permissions</c> claim is carried over: a User holds none until Epic 5.</item>
 /// <item>It carries no <c>nonce</c>, so the new ID token has none (OIDC Core §12.2).</item>
 /// </list>
 /// </summary>
@@ -163,8 +166,16 @@ internal sealed class SignInRefresh(
             return;
         }
 
+        // Story 3.7: the API the family's tokens are for, read again as it stands now. One since removed ends the family's
+        // refreshes; a request naming another is refused.
+        var target = await ApiTargets.ReadAgainAsync(context, presented, transaction.Context, services.Directory);
+        if (!target.Valid)
+        {
+            return;
+        }
+
         var lifetimes = await ApplicationTokenLifetimes.ForClientAsync(
-            context.Transaction, applications, context.ClientId ?? context.Request.ClientId, context.CancellationToken);
+            context.Transaction, applications, context.ClientId ?? context.Request.ClientId, target.Api, context.CancellationToken);
         if (services.Time.GetUtcNow() >= RefreshTokens.AbsoluteEnd(family, lifetimes.RefreshTokenAbsolute))
         {
             services.Logger?.LogInformation("A refresh was refused: its Token Family is past its absolute lifetime.");
@@ -174,7 +185,8 @@ internal sealed class SignInRefresh(
 
         context.Transaction.SetProperty(RefreshTokens.FamilyProperty, family);
 
-        var principal = presented.Clone(static claim => claim.Type != Claims.Private.Nonce);
+        // Permissions are recomputed from current state: a User holds none until Epic 5, so none is carried over.
+        var principal = presented.Clone(static claim => claim.Type is not (Claims.Private.Nonce or ApiTargets.PermissionsClaim));
         var identity = principal.Identity as ClaimsIdentity
             ?? throw new InvalidOperationException("A refresh token's principal has a claims identity.");
         AuthorizeEndpoint.SetUserClaims(identity, family.UserId, family.SessionId, family.AuthTime, family.Amr);
@@ -185,6 +197,9 @@ internal sealed class SignInRefresh(
         {
             principal.SetScopes(context.Request.GetScopes().Intersect(presented.GetScopes(), StringComparer.Ordinal));
         }
+
+        // Story 3.7: an API whose offline access is now off gets a new access token and no new refresh token.
+        ApiTargets.KeepOfflineAccessRule(principal, target.Api);
 
         context.SignIn(principal);
     }
@@ -294,7 +309,7 @@ internal sealed class CapRefreshTokenLifetime(
             ?? throw new InvalidOperationException("A refresh token is issued only in a Token Family.");
 
         var lifetimes = await ApplicationTokenLifetimes.ForClientAsync(
-            context.Transaction, applications, context.ClientId ?? context.Request?.ClientId, context.CancellationToken);
+            context.Transaction, applications, context.ClientId ?? context.Request?.ClientId, ApiTargets.Of(context.Transaction), context.CancellationToken);
         var end = RefreshTokens.AbsoluteEnd(family, lifetimes.RefreshTokenAbsolute);
         if (principal.GetExpirationDate() is not { } expires || expires > end)
         {

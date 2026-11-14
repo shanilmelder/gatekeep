@@ -701,6 +701,33 @@ export interface Messages {
   apiPermissionRemoveLabel: string;
   apiPermissionRemoved: string;
   apiPermissionFailed: string;
+  /** Story 3.7: the API detail page's machine-to-machine grants. */
+  apiGrantsTitle: string;
+  apiGrantsDescription: string;
+  apiGrantsEmpty: string;
+  apiGrantsBuiltIn: string;
+  apiGrantsLoadFailed: string;
+  apiGrantsColumnApplication: string;
+  apiGrantsColumnAuthorized: string;
+  apiGrantsColumnPermissions: string;
+  apiGrantsActions: string;
+  apiGrantAuthorizedYes: string;
+  apiGrantAuthorizedNo: string;
+  apiGrantEdit: string;
+  /** Placeholder: {name}. */
+  apiGrantEditLabel: string;
+  /** Placeholder: {name}. */
+  apiGrantEditTitle: string;
+  apiGrantPermissionsLegend: string;
+  apiGrantNoPermissions: string;
+  apiGrantNoneSelected: string;
+  apiGrantSave: string;
+  apiGrantSaved: string;
+  apiGrantRemove: string;
+  /** Placeholder: {name}. */
+  apiGrantRemoveLabel: string;
+  apiGrantRemoved: string;
+  apiGrantFailed: string;
 }
 
 export const defaultMessages: Readonly<Messages> = Object.freeze({
@@ -1160,6 +1187,29 @@ export const defaultMessages: Readonly<Messages> = Object.freeze({
   apiPermissionRemoveLabel: 'Remove {value}',
   apiPermissionRemoved: 'Permission removed',
   apiPermissionFailed: "Couldn't change the permissions.",
+  apiGrantsTitle: 'Machine-to-machine applications',
+  apiGrantsDescription: 'A machine-to-machine application gets only the permissions you authorize, in its tokens for this API.',
+  apiGrantsEmpty: 'No machine-to-machine applications yet',
+  apiGrantsBuiltIn: 'Management API access is granted by a Tenant Owner in a later release.',
+  apiGrantsLoadFailed: "Couldn't load the machine-to-machine applications.",
+  apiGrantsColumnApplication: 'Application',
+  apiGrantsColumnAuthorized: 'Authorized',
+  apiGrantsColumnPermissions: 'Permissions',
+  apiGrantsActions: 'Actions',
+  apiGrantAuthorizedYes: 'Yes',
+  apiGrantAuthorizedNo: 'No',
+  apiGrantEdit: 'Edit',
+  apiGrantEditLabel: 'Edit {name}',
+  apiGrantEditTitle: 'Authorize {name}',
+  apiGrantPermissionsLegend: 'Permissions',
+  apiGrantNoPermissions: 'This API has no permissions yet. Add one first.',
+  apiGrantNoneSelected: 'Select at least one permission, or remove the authorization.',
+  apiGrantSave: 'Save',
+  apiGrantSaved: 'Authorization saved',
+  apiGrantRemove: 'Remove authorization',
+  apiGrantRemoveLabel: 'Remove authorization for {name}',
+  apiGrantRemoved: 'Authorization removed',
+  apiGrantFailed: "Couldn't change the authorization.",
 });
 
 /**

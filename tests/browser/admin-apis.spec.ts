@@ -1,4 +1,5 @@
-// Story 3.6: the APIs list, Create API and an API's page with its Settings and Permissions, in the built Admin Dashboard
+// Story 3.6: the APIs list, Create API and an API's page with its Settings and Permissions, and from Story 3.7 its
+// machine-to-machine applications, in the built Admin Dashboard
 // served by the built Host.Admin (admin-host.mjs) under its real CSP, from localhost. The Admin API is answered by route
 // interception. The server's rules (roles, the identifier and Permission rules, the built-in API's fixed Permissions) are
 // the Isolation tests' (tests/Isolation/Apis); here, what the pages make of the answers.
@@ -62,6 +63,28 @@ const MANAGEMENT = resource(0, 'Gatekeep Management API', 'urn:gatekeep:manageme
 const BILLING = resource(1, 'Billing', 'https://billing.example.com');
 const MANAGEMENT_PERMISSIONS: Permission[] = ['apis:manage', 'applications:manage', 'configuration:read'].map((value) => ({ value, description: '' }));
 
+interface Grant {
+  applicationId: string;
+  name: string;
+  permissions: string[];
+}
+
+interface Application {
+  id: string;
+  name: string;
+  type: string;
+}
+
+const appId = (n: number) => `app_${String.fromCharCode(97 + n).repeat(25)}a`;
+const WORKER: Application = { id: appId(1), name: 'Billing worker', type: 'machine' };
+const STOREFRONT: Application = { id: appId(2), name: 'Storefront', type: 'spa' };
+const REPORTS: Application = { id: appId(3), name: 'Reports', type: 'machine' };
+const APPLICATIONS = `/api/v1/tenants/${TENANT}/applications`;
+const BILLING_PERMISSIONS: Permission[] = [
+  { value: 'invoices:read', description: 'Read invoices' },
+  { value: 'payments:write', description: 'Write payments' },
+];
+
 const json = (route: Route, status: number, body: unknown, headers: Record<string, string> = {}) =>
   route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body), headers });
 const problem = (route: Route, status: number, code: string, errors?: unknown[]) =>
@@ -74,12 +97,27 @@ const MAXIMUMS: Record<string, number> = {
   refreshTokenInactivityLifetime: 2592000,
 };
 
-async function answerApi(page: Page, capabilities = TENANT_EDITOR, options: { removed?: { status: number; code: string }; seeded?: Permission[] } = {}) {
+async function answerApi(
+  page: Page,
+  capabilities = TENANT_EDITOR,
+  options: {
+    removed?: { status: number; code: string };
+    seeded?: Permission[];
+    applications?: Application[];
+    granted?: Grant[];
+  } = {},
+) {
   const log: string[] = [];
   const writes: { method: string; path: string; body: unknown; headers: Record<string, string> }[] = [];
   const apis: Api[] = [MANAGEMENT, BILLING];
   const permissions: Record<string, Permission[]> = { [MANAGEMENT.id]: [...MANAGEMENT_PERMISSIONS], [BILLING.id]: [...(options.seeded ?? [])] };
-  const detail = (api: Api) => ({ api, permissions: [...(permissions[api.id] ?? [])].sort((a, b) => a.value.localeCompare(b.value)) });
+  const applications = options.applications ?? [WORKER, STOREFRONT, REPORTS];
+  const grants: Record<string, Grant[]> = { [MANAGEMENT.id]: [], [BILLING.id]: [...(options.granted ?? [])] };
+  const detail = (api: Api) => ({
+    api,
+    permissions: [...(permissions[api.id] ?? [])].sort((a, b) => a.value.localeCompare(b.value)),
+    grants: [...(grants[api.id] ?? [])],
+  });
 
   await page.route(
     (url) => url.pathname.startsWith('/api/'),
@@ -143,6 +181,40 @@ async function answerApi(page: Page, capabilities = TENANT_EDITOR, options: { re
         permissions[id] = (permissions[id] ?? []).filter((p) => p.value !== value);
         return route.fulfill({ status: 204 });
       }
+      if (pathname === APPLICATIONS && method === 'GET') {
+        return json(route, 200, {
+          applications: applications.map((app) => ({
+            ...app,
+            clientId: app.id,
+            grantTypes: app.type === 'machine' ? ['client_credentials'] : ['authorization_code'],
+            callbackUrls: [],
+            logoutUrls: [],
+            webOrigins: [],
+            accessTokenLifetime: 900,
+            idTokenLifetime: 900,
+            refreshTokenAbsoluteLifetime: 2592000,
+            refreshTokenInactivityLifetime: 604800,
+            createdAt: '2026-11-14T09:00:00.000Z',
+          })),
+          nextCursor: null,
+        });
+      }
+      const grant = new RegExp(`^${LIST}/([^/]+)/grants/([^/]+)$`).exec(pathname);
+      if (grant && (method === 'PUT' || method === 'DELETE')) {
+        const api = apis.find((row) => row.id === decodeURIComponent(grant[1]!))!;
+        if (api.builtIn) return problem(route, 409, 'api_built_in');
+        const applicationId = decodeURIComponent(grant[2]!);
+        const others = (grants[api.id] ?? []).filter((g) => g.applicationId !== applicationId);
+        if (method === 'DELETE') {
+          grants[api.id] = others;
+          return route.fulfill({ status: 204 });
+        }
+        const app = applications.find((row) => row.id === applicationId)!;
+        if (app.type !== 'machine') return problem(route, 409, 'application_not_machine');
+        const body = request.postDataJSON() as { permissions: string[] };
+        grants[api.id] = [...others, { applicationId, name: app.name, permissions: [...body.permissions].sort() }];
+        return json(route, 200, detail(api));
+      }
       const one = new RegExp(`^${LIST}/([^/]+)$`).exec(pathname);
       if (one && method === 'GET') {
         const found = apis.find((row) => row.id === decodeURIComponent(one[1]!));
@@ -178,6 +250,8 @@ const table = (page: Page) => page.getByTestId('apis').getByRole('table');
 const modal = (page: Page) => page.getByRole('dialog', { name: 'Create API' });
 const addModal = (page: Page) => page.getByRole('dialog', { name: 'Add permission' });
 const toast = (page: Page) => page.getByTestId('toast');
+const grants = (page: Page) => page.getByTestId('api-grants');
+const grantModal = (page: Page, name: string) => page.getByRole('dialog', { name: `Authorize ${name}` });
 
 test.use({ viewport: { width: 1280, height: 900 } });
 watchCsp(test);
@@ -351,9 +425,138 @@ for (const scheme of ['light', 'dark'] as const) {
 
     await page.goto(`${PAGE}/${BILLING.id}`);
     await expect(page.getByTestId('api-permissions')).toContainText('No permissions yet');
+    await expect(page.getByTestId('api-grant-application')).toHaveCount(2);
     expect(await axe(page), 'detail').toEqual([]);
   });
+
+  test(`axe finds no violations, ${scheme}: the machine-to-machine table and its grant modal`, async ({ page }) => {
+    await page.emulateMedia({ colorScheme: scheme });
+    await answerApi(page, TENANT_EDITOR, {
+      seeded: BILLING_PERMISSIONS,
+      granted: [{ applicationId: WORKER.id, name: WORKER.name, permissions: ['invoices:read'] }],
+    });
+    await page.goto(`${PAGE}/${BILLING.id}`);
+
+    await expect(page.getByTestId('api-grant-authorized')).toHaveText(['Yes', 'No']);
+    expect(await axe(page), 'table').toEqual([]);
+
+    await page.getByRole('button', { name: 'Edit Reports' }).click();
+    await expect(grantModal(page, 'Reports')).toBeVisible();
+    expect(await axe(page), 'modal').toEqual([]);
+  });
 }
+
+test('Machine-to-machine applications lists every machine Application with Authorized and its Permissions', async ({ page }) => {
+  const api = await answerApi(page, TENANT_EDITOR, {
+    seeded: BILLING_PERMISSIONS,
+    granted: [{ applicationId: WORKER.id, name: WORKER.name, permissions: ['invoices:read', 'payments:write'] }],
+  });
+  await page.goto(`${PAGE}/${BILLING.id}`);
+
+  await expect(grants(page).getByRole('heading', { level: 2 })).toHaveText('Machine-to-machine applications');
+  await expect(grants(page).getByRole('table').getByRole('columnheader')).toHaveText(['Application', 'Authorized', 'Permissions', 'Actions']);
+  // The single-page Application isn't listed: only machine-to-machine ones can be authorized.
+  await expect(page.getByTestId('api-grant-application')).toHaveText(['Billing worker', 'Reports']);
+  await expect(page.getByTestId('api-grant-authorized')).toHaveText(['Yes', 'No']);
+  await expect(page.getByTestId('api-grant-permissions')).toHaveText(['invoices:read payments:write', '—']);
+  await expect(page.getByRole('button', { name: 'Remove authorization for Billing worker' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Remove authorization for Reports' })).toHaveCount(0);
+  expect(api.count(`GET ${APPLICATIONS}`)).toBe(1);
+});
+
+test('Edit authorizes an Application with the checked Permissions, with a toast', async ({ page }) => {
+  const api = await answerApi(page, TENANT_EDITOR, { seeded: BILLING_PERMISSIONS });
+  await page.goto(`${PAGE}/${BILLING.id}`);
+
+  await page.getByRole('button', { name: 'Edit Reports' }).click();
+  const dialog = grantModal(page, 'Reports');
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole('checkbox')).toHaveCount(2);
+
+  // Nothing checked is refused before anything is sent.
+  await page.getByTestId('api-grant-save').click();
+  await expect(page.getByTestId('api-grant-error')).toHaveText('Select at least one permission, or remove the authorization.');
+  expect(api.writes).toHaveLength(0);
+
+  await dialog.getByRole('checkbox', { name: 'payments:write' }).check();
+  await page.getByTestId('api-grant-save').click();
+
+  await expect(toast(page)).toHaveText('Authorization saved');
+  await expect(dialog).toHaveCount(0);
+  await expect(page.getByTestId('api-grant-authorized')).toHaveText(['No', 'Yes']);
+  await expect(page.getByTestId('api-grant-permissions')).toHaveText(['—', 'payments:write']);
+  expect(api.writes).toHaveLength(1);
+  expect(api.writes[0]!.method).toBe('PUT');
+  expect(api.writes[0]!.path).toBe(`${LIST}/${BILLING.id}/grants/${REPORTS.id}`);
+  expect(api.writes[0]!.body).toEqual({ permissions: ['payments:write'] });
+  expect(api.writes[0]!.headers['x-gatekeep-csrf']).toBe(CSRF);
+});
+
+test('Remove authorization sends the DELETE and the row reads No, with a toast', async ({ page }) => {
+  const api = await answerApi(page, TENANT_EDITOR, {
+    seeded: BILLING_PERMISSIONS,
+    granted: [{ applicationId: WORKER.id, name: WORKER.name, permissions: ['invoices:read'] }],
+  });
+  await page.goto(`${PAGE}/${BILLING.id}`);
+
+  await page.getByRole('button', { name: 'Remove authorization for Billing worker' }).click();
+
+  await expect(toast(page)).toHaveText('Authorization removed');
+  await expect(page.getByTestId('api-grant-authorized')).toHaveText(['No', 'No']);
+  expect(api.writes).toHaveLength(1);
+  expect(api.writes[0]!.method).toBe('DELETE');
+  expect(api.writes[0]!.path).toBe(`${LIST}/${BILLING.id}/grants/${WORKER.id}`);
+});
+
+test('Removing a Permission drops it from every grant, and an Application left with none reads No', async ({ page }) => {
+  await answerApi(page, TENANT_EDITOR, {
+    seeded: BILLING_PERMISSIONS,
+    granted: [
+      { applicationId: WORKER.id, name: WORKER.name, permissions: ['invoices:read', 'payments:write'] },
+      { applicationId: REPORTS.id, name: REPORTS.name, permissions: ['invoices:read'] },
+    ],
+  });
+  await page.goto(`${PAGE}/${BILLING.id}`);
+  await expect(page.getByTestId('api-grant-authorized')).toHaveText(['Yes', 'Yes']);
+
+  await page.getByRole('button', { name: 'Remove invoices:read' }).click();
+
+  await expect(toast(page)).toHaveText('Permission removed');
+  await expect(page.getByTestId('api-grant-permissions')).toHaveText(['payments:write', '—']);
+  await expect(page.getByTestId('api-grant-authorized')).toHaveText(['Yes', 'No']);
+});
+
+test('With no machine-to-machine Application the table says so', async ({ page }) => {
+  await answerApi(page, TENANT_EDITOR, { seeded: BILLING_PERMISSIONS, applications: [STOREFRONT] });
+  await page.goto(`${PAGE}/${BILLING.id}`);
+
+  await expect(grants(page)).toContainText('No machine-to-machine applications yet');
+  await expect(page.getByTestId('api-grant-edit')).toHaveCount(0);
+});
+
+test('On the built-in API the section says a Tenant Owner grants Management API access later, with no controls', async ({ page }) => {
+  const api = await answerApi(page);
+  await page.goto(`${PAGE}/${MANAGEMENT.id}`);
+
+  await expect(page.getByTestId('api-grants-built-in')).toHaveText('Management API access is granted by a Tenant Owner in a later release.');
+  await expect(grants(page).getByRole('table')).toHaveCount(0);
+  await expect(grants(page).getByRole('button')).toHaveCount(0);
+  expect(api.count(`GET ${APPLICATIONS}`)).toBe(0);
+});
+
+test('A Viewer sees the machine-to-machine table read-only', async ({ page }) => {
+  const api = await answerApi(page, TENANT_VIEWER, {
+    seeded: BILLING_PERMISSIONS,
+    granted: [{ applicationId: WORKER.id, name: WORKER.name, permissions: ['invoices:read'] }],
+  });
+  await page.goto(`${PAGE}/${BILLING.id}`);
+
+  await expect(page.getByTestId('api-grant-authorized')).toHaveText(['Yes', 'No']);
+  await expect(grants(page).getByRole('table').getByRole('columnheader')).toHaveText(['Application', 'Authorized', 'Permissions']);
+  await expect(page.getByTestId('api-grant-edit')).toHaveCount(0);
+  await expect(page.getByTestId('api-grant-remove')).toHaveCount(0);
+  expect(api.writes).toHaveLength(0);
+});
 
 test('A Remove answered 404, already removed elsewhere, drops the row with no banner', async ({ page }) => {
   await answerApi(page, TENANT_EDITOR, {

@@ -59,7 +59,9 @@ public sealed class ClientCredentialsTests(PostgresFixture postgres, OpenBaoFixt
         Assert.Equal(await CurrentKidAsync(database, a.TenantId), token.Kid);
         Assert.Equal(a.Issuer, token.Issuer);
         Assert.Equal(client.ClientId, token.Subject);
-        Assert.Equal(new[] { ProtocolContract.PlaceholderAudience }, token.Audiences);
+        Assert.Equal(new[] { ProtocolDatabase.TestApi }, token.Audiences);
+        Assert.False(token.TryGetPayloadValue<object>("scope", out _));
+        Assert.False(token.TryGetPayloadValue<object>("permissions", out _));
         Assert.Equal(SecurityLimits.DefaultAccessTokenLifetime, token.ValidTo - token.IssuedAt);
         Assert.True(token.ValidTo - token.IssuedAt <= SecurityLimits.HardSignedTokenLifetime);
         Assert.Equal(1, host.Custody.Calls(Gatekeep.Kernel.Secrets.KeyOperation.Sign));
@@ -243,17 +245,26 @@ public sealed class ClientCredentialsTests(PostgresFixture postgres, OpenBaoFixt
         Assert.Equal("unsupported_grant_type", response.Error);
     }
 
+    /// <summary>
+    /// Story 3.7 (replacing Story 2.5's blanket refusal): a value that is no API of this Tenant, the Management API's
+    /// audience among them, or no value at all, is <c>invalid_target</c>, before any token or row is made.
+    /// </summary>
     [Theory]
     [InlineData("resource", "https://api.example.test/")]
     [InlineData("audience", "management")]
-    [InlineData("audience", ProtocolContract.PlaceholderAudience)]
-    public async Task A_requested_audience_or_resource_is_invalid_target(string name, string value)
+    [InlineData("audience", "urn:gatekeep:management")]
+    [InlineData("resource", "urn:gatekeep:placeholder")]
+    [InlineData("resource", "https://API.test")]
+    [InlineData(null, null)]
+    public async Task An_unknown_API_or_none_is_invalid_target(string? name, string? value)
     {
         var (database, a, _) = await TwoTenantsAsync();
         var client = await database.CreateClientAsync(a.TenantId);
         await using var host = await ProtocolHost.StartAsync(database.Hosted, bao);
 
-        using var response = await TokenAsync(host, HostA, client.ClientId, client.Secret, extra: (name, value));
+        using var response = name is null
+            ? await TokenAsync(host, HostA, client.ClientId, client.Secret, resource: null)
+            : await TokenAsync(host, HostA, client.ClientId, client.Secret, extra: (name, value!));
 
         Assert.Equal(HttpStatusCode.BadRequest, response.Status);
         Assert.Equal("invalid_target", response.Error);
@@ -261,17 +272,22 @@ public sealed class ClientCredentialsTests(PostgresFixture postgres, OpenBaoFixt
         Assert.Equal(0, host.Custody.Calls(Gatekeep.Kernel.Secrets.KeyOperation.Sign));
     }
 
+    /// <summary>Story 3.7 (FR-16): a requested scope the client isn't granted is dropped silently, never <c>invalid_scope</c>.</summary>
     [Fact]
-    public async Task A_requested_scope_is_invalid_scope()
+    public async Task A_requested_scope_not_granted_is_dropped_silently()
     {
         var (database, a, _) = await TwoTenantsAsync();
         var client = await database.CreateClientAsync(a.TenantId);
         await using var host = await ProtocolHost.StartAsync(database.Hosted, bao);
 
-        using var response = await TokenAsync(host, HostA, client.ClientId, client.Secret, extra: ("scope", "openid"));
+        using var response = await TokenAsync(host, HostA, client.ClientId, client.Secret, extra: ("scope", "openid invoices:read"));
 
-        Assert.Equal(HttpStatusCode.BadRequest, response.Status);
-        Assert.Equal("invalid_scope", response.Error);
+        Assert.Equal(HttpStatusCode.OK, response.Status);
+        Assert.False(response.Body.RootElement.TryGetProperty("scope", out _));
+        var token = new JsonWebToken(response.AccessToken);
+        Assert.Equal(new[] { ProtocolDatabase.TestApi }, token.Audiences);
+        Assert.False(token.TryGetPayloadValue<object>("scope", out _));
+        Assert.False(token.TryGetPayloadValue<object>("permissions", out _));
     }
 
     [Fact]
@@ -599,7 +615,8 @@ public sealed class ClientCredentialsTests(PostgresFixture postgres, OpenBaoFixt
         string method = "basic",
         string grant = "client_credentials",
         (string Name, string Value)? extra = null,
-        string? source = null)
+        string? source = null,
+        string? resource = ProtocolDatabase.TestApi)
     {
         var form = new Dictionary<string, string> { ["grant_type"] = grant };
         if (method == "post")
@@ -614,6 +631,12 @@ public sealed class ClientCredentialsTests(PostgresFixture postgres, OpenBaoFixt
         if (extra is { } parameter)
         {
             form[parameter.Name] = parameter.Value;
+        }
+
+        // Story 3.7: Client Credentials must name an API. The Tenant's test API, unless the test names its own or none.
+        if (grant == "client_credentials" && resource is not null && extra is not { Name: "resource" or "audience" })
+        {
+            form["resource"] = resource;
         }
 
         using var request = new HttpRequestMessage(HttpMethod.Post, new Uri($"http://{tenantHost}{ProtocolContract.TokenPath}"))
@@ -643,7 +666,7 @@ public sealed class ClientCredentialsTests(PostgresFixture postgres, OpenBaoFixt
         {
             IssuerSigningKeys = jwks.GetSigningKeys(),
             ValidIssuer = issuer,
-            ValidAudience = ProtocolContract.PlaceholderAudience,
+            ValidAudience = ProtocolDatabase.TestApi,
             ValidateLifetime = true,
             ValidAlgorithms = [SecurityAlgorithms.RsaSha256],
             ValidTypes = ["at+jwt"],

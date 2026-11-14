@@ -35,6 +35,9 @@ internal static class TenantSeeds
         ("permission", (t, n) =>
             "INSERT INTO permission (tenant_id, api_id, value, description, created_at) " +
             $"VALUES ('{t}', '{n}', 'seeded:read', 'Seeded', now())"),
+        ("api_grant", (t, n) =>
+            "INSERT INTO api_grant (tenant_id, api_id, application_id, value) " +
+            $"VALUES ('{t}', '{n}', '{n}', 'seeded:read')"),
         ("tenant_attempt", (t, _) =>
             "INSERT INTO tenant_attempt (tenant_id, policy, subject_hash, window_start, attempts) " +
             $"VALUES ('{t}', 'authentication.token_request.tenant', sha256(convert_to('{t}', 'UTF8')), now(), 1) ON CONFLICT DO NOTHING"),

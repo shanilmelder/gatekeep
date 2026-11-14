@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Net;
 using System.Net.Sockets;
 using System.Security.Claims;
+using System.Text.Json;
 using Gatekeep.Kernel.Audit;
 using Gatekeep.Kernel.Identifiers;
 using Gatekeep.Kernel.Persistence;
@@ -15,6 +16,7 @@ using Gatekeep.Modules.Tenancy.Contracts;
 using Microsoft.AspNetCore;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
+using Microsoft.IdentityModel.JsonWebTokens;
 using Microsoft.IdentityModel.Tokens;
 using OpenIddict.Abstractions;
 using OpenIddict.Server;
@@ -216,53 +218,6 @@ internal sealed class BeginTokenTransaction<TContext>(TokenRequestTransaction tr
 }
 
 /// <summary>
-/// No audience or resource may be requested at a Tenant's token endpoint (Story 2.5), so the
-/// Management API audience can never be minted here: either is refused with <c>invalid_target</c>,
-/// before OpenIddict reads it. No scope is known yet either, so a Client Credentials request naming one
-/// is refused with <c>invalid_scope</c>. A code exchange may name only <c>openid</c>, the one scope a
-/// code is ever granted (Story 2.9), which is then dropped, since it adds nothing to the code; any other
-/// is <c>invalid_scope</c>. A refresh's scope is checked against what its family was granted, once its
-/// token is read, by <see cref="RefuseUngrantedRefreshScopes"/> (Story 2.10). Story 3.7 replaces these
-/// with real APIs.
-/// </summary>
-internal sealed class RefuseTokenTargets : IOpenIddictServerHandler<ValidateTokenRequestContext>
-{
-    public static OpenIddictServerHandlerDescriptor Descriptor { get; } =
-        OpenIddictServerHandlerDescriptor.CreateBuilder<ValidateTokenRequestContext>()
-            .UseSingletonHandler<RefuseTokenTargets>()
-            .SetOrder(OpenIddictServerHandlers.Exchange.ValidateGrantType.Descriptor.Order + 500)
-            .SetType(OpenIddictServerHandlerType.Custom)
-            .Build();
-
-    public ValueTask HandleAsync(ValidateTokenRequestContext context)
-    {
-        ArgumentNullException.ThrowIfNull(context);
-
-        if (context.Request.Resources is { IsDefaultOrEmpty: false } || context.Request.Audiences is { IsDefaultOrEmpty: false })
-        {
-            context.Reject(Errors.InvalidTarget, "No audience or resource may be requested here.");
-        }
-        // A refresh may name only scopes its family was granted (Story 2.10): RefuseUngrantedRefreshScopes
-        // checks them once the refresh token is read.
-        else if (!context.Request.IsRefreshTokenGrantType()
-            && (context.Request.IsAuthorizationCodeGrantType()
-                ? context.Request.GetScopes().Any(s => s != Scopes.OpenId)
-                : !context.Request.GetScopes().IsDefaultOrEmpty))
-        {
-            context.Reject(Errors.InvalidScope, "No scope may be requested here but openid, on a code exchange.");
-        }
-        else if (context.Request.IsAuthorizationCodeGrantType())
-        {
-            // openid alone names nothing the code doesn't already carry; OpenIddict refuses any scope on
-            // a code exchange, so it is dropped before OpenIddict reads the request.
-            context.Request.Scope = null;
-        }
-
-        return ValueTask.CompletedTask;
-    }
-}
-
-/// <summary>
 /// Gatekeep's client authentication (AD-8, AD-9), in place of OpenIddict's <c>ValidateClientSecret</c>.
 /// It runs on token request validation right after the grant type check, before any of OpenIddict's
 /// parameter checks and its client lookup, so a missing secret, an unknown client and a wrong secret
@@ -417,12 +372,15 @@ internal sealed class AuthenticateGatekeepClient(TokenRequestTransaction transac
 
 /// <summary>
 /// Client Credentials has no user, so the client signs in as itself (Story 2.5): <c>sub</c> is its
-/// <c>client_id</c>, and <c>aud</c> its Application's audiences, or <see cref="ProtocolContract.PlaceholderAudience"/>
-/// while it has none (Story 3.7 replaces it). The access token is its only destination. A Tenant with
+/// <c>client_id</c>. From Story 3.7 (FR-16) its <c>aud</c> is the identifier of the API the request named, and its
+/// Permissions are the values of that API it is granted now, narrowed to the request's <c>scope</c> when it sent one:
+/// a value not granted is dropped silently. They are carried, in ordinal order, as the <c>permissions</c> JSON array and the
+/// space-delimited <c>scope</c>; with none, both are absent. The access token is its only destination. A Tenant with
 /// no <c>current</c> Signing Key can't sign, so its authenticated client is refused here with
 /// <c>server_error</c>, before any token or row is made, and the runtime it was built from stays whole.
 /// </summary>
-internal sealed class SignInClient(IOpenIddictApplicationManager applications, TokenEndpointServices services)
+internal sealed class SignInClient(
+    IOpenIddictApplicationManager applications, TokenRequestTransaction transaction, TokenEndpointServices services)
     : IOpenIddictServerHandler<HandleTokenRequestContext>
 {
     public static OpenIddictServerHandlerDescriptor Descriptor { get; } =
@@ -453,11 +411,28 @@ internal sealed class SignInClient(IOpenIddictApplicationManager applications, T
         var application = await applications.FindByClientIdAsync(context.ClientId!, context.CancellationToken) as DirectoryApplication
             ?? throw new InvalidOperationException("The authenticated client has no Application.");
 
-        string[] audiences = application.Audiences.IsDefaultOrEmpty ? [ProtocolContract.PlaceholderAudience] : [.. application.Audiences];
+        // ResolveTokenTarget refused a Client Credentials request naming no available API.
+        var api = context.Transaction.GetProperty<DirectoryApiTarget>(ApiTargets.RequestedProperty)
+            ?? throw new InvalidOperationException("A Client Credentials request names its API.");
+        context.Transaction.SetProperty(ApiTargets.ApiProperty, api);
+
+        // What it is granted now, so a removed grant is gone from the next token; narrowed to what it asked for.
+        var granted = await services.Directory.ListGrantedPermissionsAsync(transaction.Context, api.Id, application.Id, context.CancellationToken);
+        var requested = context.Transaction.GetProperty<string[]>(ApiTargets.RequestedScopesProperty) ?? [];
+        string[] permissions = requested.Length == 0
+            ? [.. granted]
+            : [.. granted.Where(value => requested.Contains(value, StringComparer.Ordinal))];
 
         var identity = new ClaimsIdentity(TokenValidationParameters.DefaultAuthenticationType, Claims.Name, Claims.Role);
         identity.SetClaim(Claims.Subject, application.ClientId);
-        identity.SetAudiences(audiences);
+        identity.SetAudiences(api.Identifier);
+        if (permissions.Length != 0)
+        {
+            identity.SetScopes(permissions);
+            // A JSON array, whatever the count: one value is still an array.
+            identity.AddClaim(new Claim(ApiTargets.PermissionsClaim, JsonSerializer.Serialize(permissions), JsonClaimValueTypes.JsonArray));
+        }
+
         identity.SetDestinations(static _ => [Destinations.AccessToken]);
         context.SignIn(new ClaimsPrincipal(identity));
     }

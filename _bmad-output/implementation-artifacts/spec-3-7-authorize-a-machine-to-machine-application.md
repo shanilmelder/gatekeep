@@ -2,13 +2,21 @@
 title: 'Story 3.7: Authorize a machine-to-machine Application'
 type: 'feature'
 created: '2026-11-14'
-status: 'ready-for-dev'
+status: 'done'
+baseline_revision: '26a1285a92d66c12e8b584fb184a41f2b498edc9'
 review_loop_iteration: 0
 followup_review_recommended: false
 context:
   - '{project-root}/_bmad-output/implementation-artifacts/epic-3-context.md'
 warnings: ['oversized']
-deferred: []
+deferred:
+  - summary: >-
+      The grant audit events (directory.api.grant_updated, directory.api.grant_removed) name the API but not the Application.
+    evidence: |-
+      The spec asks their detail to name the Application's public ID, but AuditEvent holds one target by design (AD-16, architecture-tested) and AuditDetail holds only personal data (IP, user agent, email). Story 3.6's Permission events share the limit. Recording a second object needs an audit-envelope change (a secondary target column), beyond this story.
+    location: >-
+      src/Gatekeep.Kernel/Audit/AuditEvent.cs
+    severity: medium
 ---
 
 <intent-contract>
@@ -194,6 +202,37 @@ deferred: []
 
 ## Review Triage Log
 
+### 2026-11-14 — Review pass
+- verdicts: 27 findings — high 0, medium 4, low 16, false 5, maybe-false 2
+- findings:
+  - `[false]` `[reject]` (intent) A machine client with no grant gets a 200 token with `aud` set and no Permissions, where "authorize" could mean refusal — the spec's "No grant" matrix row and the decision "no scope → all granted" (the empty set) settle it; the token carries no Permission, so it grants nothing.
+  - `[low]` `[reject]` (intent) No single test drives Remove authorization over the Admin HTTP API and then requests a token — each segment is covered (`ApiGrantsApiTests` for the route, `ApiTargetTests` for the next token after a removal); joining them adds no behaviour under test.
+  - `[false]` `[reject]` (intent) The offline-access acceptance check lands on the user code and refresh flows, not machine clients — Client Credentials never issues a refresh token, so the rule can only bite on the code flow; the spec's Offline access and Refresh rows place it there.
+  - `[false]` `[reject]` (intent) A code flow that names no API now gets an access token with no `aud` — the spec decides this ("Story 4.9 adds the default audience"); the placeholder must go (AC5).
+  - `[medium]` `[patch]` (verification) Nothing tests that a soft-deleted Application's grant is hidden from the API detail — added an `ApiGrantsApiTests` case that deletes a granted Application and asserts `grants` is empty.
+  - `[medium]` `[patch]` (verification) API lifetimes on the code-exchange and refresh paths are untested — added a code-flow case to `ApplicationLifetimeProtocolTests` asserting the API's shorter access and refresh-absolute lifetimes on the exchange and a refresh.
+  - `[medium]` `[patch]` (verification) No browser test checks that removing a Permission updates the machine-to-machine table — added an `admin-apis.spec.ts` case seeding a grant, removing its Permission, and asserting the row's Permissions and Authorized cells.
+  - `[low]` `[patch]` (verification, other) `A_deleted_Applications_purge_and_a_Tenant_purge_delete_its_grants_first` runs only the deleted-Application purge — renamed it and its summary; the Tenant purge is covered by `TenantSeeds` and `TenantDeletionOperationTests`.
+  - `[low]` `[reject]` (verification, other) The machine-to-machine table stops at 20 pages (1,000 Applications) without saying so — a Tenant with over 1,000 Applications is far from everyday use, and a truncation notice adds a new state and copy.
+  - `[medium]` `[defer]` (blind) `directory.api.grant_updated`/`grant_removed` don't name the Application, which the spec asks for — the audit envelope (`AuditEvent`) holds one target by design (AD-16, architecture-tested) and `AuditDetail` holds only personal data; Story 3.6's Permission events share the limit. Recording a second object needs an audit-model change beyond this story.
+  - `[low]` `[reject]` (blind) Removing a Permission silently de-authorizes an Application left with no values, with no grant event or dashboard warning — `directory.api.permission_removed` records the cause; a per-Application event loop and a warning add branches for a rare case.
+  - `[low]` `[patch]` (blind) `IApiManagement.RemoveGrantAsync`'s doc says the result is `Done` when there's no grant; the code returns `Unchanged` — corrected the comment.
+  - `[low]` `[reject]` (blind) A 200-value grant of long values, written in both `scope` and `permissions`, could make a ~52 KB token — the two claims are the user's decision, and 200 near-maximum values is not everyday use; a size cap is new design.
+  - `[false]` `[reject]` (blind) An unauthorized machine client still gets a token with `aud` — same as the first intent row; spec-mandated and the token carries no Permission.
+  - `[low]` `[reject]` (blind) The machine-to-machine table silently stops at 1,000 Applications — grouped with the verification note above; same reason.
+  - `[low]` `[reject]` (blind) The `application.audiences` column is still written on insert but never read — it takes its empty default, which the system CHECK requires (Story 2.8); dropping it is a migration the spec excluded ("the column is untouched").
+  - `[low]` `[reject]` (blind) Grant actions: Remove authorization has no confirmation, an unauthorized row's button reads "Edit", and Edit with no Permissions opens a modal with no Save — the modal explains there are no Permissions and the effect is reversible by re-granting; copy and flow changes are UX additions for little gain.
+  - `[low]` `[reject]` (blind) The dashboard's grant failure states (modal failed/forbidden/401, load failed, remove failed) have no browser tests — they reuse the page's shared problem-rendering; the gap leaves no behaviour wrong.
+  - `[low]` `[patch]` (blind) Protocol cases untested: repeating the authorization's own API at exchange and refresh, and a Client Credentials scope of only ungranted values — added both to `ApiTargetTests`. (Refresh naming an API when the family has none, and `resource`+`audience` with the same value, are refused by the same one-value rule already tested.)
+  - `[low]` `[patch]` (blind) The `SetApiGrant` OpenAPI description says empty or oversized lists name the value's index; `CheckGrant` reports those with no index — reworded and regenerated the contract.
+  - `[low]` `[patch]` (blind) `ApiRows.Grants` orders by `g.application_id` (a UUID) — now ordered by `a.name, g.application_id`. The 200 cap read through three names is rejected: all resolve to `SecurityLimits.MaxPermissionsPerApi`.
+  - `[maybe-false]` `[reject]` (edge) A grant write racing a concurrent Application delete and its purge could leave a grant for a deleted Application — the RESTRICT FK makes either the insert or the purge's DELETE fail (`purge_conflict`, retried); settling it needs a concurrency test, and if true it is low: a narrow race whose fix adds row locking.
+  - `[low]` `[reject]` (edge) Removing a Permission that was an Application's only value de-authorizes it with no grant event — grouped with the blind finding above; same reason.
+  - `[false]` `[reject]` (edge) Pre-3.7 refresh families with no `gk_api` claim keep refreshing and now get no `aud` — those tokens carried only the placeholder, which granted nothing; a family with no API gets exactly what a new code flow naming no API gets.
+  - `[low]` `[reject]` (edge) The machine-to-machine table silently stops at 1,000 Applications — grouped with the verification note above; same reason.
+  - `[low]` `[reject]` (edge) Remove authorization answered 404 (Application deleted elsewhere) leaves the row with a generic failure — rare, a reload clears it, and the fix adds a branch.
+  - `[maybe-false]` `[reject]` (edge) The grant modal shows only a generic failure on a 400 `unknown` or a 404/409 — settling it needs the rendered copy for each problem; if true it is low and rare, and specific copy adds branches.
+
 ## Design Notes
 
 - **The user's decisions (2026-11-14):**
@@ -211,3 +250,29 @@ deferred: []
 - **.NET build:** with `MSYS_NO_PATHCONV=1`, run `docker run --rm -v "D:/Projects/Personal/gatekeep:/src" -v gk-nuget:/root/.nuget -w /src mcr.microsoft.com/dotnet/sdk:10.0.403-noble sh -c 'dotnet build Gatekeep.slnx -p:NuGetAudit=false -v q'`. Expected: 0 warnings and 0 errors.
 - **Contract:** regenerate with `docker run --rm -v "D:/Projects/Personal/gatekeep:/src" -v "D:/Projects/Personal/gatekeep:/out" -w /src gatekeep/tests:local sh deploy/docker/api-contract.sh --write /out`. Then run `pnpm -r build`, typecheck, and the dashboard and api-client unit tests in `gatekeep/tests:local`. Expected: all clean.
 - **Targeted Isolation tests:** run `docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -e TESTCONTAINERS_HOST_OVERRIDE=host.docker.internal -v "D:/Projects/Personal/gatekeep:/src" -w /src gatekeep/tests:local sh -c '<pin the IPv4 as deploy/docker/run-tests.sh does>; dotnet test tests/Isolation --filter "<classes>"'` on the new and changed classes only (all of `Protocol/*`, `Apis/*`, and `Applications/ApplicationLifetimeProtocolTests`). Then run the Architecture suite and the `admin-apis` Playwright project. Memory is tight, so don't run the full Isolation suite; CI does.
+
+## Auto Run Result
+
+**Summary:** Directory gains `api_grant` (the Permissions of one API granted to one machine-to-machine Application), managed from the API detail page and two Admin routes. Hosted resolves the one API a request names by `resource` or `audience`: Client Credentials tokens carry it as `aud` with exactly the requested Permissions that are currently granted (in `permissions` and `scope`), the Story 2.5 placeholder audience is gone, the Management API audience is refused, an API with offline access off gets no refresh token, and token lifetimes take the shorter of the Application's and the API's.
+
+**Files changed:**
+- `src/Adapters/Postgres/Migrations/Migration20261120000000AuthorizeMachineApplications.cs` — `api_grant` with RLS, row guard, RESTRICT foreign keys and role grants (Hosted reads only what resolution needs).
+- `src/Adapters/Postgres/Schema/TableRegistry.cs` — the new table and column grants.
+- `src/Modules/Directory/**` — grant read/write methods, events `directory.api.grant_updated`/`grant_removed`, Permission removal deleting its grants, purges deleting grants first, `DirectoryApplication.Audiences` removed.
+- `src/Modules/Management/**`, `src/Gatekeep.Host.Admin/**` — `PUT`/`DELETE /apis/{apiId}/grants/{applicationId}`, `grants` on the API detail, `application_not_machine`, OpenAPI text.
+- `src/Modules/Protocol/Core/ApiTargets.cs` (new), `TokenEndpoint.cs`, `AuthorizeEndpoint.cs`, `RefreshTokens.cs`, `ApplicationLifetimes.cs`, `ProtocolServer.cs`, `ProtocolContract.cs` — target resolution, Permissions, the private `gk_api` claim, offline access, per-API lifetimes; placeholder removed.
+- `apps/admin-dashboard/src/shell/ApiDetailPage.tsx`, `apis.ts`, `packages/ui/src/messages.tsx`, `packages/api-client/**` — the machine-to-machine section, grant modal and client methods.
+- `docs/api/openapi-v1.json`, `docs/audit-events.md`, `LogCatalogue.Generated.cs`, `schema.generated.ts` — regenerated.
+- Tests: new `tests/Isolation/Apis/ApiGrantsApiTests.cs` and `tests/Isolation/Protocol/ApiTargetTests.cs`; updated Protocol, lifetime, migration-count, cross-Tenant, canary, capability and Admin API rule tests; `tests/browser/admin-apis.spec.ts`.
+
+**Review findings:** 27 findings (medium 4, low 16, false 5, maybe-false 2). Patched 8 (3 medium, 5 low): tests for a deleted Application's hidden grant, API lifetimes on the code flow, the dashboard grant table after a Permission removal, repeated API at exchange and refresh, and a Client Credentials scope of only ungranted values; the `RemoveGrantAsync` doc; the `SetApiGrant` OpenAPI text; grant ordering by name; a test rename. Deferred 1 (medium): grant events don't name the Application (audit envelope holds one target). Rejected 18, each with its reason in the Review Triage Log.
+
+**Follow-up review:** not recommended. The three medium patches were test additions that ran green, and the low patches were a comment, a description, an ORDER BY and a rename; no unverified risk remains from them. Patched counts: high 0, medium 3, low 5.
+
+**Verification:** .NET build 0 warnings / 0 errors; `api-contract.sh` reports the contract matches; Isolation `Protocol/*`, `Apis/*` and `ApplicationLifetimeProtocolTests`: 264 of 264 pass after the patches. The implementer also ran the api-client (33), dashboard (115) and ui unit tests, Architecture (785 pass; the one failure is the known local-only `.claude/worktrees` check), the cross-Tenant, migration, purge, Applications and canary classes, and Playwright `admin-apis` (19 of 19).
+
+**Residual risks:**
+- Grant audit events name the API only (deferred above).
+- Machine-to-machine table lists at most 1,000 Applications without a notice.
+- Refresh families issued before this release carry no `gk_api` and refresh as no-API tokens (no `aud`).
+- `/authorize` doesn't keep the named API in the stored sign-in parameters; Story 4.2's resumed sign-in must add it.

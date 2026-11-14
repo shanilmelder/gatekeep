@@ -155,11 +155,23 @@ internal sealed class ProtocolDatabase(PostgresFixture postgres, string name)
     public static async Task<ProtocolDatabase> CreateAsync(PostgresFixture postgres) =>
         new(postgres, await postgres.NewMigratedDatabaseAsync());
 
-    /// <summary>An active Tenant on <paramref name="host"/>, with its stored issuer <c>https://{host}/</c> unless one is given.</summary>
+    /// <summary>
+    /// The identifier of the API every Tenant <see cref="AddTenantAsync"/> adds has (Story 3.7): a Client Credentials request
+    /// must name an API, and <c>ClientCredentialsTests.TokenAsync</c> names this one unless a test names its own.
+    /// </summary>
+    public const string TestApi = "https://api.test";
+
+    /// <summary>
+    /// An active Tenant on <paramref name="host"/>, with its stored issuer <c>https://{host}/</c> unless one is given, and
+    /// from Story 3.7 an API identified by <see cref="TestApi"/>, with the default lifetimes and offline access off.
+    /// </summary>
     public async Task<ResolvedTenant> AddTenantAsync(string host, string? issuer = null)
     {
         var id = Guid.CreateVersion7();
         await TestTenants.InsertAsync(Superuser, id, host);
+        await PostgresFixture.ExecuteAsync(
+            Superuser,
+            $"INSERT INTO api (tenant_id, id, name, identifier, created_at) VALUES ('{id}', '{Guid.CreateVersion7()}', 'Test API', '{TestApi}', now())");
         if (issuer is not null)
         {
             await PostgresFixture.ExecuteAsync(

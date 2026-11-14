@@ -23,8 +23,14 @@ public sealed record ManagedApi(
 /// <summary>One of an API's Permissions as the Admin API shows it (Story 3.6): its <c>resource:action</c> value and description.</summary>
 public sealed record ManagedPermission(string Value, string Description);
 
+/// <summary>
+/// One machine-to-machine Application's grant on an API as the Admin API shows it (Story 3.7): the Application's ID and
+/// name, and the values of the API's Permissions it holds, in ordinal order.
+/// </summary>
+public sealed record ManagedApiGrant(Guid ApplicationId, string Name, IReadOnlyList<string> Permissions);
+
 /// <summary>One refused field of an API or Permission write (Story 3.6): the field, the reason and, for a lifetime above its limit, that limit in seconds.</summary>
-public sealed record ApiFieldError(string Field, string Reason, int? Maximum);
+public sealed record ApiFieldError(string Field, string Reason, int? Maximum, int? Index = null);
 
 /// <summary>How an API call ended (Story 3.6).</summary>
 public enum ApiStatus
@@ -53,16 +59,26 @@ public enum ApiStatus
     /// <summary>The API already holds the most Permissions. Nothing was written.</summary>
     PermissionLimitReached,
 
-    /// <summary>The API is the built-in Management API, whose identifier and Permissions are fixed. Nothing was written.</summary>
+    /// <summary>
+    /// The API is the built-in Management API, whose identifier and Permissions are fixed, and which only Epic 17's Owner
+    /// flow grants. Nothing was written.
+    /// </summary>
     BuiltIn,
+
+    /// <summary>A grant names an Application that isn't a machine-to-machine one (Story 3.7). Nothing was written.</summary>
+    ApplicationNotMachine,
 }
 
-/// <summary>An API call's result: the API and its Permissions when done or unchanged, the errors when invalid.</summary>
+/// <summary>
+/// An API call's result: the API, its Permissions and from Story 3.7 its grants when done or unchanged, the errors when
+/// invalid.
+/// </summary>
 public sealed record ApiResult(
     ApiStatus Status,
     ManagedApi? Api = null,
     IReadOnlyList<ManagedPermission>? Permissions = null,
-    IReadOnlyList<ApiFieldError>? Errors = null);
+    IReadOnlyList<ApiFieldError>? Errors = null,
+    IReadOnlyList<ManagedApiGrant>? Grants = null);
 
 /// <summary>A page of APIs when <see cref="Status"/> is <see cref="ApiStatus.Done"/>: the built-in first, then newest, and the next page's cursor.</summary>
 public sealed record ApiPageResult(ApiStatus Status, IReadOnlyList<ManagedApi> Apis, Guid? NextAfter);
@@ -144,7 +160,10 @@ public interface IApiManagement
         string? description,
         CancellationToken cancellationToken);
 
-    /// <summary>Removes the Permission <paramref name="value"/> from the API <paramref name="apiId"/>, and writes <c>directory.api.permission_removed</c> by the caller.</summary>
+    /// <summary>
+    /// Removes the Permission <paramref name="value"/> from the API <paramref name="apiId"/>, with every grant of it (Story
+    /// 3.7), and writes <c>directory.api.permission_removed</c> by the caller.
+    /// </summary>
     /// <exception cref="InvalidOperationException">The context isn't <paramref name="tenantId"/>'s.</exception>
     [StateChanging]
     Task<ApiResult> RemovePermissionAsync(
@@ -154,5 +173,40 @@ public interface IApiManagement
         Guid tenantId,
         Guid apiId,
         string value,
+        CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Replaces the Permissions of the API <paramref name="apiId"/> granted to the machine-to-machine Application
+    /// <paramref name="applicationId"/> with <paramref name="permissions"/> (Story 3.7, FR-16): 1 to 200 distinct values,
+    /// each one of the API's Permissions, every problem named by its index. A set equal to what is stored writes nothing;
+    /// otherwise the rows and <c>directory.api.grant_updated</c> by the caller, in the caller's transaction. Another kind of
+    /// Application is <see cref="ApiStatus.ApplicationNotMachine"/>; the built-in Management API is <see cref="ApiStatus.BuiltIn"/>.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The context isn't <paramref name="tenantId"/>'s.</exception>
+    [StateChanging]
+    Task<ApiResult> SetGrantAsync(
+        CommandContext tenantContext,
+        Principal principal,
+        TenantRoleGrant? grant,
+        Guid tenantId,
+        Guid apiId,
+        Guid applicationId,
+        IReadOnlyList<string?> permissions,
+        CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Removes the Application <paramref name="applicationId"/>'s grant on the API <paramref name="apiId"/> (Story 3.7), and
+    /// writes <c>directory.api.grant_removed</c> by the caller. When it holds none, nothing is written and the result is
+    /// <see cref="ApiStatus.Unchanged"/>.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The context isn't <paramref name="tenantId"/>'s.</exception>
+    [StateChanging]
+    Task<ApiResult> RemoveGrantAsync(
+        CommandContext tenantContext,
+        Principal principal,
+        TenantRoleGrant? grant,
+        Guid tenantId,
+        Guid apiId,
+        Guid applicationId,
         CancellationToken cancellationToken);
 }

@@ -78,6 +78,10 @@ export type ApiPermission = components['schemas']['ApiPermissionResponse'];
 export type CreateApiRequest = components['schemas']['CreateApiRequest'];
 export type ApiSettingsRequest = components['schemas']['ApiSettingsRequest'];
 export type AddApiPermissionRequest = components['schemas']['AddApiPermissionRequest'];
+/** A machine-to-machine Application's grant on an API (Story 3.7): its `app_` ID, name and the Permissions it holds. */
+export type ApiGrant = components['schemas']['ApiGrantResponse'];
+/** The Permissions to grant a machine-to-machine Application on an API (Story 3.7): they replace what it holds. */
+export type SetApiGrantRequest = components['schemas']['SetApiGrantRequest'];
 
 /** A path the committed OpenAPI document has, so a removed endpoint fails to compile. */
 export type ApiPath = keyof paths;
@@ -480,6 +484,23 @@ export function createApiClient(options: ApiClientOptions = {}) {
     removeApiPermission: (tenantId: string, apiId: string, value: string) =>
       request(
         `/api/v1/tenants/${encodeURIComponent(tenantId)}/apis/${encodeURIComponent(apiId)}/permissions/${encodeURIComponent(value)}` as '/api/v1/tenants/{tenantId}/apis/{apiId}/permissions/{value}',
+        'delete',
+      ),
+    /**
+     * Authorizes a machine-to-machine Application on an API with exactly `body.permissions` (Story 3.7): a 200 with the API,
+     * its Permissions and grants. Another kind of Application is 409 application_not_machine; the built-in Management API
+     * is 409 api_built_in. Every ID goes into the path encoded.
+     */
+    setApiGrant: (tenantId: string, apiId: string, applicationId: string, body: SetApiGrantRequest) =>
+      request(
+        `/api/v1/tenants/${encodeURIComponent(tenantId)}/apis/${encodeURIComponent(apiId)}/grants/${encodeURIComponent(applicationId)}` as '/api/v1/tenants/{tenantId}/apis/{apiId}/grants/{applicationId}',
+        'put',
+        body,
+      ),
+    /** Removes a machine-to-machine Application's authorization on an API (Story 3.7): a 204, even when it held none. Every ID goes into the path encoded. */
+    removeApiGrant: (tenantId: string, apiId: string, applicationId: string) =>
+      request(
+        `/api/v1/tenants/${encodeURIComponent(tenantId)}/apis/${encodeURIComponent(apiId)}/grants/${encodeURIComponent(applicationId)}` as '/api/v1/tenants/{tenantId}/apis/{apiId}/grants/{applicationId}',
         'delete',
       ),
     /** Begins a fresh assertion for a Tenant action, bound to the Tenant `tenantId` names. The Deployment complete finishes it. */

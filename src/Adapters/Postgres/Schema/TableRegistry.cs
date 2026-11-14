@@ -659,6 +659,7 @@ public static class TableRegistry
         // changes only their offline access, RBAC and lifetimes: never the identifier, which is fixed at creation, or
         // the name. Host.Worker writes the built-in Management API at Tenant activation and in the hourly backfill,
         // finding it by built_in, and a Tenant's deletion purges, reading only tenant_id.
+        // Story 3.7: Host.Hosted resolves a token's API by its identifier, reading only what a token for it needs.
         new(
             "api",
             TableClass.Tenant,
@@ -671,6 +672,11 @@ public static class TableRegistry
             },
             new Dictionary<string, IReadOnlyList<ColumnGrant>>
             {
+                [Hosted] = [new ColumnGrant(Select, [
+                    "tenant_id", "id", "identifier", "built_in", "offline_access",
+                    "access_token_lifetime", "id_token_lifetime",
+                    "refresh_token_absolute_lifetime", "refresh_token_inactivity_lifetime",
+                ])],
                 [Worker] = [new ColumnGrant(Select, ["tenant_id", "id", "built_in"])],
                 [Admin] = [new ColumnGrant(Update, [
                     "offline_access", "rbac",
@@ -682,6 +688,7 @@ public static class TableRegistry
         // Story 3.6: an API's resource:action Permissions. Host.Admin adds and removes them, never edits one; Host.Worker
         // writes the built-in Management API's, reading which values it has so it inserts only the missing ones, and a
         // Tenant's deletion purges.
+        // Story 3.7: Host.Hosted reads the values a client's grant joins to; removing one removes its grants first.
         new(
             "permission",
             TableClass.Tenant,
@@ -694,7 +701,27 @@ public static class TableRegistry
             },
             new Dictionary<string, IReadOnlyList<ColumnGrant>>
             {
+                [Hosted] = [new ColumnGrant(Select, ["tenant_id", "api_id", "value"])],
                 [Worker] = [new ColumnGrant(Select, ["tenant_id", "api_id", "value"])],
+            },
+            RowGuard),
+        // Story 3.7 (FR-16): the Permissions of an API granted to a machine-to-machine Application, one row per value.
+        // Host.Admin sets and removes them, never updates one; Host.Hosted reads a client's to issue its token; a Tenant's
+        // purge and a deleted Application's delete them before the rows they reference, reading only what each WHERE names.
+        new(
+            "api_grant",
+            TableClass.Tenant,
+            "Directory",
+            TableUse.Configuration,
+            new Dictionary<string, IReadOnlyList<string>>
+            {
+                [Hosted] = [Select],
+                [Admin] = [Select, Insert, Delete],
+                [Worker] = [Delete],
+            },
+            new Dictionary<string, IReadOnlyList<ColumnGrant>>
+            {
+                [Worker] = [new ColumnGrant(Select, ["tenant_id", "application_id"])],
             },
             RowGuard),
 

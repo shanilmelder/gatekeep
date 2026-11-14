@@ -35,6 +35,8 @@ internal static partial class LogCatalogue
         new("bootstrap.token.issued", AuditOutcome.Success, "gatekeep init issued the first one-time bootstrap token. It expires 15 minutes after issue. Holds no token or hash."),
         new("bootstrap.token.reissued", AuditOutcome.Success, "gatekeep init reissued the bootstrap token, voiding the previous one. It expires 15 minutes after issue. Holds no token or hash."),
         new("directory.api.created", AuditOutcome.Success, "An API was created with its identifier, which can't be changed. Names the API only."),
+        new("directory.api.grant_removed", AuditOutcome.Success, "A machine-to-machine Application's authorization on an API was removed: its next token for the API carries no Permission. Names the API only. Removing a grant that doesn't exist writes no event."),
+        new("directory.api.grant_updated", AuditOutcome.Success, "The Permissions of an API granted to a machine-to-machine Application were changed. The next token it gets carries only those. Names the API only. A save that changes nothing writes no event."),
         new("directory.api.permission_added", AuditOutcome.Success, "A Permission was added to an API. Names the API only."),
         new("directory.api.permission_removed", AuditOutcome.Success, "A Permission was removed from an API. Names the API only."),
         new("directory.api.updated", AuditOutcome.Success, "An API's offline access, RBAC or token lifetimes were changed. Names the API only. A save that changes nothing writes no event."),

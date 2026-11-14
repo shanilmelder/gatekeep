@@ -27,6 +27,8 @@ export {
   type ApiSent,
   type ApiProblemError,
   type AddApiPermissionRequest,
+  type ApiGrant,
+  type SetApiGrantRequest,
   type ApiPermission,
   type ApiResource,
   type ApiResourceDetail,

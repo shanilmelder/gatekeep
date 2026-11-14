@@ -17,9 +17,9 @@ internal sealed record IssuedTokenLifetimes(
     TimeSpan RefreshTokenInactivity);
 
 /// <summary>
-/// Where a token request's lifetimes come from (Stories 3.4 and 3.6, FR-15). <see cref="Of"/> is the one lookup: the
-/// client's Application and the API the request names, the shorter of each lifetime winning. Until Story 3.7 resolves
-/// the audience, no request names an API.
+/// Where a token request's lifetimes come from (Stories 3.4, 3.6 and 3.7, FR-15). <see cref="Of"/> is the one lookup: the
+/// client's Application and the API the request's tokens are for (<see cref="ApiTargets"/>), the shorter of each lifetime
+/// winning, on every grant.
 /// The global OpenIddict lifetimes stay the Deployment defaults, and <see cref="ApplyApplicationLifetimes"/>
 /// replaces them on every token the request issues.
 /// </summary>
@@ -31,9 +31,9 @@ internal static class ApplicationTokenLifetimes
     /// <summary>
     /// The lifetimes <paramref name="application"/>'s tokens for <paramref name="api"/> are issued with (Stories 3.4 and
     /// 3.6, FR-15): each of the four the shorter of the Application's and the API's; with no API, the Application's own,
-    /// as saved. Until Story 3.7 resolves a request's audience, every caller passes no API.
+    /// as saved.
     /// </summary>
-    public static IssuedTokenLifetimes Of(DirectoryApplication application, DirectoryApi? api)
+    public static IssuedTokenLifetimes Of(DirectoryApplication application, DirectoryApiTarget? api)
     {
         ArgumentNullException.ThrowIfNull(application);
         var own = new IssuedTokenLifetimes(
@@ -61,20 +61,24 @@ internal static class ApplicationTokenLifetimes
     }
 
     /// <summary>
-    /// The lifetimes of the request's client <paramref name="clientId"/>, read once per request from its
-    /// Application in the request's own Tenant context, and kept on <paramref name="transaction"/>.
+    /// The lifetimes of the request's client <paramref name="clientId"/> for <paramref name="api"/>, the API its tokens are
+    /// for or none (Story 3.7), read once per request and API from its Application in the request's own Tenant context, and
+    /// kept on <paramref name="transaction"/> under a key that names the API.
     /// </summary>
     /// <exception cref="InvalidOperationException">The request has no client, or its client has no Application.</exception>
     public static async ValueTask<IssuedTokenLifetimes> ForClientAsync(
         OpenIddictServerTransaction transaction,
         IOpenIddictApplicationManager applications,
         string? clientId,
+        DirectoryApiTarget? api,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(transaction);
         ArgumentNullException.ThrowIfNull(applications);
 
-        if (transaction.GetProperty<IssuedTokenLifetimes>(Property) is { } known)
+        // One key per API, so lifetimes read before the API was known are never taken for the API's.
+        var key = $"{Property}:{api?.Id.ToString("N") ?? "none"}";
+        if (transaction.GetProperty<IssuedTokenLifetimes>(key) is { } known)
         {
             return known;
         }
@@ -82,15 +86,15 @@ internal static class ApplicationTokenLifetimes
         var application = (string.IsNullOrEmpty(clientId) ? null : await applications.FindByClientIdAsync(clientId, cancellationToken)) as DirectoryApplication
             ?? throw new InvalidOperationException("A token is issued only to a known Application.");
 
-        // Story 3.7 passes the API the request's audience names; until then, none.
-        var lifetimes = Of(application, api: null);
-        transaction.SetProperty(Property, lifetimes);
+        var lifetimes = Of(application, api);
+        transaction.SetProperty(key, lifetimes);
         return lifetimes;
     }
 }
 
 /// <summary>
-/// Issues every token of a token request for its Application's lifetimes (Story 3.4, FR-15), on
+/// Issues every token of a token request for its Application's lifetimes (Story 3.4, FR-15), each the shorter of its
+/// Application's and its API's from Story 3.7, on
 /// authorization_code, refresh_token and client_credentials alike, after OpenIddict's
 /// <c>Prepare*TokenPrincipal</c> handlers set the global defaults and before the tokens are made:
 /// <list type="bullet">
@@ -123,7 +127,7 @@ internal sealed class ApplyApplicationLifetimes(IOpenIddictApplicationManager ap
         }
 
         var lifetimes = await ApplicationTokenLifetimes.ForClientAsync(
-            context.Transaction, applications, context.ClientId ?? context.Request?.ClientId, context.CancellationToken);
+            context.Transaction, applications, context.ClientId ?? context.Request?.ClientId, ApiTargets.Of(context.Transaction), context.CancellationToken);
 
         Expire(context.AccessTokenPrincipal, lifetimes.AccessToken);
         Expire(context.IdentityTokenPrincipal, lifetimes.IdentityToken);
