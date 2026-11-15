@@ -67,4 +67,17 @@ public static class SessionsContract
     /// <exception cref="InvalidOperationException">The context has no Tenant.</exception>
     public static Task PurgeApplicationsAsync(CommandContext context, IReadOnlyCollection<Guid> applicationIds, CancellationToken cancellationToken) =>
         SessionsApplicationPurge.PurgeAsync(context, applicationIds, cancellationToken);
+
+    /// <summary>
+    /// Sessions' purge of expired state (Story 4.3, FR-8, AD-13): deletes the context Tenant's <c>token</c> rows whose
+    /// <c>expiration_date</c> is at or before <paramref name="now"/>, then the <c>authorization</c> rows (Token Families)
+    /// no token references, then the <c>user_session</c> rows that are over (ended, or idle or absolute expiry at or
+    /// before <paramref name="now"/>) and that no family anchors. A live Session, and a family with any unexpired
+    /// token, always stay. It writes no event: its caller writes <see cref="SessionsEvents.ExpiredStatePurged"/> once
+    /// for its whole run. A second run deletes nothing.
+    /// </summary>
+    /// <returns>How many rows it deleted, over the three tables.</returns>
+    /// <exception cref="InvalidOperationException">The context has no Tenant.</exception>
+    public static Task<int> PurgeExpiredStateAsync(CommandContext context, DateTimeOffset now, CancellationToken cancellationToken) =>
+        SessionsExpiredStatePurge.PurgeAsync(context, now, cancellationToken);
 }

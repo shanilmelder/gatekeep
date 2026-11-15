@@ -374,6 +374,17 @@ internal static class CanaryFlows
             "Story 2.4 build review",
             new DateOnly(2026, 11, 5)),
         new(
+            new(SurfaceKind.JobType, "sessions.expired_state.sweep"),
+            "Deployment-wide, so it carries no payload. Reads active Tenant IDs and enqueues ID-only jobs. It deletes nothing.",
+            "Story 4.3 build review",
+            new DateOnly(2026, 11, 16)),
+        new(
+            new(SurfaceKind.JobType, "sessions.expired_state.purge"),
+            "Carries no payload and may not carry a credential. Deletes expired rows by their expiry and references only, "
+            + "never reading a token payload, Session hash, transaction parameter or kept email, and writes one ID-free event.",
+            "Story 4.3 build review",
+            new DateOnly(2026, 11, 16)),
+        new(
             new(SurfaceKind.OperationType, "tenancy.tenant.create"),
             "Its Tenant stages create the six secret class keys, then the Signing and Management keys and the wrapped token "
             + "protection key, by name only, storing key names, versions, Transit's ciphertext and fixed result codes; its "

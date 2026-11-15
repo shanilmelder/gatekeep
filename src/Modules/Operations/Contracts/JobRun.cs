@@ -86,6 +86,9 @@ public sealed record JobRunnerOptions
 
     /// <summary>How long the runner waits for a notification before it looks anyway.</summary>
     public TimeSpan PollInterval { get; init; } = TimeSpan.FromSeconds(30);
+
+    /// <summary>The clock a job body reads as its "now", such as the expired-state purge's cutoffs (Story 4.3). Not the runner's own timings.</summary>
+    public TimeProvider Time { get; init; } = TimeProvider.System;
 }
 
 /// <summary>Claims and runs jobs (AD-15).</summary>

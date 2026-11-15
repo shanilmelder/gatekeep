@@ -30,6 +30,10 @@ internal static class ProductionJobs
 
     public static readonly JobType SweepTransitKeys = SigningKeyJobs.SweepType;
 
+    public static readonly JobType SweepExpiredState = ExpiredStatePurgeJobs.SweepType;
+
+    public static readonly JobType PurgeExpiredState = ExpiredStatePurgeJobs.PurgeType;
+
     public static readonly JobRegistry Registry = new(
     [
         new JobDefinition(
@@ -162,6 +166,34 @@ internal static class ProductionJobs
                 + "24 hours. For each it reads, in that key's Tenant scope, whether a signing_key row names it, and only "
                 + "when none does deletes it with one Deployment audit event. Secret class and Deployment keys are never "
                 + "read or deleted.")),
+        new JobDefinition(
+            SweepExpiredState,
+            JobScope.DeploymentWide,
+            enqueuingRoles: [JobRole.Worker],
+            runAs: JobRole.Worker,
+            maxAttempts: 5,
+            handler: ExpiredStatePurgeJobs.SweepAsync,
+            review: new JobReview(
+                "Story 4.3 build review",
+                new DateOnly(2026, 11, 16),
+                "Takes no parameter. In its own scope it reads only the IDs of active Tenants and the job table. For each "
+                + "Tenant it enqueues one sessions.expired_state.purge job in that Tenant's own scope, unless one is already "
+                + "waiting there. It deletes nothing: the purge job does.")),
+        new JobDefinition(
+            PurgeExpiredState,
+            JobScope.Tenant,
+            enqueuingRoles: [JobRole.Worker],
+            runAs: JobRole.Worker,
+            maxAttempts: 5,
+            handler: ExpiredStatePurgeJobs.PurgeAsync,
+            review: new JobReview(
+                "Story 4.3 build review",
+                new DateOnly(2026, 11, 16),
+                "Takes no parameter. In its Tenant's scope and one transaction, against one clock, it deletes token rows "
+                + "whose expiration_date has passed, then authorization rows no token references, then user_session rows "
+                + "that are ended or idle- or absolute-expired and that no authorization references, then signin_transaction "
+                + "rows more than one hour past expires_at. It reads only those columns, the IDs and references that join "
+                + "them and tenant_id, and writes one ID-free audit event when it deleted anything.")),
     ]);
 
     private const string DeleteDone =

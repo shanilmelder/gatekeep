@@ -148,7 +148,7 @@ public class AdminApiRuleTests
             "gk_admin SELECT application_id,id,status,tenant_id",
             "gk_admin UPDATE concurrency_token,status",
             "gk_hosted UPDATE concurrency_token,status",
-            "gk_worker SELECT application_id,id,tenant_id",
+            "gk_worker SELECT application_id,id,tenant_id,user_session_id",
         })]
     [InlineData(
         "token",
@@ -157,9 +157,9 @@ public class AdminApiRuleTests
             "gk_admin SELECT application_id,authorization_id,status,tenant_id",
             "gk_admin UPDATE concurrency_token,status",
             "gk_hosted UPDATE concurrency_token,payload,redemption_date,reference_id,status",
-            "gk_worker SELECT application_id,authorization_id,tenant_id",
+            "gk_worker SELECT application_id,authorization_id,expiration_date,tenant_id",
         })]
-    [InlineData("signin_transaction", new[] { "gk_worker SELECT application_id,tenant_id" })]
+    [InlineData("signin_transaction", new[] { "gk_worker SELECT application_id,expires_at,tenant_id" })]
     public void Registry_holds_an_Application_deletion_and_its_purge_to_their_columns(string table, string[] columns)
     {
         Assert.Equal(columns, ColumnGrants(Entry(table)));

@@ -45,6 +45,8 @@ public static class TenantKeyedTypes
         ["keys.signing_keys.rotate"] = KeyScope.DeploymentWide("Not one Tenant's job: it checks every active Tenant's key ages daily. Each Tenant it touches is rotated in its own Tenant scope, one at a time (AD-4)."),
         ["keys.signing_key.destroy"] = KeyScope.Tenant,
         ["keys.transit_keys.sweep"] = KeyScope.DeploymentWide("Not one Tenant's job: it lists every key in custody. Each key's row is read in that key's own Tenant scope, and only orphaned sig- and mgmt- keys are deleted."),
+        ["sessions.expired_state.sweep"] = KeyScope.DeploymentWide("Not one Tenant's job: it reads only active Tenant IDs and the job table, and enqueues one sessions.expired_state.purge job in each Tenant's own scope. It deletes nothing."),
+        ["sessions.expired_state.purge"] = KeyScope.Tenant,
     };
 
     /// <summary>

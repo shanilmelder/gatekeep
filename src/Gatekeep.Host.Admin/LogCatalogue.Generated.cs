@@ -65,6 +65,7 @@ internal static partial class LogCatalogue
         new("operations.operation.retried", AuditOutcome.Success, "An Admin retried a failed Operation's failed steps. Names the Operation's Tenant only, when it has one."),
         new("protocol.client.cross_tenant_rejected", AuditOutcome.Failure, "A client credential issued by another Tenant was refused at this Tenant's token endpoint. Names nothing of the other Tenant."),
         new("sessions.access.revoked", AuditOutcome.Success, "Sessions in scope ended and their Token Families and tokens were revoked. User scope targets the User."),
+        new("sessions.expired_state.purged", AuditOutcome.Success, "The hourly purge deleted the Tenant's expired tokens, empty Token Families, over Sessions with no family, and sign-in transactions over an hour past expiry."),
         new("sessions.session.rotated", AuditOutcome.Success, "A User authenticated again in a browser holding their live Session, so its identifier was replaced and the old one stopped working. Names the User only."),
         new("sessions.session.started", AuditOutcome.Success, "A User's Session started. Names the User only: the Session ID is stored only as its hash."),
         new("tenancy.tenant.activated", AuditOutcome.Success, "A Tenant's creation Operation succeeded: its settings exist and its Tenant Subdomain now resolves."),
