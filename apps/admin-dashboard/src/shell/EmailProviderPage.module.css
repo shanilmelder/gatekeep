@@ -1,0 +1,87 @@
+/*
+ * Email provider (Story 4.4): the kind cards, then the settings and sender cards on the sf surface, as an
+ * Application's Settings tab, then Save and Remove. Tokens only.
+ */
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gk-space-16);
+  min-width: 0;
+  margin: 0;
+}
+
+.empty {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gk-space-8);
+}
+
+.kinds {
+  min-width: 0;
+}
+
+.kind {
+  padding: var(--gk-space-8) var(--gk-space-12);
+  background: var(--gk-color-sf);
+  border: 1px solid var(--gk-color-bd);
+  border-radius: var(--gk-radius-card);
+}
+
+.kindText {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.kindName {
+  font-weight: var(--gk-font-section-weight);
+}
+
+.kindDescription {
+  font: var(--gk-font-small);
+  color: var(--gk-color-tx2);
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  background: var(--gk-color-sf);
+  border: 1px solid var(--gk-color-bd);
+  border-radius: var(--gk-radius-card);
+}
+
+.cardHeader {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gk-space-4);
+  padding: var(--gk-space-12) var(--gk-space-16);
+  border-bottom: 1px solid var(--gk-color-bd);
+}
+
+.cardHeader > h2 {
+  margin: 0;
+  font: var(--gk-font-section);
+  font-weight: var(--gk-font-section-weight);
+}
+
+.cardBody {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr));
+  gap: var(--gk-space-16);
+  padding: var(--gk-space-16);
+  min-width: 0;
+}
+
+.note {
+  margin: 0;
+  color: var(--gk-color-tx2);
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--gk-space-8);
+}

@@ -214,11 +214,31 @@ internal static class AdminOpenApi
                     Enumerate(
                         schema,
                         "field",
-                        [.. ManagementContract.ApplicationSettingsFields.Concat(ManagementContract.ApplicationLifetimeFields).Concat(ManagementContract.ApiFields).Distinct(StringComparer.Ordinal)]);
+                        [.. ManagementContract.ApplicationSettingsFields.Concat(ManagementContract.ApplicationLifetimeFields).Concat(ManagementContract.ApiFields)
+                            .Concat(ManagementContract.EmailProviderFields).Distinct(StringComparer.Ordinal)]);
                     Enumerate(
                         schema,
                         "reason",
-                        [.. ManagementContract.ApplicationSettingsReasons.Concat(ManagementContract.ApplicationLifetimeReasons).Concat(ManagementContract.ApiReasons).Distinct(StringComparer.Ordinal)]);
+                        [.. ManagementContract.ApplicationSettingsReasons.Concat(ManagementContract.ApplicationLifetimeReasons).Concat(ManagementContract.ApiReasons)
+                            .Concat(ManagementContract.EmailProviderReasons).Distinct(StringComparer.Ordinal)]);
+                }
+                else if (type == typeof(SetEmailProviderRequest))
+                {
+                    // Feedback for clients: the server decides each field and names each one it refuses (Story 4.4).
+                    Enumerate(schema, "kind", ManagementContract.EmailProviderKinds);
+                    Bound(schema, "fromAddress", pattern: null, maxLength: Gatekeep.Kernel.Limits.SecurityLimits.MaxEmailLength);
+                    Bound(schema, "fromName", pattern: null, maxLength: Gatekeep.Kernel.Limits.SecurityLimits.MaxEmailFromNameLength);
+                    Bound(schema, "secret", pattern: null, maxLength: Gatekeep.Kernel.Limits.SecurityLimits.MaxEmailProviderSecretLength);
+                    schema.Properties ??= new Dictionary<string, IOpenApiSchema>();
+                    schema.Properties["settings"] = EmailProviderSettingsSchema();
+                }
+                else if (type == typeof(EmailProviderResponse))
+                {
+                    Enumerate(schema, "kind", ManagementContract.EmailProviderKinds);
+                }
+                else if (type == typeof(EmailProviderSettings))
+                {
+                    Enumerate(schema, "tls", EmailProviderTls);
                 }
                 else if (type == typeof(CreateApiRequest))
                 {
@@ -638,6 +658,44 @@ internal static class AdminOpenApi
                 target.MaxLength = max;
             }
         }
+    }
+
+    /// <summary>An SMTP provider's TLS modes (Story 4.4): never plaintext.</summary>
+    private static readonly string[] EmailProviderTls = ["starttls", "implicit"];
+
+    /// <summary>
+    /// A save's settings (Story 4.4): read as raw JSON, so a member its kind doesn't have is refused rather than skipped,
+    /// and described here as the object it must be, with every kind's members and no other.
+    /// </summary>
+    private static OpenApiSchema EmailProviderSettingsSchema()
+    {
+        static OpenApiSchema Text(string description, int maxLength, IEnumerable<string>? values = null) => new()
+        {
+            Type = JsonSchemaType.String,
+            Description = description,
+            MaxLength = maxLength,
+            Enum = values is null ? null : [.. values.Select(v => (JsonNode)JsonValue.Create(v))],
+        };
+
+        return new OpenApiSchema
+        {
+            Type = JsonSchemaType.Object,
+            Description = "The kind's non-secret settings: exactly its members, as EmailProviderSettings describes them. Any other member is refused.",
+            AdditionalPropertiesAllowed = false,
+            Properties = new Dictionary<string, IOpenApiSchema>
+            {
+                ["host"] = Text("smtp: a DNS name or a public IP address.", 253),
+                ["port"] = new OpenApiSchema { Type = JsonSchemaType.Integer, Format = "int32", Minimum = "1", Maximum = "65535", Description = "smtp." },
+                ["tls"] = Text("smtp.", 16, EmailProviderTls),
+                ["username"] = Text("smtp, optional. With one, the secret is its password.", 256),
+                ["region"] = Text("sendgrid: global or eu. mailgun: us or eu. ses: an AWS region.", 64),
+                ["messageStream"] = Text("postmark, optional.", 64),
+                ["domain"] = Text("mailgun: the sending domain.", 253),
+                ["accessKeyId"] = Text("ses.", 128),
+                ["endpoint"] = Text("custom_http: an absolute https URL.", 2048),
+                ["authHeaderName"] = Text("custom_http: the header the secret is sent in; Authorization by default.", 64),
+            },
+        };
     }
 
     private static void Enumerate(OpenApiSchema schema, string property, IEnumerable<string> values)

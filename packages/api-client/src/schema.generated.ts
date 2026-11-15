@@ -640,6 +640,34 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/tenants/{tenantId}/email-provider": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The path Tenant's email provider, without its secret.
+         * @description Any Tenant Role in the path Tenant. Read only, in the Tenant's own scope. With no provider, only configured: false. Otherwise its kind, its non-secret settings as stored, the From address and name, when it was last changed, and whether a secret is stored; never the secret or its ciphertext, which Host.Admin can't read. It writes nothing. A malformed, unknown or role-less Tenant is 403 access_denied, audited as every Tenant capability refusal is.
+         */
+        get: operations["GetEmailProvider"];
+        /**
+         * Save the path Tenant's email provider: its kind, settings, From address and secret.
+         * @description Tenant Owner only; never a machine principal. Needs a fresh assertion for tenant.email_provider.manage in this Tenant, begun on POST /api/v1/tenants/{tenantId}/assertions, or 403 fresh_assertion_required. The save replaces the provider: kind is smtp, sendgrid, postmark, mailgun, ses or custom_http, and settings holds exactly that kind's members. The secret (an SMTP password, API key, server token, secret access key or auth header value) is required on a first save, on a change of kind, for an SMTP username with none stored, and on any change of settings but Postmark's messageStream, so a stored secret is never sent anywhere new; left out otherwise, the stored one stays (the From address and name may change freely). An SMTP provider with no username takes no secret. The secret is encrypted under the Tenant's email key before anything is written, stored only as that ciphertext, which Host.Admin can't decrypt, and never returned or logged. A save that changes anything writes notifications.email_provider.updated on the Tenant's own Log with the Admin as Actor, recording no setting and no secret; an identical save with no secret writes nothing. The answer is the provider as GET gives it. A body that isn't JSON, is over 65536 bytes or has a top-level member of the wrong type is 400 email_provider_invalid with no errors; a field that breaks a rule is 400 email_provider_invalid naming each field and reason (required, invalid or too_long), never its value. Nothing is sent and no connection is made: sending is Story 4.5's. Key custody down is 503 and nothing is written. A malformed, unknown or role-less Tenant, and a Viewer or Editor, is 403 access_denied, audited as every Tenant capability refusal is.
+         */
+        put: operations["SetEmailProvider"];
+        post?: never;
+        /**
+         * Remove the path Tenant's email provider and its stored secret.
+         * @description Tenant Owner only; never a machine principal. Needs a fresh assertion for tenant.email_provider.manage in this Tenant, or 403 fresh_assertion_required. It takes no body. The provider and its ciphertext are deleted, writing notifications.email_provider.removed on the Tenant's own Log with the Admin as Actor. A Tenant with no provider is the same 204 and writes nothing. A malformed, unknown or role-less Tenant, and a Viewer or Editor, is 403 access_denied, audited as every Tenant capability refusal is.
+         */
+        delete: operations["RemoveEmailProvider"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/tenants/{tenantId}/applications": {
         parameters: {
             query?: never;
@@ -1011,7 +1039,7 @@ export interface components {
         };
         ApiProblem: {
             /** @enum {string} */
-            code: "bootstrap_refused" | "credential_refused" | "signin_refused" | "rate_limited" | "access_denied" | "fresh_assertion_required" | "assertion_refused" | "credentials_minimum" | "credentials_maximum" | "recovery_code_refused" | "recovery_code_superseded" | "enrolment_refused" | "tenant_invalid" | "subdomain_refused" | "operation_not_failed" | "tenant_mismatch" | "tenant_not_active" | "tenant_deleted" | "tenant_busy" | "confirmation_mismatch" | "invalid_request" | "application_invalid" | "not_found" | "custom_scheme_acknowledgement_required" | "client_secret_not_applicable" | "client_secret_limit_reached" | "api_invalid" | "api_identifier_taken" | "permission_taken" | "permission_limit_reached" | "api_built_in" | "signing_key_not_ready" | "application_not_machine";
+            code: "bootstrap_refused" | "credential_refused" | "signin_refused" | "rate_limited" | "access_denied" | "fresh_assertion_required" | "assertion_refused" | "credentials_minimum" | "credentials_maximum" | "recovery_code_refused" | "recovery_code_superseded" | "enrolment_refused" | "tenant_invalid" | "subdomain_refused" | "operation_not_failed" | "tenant_mismatch" | "tenant_not_active" | "tenant_deleted" | "tenant_busy" | "confirmation_mismatch" | "invalid_request" | "application_invalid" | "not_found" | "custom_scheme_acknowledgement_required" | "client_secret_not_applicable" | "client_secret_limit_reached" | "api_invalid" | "api_identifier_taken" | "permission_taken" | "permission_limit_reached" | "api_built_in" | "signing_key_not_ready" | "application_not_machine" | "email_provider_invalid";
             traceId: string;
             errors?: null | components["schemas"]["ApiProblemError"][];
             /** Format: int32 */
@@ -1019,11 +1047,11 @@ export interface components {
         };
         ApiProblemError: {
             /** @enum {string} */
-            field: "callbackUrls" | "logoutUrls" | "webOrigins" | "grantTypes" | "accessTokenLifetime" | "idTokenLifetime" | "refreshTokenAbsoluteLifetime" | "refreshTokenInactivityLifetime" | "name" | "identifier" | "value" | "description" | "permissions";
+            field: "callbackUrls" | "logoutUrls" | "webOrigins" | "grantTypes" | "accessTokenLifetime" | "idTokenLifetime" | "refreshTokenAbsoluteLifetime" | "refreshTokenInactivityLifetime" | "name" | "identifier" | "value" | "description" | "permissions" | "kind" | "settings" | "settings.host" | "settings.port" | "settings.tls" | "settings.username" | "settings.region" | "settings.messageStream" | "settings.domain" | "settings.accessKeyId" | "settings.endpoint" | "settings.authHeaderName" | "fromAddress" | "fromName" | "secret";
             /** Format: int32 */
             index: null | number;
             /** @enum {string} */
-            reason: "not_absolute" | "wildcard" | "scheme_not_allowed" | "too_long" | "too_many" | "duplicate" | "not_allowed_for_type" | "below_minimum" | "above_maximum" | "invalid" | "reserved" | "unknown";
+            reason: "not_absolute" | "wildcard" | "scheme_not_allowed" | "too_long" | "too_many" | "duplicate" | "not_allowed_for_type" | "below_minimum" | "above_maximum" | "invalid" | "reserved" | "unknown" | "required";
             /** Format: int32 */
             maximum?: null | number;
         };
@@ -1177,6 +1205,30 @@ export interface components {
         DeleteTenantRequest: {
             confirmation: string;
         };
+        EmailProviderResponse: {
+            configured: boolean;
+            /** @enum {null|string} */
+            kind?: "smtp" | "sendgrid" | "postmark" | "mailgun" | "ses" | "custom_http" | null;
+            settings?: null | components["schemas"]["EmailProviderSettings"];
+            fromAddress?: null | string;
+            fromName?: null | string;
+            updatedAt?: null | string;
+            secretSet?: null | boolean;
+        };
+        EmailProviderSettings: {
+            host?: null | string;
+            /** Format: int32 */
+            port?: null | number;
+            /** @enum {null|string} */
+            tls?: "starttls" | "implicit" | null;
+            username?: null | string;
+            region?: null | string;
+            messageStream?: null | string;
+            domain?: null | string;
+            accessKeyId?: null | string;
+            endpoint?: null | string;
+            authHeaderName?: null | string;
+        };
         EnrolmentRedeemRequest: {
             enrolment: string;
         };
@@ -1263,6 +1315,42 @@ export interface components {
         };
         SetApiGrantRequest: {
             permissions: string[];
+        };
+        SetEmailProviderRequest: {
+            /** @enum {null|string} */
+            kind?: "smtp" | "sendgrid" | "postmark" | "mailgun" | "ses" | "custom_http" | null;
+            /** @description The kind's non-secret settings: exactly its members, as EmailProviderSettings describes them. Any other member is refused. */
+            settings?: {
+                /** @description smtp: a DNS name or a public IP address. */
+                host?: string;
+                /**
+                 * Format: int32
+                 * @description smtp.
+                 */
+                port?: number;
+                /**
+                 * @description smtp.
+                 * @enum {string}
+                 */
+                tls?: "starttls" | "implicit";
+                /** @description smtp, optional. With one, the secret is its password. */
+                username?: string;
+                /** @description sendgrid: global or eu. mailgun: us or eu. ses: an AWS region. */
+                region?: string;
+                /** @description postmark, optional. */
+                messageStream?: string;
+                /** @description mailgun: the sending domain. */
+                domain?: string;
+                /** @description ses. */
+                accessKeyId?: string;
+                /** @description custom_http: an absolute https URL. */
+                endpoint?: string;
+                /** @description custom_http: the header the secret is sent in; Authorization by default. */
+                authHeaderName?: string;
+            };
+            fromAddress?: null | string;
+            fromName?: null | string;
+            secret?: null | string;
         };
         SetTenantLabelRequest: {
             /** @enum {string} */
@@ -3357,6 +3445,179 @@ export interface operations {
             };
             /** @description Not Found */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description tenant_mismatch, with the problem body, when X-Gatekeep-Tenant is missing, sent twice or isn't {tenantId}, and nothing ran; or another conflict the operation's description names. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    GetEmailProvider: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The Tenant's public ID: ten_ and the UUID's 16 bytes in lowercase RFC 4648 base32 with no padding, whose last character carries two zero bits. Only this canonical spelling, after URL decoding, names a Tenant, and the empty UUID's never does; anything else is refused like a Tenant the Admin holds no role in. */
+                tenantId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EmailProviderResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description access_denied, with the problem body, when the capability is refused. No body when an earlier check refuses first: a Session restricted to setup, or on a state-changing call a wrong Origin or CSRF token. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    SetEmailProvider: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description The Tenant the page shows, its ten_ ID: it must equal {tenantId}, or 409 tenant_mismatch. It never selects a Tenant. */
+                "X-Gatekeep-Tenant": string;
+            };
+            path: {
+                /** @description The Tenant's public ID: ten_ and the UUID's 16 bytes in lowercase RFC 4648 base32 with no padding, whose last character carries two zero bits. Only this canonical spelling, after URL decoding, names a Tenant, and the empty UUID's never does; anything else is refused like a Tenant the Admin holds no role in. */
+                tenantId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetEmailProviderRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EmailProviderResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description fresh_assertion_required, with the problem body, when no fresh assertion for this action and target is bound to the Session; access_denied when the capability is refused. No body when an earlier check refuses first: a restricted Session, or a wrong Origin or CSRF token. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description tenant_mismatch, with the problem body, when X-Gatekeep-Tenant is missing, sent twice or isn't {tenantId}, and nothing ran; or another conflict the operation's description names. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    RemoveEmailProvider: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description The Tenant the page shows, its ten_ ID: it must equal {tenantId}, or 409 tenant_mismatch. It never selects a Tenant. */
+                "X-Gatekeep-Tenant": string;
+            };
+            path: {
+                /** @description The Tenant's public ID: ten_ and the UUID's 16 bytes in lowercase RFC 4648 base32 with no padding, whose last character carries two zero bits. Only this canonical spelling, after URL decoding, names a Tenant, and the empty UUID's never does; anything else is refused like a Tenant the Admin holds no role in. */
+                tenantId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No Content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description fresh_assertion_required, with the problem body, when no fresh assertion for this action and target is bound to the Session; access_denied when the capability is refused. No body when an earlier check refuses first: a restricted Session, or a wrong Origin or CSRF token. */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };

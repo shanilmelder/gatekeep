@@ -671,6 +671,54 @@ describe('api-client', () => {
     assert.equal(set.problem?.code, 'application_not_machine');
   });
 
+  it("reads, saves and removes a Tenant's email provider with its ID encoded, the page Tenant and the CSRF header on the writes", async () => {
+    const provider = {
+      configured: true,
+      kind: 'smtp',
+      settings: { host: 'smtp.example.com', port: 587, tls: 'starttls', username: 'mailer' },
+      fromAddress: 'no-reply@example.com',
+      updatedAt: '2026-11-16T00:00:00.000Z',
+      secretSet: true,
+    };
+    const { fetch, calls } = fakeFetch(200, JSON.stringify(provider));
+    const client = createApiClient({ fetch, csrfToken: () => 'csrf-1', pageTenant: () => 'ten_a' });
+
+    const read = await client.getEmailProvider('ten_a/b');
+    const body = { kind: 'smtp', settings: provider.settings, fromAddress: 'no-reply@example.com', secret: 'pa55word' };
+    const saved = await client.setEmailProvider('ten_a', body);
+    await client.removeEmailProvider('ten_a');
+
+    assert.equal(calls[0].input, '/api/v1/tenants/ten_a%2Fb/email-provider');
+    assert.equal(calls[0].init.method, 'GET');
+    assert.equal(calls[0].init.headers[CSRF_HEADER], undefined);
+    assert.equal(calls[0].init.headers[TENANT_HEADER], undefined);
+    assert.deepEqual(read.data, provider);
+    assert.equal(calls[1].input, '/api/v1/tenants/ten_a/email-provider');
+    assert.equal(calls[1].init.method, 'PUT');
+    assert.equal(calls[1].init.body, JSON.stringify(body));
+    assert.equal(calls[1].init.headers['Content-Type'], 'application/json');
+    assert.equal(calls[1].init.headers[CSRF_HEADER], 'csrf-1');
+    assert.equal(calls[1].init.headers[TENANT_HEADER], 'ten_a');
+    assert.equal(saved.ok, true);
+    assert.equal(calls[2].input, '/api/v1/tenants/ten_a/email-provider');
+    assert.equal(calls[2].init.method, 'DELETE');
+    assert.equal(calls[2].init.body, undefined);
+    assert.equal(calls[2].init.headers[CSRF_HEADER], 'csrf-1');
+    assert.equal(calls[2].init.headers[TENANT_HEADER], 'ten_a');
+  });
+
+  it("keeps an email provider save's field errors", async () => {
+    const problem = { code: 'email_provider_invalid', traceId: 't', errors: [{ field: 'secret', index: null, reason: 'required' }] };
+    const { fetch } = fakeFetch(400, JSON.stringify(problem), 'application/problem+json');
+    const client = createApiClient({ fetch, csrfToken: () => 'csrf-1', pageTenant: () => 'ten_a' });
+
+    const refused = await client.setEmailProvider('ten_a', { kind: 'sendgrid', settings: { region: 'eu' }, fromAddress: 'a@example.com' });
+
+    assert.equal(refused.ok, false);
+    assert.equal(refused.problem?.code, 'email_provider_invalid');
+    assert.deepEqual(refused.problem?.errors, [{ field: 'secret', index: null, reason: 'required' }]);
+  });
+
   it('reads an Application deletion refusal as its problem code', async () => {
     const { fetch } = fakeFetch(404, JSON.stringify({ code: 'not_found', traceId: 't' }), 'application/problem+json');
     const client = createApiClient({ fetch, csrfToken: () => 'csrf-1', pageTenant: () => 'ten_a' });

@@ -61,6 +61,8 @@ internal static partial class LogCatalogue
         new("keys.signing_key.rotated", AuditOutcome.Success, "A Tenant's Signing or Management key was rotated, by the daily rotation or a Tenant Owner: current became previous. Names no key."),
         new("keys.tenant_keys.provisioned", AuditOutcome.Success, "A Tenant's missing Signing Keys, Management keys or token protection key were created in key custody. Names no key."),
         new("keys.transit_key.swept", AuditOutcome.Success, "A Signing or Management key at least 24 hours old, named by no row when checked, was deleted from key custody. Names no key."),
+        new("notifications.email_provider.removed", AuditOutcome.Success, "A Tenant Owner removed the Tenant's email provider and its stored secret."),
+        new("notifications.email_provider.updated", AuditOutcome.Success, "A Tenant Owner saved the Tenant's email provider. Records no setting, address or secret."),
         new("operations.job.dead", AuditOutcome.Failure, "A job used its last attempt and went dead. Only its fixed failure code is kept."),
         new("operations.operation.retried", AuditOutcome.Success, "An Admin retried a failed Operation's failed steps. Names the Operation's Tenant only, when it has one."),
         new("protocol.client.cross_tenant_rejected", AuditOutcome.Failure, "A client credential issued by another Tenant was refused at this Tenant's token endpoint. Names nothing of the other Tenant."),

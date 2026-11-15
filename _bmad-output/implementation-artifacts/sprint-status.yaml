@@ -98,7 +98,7 @@ development_status:
   4-1-serve-hosted-login-step-screens: done
   4-2-bind-sign-in-transactions-and-issue-sessions: done
   4-3-purge-expired-sign-in-state: done
-  4-4-configure-a-tenant-s-email-provider: in-progress
+  4-4-configure-a-tenant-s-email-provider: done
   4-5-send-email-through-the-job-pipeline: backlog
   4-6-configure-the-database-connection: backlog
   4-7-sign-up-and-verify-an-email-address: backlog

@@ -27,6 +27,25 @@ public static class ManagementContract
         return new SigningKeyManagement(appender);
     }
 
+    /// <summary>
+    /// A Tenant's email provider (Story 4.4), as <c>gk_admin</c>, in the path Tenant's own scope, over Notifications'
+    /// contract. A save or removal writes its event through <paramref name="appender"/>.
+    /// </summary>
+    public static IEmailProviderManagement CreateEmailProviders(IAuditAppender appender)
+    {
+        ArgumentNullException.ThrowIfNull(appender);
+        return new EmailProviderManagement(appender);
+    }
+
+    /// <summary>The email provider kinds (Story 4.4), in a fixed order.</summary>
+    public static IReadOnlyList<string> EmailProviderKinds => Gatekeep.Modules.Notifications.Contracts.EmailProviderKinds.All;
+
+    /// <summary>The fields an email provider save's errors name (Story 4.4).</summary>
+    public static IReadOnlyList<string> EmailProviderFields => Gatekeep.Modules.Notifications.Contracts.EmailProviderFields.All;
+
+    /// <summary>The reasons an email provider save's errors give (Story 4.4).</summary>
+    public static IReadOnlyList<string> EmailProviderReasons => Gatekeep.Modules.Notifications.Contracts.EmailProviderReasons.All;
+
     /// <summary>The Application types an Admin creates (Story 3.1), in a fixed order: <c>spa</c>, <c>web</c>, <c>native</c>, <c>machine</c>.</summary>
     public static IReadOnlyList<string> ApplicationTypes => Gatekeep.Modules.Directory.Contracts.DirectoryContract.CreatableKinds;
 

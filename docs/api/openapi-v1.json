@@ -2598,6 +2598,259 @@
         }
       }
     },
+    "/api/v1/tenants/{tenantId}/email-provider": {
+      "get": {
+        "tags": [
+          "Tenants"
+        ],
+        "summary": "The path Tenant's email provider, without its secret.",
+        "description": "Any Tenant Role in the path Tenant. Read only, in the Tenant's own scope. With no provider, only configured: false. Otherwise its kind, its non-secret settings as stored, the From address and name, when it was last changed, and whether a secret is stored; never the secret or its ciphertext, which Host.Admin can't read. It writes nothing. A malformed, unknown or role-less Tenant is 403 access_denied, audited as every Tenant capability refusal is.",
+        "operationId": "GetEmailProvider",
+        "parameters": [
+          {
+            "name": "tenantId",
+            "in": "path",
+            "description": "The Tenant's public ID: ten_ and the UUID's 16 bytes in lowercase RFC 4648 base32 with no padding, whose last character carries two zero bits. Only this canonical spelling, after URL decoding, names a Tenant, and the empty UUID's never does; anything else is refused like a Tenant the Admin holds no role in.",
+            "required": true,
+            "schema": {
+              "pattern": "^ten_[a-z2-7]{25}[aeimquy4]$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EmailProviderResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "access_denied, with the problem body, when the capability is refused. No body when an earlier check refuses first: a Session restricted to setup, or on a state-changing call a wrong Origin or CSRF token.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "adminSession": [ ]
+          }
+        ],
+        "x-gatekeep-setup-allowed": false,
+        "x-gatekeep-access": {
+          "kind": "capability",
+          "capability": "tenant.configuration.read",
+          "scope": "tenant",
+          "machineAllowed": true,
+          "freshAssertion": "never"
+        },
+        "x-gatekeep-recovery-allowed": false
+      },
+      "put": {
+        "tags": [
+          "Tenants"
+        ],
+        "summary": "Save the path Tenant's email provider: its kind, settings, From address and secret.",
+        "description": "Tenant Owner only; never a machine principal. Needs a fresh assertion for tenant.email_provider.manage in this Tenant, begun on POST /api/v1/tenants/{tenantId}/assertions, or 403 fresh_assertion_required. The save replaces the provider: kind is smtp, sendgrid, postmark, mailgun, ses or custom_http, and settings holds exactly that kind's members. The secret (an SMTP password, API key, server token, secret access key or auth header value) is required on a first save, on a change of kind, for an SMTP username with none stored, and on any change of settings but Postmark's messageStream, so a stored secret is never sent anywhere new; left out otherwise, the stored one stays (the From address and name may change freely). An SMTP provider with no username takes no secret. The secret is encrypted under the Tenant's email key before anything is written, stored only as that ciphertext, which Host.Admin can't decrypt, and never returned or logged. A save that changes anything writes notifications.email_provider.updated on the Tenant's own Log with the Admin as Actor, recording no setting and no secret; an identical save with no secret writes nothing. The answer is the provider as GET gives it. A body that isn't JSON, is over 65536 bytes or has a top-level member of the wrong type is 400 email_provider_invalid with no errors; a field that breaks a rule is 400 email_provider_invalid naming each field and reason (required, invalid or too_long), never its value. Nothing is sent and no connection is made: sending is Story 4.5's. Key custody down is 503 and nothing is written. A malformed, unknown or role-less Tenant, and a Viewer or Editor, is 403 access_denied, audited as every Tenant capability refusal is.",
+        "operationId": "SetEmailProvider",
+        "parameters": [
+          {
+            "name": "tenantId",
+            "in": "path",
+            "description": "The Tenant's public ID: ten_ and the UUID's 16 bytes in lowercase RFC 4648 base32 with no padding, whose last character carries two zero bits. Only this canonical spelling, after URL decoding, names a Tenant, and the empty UUID's never does; anything else is refused like a Tenant the Admin holds no role in.",
+            "required": true,
+            "schema": {
+              "pattern": "^ten_[a-z2-7]{25}[aeimquy4]$",
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Gatekeep-Tenant",
+            "in": "header",
+            "description": "The Tenant the page shows, its ten_ ID: it must equal {tenantId}, or 409 tenant_mismatch. It never selects a Tenant.",
+            "required": true,
+            "schema": {
+              "pattern": "^ten_[a-z2-7]{25}[aeimquy4]$",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetEmailProviderRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EmailProviderResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "fresh_assertion_required, with the problem body, when no fresh assertion for this action and target is bound to the Session; access_denied when the capability is refused. No body when an earlier check refuses first: a restricted Session, or a wrong Origin or CSRF token.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "tenant_mismatch, with the problem body, when X-Gatekeep-Tenant is missing, sent twice or isn't {tenantId}, and nothing ran; or another conflict the operation's description names.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "adminSession": [ ],
+            "csrf": [ ]
+          }
+        ],
+        "x-gatekeep-setup-allowed": false,
+        "x-gatekeep-access": {
+          "kind": "capability",
+          "capability": "tenant.email_provider.manage",
+          "scope": "tenant",
+          "machineAllowed": false,
+          "freshAssertion": "always"
+        },
+        "x-gatekeep-recovery-allowed": false,
+        "x-gatekeep-fresh-assertion": {
+          "action": "tenant.email_provider.manage",
+          "target": null,
+          "enforcedBy": "checks"
+        }
+      },
+      "delete": {
+        "tags": [
+          "Tenants"
+        ],
+        "summary": "Remove the path Tenant's email provider and its stored secret.",
+        "description": "Tenant Owner only; never a machine principal. Needs a fresh assertion for tenant.email_provider.manage in this Tenant, or 403 fresh_assertion_required. It takes no body. The provider and its ciphertext are deleted, writing notifications.email_provider.removed on the Tenant's own Log with the Admin as Actor. A Tenant with no provider is the same 204 and writes nothing. A malformed, unknown or role-less Tenant, and a Viewer or Editor, is 403 access_denied, audited as every Tenant capability refusal is.",
+        "operationId": "RemoveEmailProvider",
+        "parameters": [
+          {
+            "name": "tenantId",
+            "in": "path",
+            "description": "The Tenant's public ID: ten_ and the UUID's 16 bytes in lowercase RFC 4648 base32 with no padding, whose last character carries two zero bits. Only this canonical spelling, after URL decoding, names a Tenant, and the empty UUID's never does; anything else is refused like a Tenant the Admin holds no role in.",
+            "required": true,
+            "schema": {
+              "pattern": "^ten_[a-z2-7]{25}[aeimquy4]$",
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Gatekeep-Tenant",
+            "in": "header",
+            "description": "The Tenant the page shows, its ten_ ID: it must equal {tenantId}, or 409 tenant_mismatch. It never selects a Tenant.",
+            "required": true,
+            "schema": {
+              "pattern": "^ten_[a-z2-7]{25}[aeimquy4]$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "fresh_assertion_required, with the problem body, when no fresh assertion for this action and target is bound to the Session; access_denied when the capability is refused. No body when an earlier check refuses first: a restricted Session, or a wrong Origin or CSRF token.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "tenant_mismatch, with the problem body, when X-Gatekeep-Tenant is missing, sent twice or isn't {tenantId}, and nothing ran; or another conflict the operation's description names.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "adminSession": [ ],
+            "csrf": [ ]
+          }
+        ],
+        "x-gatekeep-setup-allowed": false,
+        "x-gatekeep-access": {
+          "kind": "capability",
+          "capability": "tenant.email_provider.manage",
+          "scope": "tenant",
+          "machineAllowed": false,
+          "freshAssertion": "always"
+        },
+        "x-gatekeep-recovery-allowed": false,
+        "x-gatekeep-fresh-assertion": {
+          "action": "tenant.email_provider.manage",
+          "target": null,
+          "enforcedBy": "checks"
+        }
+      }
+    },
     "/api/v1/tenants/{tenantId}/applications": {
       "get": {
         "tags": [
@@ -4739,7 +4992,8 @@
               "permission_limit_reached",
               "api_built_in",
               "signing_key_not_ready",
-              "application_not_machine"
+              "application_not_machine",
+              "email_provider_invalid"
             ],
             "type": "string"
           },
@@ -4786,7 +5040,22 @@
               "identifier",
               "value",
               "description",
-              "permissions"
+              "permissions",
+              "kind",
+              "settings",
+              "settings.host",
+              "settings.port",
+              "settings.tls",
+              "settings.username",
+              "settings.region",
+              "settings.messageStream",
+              "settings.domain",
+              "settings.accessKeyId",
+              "settings.endpoint",
+              "settings.authHeaderName",
+              "fromAddress",
+              "fromName",
+              "secret"
             ],
             "type": "string"
           },
@@ -4810,7 +5079,8 @@
               "above_maximum",
               "invalid",
               "reserved",
-              "unknown"
+              "unknown",
+              "required"
             ],
             "type": "string"
           },
@@ -5480,6 +5750,135 @@
           }
         }
       },
+      "EmailProviderResponse": {
+        "required": [
+          "configured"
+        ],
+        "type": "object",
+        "properties": {
+          "configured": {
+            "type": "boolean"
+          },
+          "kind": {
+            "enum": [
+              "smtp",
+              "sendgrid",
+              "postmark",
+              "mailgun",
+              "ses",
+              "custom_http"
+            ],
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "settings": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/EmailProviderSettings"
+              }
+            ]
+          },
+          "fromAddress": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "fromName": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "updatedAt": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "secretSet": {
+            "type": [
+              "null",
+              "boolean"
+            ]
+          }
+        }
+      },
+      "EmailProviderSettings": {
+        "type": "object",
+        "properties": {
+          "host": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "port": {
+            "type": [
+              "null",
+              "integer"
+            ],
+            "format": "int32"
+          },
+          "tls": {
+            "enum": [
+              "starttls",
+              "implicit"
+            ],
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "username": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "region": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "messageStream": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "domain": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "accessKeyId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "endpoint": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "authHeaderName": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        }
+      },
       "EnrolmentRedeemRequest": {
         "required": [
           "enrolment"
@@ -5821,6 +6220,109 @@
             "items": {
               "type": "string"
             }
+          }
+        }
+      },
+      "SetEmailProviderRequest": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "enum": [
+              "smtp",
+              "sendgrid",
+              "postmark",
+              "mailgun",
+              "ses",
+              "custom_http"
+            ],
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "settings": {
+            "type": "object",
+            "properties": {
+              "host": {
+                "maxLength": 253,
+                "type": "string",
+                "description": "smtp: a DNS name or a public IP address."
+              },
+              "port": {
+                "maximum": 65535,
+                "minimum": 1,
+                "type": "integer",
+                "description": "smtp.",
+                "format": "int32"
+              },
+              "tls": {
+                "maxLength": 16,
+                "enum": [
+                  "starttls",
+                  "implicit"
+                ],
+                "type": "string",
+                "description": "smtp."
+              },
+              "username": {
+                "maxLength": 256,
+                "type": "string",
+                "description": "smtp, optional. With one, the secret is its password."
+              },
+              "region": {
+                "maxLength": 64,
+                "type": "string",
+                "description": "sendgrid: global or eu. mailgun: us or eu. ses: an AWS region."
+              },
+              "messageStream": {
+                "maxLength": 64,
+                "type": "string",
+                "description": "postmark, optional."
+              },
+              "domain": {
+                "maxLength": 253,
+                "type": "string",
+                "description": "mailgun: the sending domain."
+              },
+              "accessKeyId": {
+                "maxLength": 128,
+                "type": "string",
+                "description": "ses."
+              },
+              "endpoint": {
+                "maxLength": 2048,
+                "type": "string",
+                "description": "custom_http: an absolute https URL."
+              },
+              "authHeaderName": {
+                "maxLength": 64,
+                "type": "string",
+                "description": "custom_http: the header the secret is sent in; Authorization by default."
+              }
+            },
+            "additionalProperties": false,
+            "description": "The kind's non-secret settings: exactly its members, as EmailProviderSettings describes them. Any other member is refused."
+          },
+          "fromAddress": {
+            "maxLength": 254,
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "fromName": {
+            "maxLength": 128,
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "secret": {
+            "maxLength": 4096,
+            "type": [
+              "null",
+              "string"
+            ]
           }
         }
       },

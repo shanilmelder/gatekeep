@@ -2,13 +2,21 @@
 title: "Story 4.4: Configure a Tenant's email provider"
 type: 'feature'
 created: '2026-11-16'
-status: 'ready-for-dev'
+status: 'done'
+baseline_revision: 'fb16bcccff4e959834f384c36b9105db97d05c8e'
 review_loop_iteration: 0
-followup_review_recommended: false
+followup_review_recommended: true
 context:
   - '{project-root}/_bmad-output/implementation-artifacts/epic-4-context.md'
 warnings: ['oversized']
-deferred: []
+deferred:
+  - summary: >-
+      Changing the email provider doesn't raise a Security Alert yet.
+    evidence: |-
+      FR-36 asks for a Security Alert on a provider change. The product owner deferred it to Epic 11 (2026-11-16): Host.Admin can't raise alerts yet. This story writes only the Log events notifications.email_provider.updated and .removed.
+    location: >-
+      src/Modules/Notifications/Core/EmailProviderStore.cs
+    severity: medium
 ---
 
 <intent-contract>
@@ -162,6 +170,41 @@ deferred: []
 
 ## Review Triage Log
 
+### 2026-11-16 — Review pass
+- verdicts: 31 findings — high 1, medium 13, low 12, false 5, maybe-false 0
+- findings:
+  - `[false]` `[reject]` (intent a) Nothing sends or test-sends mail, so "so that messages reach Users" isn't met — sending is Story 4.5 and test send Story 15.5 (spec Never list); this story's criteria are about storing the configuration.
+  - `[low]` `[reject]` (intent b) "Host.Admin can't decrypt" is proven one layer below the endpoint (real OpenBao through the module) while the HTTP tests use a stand-in — the HTTP route calls the same module and custody; the database denial on `secret_ciphertext` is tested separately.
+  - `[medium]` `[patch]` (intent c) A machine principal's change is refused only at the capability level, never at the endpoint — Host.Admin authenticates no machine client before Epic 17, so a test now drives a machine principal of the Tenant through the request checks' authorizer: refused `tenant.email_provider.manage` (still allowed `tenant.configuration.read`), nothing written.
+  - `[false]` `[reject]` (intent e) "The Log" may mean the operational log — in Gatekeep "the Log" is the Tenant audit Log (FR-36); the event is tested.
+  - `[low]` `[reject]` (intent f) SMTP with no username stores no ciphertext, narrowing "stored as Transit ciphertext" — an unauthenticated relay has no credential to store; every credential that exists is ciphertext.
+  - `[false]` `[reject]` (intent g) Remove, no-op saves, purge and registries go beyond the intent — the screen's Remove and the Tenant purge are required by the design and the purge rule (AD-27).
+  - `[medium]` `[patch]` (verification) A save that drops the SMTP username and clears the secret is untested — tested: 200, `secretSet:false`, ciphertext NULL, one more event.
+  - `[medium]` `[patch]` (verification) Replacing the secret on a same-kind save is untested — tested: a second encryption replaces the stored ciphertext.
+  - `[medium]` `[patch]` (verification) Adding an SMTP username with no secret stored isn't tested at the server — tested: 400 `secret: required`, row unchanged.
+  - `[medium]` `[patch]` (verification, other) Removal skips the advisory lock, so a racing save can fail with an unhandled 500 — `RemoveAsync` now takes the same lock.
+  - `[high]` `[patch]` (blind) A same-kind save without a secret keeps the stored secret while the destination or account changes (SMTP host, custom_http endpoint, Mailgun domain, SES key ID…), so an Owner who never knew it could redirect it to their own server — a stored secret is now kept only when `kind` and `settings` are unchanged apart from Postmark's `messageStream`; From fields may change freely. This narrows the spec's "omitted, it keeps the stored ciphertext" rule. Tests for SMTP `host` and custom_http `endpoint` changes without a secret (400 `required`) and a From-only change (kept); UI `secretRequired` mirrors it.
+  - `[medium]` `[patch]` (blind) Removal doesn't take the lock and can race a save into a 500 — grouped with the verification row; fixed.
+  - `[low]` `[reject]` (blind) A no-change save shows the same "saved" toast — the stored state is what the Owner asked for; nothing is misreported.
+  - `[low]` `[patch]` (blind) Switching kind carries a typed secret to the new kind — the draft's secret is cleared on a kind change (unit test).
+  - `[medium]` `[patch]` (blind) `IsPublic` lets through reserved IPv4 ranges and IPv6 forms (NAT64, 6to4, IPv4-compatible) that can embed private addresses — those ranges are refused and embedded addresses judged by their IPv4; tests added.
+  - `[low]` `[patch]` (blind) `MaxBody` (32768) can't hold a full secret plus settings when non-ASCII is escaped — raised to 65536 with a corrected comment.
+  - `[low]` `[reject]` (blind) The event records no detail (secret replaced, kind changed) — the audit envelope holds no free-form values (AD-16).
+  - `[medium]` `[patch]` (blind) Important paths untested (clearsSecret, oversize body, save/remove race, destination change) — grouped with the verification rows and the high row; the oversize-body and cancellation cases are rejected as low (the cap is a fixed read limit; cancellation is the host's).
+  - `[false]` `[reject]` (blind) The diff leaves out four generated files — they were left out of the review diff on purpose; the contract check and `AuditCatalogueTests` verify them.
+  - `[low]` `[patch]` (blind) Length limits disagree between server, OpenAPI and UI (`tls`, `region`) — aligned. The merged OpenAPI settings schema (no per-kind `required`) is rejected: a `oneOf` per kind adds schema complexity for a client the dashboard already covers.
+  - `[medium]` `[patch]` (edge) Remove vs save race (lock) — grouped; fixed.
+  - `[medium]` `[patch]` (edge) An UPDATE that finds no row throws past the 503 handling — removed by serialising removal with saves under the same lock.
+  - `[medium]` `[patch]` (edge) IPv6 literals embedding private IPv4 — grouped with the `IsPublic` row; fixed.
+  - `[medium]` `[patch]` (edge) Reserved IPv4 ranges accepted — grouped; fixed.
+  - `[low]` `[patch]` (edge) `MaxBody` too small for escaped input — grouped; fixed.
+  - `[low]` `[patch]` (edge) Switching to SES carries `region` `global`/`us` into SES's free-text region — values invalid for the new kind are dropped on a kind change.
+  - `[low]` `[reject]` (edge) A typed secret on a disabled field keeps the form dirty — the Owner is asked about unsaved changes they did type; harmless.
+  - `[low]` `[reject]` (edge) A 400 naming only `kind` or `settings` moves focus nowhere — the dashboard never sends those shapes; only a hand-built client can.
+  - `[low]` `[patch]` (edge) A whitespace-only SMTP `username` is stored and makes a secret required — treated as absent.
+  - `[false]` `[reject]` (edge) The spec says GET answers `secretSet:true`, but SMTP with no username answers false — the spec's shape assumed a secret; reporting none when none exists is correct.
+  - `[medium]` `[patch]` (edge) "Saves of one Tenant wait for each other" isn't true of removal — grouped with the lock row; fixed.
+
 ## Verification
 
 **Commands:**
@@ -169,3 +212,34 @@ deferred: []
 - **Contract:** regenerate with `docker run --rm -v "D:/Projects/Personal/gatekeep:/src" -v "D:/Projects/Personal/gatekeep:/out" -w /src gatekeep/tests:local sh deploy/docker/api-contract.sh --write /out`. Then run `pnpm -r build`, the ui check and the api-client and admin-dashboard tests. Expected: all pass.
 - **Browser:** run the Playwright `admin-email-provider` project. Expected: all pass.
 - **Isolation:** with Testcontainers, pinning the IPv4 as `run-tests.sh` does, run `EmailProviderApiTests`, `CrossTenant*`, `Canary*`, `MigrateCommandTests`, `TenantPurge*`, `Custody*` and `AuditCatalogue*`, plus the Architecture suite. Don't run the full Isolation suite. The local-only `.claude/worktrees` failure is expected.
+
+## Auto Run Result
+
+**Summary:** Notifications gains `email_provider`, one row per Tenant: the provider kind (SMTP, SendGrid, Postmark, Mailgun, Amazon SES or Custom HTTP), its validated non-secret settings, the From address, and the provider's one secret as Transit ciphertext under `email-{tenant}` with the Tenant ID as associated data. Host.Admin can encrypt it but not decrypt it, and `gk_admin` can't read the ciphertext column. `GET`/`PUT`/`DELETE /api/v1/tenants/{tenantId}/email-provider` read for every Tenant role and save or remove for Owners with a fresh assertion; Editors, Viewers and machine principals are refused. Saves and removals write `notifications.email_provider.updated`/`.removed`. A stored secret is kept only when the destination settings are unchanged. The Admin Dashboard gains an Email provider page.
+
+**Files changed:**
+- `src/Adapters/Postgres/Migrations/Migration20261125000000ConfigureEmailProviders.cs`, `Schema/TableRegistry.cs` -- the table, RLS, guard, grants and CHECKs (migration 41).
+- `src/Gatekeep.Kernel/Limits/SecurityLimits.cs` -- secret, ciphertext, settings and From-name limits.
+- `src/Modules/Notifications/**` -- kinds, per-kind rules (including public-address checks), the store (lock, change detection, encrypt, upsert, remove), events and the Tenant purge.
+- `src/Modules/Management/**` -- `IEmailProviderManagement` with the capability re-check.
+- `src/Gatekeep.Host.Admin/{AdminApi.cs,EmailProviderApi.cs,AdminResponses.cs,AdminOpenApi.cs}` -- the three routes and OpenAPI; regenerated contract, audit docs and Log catalogue.
+- `src/Modules/Operations/Core/TenantDeletion.cs` -- the Notifications purge joins the stage.
+- `packages/api-client/**`, `packages/ui/src/messages.tsx`, `apps/admin-dashboard/src/shell/{emailProvider.ts,EmailProviderPage.tsx,...}` -- client wrappers, copy and the page.
+- Tests: new `EmailProviderApiTests` and `admin-email-provider.spec.ts`; updated capability rules, route registry, canary, seeds, purge registry, migration count, grants and sidebar order.
+
+**Review findings:** 31 findings (high 1, medium 13, low 12, false 5). Patched 12 entries (high 1, medium 7, low 4, counted by group): a stored secret is no longer kept when the destination or account settings change (it could otherwise be redirected to an Owner's own server); removal takes the save lock; reserved and embedding IP ranges are refused; the dashboard clears a typed secret and invalid carried values on a kind switch; the body cap fits escaped input; limits agree across server, OpenAPI and UI; whitespace usernames count as absent; tests for clearing, replacing and requiring the secret, and for a machine principal at the authorizer (Host.Admin has no machine client before Epic 17). Deferred 1 (the Security Alert, Epic 11). Rejected 18 with reasons in the Review Triage Log.
+
+**Follow-up review:** recommended. This pass patched a high finding. The specific unverified risk: the destination-bound secret rule now decides every save, and the Tenant deletion stage gained a purge whose tests are timing-sensitive under a loaded local run; the full Isolation suite runs only in CI. Patched counts: high 1, medium 7, low 4.
+
+**Verification:**
+- .NET build: 0 warnings / 0 errors; API contract matches.
+- `pnpm -r build`; ui check; tests: ui 62, admin-dashboard 135, api-client 38.
+- Architecture: 794 of 795; the one failure is the known local-only `.claude/worktrees` check.
+- Isolation `EmailProviderApiTests`, `CrossTenant*`, `Canary*`, `MigrateCommandTests`, `TenantPurge*`, `AuditCatalogue*`, `TenantTablesTests`, `TenantDeletion*`, `PolicyMatrix*`, `CustodyTests`: 733 of 734 after the fixes. The one failure, `TenantDeletionTests.A_failed_deletion_is_read_and_retried_with_a_new_assertion_then_finishes`, and two other deletion tests that failed on the earlier run, all pass alone (the class 17 of 17, three times).
+- `MasterKeyRotationTests.Full_rotation_keeps_every_value_and_leaves_the_old_generation_unable_to_unseal` fails locally even alone (an OpenBao root-token census in shell); this story touches no OpenBao script or policy. CI decides.
+- Playwright `admin-email-provider` (implementer): 21 of 21; the sidebar-affected admin projects 254 of 254 before the fixes.
+
+**Residual risks:**
+- A machine principal's refusal is tested at the authorizer, not over HTTP, until Epic 17 adds machine clients.
+- Custom HTTP endpoints are checked only as configured; resolved-address and redirect checks belong to Story 4.5.
+- The Security Alert is deferred to Epic 11.

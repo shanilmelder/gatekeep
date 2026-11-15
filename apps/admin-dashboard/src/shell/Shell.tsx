@@ -29,6 +29,7 @@ import { CapabilitiesProvider, capabilitiesOf, pathTenant, useCapabilityReads, t
 import { current as currentTenant, forget, remember, remembered, switchHref, tenantOfPath } from './currentTenant';
 import { CredentialsPage, type ShellRequest } from './CredentialsPage';
 import { CreateTenantPage } from './CreateTenantPage';
+import { EmailProviderPage } from './EmailProviderPage';
 import { fillNodes } from './DeleteTenantModal';
 import { isLost, lostName, refusedInPageTenant } from './lostTenant';
 import { createFreshAssertion } from './freshAssertion';
@@ -170,9 +171,10 @@ interface Mismatch {
 
 /**
  * A Tenant path's page (Story 1.28): the Tenant's landing, its settings, its Logs (Story 7.4), its
- * Signing keys (Story 9.1), its Applications and one Application (Story 3.1), or its APIs and one API (Story 3.6).
+ * Signing keys (Story 9.1), its Applications and one Application (Story 3.1), its APIs and one API (Story 3.6), or its
+ * Email provider (Story 4.4).
  */
-const TENANT_ROUTE = /^\/tenants\/[^/]+(\/settings|\/logs|\/signing-keys|\/applications(\/[^/]+)?|\/apis(\/[^/]+)?)?$/;
+const TENANT_ROUTE = /^\/tenants\/[^/]+(\/settings|\/logs|\/signing-keys|\/email-provider|\/applications(\/[^/]+)?|\/apis(\/[^/]+)?)?$/;
 
 /** The Deployment Log page's scope. LogsPage keys its reads on the scope's plain values, so any equal scope would do. */
 const DEPLOYMENT_SCOPE = { kind: 'deployment' } as const;
@@ -556,6 +558,9 @@ function ShellFrame({ adminId }: { adminId: string }) {
       );
     else if (answered.path.endsWith('/signing-keys'))
       page = <SigningKeysPage key={tenantId} request={shellRequest} fresh={fresh} tenantId={tenantId} />;
+    // Email provider (Story 4.4): any Tenant Role reads it; only a Tenant Owner saves or removes it.
+    else if (answered.path.endsWith('/email-provider'))
+      page = <EmailProviderPage key={tenantId} request={shellRequest} fresh={fresh} tenantId={tenantId} />;
     // Applications (Story 3.1): any Tenant Role reads them, as the path Tenant's read has answered.
     else if (answered.path.endsWith('/applications'))
       page = <ApplicationsPage key={tenantId} request={shellRequest} tenantId={tenantId} />;

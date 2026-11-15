@@ -130,8 +130,8 @@ public class OperationRuleTests
     [Fact]
     public void Module_without_a_Tenant_purge_is_reported()
     {
-        // Notifications owns no tenant table today, and exposes no purge.
-        Assert.False(ExposesPurge("Notifications"));
+        // Management owns no table, and exposes no purge. Notifications did until Story 4.4 gave it email_provider.
+        Assert.False(ExposesPurge("Management"));
     }
 
     /// <summary>

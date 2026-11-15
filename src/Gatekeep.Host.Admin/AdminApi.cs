@@ -766,6 +766,73 @@ internal static class AdminApi
             .Produces<ApiProblem>(StatusCodes.Status409Conflict, AdminResponses.ProblemContentType)
             .Produces(StatusCodes.Status503ServiceUnavailable);
 
+        app.MapGet("/api/v1/tenants/{tenantId}/email-provider", static (HttpContext context, AdminApiServices services) => EmailProviderApi.GetAsync(context, services))
+            .WithMetadata(TenantApiEndpoint.Instance, new RequiresCapability(AdminCapabilities.TenantConfigurationRead))
+            .WithName("GetEmailProvider")
+            .WithTags(TenantTag)
+            .WithSummary("The path Tenant's email provider, without its secret.")
+            .WithDescription(
+                "Any Tenant Role in the path Tenant. Read only, in the Tenant's own scope. With no provider, only configured: " +
+                "false. Otherwise its kind, its non-secret settings as stored, the From address and name, when it was last " +
+                "changed, and whether a secret is stored; never the secret or its ciphertext, which Host.Admin can't read. It " +
+                "writes nothing. A malformed, unknown or role-less Tenant is 403 access_denied, audited as every Tenant " +
+                "capability refusal is.")
+            .Produces<EmailProviderResponse>(StatusCodes.Status200OK)
+            .Produces(StatusCodes.Status401Unauthorized)
+            .Produces<ApiProblem>(StatusCodes.Status403Forbidden, AdminResponses.ProblemContentType)
+            .Produces(StatusCodes.Status503ServiceUnavailable);
+
+        app.MapPut("/api/v1/tenants/{tenantId}/email-provider", static (HttpContext context, AdminApiServices services) => EmailProviderApi.SetAsync(context, services))
+            .WithMetadata(
+                TenantApiEndpoint.Instance,
+                new RequiresCapability(AdminCapabilities.TenantEmailProviderManage),
+                new JsonRequestBody(typeof(SetEmailProviderRequest)))
+            .WithName("SetEmailProvider")
+            .WithTags(TenantTag)
+            .WithSummary("Save the path Tenant's email provider: its kind, settings, From address and secret.")
+            .WithDescription(
+                "Tenant Owner only; never a machine principal. Needs a fresh assertion for tenant.email_provider.manage in " +
+                "this Tenant, begun on POST /api/v1/tenants/{tenantId}/assertions, or 403 fresh_assertion_required. The save " +
+                "replaces the provider: kind is smtp, sendgrid, postmark, mailgun, ses or custom_http, and settings holds " +
+                "exactly that kind's members. The secret (an SMTP password, API key, server token, secret access key or auth " +
+                "header value) is required on a first save, on a change of kind, for an SMTP username with none stored, and on any " +
+                "change of settings but Postmark's messageStream, so a stored secret is never sent anywhere new; left out " +
+                "otherwise, the stored one stays (the From address and name may change freely). An SMTP provider with no username takes no secret. The secret is " +
+                "encrypted under the Tenant's email key before anything is written, stored only as that ciphertext, which " +
+                "Host.Admin can't decrypt, and never returned or logged. A save that changes anything writes " +
+                "notifications.email_provider.updated on the Tenant's own Log with the Admin as Actor, recording no setting " +
+                "and no secret; an identical save with no secret writes nothing. The answer is the provider as GET gives it. " +
+                "A body that isn't JSON, is over 65536 bytes or has a top-level member of the wrong type is 400 " +
+                "email_provider_invalid with no errors; a field that breaks a rule is 400 email_provider_invalid naming each " +
+                "field and reason (required, invalid or too_long), never its value. Nothing is sent and no connection is made: " +
+                "sending is Story 4.5's. Key custody down is 503 and nothing is written. A malformed, unknown or role-less " +
+                "Tenant, and a Viewer or Editor, is 403 access_denied, audited as every Tenant capability refusal is.")
+            .Produces<EmailProviderResponse>(StatusCodes.Status200OK)
+            .Produces<ApiProblem>(StatusCodes.Status400BadRequest, AdminResponses.ProblemContentType)
+            .Produces(StatusCodes.Status401Unauthorized)
+            .Produces<ApiProblem>(StatusCodes.Status403Forbidden, AdminResponses.ProblemContentType)
+            // The request checks' tenant_mismatch: every state-changing Tenant route declares it (AdminOpenApi).
+            .Produces<ApiProblem>(StatusCodes.Status409Conflict, AdminResponses.ProblemContentType)
+            .Produces(StatusCodes.Status503ServiceUnavailable);
+
+        app.MapDelete("/api/v1/tenants/{tenantId}/email-provider", static (HttpContext context, AdminApiServices services) => EmailProviderApi.RemoveAsync(context, services))
+            .WithMetadata(TenantApiEndpoint.Instance, new RequiresCapability(AdminCapabilities.TenantEmailProviderManage))
+            .WithName("RemoveEmailProvider")
+            .WithTags(TenantTag)
+            .WithSummary("Remove the path Tenant's email provider and its stored secret.")
+            .WithDescription(
+                "Tenant Owner only; never a machine principal. Needs a fresh assertion for tenant.email_provider.manage in " +
+                "this Tenant, or 403 fresh_assertion_required. It takes no body. The provider and its ciphertext are deleted, " +
+                "writing notifications.email_provider.removed on the Tenant's own Log with the Admin as Actor. A Tenant with " +
+                "no provider is the same 204 and writes nothing. A malformed, unknown or role-less Tenant, and a Viewer or " +
+                "Editor, is 403 access_denied, audited as every Tenant capability refusal is.")
+            .Produces(StatusCodes.Status204NoContent)
+            .Produces(StatusCodes.Status401Unauthorized)
+            .Produces<ApiProblem>(StatusCodes.Status403Forbidden, AdminResponses.ProblemContentType)
+            // The request checks' tenant_mismatch: every state-changing Tenant route declares it (AdminOpenApi).
+            .Produces<ApiProblem>(StatusCodes.Status409Conflict, AdminResponses.ProblemContentType)
+            .Produces(StatusCodes.Status503ServiceUnavailable);
+
         app.MapGet("/api/v1/tenants/{tenantId}/applications", static (HttpContext context, AdminApiServices services) => ApplicationsApi.ListAsync(context, services))
             .WithMetadata(
                 TenantApiEndpoint.Instance,

@@ -741,6 +741,25 @@ public static class TableRegistry
             },
             RowGuard),
 
+        // Story 4.4 (FR-36, AD-10): each Tenant's email provider, its secret only as Transit ciphertext under the Tenant's
+        // email key. Host.Admin, which may encrypt under that key but never decrypt, saves and removes it and reads every
+        // column but the ciphertext; Host.Worker reads it to send (Story 4.5) and deletes it in a Tenant's purge.
+        new(
+            "email_provider",
+            TableClass.Tenant,
+            "Notifications",
+            TableUse.Configuration,
+            new Dictionary<string, IReadOnlyList<string>>
+            {
+                [Admin] = [Insert, Update, Delete],
+                [Worker] = [Select, Delete],
+            },
+            new Dictionary<string, IReadOnlyList<ColumnGrant>>
+            {
+                [Admin] = [new ColumnGrant(Select, ["tenant_id", "kind", "settings", "from_address", "from_name", "updated_at"])],
+            },
+            RowGuard),
+
         // Story 2.5 (AD-14): Tenant attempt counters, such as token requests per Tenant and per source,
         // and cross-Tenant mismatches per source. Host.Hosted counts; only a Tenant's deletion deletes.
         new(
