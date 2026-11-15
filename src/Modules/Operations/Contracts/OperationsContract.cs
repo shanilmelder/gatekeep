@@ -80,6 +80,18 @@ public static class OperationsContract
     public static JobType SweepTransitKeys => ProductionJobs.SweepTransitKeys;
 
     /// <summary>
+    /// Fans out one <see cref="PurgeExpiredState"/> job per active Tenant, in that Tenant's own scope, unless one is
+    /// already waiting there (Story 4.3). It deletes nothing. Scheduled hourly.
+    /// </summary>
+    public static JobType SweepExpiredState => ProductionJobs.SweepExpiredState;
+
+    /// <summary>
+    /// Deletes one Tenant's expired tokens, Token Families with no token, Sessions that are over and anchor no family, and
+    /// sign-in transactions more than an hour past expiry, through Sessions' and Authentication's own purges (Story 4.3).
+    /// </summary>
+    public static JobType PurgeExpiredState => ProductionJobs.PurgeExpiredState;
+
+    /// <summary>
     /// Purges a deleting Tenant's data in every module but Audit, and destroys its secret class, Signing and Management keys,
     /// then, once both stages have succeeded, marks it deleted and schedules its chain's purge (Story
     /// 1.29). Tenant deletion starts it scoped to the Tenant, with one <see cref="TenantPurgeStage"/>

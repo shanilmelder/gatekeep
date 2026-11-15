@@ -119,4 +119,14 @@ public static class AuthenticationContract
     /// <exception cref="InvalidOperationException">The context has no Tenant.</exception>
     public static Task PurgeApplicationsAsync(CommandContext context, IReadOnlyCollection<Guid> applicationIds, CancellationToken cancellationToken) =>
         AuthenticationPurge.PurgeApplicationsAsync(context, applicationIds, cancellationToken);
+
+    /// <summary>
+    /// Authentication's purge of expired state (Story 4.3, FR-8, AD-12): deletes the context Tenant's
+    /// <c>signin_transaction</c> rows whose <c>expires_at</c> is at least <see cref="SecurityLimits.SignInRestartRetention"/>
+    /// before <paramref name="now"/>, completed or not, with the email each kept. A second run deletes nothing.
+    /// </summary>
+    /// <returns>How many transactions it deleted.</returns>
+    /// <exception cref="InvalidOperationException">The context has no Tenant.</exception>
+    public static Task<int> PurgeExpiredStateAsync(CommandContext context, DateTimeOffset now, CancellationToken cancellationToken) =>
+        AuthenticationExpiredStatePurge.PurgeAsync(context, now, cancellationToken);
 }

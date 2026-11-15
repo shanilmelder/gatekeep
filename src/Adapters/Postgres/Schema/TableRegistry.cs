@@ -321,13 +321,15 @@ public static class TableRegistry
             [Worker] = [Delete],
         }, PurgeColumns, RowGuard),
         // Story 9.3: a Signing Key revocation, as gk_admin, may also end every Session of its Tenant by the
-        // one revocation path, reading only the columns its WHERE names and setting only the end.
+        // one revocation path, reading only the columns its WHERE names and setting only the end. Story 4.3:
+        // the expired-state purge, as gk_worker, reads only whether a Session is over.
         new("user_session", TableClass.Tenant, "Sessions", TableUse.Runtime, new Dictionary<string, IReadOnlyList<string>>
         {
             [Hosted] = [Select, Insert, Update],
             [Worker] = [Delete],
-        }, new Dictionary<string, IReadOnlyList<ColumnGrant>>(PurgeColumns)
+        }, new Dictionary<string, IReadOnlyList<ColumnGrant>>
         {
+            [Worker] = [new ColumnGrant(Select, ["tenant_id", "id", "ended_at", "idle_expires_at", "absolute_expires_at"])],
             [Admin] =
             [
                 new ColumnGrant(Select, ["tenant_id", "ended_at"]),
@@ -350,7 +352,8 @@ public static class TableRegistry
                 new ColumnGrant(Select, ["tenant_id", "id", "application_id", "status"]),
                 new ColumnGrant(Update, AuthorizationUpdateColumns),
             ],
-            [Worker] = [new ColumnGrant(Select, ["tenant_id", "id", "application_id"])],
+            // Story 4.3: the expired-state purge also finds a family no token references and a Session no family anchors.
+            [Worker] = [new ColumnGrant(Select, ["tenant_id", "id", "application_id", "user_session_id"])],
         }, SystemApplicationGuard),
         new("token", TableClass.Tenant, "Sessions", TableUse.Runtime, new Dictionary<string, IReadOnlyList<string>>
         {
@@ -365,7 +368,8 @@ public static class TableRegistry
                 // Story 3.5: only what the one revocation path changes, as on an authorization row.
                 new ColumnGrant(Update, AuthorizationUpdateColumns),
             ],
-            [Worker] = [new ColumnGrant(Select, ["tenant_id", "application_id", "authorization_id"])],
+            // Story 4.3: the expired-state purge deletes a token by its expiry.
+            [Worker] = [new ColumnGrant(Select, ["tenant_id", "application_id", "authorization_id", "expiration_date"])],
         }, SystemApplicationGuard),
         // Story 4.2: gk_hosted binds, slides and moves a transaction on (step_version, identifier,
         // authenticated_session_id, completed_at) through its table grants; it still deletes nothing.
@@ -376,7 +380,8 @@ public static class TableRegistry
         }, new Dictionary<string, IReadOnlyList<ColumnGrant>>
         {
             // Story 3.5: a deleted Application's purge deletes its transactions by their Application.
-            [Worker] = [new ColumnGrant(Select, ["tenant_id", "application_id"])],
+            // Story 4.3: the expired-state purge deletes them by their expiry.
+            [Worker] = [new ColumnGrant(Select, ["tenant_id", "application_id", "expires_at"])],
         }, RowGuard),
         new(
             "admin_attempt",

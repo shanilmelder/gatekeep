@@ -11,7 +11,7 @@ namespace Gatekeep.Modules.Operations.Core;
 /// registry, the runner's key custody for stage handlers, null when the Worker has none, and the
 /// runner's logger, for a handler that reports a failure it doesn't throw (Story 2.3).
 /// </summary>
-internal sealed record JobRunServices(NpgsqlDataSource Source, OperationRegistry Operations, IKeyCustody? Custody = null, ILogger? Logger = null)
+internal sealed record JobRunServices(NpgsqlDataSource Source, OperationRegistry Operations, IKeyCustody? Custody = null, ILogger? Logger = null, TimeProvider? Time = null)
 {
     public override string ToString() => nameof(JobRunServices);
 }

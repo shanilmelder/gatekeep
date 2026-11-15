@@ -59,6 +59,7 @@ Every audit type code Gatekeep writes, declared in its module's contract. Codes 
 | `operations.operation.retried` | Operations | Success | An Admin retried a failed Operation's failed steps. Names the Operation's Tenant only, when it has one. | None |
 | `protocol.client.cross_tenant_rejected` | Protocol | Failure | A client credential issued by another Tenant was refused at this Tenant's token endpoint. Names nothing of the other Tenant. | Rejected cross-Tenant attempts |
 | `sessions.access.revoked` | Sessions | Success | Sessions in scope ended and their Token Families and tokens were revoked. User scope targets the User. | Session and token revocation |
+| `sessions.expired_state.purged` | Sessions | Success | The hourly purge deleted the Tenant's expired tokens, empty Token Families, over Sessions with no family, and sign-in transactions over an hour past expiry. | None |
 | `sessions.session.rotated` | Sessions | Success | A User authenticated again in a browser holding their live Session, so its identifier was replaced and the old one stopped working. Names the User only. | None |
 | `sessions.session.started` | Sessions | Success | A User's Session started. Names the User only: the Session ID is stored only as its hash. | None |
 | `tenancy.tenant.activated` | Tenancy | Success | A Tenant's creation Operation succeeded: its settings exist and its Tenant Subdomain now resolves. | None |
