@@ -2,9 +2,10 @@
 title: 'Story 4.1: Serve Hosted Login step screens'
 type: 'feature'
 created: '2026-11-15'
-status: 'ready-for-dev'
+status: 'done'
+baseline_revision: '9988cc2dcaf99ba4316fd3f85c7b162af6b2fdbd'
 review_loop_iteration: 0
-followup_review_recommended: false
+followup_review_recommended: true
 context:
   - '{project-root}/_bmad-output/implementation-artifacts/epic-4-context.md'
 warnings: ['oversized']
@@ -158,6 +159,51 @@ deferred: []
 
 ## Review Triage Log
 
+### 2026-11-15 — Review pass
+- verdicts: 41 findings — high 0, medium 15, low 21, false 5, maybe-false 0
+- findings:
+  - `[medium]` `[patch]` (intent A) Browser-observable criteria are verified on a re-implemented Node stand-in whose parity with Host.Hosted is asserted only in comments — grouped with the theme and CSP parity rows: the served theme CSS is now checked value by value against `DesignTokens` and the harness reads the header values from `SecurityHeaders.cs`.
+  - `[false]` `[reject]` (intent B) No real sign-in step exists; only Generic error is served — the spec scopes 4.1 to the delivery mechanism with Generic error as its first step; Login is Stories 4.2 and 4.9 (Never list).
+  - `[low]` `[reject]` (intent C) Only the heading branch of focus precedence is exercised — the other branches need fields, which arrive with Login (4.9); the order is in `StepScreen.initialFocus` for that story to test.
+  - `[false]` `[reject]` (intent D) No per-Tenant theme variant — per-Tenant overrides are Epic 15's (spec Never list); 4.1's variants are the two schemes.
+  - `[low]` `[reject]` (intent E) The third-party-request guarantee is static in CI and runtime only on the stand-in — the static check covers the built files the real host serves byte for byte, and the runtime watcher covers the same bundle.
+  - `[false]` `[reject]` (intent F) The Tenant name appears beyond "fixed text, a code and a trace ID" — UX-DR37 and UX-DR41 require the `<title>` "{heading} – {Tenant}" and the Tenant's name; the error body itself shows only fixed text, code and trace ID.
+  - `[medium]` `[patch]` (intent G) The lint's "surface" misses literal text reached through expressions — grouped with the lint rows; child expression literals and `+` concatenation are now flagged.
+  - `[false]` `[reject]` (intent H) Changes beyond the criteria (Protocol signature, `ResolvedTenant`, Admin title, framer port, Docker stage) — each is needed by the spec's design; descriptive, no defect.
+  - `[medium]` `[patch]` (blind) The string lint misses `{'Hello'}` children, ternaries, other props and `.ts` files — child expression literals (conditional, logical, template, `+`) are now flagged with tests; other props and `.ts` files are rejected below.
+  - `[medium]` `[patch]` (blind) A host without its bundle starts healthy and the first invalid authorize request 500s without no-store or AD-21 headers — Host.Hosted now validates the web root's `index.html` and markers at startup and refuses to start without it; the NullFileProvider fallback is gone.
+  - `[medium]` `[patch]` (blind) No test ties the C# theme list to the tokens or to the harness — the colour list is derived from `DesignTokens`, and HostedStepTests asserts each scheme rule's values.
+  - `[medium]` `[patch]` (blind) The harness differs from the real host: any path renders a step, and its CSP is a copy — the harness now reads the header values from `SecurityHeaders.cs`; the any-path behaviour is rejected below (edge row).
+  - `[low]` `[reject]` (blind) Bad step JSON: empty tenant logs `console.error` and the bad-step tests skip title and axe — a corrupt page is not a reachable server output; the fallback renders the fixed error.
+  - `[medium]` `[patch]` (blind) `catalogue-html.ts` has no tests and is imported by relative path — grouped with the Admin title row: the plugin now has fill, escape and unknown-key tests. The relative import is rejected: a package export would add public surface for a build-only helper.
+  - `[low]` `[patch]` (blind) The bundle budget measures only files linked from `index.html` — it now measures every `.js` and `.css` under `dist/`.
+  - `[low]` `[patch]` (blind) Asset headers: the 404 loop never asserts headers; hashed assets lack long cache — the 404 loop now asserts the AD-21 headers. The cache header is rejected: the spec doesn't ask for it, and the default is safe.
+  - `[low]` `[reject]` (blind) `StepScreen` sets `tabindex` on React's `h1` via the DOM — React doesn't manage that attribute on the element, so nothing resets it; moving it into props is a refactor with no behaviour change.
+  - `[low]` `[reject]` (blind) The client never checks `stepVersion` — stale-version handling is the server's (AD-21, Story 4.2); only one version exists.
+  - `[false]` `[reject]` (blind) `context.Error` isn't guarded before `StepResponse.GenericError` — `AnswerInvalidRequestPage` returns early when `context.Error` is null or empty.
+  - `[low]` `[reject]` (blind) `TestStepPages` copies `HostedStepPages`, so ProtocolHost tests exercise a copy — `HostedStepTests` runs the real host process and covers the real writer; sharing it would need a new assembly reference.
+  - `[low]` `[patch]` (blind) The harness crashes with EISDIR on `/login/assets/..` — it now answers 404 unless the path is a file inside dist.
+  - `[medium]` `[patch]` (edge) Missing or marker-less `index.html` gives an unhandled 500 — grouped with the fail-fast row above.
+  - `[medium]` `[patch]` (edge) `<p>{'Hello'}</p>` passes the lint — grouped with the lint rows; fixed.
+  - `[medium]` `[patch]` (edge) `aria-label={'Close ' + name}` passes the lint — grouped with the lint rows; `+` is now walked.
+  - `[low]` `[reject]` (edge) String props on components (`heading=`, `body=`) and other ARIA attributes pass — flagging every capitalised component's string prop would flag identifiers and variants; the catalogue rule is enforced at the text sinks.
+  - `[low]` `[reject]` (edge) `.ts` files (e.g. `document.title = 'X'`) aren't scanned — non-JSX literals are mostly non-UI; scanning them needs sink analysis beyond this lint.
+  - `[low]` `[reject]` (edge) Trailing text after the last tag in `index.html` isn't flagged — no real index has text after `</html>`.
+  - `[low]` `[reject]` (edge) A broken symlink crashes the lint — none exist in the scanned trees; a crash fails the build loudly.
+  - `[low]` `[reject]` (edge) Single-quoted or unquoted `src`/`href` are skipped by the budget — superseded: the budget now measures every file under `dist/`.
+  - `[low]` `[reject]` (edge) A referenced file missing from dist throws a raw ENOENT — a missing file fails the check, which is the right outcome.
+  - `[low]` `[reject]` (edge) `..` segments or `#fragment` URLs — Vite emits neither; superseded by measuring `dist/` directly.
+  - `[low]` `[reject]` (edge) woff2 with a query suffix or CSS `@import` — Vite emits neither for this bundle.
+  - `[medium]` `[patch]` (edge) Assets missing at startup fix a NullFileProvider for the process life — grouped with the fail-fast row; the fallback is removed.
+  - `[low]` `[reject]` (edge) The step marker's position isn't validated — the template is a repository file checked by the tests; a moved marker fails the HTTP tests.
+  - `[low]` `[reject]` (edge) HEAD to the theme gets 404 — browsers fetch stylesheets with GET.
+  - `[low]` `[patch]` (edge) Harness EISDIR on `/login/assets/..` — grouped with the blind row; fixed.
+  - `[low]` `[reject]` (edge) The harness serves a step page for any path — a test stand-in's routing; the real host's routing is covered by HostedStepTests.
+  - `[medium]` `[patch]` (edge) The claim that a hard-coded string fails the build is incomplete — grouped with the lint rows; the expression gaps are closed, remaining scope recorded above.
+  - `[medium]` `[patch]` (verification) The served theme CSS is never checked value by value — grouped with the theme row; fixed.
+  - `[medium]` `[patch]` (verification) The Hosted image's bundle placement is unverified — `stack-check.sh` now copies `/app/wwwroot/index.html` out of the image and asserts the step marker and a built script.
+  - `[medium]` `[patch]` (verification) The Admin `<title>` now comes from the plugin and nothing checks it — AdminBundleTests asserts the built index has no `%gk:` and the catalogue title.
+
 ## Design Notes
 
 **Why a Node harness and a real-host test.** The browser tests run before the Isolation stage, and that stage has no Postgres, so a real `Host.Hosted` can't run there. The browser harness performs the same two-marker injection as the host, with the same headers. `HostedStepTests` then proves that the real host emits exactly that shape. Keep the markers (e.g. `<!--gk-head-->` and `<!--gk-step-->`) in `index.html` so both sides replace the same text.
@@ -180,3 +226,36 @@ deferred: []
   Expected: all pass, and the budget prints a total ≤150 kB.
 - **Browser:** run the Playwright `hosted-step`, `hosted` and `admin-*` projects. Expected: all pass.
 - **Isolation:** with Testcontainers, pinning the IPv4 as `deploy/docker/run-tests.sh` does, run `HostedStepTests`, `AuthorizationCodeTests`, `ApplicationSettingsProtocolTests`, `InertApplicationTests`, `CrossTenant*`, `AdminBundleTests` and `RouteRegistryTests`, plus the Architecture suite. Don't run the full Isolation suite; CI does. The known local-only Architecture failure (`.claude/worktrees`) is expected.
+
+## Auto Run Result
+
+**Summary:** `Host.Hosted` now serves the built Hosted Login bundle under `/login/`. A step page is the bundle's `index.html` with the Tenant's content-hashed theme stylesheet linked in `<head>` and the step embedded as an HTML-safe `StepResponse` JSON block, sent `no-store` with the exact AD-21 headers; the client renders it with no fetch. Generic error is the first step, replacing Story 2.9's static invalid-request page. CI gains a 150 kB gzip bundle budget, a hard-coded-string lint over every surface, browser tests of the served step in both schemes, and an image check that the Hosted bundle ships.
+
+**Files changed:**
+- `src/Adapters/Hosting/StepPageTemplate.cs`, `HostedLoginFiles.cs`, `RequestTrace.cs` (new) -- the validated page template and injection, `/login` files with security headers, and the one trace-ID helper.
+- `src/Modules/Protocol/Contracts/StepResponse.cs` (new), `ProtocolContract.cs`, `Core/AuthorizeEndpoint.cs` -- `StepResponse`, the `IStepPages` port, and Generic error replacing the static page.
+- `src/Modules/Tenancy/**` -- `ResolvedTenant.Name`, `ThemeStylesheet` derived from `DesignTokens`, and the `/login/theme/{hash}.css` route.
+- `src/Gatekeep.Host.Hosted/Program.cs`, `HostedStepPages.cs` (new) -- refuses to start without a valid bundle; writes step pages.
+- `src/Gatekeep.Host.Admin/AdminResponses.cs` -- uses the shared trace ID.
+- `apps/hosted-login/**` -- entry, step reader, `StepScreen`, catalogue-filled `index.html`, Vite config, budget check.
+- `packages/ui/**` -- catalogue entries, the `catalogue-html` Vite plugin, and the hard-coded-string lint, each with tests.
+- `apps/admin-dashboard/**` -- title and placeholder moved to the catalogue.
+- `deploy/docker/hosted.Dockerfile`, `deploy/docker/run-tests.sh`, `deploy/ci/stack-check.sh` -- bundle stage, budget in CI, image bundle check.
+- Tests: new `HostedStepTests`, `TestStepPages`, `hosted-step-server.mjs`, `hosted-step.spec.ts`; updated static-page assertions, `ProtocolHost`, `RouteRegistry`, `CrossTenantRouteTests`, `HostStartupTests`, `AdminBundleTests`, `admin-csp.spec.ts`.
+
+**Review findings:** 41 findings (medium 15, low 21, false 5). Patched 9 entries (6 medium, 3 low): Hosted fails fast without a valid bundle; the lint follows child expressions and `+`; the theme colours derive from the tokens and are checked per scheme; the harness reads the header values from `SecurityHeaders.cs` and no longer crashes on a directory path; the catalogue plugin and the Admin title are tested; the budget measures every JS and CSS file; 404s under `/login` assert headers; the stack check verifies the Hosted image's bundle. Deferred none. Rejected 23 with reasons in the Review Triage Log.
+
+**Follow-up review:** recommended. Six medium entries were patched. The specific unverified risk: the fail-fast startup change touches every path that starts `Host.Hosted` (the stack check, `RunningRoutes` and the full Isolation suite), and the new `stack-check.sh` image step was only syntax-checked locally; both run first in CI. Patched counts: high 0, medium 6, low 3.
+
+**Verification:**
+- .NET build: 0 warnings / 0 errors; API contract matches.
+- `pnpm -r build`; `@gatekeep/ui` check passes; unit tests pass: ui 61, admin-dashboard 122, hosted-login 4 (budget 84.0 kB of 150 kB), api-client 36.
+- Isolation `HostedStepTests`, `HostStartupTests`, `AuthorizationCodeTests`, `ApplicationSettingsProtocolTests`, `InertApplicationTests`, `CrossTenant*`, `AdminBundleTests`, `RouteRegistryTests`, `TenantResolution*` and `EventClassTests`: 295 of 295.
+- Architecture: 793 of 794; the one failure is the known local-only `.claude/worktrees` check.
+- Playwright (implementer): full run 694 of 695 before the `admin-csp` framer fix; after it, `hosted-step`, `hosted-login` and `admin-host` 21 of 21.
+
+**Residual risks:**
+- The lint covers JSX text, child expressions and named text attributes, not string props on components or `.ts` files.
+- Focus precedence is tested only for the heading branch until a step with fields exists (Story 4.9). A Login screen must mark its email input with `data-gk-initial-focus`.
+- The browser tests run against a Node stand-in; `HostedStepTests` holds the real host to the same shape.
+- The theme is served `immutable` for a year under its content hash.

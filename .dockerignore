@@ -1,6 +1,6 @@
 # Image builds copy only what restore and publish need (deploy/docker/*.Dockerfile).
-# apps/ and packages/ stay in the context: admin.Dockerfile builds the Admin Dashboard bundle
-# from the pnpm workspace. One shared file, because the classic builder (no BuildKit, as
+# apps/ and packages/ stay in the context: admin.Dockerfile builds the Admin Dashboard bundle,
+# and hosted.Dockerfile the Hosted Login bundle, from the pnpm workspace. One shared file, because the classic builder (no BuildKit, as
 # in the stack check) ignores per-Dockerfile ignore files.
 **/bin/
 **/obj/

@@ -1,5 +1,5 @@
-using System.Diagnostics;
 using System.Text.Json;
+using Gatekeep.Adapters.Hosting;
 
 namespace Gatekeep.Host.Admin;
 
@@ -299,11 +299,8 @@ internal static class AdminResponses
     public static string SessionCookie(string token) =>
         $"{AdminRequestChecks.SessionCookie}={token}; Path=/; Secure; HttpOnly; SameSite=Strict";
 
-    /// <summary>The request's trace ID: the W3C one when there is an Activity, Kestrel's otherwise.</summary>
-    public static string TraceId(HttpContext context) =>
-        Activity.Current is { } activity && activity.TraceId != default
-            ? activity.TraceId.ToHexString()
-            : context.TraceIdentifier;
+    /// <summary>The request's trace ID: the one shared definition, <see cref="RequestTrace.Id"/>.</summary>
+    public static string TraceId(HttpContext context) => RequestTrace.Id(context);
 
     /// <summary>
     /// The one 404: an unknown API path, a claim with nothing to claim and the Bootstrap page once

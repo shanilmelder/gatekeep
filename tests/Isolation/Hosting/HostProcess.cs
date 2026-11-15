@@ -67,6 +67,13 @@ internal sealed class HostProcess : IDisposable
             list.Add($"--Gatekeep:TenantZone={TenantZone}");
         }
 
+        // Host.Hosted needs the built Hosted Login bundle as its web root (Story 4.1), or refuses to
+        // start. A test that names one, even empty, keeps its own.
+        if (host == "Hosted" && !list.Any(a => a.StartsWith("--webroot=", StringComparison.Ordinal)))
+        {
+            list.Add($"--webroot={Gatekeep.Tests.Isolation.Protocol.TestStepPages.Bundle}");
+        }
+
         // And to be told who forwards to it: no proxy, unless a test names a network, or empty.
         if (host is "Admin" or "Hosted" && !list.Any(a => a.StartsWith("--Gatekeep:ForwardedBy=", StringComparison.Ordinal)))
         {

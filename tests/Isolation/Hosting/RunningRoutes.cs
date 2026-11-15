@@ -64,6 +64,8 @@ internal static class RunningRoutes
             (directory, socket) =>
             [
                 $"--ConnectionStrings:Hosted=Host=127.0.0.1;Port=9;Database=gatekeep;Username=gk_hosted;Password={Guid.NewGuid():N}",
+                // The built Hosted Login bundle (Story 4.1): Host.Hosted refuses to start without it.
+                $"--webroot={Gatekeep.Tests.Isolation.Protocol.TestStepPages.Bundle}",
                 $"--Custody:SocketPath={socket}",
                 $"--Custody:RoleIdFile={SecretFile(directory, "role-id")}",
                 $"--Custody:SecretIdFile={SecretFile(directory, "secret-id")}",

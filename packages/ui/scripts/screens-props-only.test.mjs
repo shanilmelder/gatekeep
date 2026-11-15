@@ -1,6 +1,7 @@
 // Story 1.18: every screen in packages/hosted-screens is props-only. What it shows comes from
 // its props and the catalogue, with no fetch, storage, navigation, global state, router or
-// state library: serving the steps is Story 4.1's. This scans the screens' source for them.
+// state library: serving the steps is Story 4.1's. This scans the screens' source for them, and
+// the Hosted Login client's (apps/hosted-login/src), which serves them.
 
 import assert from 'node:assert/strict';
 import { readdir, readFile } from 'node:fs/promises';
@@ -49,6 +50,16 @@ async function sources(directory) {
 describe('Props-only screens', () => {
   it('finds no fetch, storage, navigation, global state or router in packages/hosted-screens/src', async () => {
     const files = await sources(source);
+    assert.ok(files.length > 0);
+    for (const file of files) {
+      assert.deepEqual(impurities(await readFile(file, 'utf8')), [], path.relative(repository, file));
+    }
+  });
+
+  // Story 4.1: the Hosted Login client only reads the step the server embedded and renders its
+  // screen. It never fetches, uses XMLHttpRequest or storage, or navigates by script.
+  it('finds none of them in apps/hosted-login/src either', async () => {
+    const files = await sources(path.join(repository, 'apps/hosted-login/src'));
     assert.ok(files.length > 0);
     for (const file of files) {
       assert.deepEqual(impurities(await readFile(file, 'utf8')), [], path.relative(repository, file));

@@ -136,6 +136,9 @@ public static class RouteRegistry
         new("*", "/connect/userinfo", CaseKind.HostResolved),
         new("*", "/connect/revoke", CaseKind.HostResolved),
 
+        // Hosted Login (Story 4.1): the resolved Tenant's theme stylesheet. Its assets are static files, not routes.
+        new("GET", "/login/theme/{hash}.css", CaseKind.HostResolved),
+
         new("*", "{*path:nonfile}", CaseKind.NotTenantBound, Reason: "the one fixed 404, the same as an unknown host's (AD-6)"),
     ];
 }

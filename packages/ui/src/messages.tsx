@@ -97,6 +97,17 @@ export interface Messages {
   traceId: string;
   /** What a trace ID's Copy copies, as its name says: "Copy trace ID". Placeholder for `copyNamed`. */
   traceIdCopy: string;
+  /**
+   * A Hosted Login page's `<title>` (Story 4.1): the step's heading and the Tenant's name, never
+   * Gatekeep's. Placeholders: {heading}, {tenant}.
+   */
+  hostedPageTitle: string;
+  /** Hosted Login's `<title>` before its step renders, written into index.html at build. It names no Tenant and never Gatekeep. */
+  hostedFallbackTitle: string;
+  /** Hosted Login's fixed `<noscript>` text, written into index.html at build: JavaScript is required. */
+  hostedNoScript: string;
+  /** The Admin Dashboard's `<title>`, written into its index.html at build. */
+  adminDocumentTitle: string;
   /** The product's name, which the Admin pages before a session speak for, as a Tenant's name does on Hosted Login. */
   productName: string;
   /** Bootstrap's heading (EXPERIENCE.md, Admin: access and Tenants). */
@@ -692,6 +703,8 @@ export interface Messages {
   createApiName: string;
   createApiIdentifier: string;
   createApiIdentifierAdvice: string;
+  /** The Identifier field's placeholder: an example identifier, a URL shape. */
+  createApiIdentifierPlaceholder: string;
   createApiSubmit: string;
   createApiNameRequired: string;
   createApiNameInvalid: string;
@@ -813,6 +826,10 @@ export const defaultMessages: Readonly<Messages> = Object.freeze({
   errorCode: 'Code',
   traceId: 'Trace ID',
   traceIdCopy: 'trace ID',
+  hostedPageTitle: '{heading} – {tenant}',
+  hostedFallbackTitle: 'Sign in',
+  hostedNoScript: 'Sign-in needs JavaScript. Turn it on in your browser, then reload this page.',
+  adminDocumentTitle: 'Gatekeep Admin Dashboard',
   productName: 'Gatekeep',
   bootstrapTitle: 'Claim this Deployment',
   bootstrapSubtitle: 'Paste the one-time token gatekeep init wrote. It works once, within 15 minutes of being issued.',
@@ -1199,6 +1216,7 @@ export const defaultMessages: Readonly<Messages> = Object.freeze({
   createApiIdentifier: 'Identifier',
   createApiIdentifierAdvice:
     "Use a different identifier in each environment, such as Dev, Staging and Prod, so a token for one is never accepted by another. It can't be changed later.",
+  createApiIdentifierPlaceholder: 'https://api.example.com',
   createApiSubmit: 'Create API',
   createApiNameRequired: 'Enter a name.',
   createApiNameInvalid: 'Use at most 200 characters, with no control characters.',

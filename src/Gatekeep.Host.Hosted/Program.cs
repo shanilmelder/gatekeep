@@ -1,5 +1,6 @@
 using Gatekeep.Adapters.Hosting;
 using Gatekeep.Adapters.Logging;
+using Gatekeep.Host.Hosted;
 using Gatekeep.Kernel.Audit;
 using Gatekeep.Modules.Audit.Contracts;
 using Gatekeep.Modules.Protocol.Contracts;
@@ -13,16 +14,30 @@ if (HealthProbe.IsRequested(args))
 
 var builder = WebApplication.CreateBuilder(args);
 builder.Logging.AddGatekeepLogging();
-builder.AddGatekeepHost(new HostProfile("Host.Hosted", ["Hosted"], HasPublicEndpoint: true, HasForwardingProxy: true));
+
+// Hosted Login (Story 4.1): the built apps/hosted-login bundle in the web root, its index.html read
+// and checked once here. Without a valid one the host refuses to start, naming the web root.
+var webRoot = HostedLoginFiles.WebRoot(builder.Environment);
+var stepPage = StepPageTemplate.TryLoad(webRoot);
+builder.AddGatekeepHost(new HostProfile(
+    "Host.Hosted",
+    ["Hosted"],
+    HasPublicEndpoint: true,
+    HasForwardingProxy: true,
+    RefusedHostSettings: _ => stepPage is null ? [StepPageTemplate.WebRootSetting] : []));
 
 // Each Tenant's OpenID Provider (Stories 2.3, 2.5 and 2.9): discovery, JWKS, Client Credentials and
 // the code flow with PKCE, as gk_hosted. Its audit events, such as a refused cross-Tenant credential,
-// go to the Tenant's Log. No sign-in screen exists before Stories 4.1 and 4.2, so a release build
-// completes no sign-in (Protocol's default UnavailableSignIn): every valid authorization request gets
+// go to the Tenant's Log. No sign-in step exists before Story 4.2, so a release build completes no
+// sign-in (Protocol's default UnavailableSignIn): every valid authorization request gets
 // temporarily_unavailable and no code.
-// The one page the authorization endpoint shows carries the AD-21 Hosted headers.
+// Every Hosted Login step page is the bundle's index.html with the step embedded as JSON and the
+// Tenant's theme linked, under the AD-21 headers. The authorization endpoint shows Generic error
+// through it for a request it can't send back. A refused host never builds it.
 builder.Services.AddSingleton<IAuditAppender>(AuditContract.CreateAppender());
-builder.Services.AddGatekeepProtocol(services => services.GetRequiredService<HostDatabases>()["Hosted"], SecurityHeaders.Apply);
+builder.Services.AddGatekeepProtocol(
+    services => services.GetRequiredService<HostDatabases>()["Hosted"],
+    _ => new HostedStepPages(stepPage!));
 var app = builder.Build();
 
 // First on the public port, before routing (AD-6): the whole host, matched exactly against an
@@ -34,9 +49,20 @@ app.UseTenantResolution(() => app.Services.GetRequiredService<HostDatabases>()["
 // Caddy's edge network (Gatekeep:ForwardedBy).
 app.UseGatekeepForwardedClient();
 
+// Hosted Login's files (Story 4.1): the AD-21 headers on everything under /login/, and the bundle's
+// assets under /login/assets/. The theme stylesheet is an endpoint, below.
+// A host refused for its web root never serves: RunGatekeepAsync stops it before the first request.
+if (stepPage is not null)
+{
+    app.UseHostedLoginFiles(webRoot);
+}
+
 // OpenIddict, on the resolved Tenant only: its first handler takes the Tenant from resolution.
 app.UseGatekeepProtocol();
 app.UseRouting();
+
+// The request's Tenant's theme stylesheet, at its content hash (Story 4.1).
+app.MapThemeStylesheet();
 
 // Any other path on a resolved host gets the same fixed 404 as an unknown host.
 app.MapFallback(TenancyContract.NotFoundAsync);

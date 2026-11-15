@@ -190,7 +190,7 @@ export function CreateApiModal({ open, request, tenantId, onClose, onCreated }: 
             code
             autoComplete="off"
             spellCheck={false}
-            placeholder="https://api.example.com"
+            placeholder={messages.createApiIdentifierPlaceholder}
             readOnly={pending}
             onChange={(event) => {
               setIdentifier(event.currentTarget.value);

@@ -2,8 +2,10 @@ using Gatekeep.Kernel.Audit;
 using Gatekeep.Kernel.Persistence;
 using Gatekeep.Modules.Tenancy.Adapters;
 using Gatekeep.Modules.Tenancy.Core;
+using Gatekeep.Modules.Tenancy.Core.Theme;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Routing;
 
 namespace Gatekeep.Modules.Tenancy.Contracts;
 
@@ -36,6 +38,39 @@ public static class TenancyContract
     /// </summary>
     public static IApplicationBuilder UseTenantResolution(this IApplicationBuilder app, Func<string> connectionString) =>
         TenancyAdapters.UseTenantResolution(app, connectionString);
+
+    /// <summary>
+    /// The Hosted Login theme stylesheet of <paramref name="tenant"/> (AD-21, Story 4.1), generated from
+    /// the default design tokens and named by its content's hash. Per-Tenant overrides are Epic 15's.
+    /// </summary>
+    public static TenantTheme Theme(ResolvedTenant tenant) => ThemeStylesheet.For(tenant);
+
+    /// <summary>The route Host.Hosted serves the request's Tenant's theme stylesheet on (Story 4.1).</summary>
+    public const string ThemeRoute = "/login/theme/{hash}.css";
+
+    /// <summary>
+    /// <c>GET /login/theme/{hash}.css</c> on Host.Hosted (AD-21, Story 4.1): the resolved Tenant's theme
+    /// stylesheet, <c>text/css</c>, when <c>hash</c> is its content's. Any other hash, or no resolved
+    /// Tenant, is the one fixed 404. The URL changes with the content, so it may be cached for good.
+    /// </summary>
+    public static IEndpointRouteBuilder MapThemeStylesheet(this IEndpointRouteBuilder endpoints)
+    {
+        ArgumentNullException.ThrowIfNull(endpoints);
+        endpoints.MapGet(ThemeRoute, static (HttpContext context, string hash) =>
+        {
+            var tenant = context.Features.Get<ResolvedTenant>();
+            var theme = tenant is null ? null : Theme(tenant);
+            if (theme is null || !string.Equals(hash, theme.Hash, StringComparison.Ordinal))
+            {
+                return NotFoundAsync(context);
+            }
+
+            context.Response.Headers.CacheControl = "public, max-age=31536000, immutable";
+            context.Response.ContentType = "text/css; charset=utf-8";
+            return context.Response.WriteAsync(theme.Css, context.RequestAborted);
+        });
+        return endpoints;
+    }
 
     /// <summary>The one fixed 404 an unknown host gets, for a resolved request no endpoint answers too.</summary>
     public static Task NotFoundAsync(HttpContext context) => TenancyAdapters.NotFoundAsync(context);

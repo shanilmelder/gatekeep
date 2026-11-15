@@ -25,6 +25,9 @@
 // Story 1.29: deleting a Tenant, retrying its deletion and the lost-Tenant banner (admin-tenant-delete.spec.ts), on that same host.
 // Story 7.4: a Tenant's Logs, its field search, URL, Load more and sidebar item (admin-logs.spec.ts), on that same host.
 // Story 9.1: the Signing keys page, its JWKS sample and its failures (admin-signing-keys.spec.ts), on that same host.
+// Story 4.1: the built Hosted Login bundle is served as Host.Hosted serves it, step JSON and theme
+// injected under the AD-21 headers, by hosted-step-server.mjs (hosted-step.spec.ts), and the
+// hosted-login surface tests run against that same server rather than `vite preview`.
 
 import { existsSync } from 'node:fs';
 import path from 'node:path';
@@ -33,10 +36,13 @@ import { defineConfig } from '@playwright/test';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
+// Hosted Login is served by hosted-step-server.mjs, at /login/, as Host.Hosted serves it; the Admin
+// Dashboard by `vite preview`.
 const surfaces = [
-  { name: 'hosted-login', port: 4310 },
-  { name: 'admin-dashboard', port: 4311 },
+  { name: 'hosted-login', port: 4310, url: '/login/', command: 'node hosted-step-server.mjs 4310' },
+  { name: 'admin-dashboard', port: 4311, url: '/', command: 'pnpm --dir ../../apps/admin-dashboard exec vite preview --host 127.0.0.1 --port 4311 --strictPort' },
 ];
+const hostedStep = surfaces[0]!;
 const fixture = { name: 'controls', port: 4312 };
 
 const adminHost = { port: 4313, healthPort: 4314 };
@@ -62,9 +68,11 @@ export default defineConfig({
       name,
       // Every spec that isn't another project's own, so a new spec runs by default.
       testMatch: '*.spec.ts',
-      testIgnore: ['admin-csp.spec.ts', 'bootstrap.spec.ts', 'credential-setup.spec.ts', 'signin.spec.ts', 'controls.spec.ts', 'data.spec.ts', 'overlay.spec.ts', 'drawer.spec.ts', 'hosted.spec.ts', 'shell.spec.ts', 'admin-shell.spec.ts', 'admin-credentials.spec.ts', 'admin-recovery.spec.ts', 'admin-tenants.spec.ts', 'admin-tenant-switcher.spec.ts', 'admin-tenant-delete.spec.ts', 'admin-logs.spec.ts', 'admin-signing-keys.spec.ts', 'admin-applications.spec.ts', 'admin-apis.spec.ts'],
+      testIgnore: ['hosted-step.spec.ts', 'admin-csp.spec.ts', 'bootstrap.spec.ts', 'credential-setup.spec.ts', 'signin.spec.ts', 'controls.spec.ts', 'data.spec.ts', 'overlay.spec.ts', 'drawer.spec.ts', 'hosted.spec.ts', 'shell.spec.ts', 'admin-shell.spec.ts', 'admin-credentials.spec.ts', 'admin-recovery.spec.ts', 'admin-tenants.spec.ts', 'admin-tenant-switcher.spec.ts', 'admin-tenant-delete.spec.ts', 'admin-logs.spec.ts', 'admin-signing-keys.spec.ts', 'admin-applications.spec.ts', 'admin-apis.spec.ts'],
       use: { baseURL: `http://127.0.0.1:${port}` },
     })),
+    // Hosted Login's step pages (Story 4.1), on the built bundle as Host.Hosted serves it.
+    { name: 'hosted-step', testMatch: 'hosted-step.spec.ts', use: { baseURL: `http://127.0.0.1:${hostedStep.port}` } },
     { name: fixture.name, testMatch: 'controls.spec.ts', use: { baseURL: `http://127.0.0.1:${fixture.port}` } },
     // The data display (Story 1.15), on the same fixture build at ?page=data.
     { name: 'data', testMatch: 'data.spec.ts', use: { baseURL: `http://127.0.0.1:${fixture.port}` } },
@@ -169,9 +177,9 @@ export default defineConfig({
     },
   ],
   webServer: [
-    ...surfaces.map(({ name, port }) => ({
-      command: `pnpm --dir ../../apps/${name} exec vite preview --host 127.0.0.1 --port ${port} --strictPort`,
-      url: `http://127.0.0.1:${port}/`,
+    ...surfaces.map(({ port, url, command }) => ({
+      command,
+      url: `http://127.0.0.1:${port}${url}`,
       reuseExistingServer: false,
       timeout: 60_000,
     })),

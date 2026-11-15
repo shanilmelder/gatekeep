@@ -1,7 +1,10 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "types": ["vite/client"]
+    "types": ["vite/client"],
+    // vite.config.ts imports packages/ui/vite/catalogue-html.ts by its file name (Story 4.1).
+    "allowImportingTsExtensions": true,
+    "noEmit": true
   },
   "include": ["src", "vite.config.ts"]
 }

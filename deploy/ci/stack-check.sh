@@ -187,6 +187,20 @@ search_key() {
     done
 }
 
+say "the hosted image holds the built Hosted Login bundle in its web root (Story 4.1)."
+id="$(docker create gatekeep/hosted:local)"
+bundle="$(mktemp -d)"
+if docker cp "$id:/app/wwwroot/index.html" "$bundle/index.html" > /dev/null 2>&1 \
+    && grep -qF '<!--gk-step-->' "$bundle/index.html" \
+    && docker cp "$id:/app/wwwroot/assets" - | tar -tf - | grep -qE '^assets/[^/]+\.js$'; then
+    bundled=0
+else
+    bundled=1
+fi
+docker rm "$id" > /dev/null
+rm -rf "$bundle"
+[ "$bundled" -eq 0 ] || fail "gatekeep/hosted:local has no Hosted Login bundle: /app/wwwroot/index.html with <!--gk-step-->, and a script in /app/wwwroot/assets."
+
 say "the Master Key is in no volume, built image or container environment."
 search_key master-key
 

@@ -250,6 +250,9 @@ importers:
 
   apps/hosted-login:
     dependencies:
+      '@gatekeep/hosted-screens':
+        specifier: workspace:*
+        version: link:../../packages/hosted-screens
       '@gatekeep/ui':
         specifier: workspace:*
         version: link:../../packages/ui

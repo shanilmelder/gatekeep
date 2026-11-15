@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using Gatekeep.Adapters.Hosting;
 using Gatekeep.Adapters.Postgres.Schema;
 using Gatekeep.Adapters.OpenBao;
 using Gatekeep.Kernel.Persistence;
@@ -22,8 +23,9 @@ using OpenIddict.Server;
 namespace Gatekeep.Tests.Isolation.Protocol;
 
 /// <summary>
-/// Host.Hosted's public pipeline as <c>Program.cs</c> builds it (Tenant resolution, then the
-/// Protocol module, then routing and the fixed 404), on a TestServer, with the real Protocol
+/// Host.Hosted's public pipeline as <c>Program.cs</c> builds it (Tenant resolution, then Hosted Login's
+/// files, the Protocol module, routing, the theme stylesheet and the fixed 404), on a TestServer, with
+/// step pages over the built Hosted Login bundle (<see cref="TestStepPages"/>), with the real Protocol
 /// registration over a migrated database as <c>gk_hosted</c> and the real OpenBao through the
 /// <c>host-hosted</c> login, wrapped so a test can count or fail custody calls. Logs are captured
 /// so a test can check that no key material or ciphertext reaches them.
@@ -109,7 +111,7 @@ internal sealed class ProtocolHost : IAsyncDisposable
             builder.Services.AddSingleton(signIn);
         }
 
-        builder.Services.AddGatekeepProtocol(_ => hostedConnection, Gatekeep.Adapters.Hosting.SecurityHeaders.Apply);
+        builder.Services.AddGatekeepProtocol(_ => hostedConnection, TestStepPages.Create);
         configure?.Invoke(builder.Services);
 
         var app = builder.Build();
@@ -126,8 +128,10 @@ internal sealed class ProtocolHost : IAsyncDisposable
         });
 
         app.UseTenantResolution(() => hostedConnection);
+        app.UseHostedLoginFiles(TestStepPages.Bundle);
         app.UseGatekeepProtocol();
         app.UseRouting();
+        app.MapThemeStylesheet();
         app.MapFallback(TenancyContract.NotFoundAsync);
 
         await app.StartAsync(TestContext.Current.CancellationToken);
@@ -151,6 +155,9 @@ internal sealed class ProtocolDatabase(PostgresFixture postgres, string name)
     public string Hosted => postgres.RoleConnection(TableRegistry.Hosted, Name);
 
     public string Superuser => postgres.SuperuserConnection(Name);
+
+    /// <summary>The display name every Tenant <see cref="AddTenantAsync"/> adds has: <see cref="TestTenants"/>' default.</summary>
+    public const string TestTenantName = "Test Tenant";
 
     public static async Task<ProtocolDatabase> CreateAsync(PostgresFixture postgres) =>
         new(postgres, await postgres.NewMigratedDatabaseAsync());
@@ -179,7 +186,7 @@ internal sealed class ProtocolDatabase(PostgresFixture postgres, string name)
                 $"SET session_replication_role = replica; UPDATE tenant SET issuer = '{issuer}' WHERE id = '{id}'; SET session_replication_role = DEFAULT");
         }
 
-        return new ResolvedTenant(id, issuer ?? $"https://{host}/", host, issuer ?? $"https://{host}/");
+        return new ResolvedTenant(id, issuer ?? $"https://{host}/", host, issuer ?? $"https://{host}/", TestTenantName);
     }
 
     /// <summary>

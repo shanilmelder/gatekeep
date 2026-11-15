@@ -21,7 +21,7 @@ internal static class TenancyAdapters
 {
     private const string Lookup =
         """
-        SELECT t.id, t.issuer, t.rp_id, t.email_link_base
+        SELECT t.id, t.issuer, t.rp_id, t.email_link_base, t.name
         FROM tenant_host h
         JOIN tenant t ON t.id = h.tenant_id
         WHERE h.host = @host AND t.status = 'active'
@@ -114,6 +114,6 @@ internal static class TenancyAdapters
             return null;
         }
 
-        return new ResolvedTenant(reader.GetGuid(0), reader.GetString(1), reader.GetString(2), reader.GetString(3));
+        return new ResolvedTenant(reader.GetGuid(0), reader.GetString(1), reader.GetString(2), reader.GetString(3), reader.GetString(4));
     }
 }

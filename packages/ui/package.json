@@ -11,7 +11,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "fonts": "node scripts/fonts.mjs",
-    "check": "node scripts/fonts.mjs --check && node scripts/check-no-raw-hex.mjs && node scripts/check-dependencies.mjs",
+    "check": "node scripts/fonts.mjs --check && node scripts/check-no-raw-hex.mjs && node scripts/check-no-hardcoded-strings.mjs && node scripts/check-dependencies.mjs",
     "test": "node --test \"scripts/**/*.test.mjs\""
   },
   "dependencies": {

@@ -4,9 +4,12 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "tsc -p tsconfig.json --noEmit && vite build"
+    "build": "tsc -p tsconfig.json --noEmit && vite build",
+    "budget": "node scripts/check-bundle-budget.mjs",
+    "test": "node --test \"scripts/**/*.test.mjs\""
   },
   "dependencies": {
+    "@gatekeep/hosted-screens": "workspace:*",
     "@gatekeep/ui": "workspace:*",
     "react": "catalog:",
     "react-dom": "catalog:"

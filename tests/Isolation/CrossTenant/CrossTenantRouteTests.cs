@@ -212,14 +212,12 @@ public sealed class CrossTenantRouteTests(PostgresFixture postgres, OpenBaoFixtu
             case ProtocolContract.AuthorizePath:
             {
                 // Tenant A's real web client, at B's host (Story 2.9): B doesn't know it, so the request gets
-                // the static page, never a redirect to A's client, and naming nothing of A. Nothing begins.
+                // Generic error (Story 4.1), never a redirect to A's client, and naming nothing of A. Nothing begins.
                 var client = await database.CreateWebClientAsync(a.TenantId, [CodeFlowSetup.Callback]);
                 var user = await database.AddUserAsync(a.TenantId);
                 using var response = await CodeFlow.AuthorizeAsync(host, HostB, client.ClientId, CodeFlowSetup.Callback, Pkce.New(), user, state: "cross-tenant");
-                Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
-                Assert.Null(response.Headers.Location);
+                await StepPage.AssertGenericErrorAsync(response, ProtocolDatabase.TestTenantName);
                 var body = await response.Content.ReadAsStringAsync(Cancellation);
-                Assert.Contains("Something went wrong", body, StringComparison.Ordinal);
                 Assert.DoesNotContain(HostA, body, StringComparison.OrdinalIgnoreCase);
                 Assert.DoesNotContain(client.ClientId, body, StringComparison.Ordinal);
                 Assert.DoesNotContain("cross-tenant", body, StringComparison.Ordinal);
@@ -258,6 +256,24 @@ public sealed class CrossTenantRouteTests(PostgresFixture postgres, OpenBaoFixtu
                 Assert.Equal(0L, await database.ScalarAsync<long>("SELECT count(*) FROM audit_event WHERE type_code = 'sessions.access.revoked'"));
                 using var refreshed = await CodeFlow.RefreshAsync(host, HostA, flow.ClientA.ClientId, flow.ClientA.Secret, tokens.Refresh);
                 Assert.Equal(HttpStatusCode.OK, refreshed.Status);
+                break;
+            }
+
+            case Gatekeep.Modules.Tenancy.Contracts.TenancyContract.ThemeRoute:
+            {
+                // B's theme stylesheet at the hash B's step pages link (Story 4.1), from B's resolved Tenant only:
+                // it names nothing of A, and any other hash is the fixed 404.
+                var href = Gatekeep.Modules.Tenancy.Contracts.TenancyContract.Theme(b).Href;
+                using var response = await host.Http.GetAsync(new Uri($"http://{HostB}{href}"), Cancellation);
+                Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+                Assert.Equal("text/css", response.Content.Headers.ContentType?.MediaType);
+                var body = await response.Content.ReadAsStringAsync(Cancellation);
+                Assert.Contains("--gk-color-ac", body, StringComparison.Ordinal);
+                Assert.DoesNotContain(HostA, body, StringComparison.OrdinalIgnoreCase);
+                Assert.DoesNotContain(a.TenantId.ToString(), body, StringComparison.OrdinalIgnoreCase);
+
+                using var other = await host.Http.GetAsync(new Uri($"http://{HostB}/login/theme/0123456789abcdef.css"), Cancellation);
+                Assert.Equal(HttpStatusCode.NotFound, other.StatusCode);
                 break;
             }
 
