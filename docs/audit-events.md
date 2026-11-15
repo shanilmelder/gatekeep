@@ -55,6 +55,9 @@ Every audit type code Gatekeep writes, declared in its module's contract. Codes 
 | `keys.signing_key.rotated` | Keys | Success | A Tenant's Signing or Management key was rotated, by the daily rotation or a Tenant Owner: current became previous. Names no key. | Key operations |
 | `keys.tenant_keys.provisioned` | Keys | Success | A Tenant's missing Signing Keys, Management keys or token protection key were created in key custody. Names no key. | None |
 | `keys.transit_key.swept` | Keys | Success | A Signing or Management key at least 24 hours old, named by no row when checked, was deleted from key custody. Names no key. | None |
+| `notifications.email.held_back` | Notifications | Failure | An email to a User was dropped: the User's per-recipient email limit was reached. Records no address, link or code. | None |
+| `notifications.email.sent` | Notifications | Success | An email to a User was accepted by the Tenant's provider. Records no address, link or code. | None |
+| `notifications.email.undeliverable` | Notifications | Failure | An email to a User couldn't be delivered and won't be retried. Records no address, link or code. | None |
 | `notifications.email_provider.removed` | Notifications | Success | A Tenant Owner removed the Tenant's email provider and its stored secret. | None |
 | `notifications.email_provider.updated` | Notifications | Success | A Tenant Owner saved the Tenant's email provider. Records no setting, address or secret. | None |
 | `operations.job.dead` | Operations | Failure | A job used its last attempt and went dead. Only its fixed failure code is kept. | None |

@@ -656,10 +656,11 @@ public sealed class TenantTablesTests(PostgresFixture postgres)
     /// <summary>
     /// Story 1.29: a purge reads only the Tenant ID its <c>WHERE</c> names. Story 3.5: a deleted Application's
     /// purge also reads the Application and family references it deletes by, and never any content. Story 4.3: the
-    /// expired-state purge also reads the expiries and references it deletes by, and whether a Session ended.
+    /// expired-state purge also reads the expiries and references it deletes by, and whether a Session ended. Story 4.5:
+    /// the email send job also reads a User's ID and email, to resolve a recipient.
     /// </summary>
     [Theory]
-    [InlineData("user", "tenant_id")]
+    [InlineData("user", "email,id,tenant_id")]
     [InlineData("user_session", "absolute_expires_at,ended_at,id,idle_expires_at,tenant_id")]
     [InlineData("authorization", "application_id,id,tenant_id,user_session_id")]
     [InlineData("token", "application_id,authorization_id,expiration_date,tenant_id")]
@@ -693,7 +694,7 @@ public sealed class TenantTablesTests(PostgresFixture postgres)
 
         var failure = await Assert.ThrowsAsync<PostgresException>(() => PostgresFixture.ExecuteAsync(
             postgres.RoleConnection(TableRegistry.Worker, database),
-            $"BEGIN; SELECT set_config('gatekeep.tenant_id', '{TenantA}', true); SELECT id FROM \"user\"; COMMIT;"));
+            $"BEGIN; SELECT set_config('gatekeep.tenant_id', '{TenantA}', true); SELECT created_at FROM \"user\"; COMMIT;"));
 
         Assert.Equal(PermissionDenied, failure.SqlState);
     }

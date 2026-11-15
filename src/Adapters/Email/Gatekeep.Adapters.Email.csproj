@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- IEmailSender (Story 4.5): one adapter per provider kind. The HTTP kinds use BCL HTTP and JSON through
+       EgressHttp only; SMTP runs MailKit over a TCP stream Adapters.Egress opened and checked. -->
+  <ItemGroup>
+    <PackageReference Include="MailKit" />
+    <PackageReference Include="MimeKit" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../Gatekeep.Kernel/Gatekeep.Kernel.csproj" />
+    <ProjectReference Include="../Egress/Gatekeep.Adapters.Egress.csproj" />
+  </ItemGroup>
+
+</Project>

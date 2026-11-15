@@ -30,6 +30,7 @@ flowchart TD
   AdaptersObjectLock[Adapters.ObjectLock]
   Directory[Directory]
   Notifications[Notifications]
+  AdaptersEmail[Adapters.Email]
   TestsIsolation[Tests.Isolation]
   HostHosted --> Protocol
   HostHosted --> Authentication
@@ -99,10 +100,13 @@ flowchart TD
   AdaptersHosting --> AdaptersEgress
   AdaptersHosting --> AdaptersAlertChannel
   AdaptersHosting --> AdaptersObjectLock
+  AdaptersHosting --> AdaptersEmail
   AdaptersAlertChannel --> AdaptersEgress
   AdaptersObjectLock --> AdaptersEgress
+  AdaptersEmail --> AdaptersEgress
   TestsIsolation --> AdaptersAlertChannel
   TestsIsolation --> AdaptersEgress
+  TestsIsolation --> AdaptersEmail
   TestsIsolation --> AdaptersFido2
   TestsIsolation --> AdaptersHosting
   TestsIsolation --> AdaptersLogging
@@ -116,6 +120,7 @@ flowchart TD
   TestsIsolation --> Cli
   TestsIsolation --> Keys
   TestsIsolation --> Management
+  TestsIsolation --> Notifications
   TestsIsolation --> Operations
   TestsIsolation --> Protocol
   TestsIsolation --> Sessions

@@ -1,4 +1,5 @@
 using Gatekeep.Adapters.Hosting;
+using Gatekeep.Kernel.Email;
 using Gatekeep.Kernel.Secrets;
 using Gatekeep.Modules.Operations.Contracts;
 
@@ -21,7 +22,9 @@ internal static class WorkerSettings
         HasPublicEndpoint: false,
         // The alert channel and the off-server bucket are required, though nothing calls them until
         // Story 11.1 and Story 7.2, so no Deployment runs without them (Story 1.30).
-        UsesOffServer: true);
+        UsesOffServer: true,
+        // Story 4.5: the send job hands each email to IEmailSender, over the egress path only.
+        SendsEmail: true);
 
     public static JobDatabases Databases(HostDatabases databases) =>
         new(databases[Dispatch], databases[Worker], databases[Sealer], databases[Retention]);
@@ -42,7 +45,8 @@ internal static class WorkerJobs
             WorkerSettings.Databases(provider.GetRequiredService<HostDatabases>()),
             options: null,
             custody: provider.GetService<IKeyCustody>(),
-            provider.GetRequiredService<ILoggerFactory>().CreateLogger("Gatekeep.Jobs")));
+            provider.GetRequiredService<ILoggerFactory>().CreateLogger("Gatekeep.Jobs"),
+            email: provider.GetService<IEmailSender>()));
 
         services.AddSingleton(provider => OperationsContract.CreateScheduleRunner(
             OperationsContract.ProductionRegistry,

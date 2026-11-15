@@ -450,6 +450,12 @@ public sealed class EmailProviderApiTests(PostgresFixture postgres, OpenBaoFixtu
         { """{"kind":"custom_http","settings":{"endpoint":"https://user:pw@mail.example.com/send"},"fromAddress":"a@example.com","secret":"s"}""", "settings.endpoint:invalid" },
         { """{"kind":"custom_http","settings":{"endpoint":"https://mail.example.com/send#x"},"fromAddress":"a@example.com","secret":"s"}""", "settings.endpoint:invalid" },
         { """{"kind":"custom_http","settings":{"endpoint":"https://mail.example.com","authHeaderName":"Bad Header"},"fromAddress":"a@example.com","secret":"s"}""", "settings.authHeaderName:invalid" },
+        // Story 4.5: a header that frames or routes the request is refused.
+        { """{"kind":"custom_http","settings":{"endpoint":"https://mail.example.com","authHeaderName":"Host"},"fromAddress":"a@example.com","secret":"s"}""", "settings.authHeaderName:invalid" },
+        { """{"kind":"custom_http","settings":{"endpoint":"https://mail.example.com","authHeaderName":"content-length"},"fromAddress":"a@example.com","secret":"s"}""", "settings.authHeaderName:invalid" },
+        { """{"kind":"custom_http","settings":{"endpoint":"https://mail.example.com","authHeaderName":"Proxy-Authorization"},"fromAddress":"a@example.com","secret":"s"}""", "settings.authHeaderName:invalid" },
+        { """{"kind":"custom_http","settings":{"endpoint":"https://mail.example.com","authHeaderName":"Expect"},"fromAddress":"a@example.com","secret":"s"}""", "settings.authHeaderName:invalid" },
+        { """{"kind":"custom_http","settings":{"endpoint":"https://mail.example.com","authHeaderName":"keep-alive"},"fromAddress":"a@example.com","secret":"s"}""", "settings.authHeaderName:invalid" },
         { """{"kind":"smtp","settings":{"host":"smtp.example.com","port":0,"tls":"starttls"},"fromAddress":"a@example.com"}""", "settings.port:invalid" },
         { """{"kind":"smtp","settings":{"host":"smtp.example.com","port":"587","tls":"starttls"},"fromAddress":"a@example.com"}""", "settings.port:invalid" },
         { """{"kind":"smtp","settings":{"host":"smtp.example.com","port":25,"tls":"none"},"fromAddress":"a@example.com"}""", "settings.tls:invalid" },

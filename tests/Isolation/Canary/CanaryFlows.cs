@@ -9,6 +9,7 @@ using Gatekeep.Adapters.Postgres.Schema;
 using Gatekeep.Cli;
 using Gatekeep.Kernel.Alerts;
 using Gatekeep.Kernel.Audit;
+using Gatekeep.Kernel.Email;
 using Gatekeep.Kernel.Identifiers;
 using Gatekeep.Kernel.Jobs;
 using Gatekeep.Kernel.Persistence;
@@ -290,9 +291,11 @@ internal static class CanaryFlows
             ],
             ApplicationSecretsAsync),
 
-        // No production type carries a credential yet, so this flow takes the runner's credential
-        // path with a test type: enqueue, decrypt, run, retry and dead, as every one will.
+        // The runner's credential path with a test type: enqueue, decrypt, run, retry and dead, as every one takes it.
         new("jobs.credential", [], CredentialJobAsync),
+
+        // Story 4.5: the first production type carrying a credential, a link token, plus the provider's secret.
+        new("notifications.email", [new(SurfaceKind.JobType, "notifications.email.send")], EmailSendAsync),
         new("custody.openbao", [], CustodyAsync),
         new("audit.appender", [], AppenderAsync),
 
@@ -2321,6 +2324,78 @@ internal static class CanaryFlows
                 secret.Use<int>(bytes => throw new InvalidOperationException($"Delivery failed for {Encoding.UTF8.GetString(bytes)}"));
             }
         }
+    }
+
+    /// <summary>
+    /// Story 4.5: a verification email through the real send job. Its link token and the provider's secret are canaries: the
+    /// token travels only as payload ciphertext, the secret only as the provider's ciphertext, and neither may reach a table,
+    /// an event or a log line. Normally the provider accepts it; failing, it answers a transient error on every attempt
+    /// until the job goes dead, with no event written.
+    /// </summary>
+    private static async Task EmailSendAsync(CanaryFlowContext context, FlowRun run, bool failing)
+    {
+        const int MaxAttempts = 5;
+
+        var token = run.Plant("email-link-token");
+        var providerSecret = run.Plant("email-provider-secret");
+        var database = await JobDatabase.CreateAsync(context.Postgres, registry: null);
+        run.Database = database.Name;
+        var custody = new FakeKeyCustody();
+        var user = Guid.CreateVersion7();
+
+        var ciphertext = await custody.EncryptAsync(
+            KeyName.ForTenant(TenantKeyClass.Email, JobDatabase.TenantA),
+            JobDatabase.TenantA,
+            new Secret<byte[]>(Encoding.UTF8.GetBytes(providerSecret.Value)),
+            CanaryFlowContext.Cancellation);
+        await database.SuperuserAsync(
+            $"INSERT INTO \"user\" (tenant_id, id, email) VALUES ('{JobDatabase.TenantA}', '{user}', 'canary.user@example.test'); "
+            + "INSERT INTO email_provider (tenant_id, kind, settings, from_address, secret_ciphertext) "
+            + $"VALUES ('{JobDatabase.TenantA}', 'sendgrid', '{{\"region\":\"global\"}}', 'no-reply@example.test', '{ciphertext.Value}')");
+
+        var job = await database.InScopeAsync(
+            TableRegistry.Hosted,
+            JobDatabase.TenantA,
+            c => OperationsContract.CreateEnqueuer(OperationsContract.ProductionRegistry, custody).EnqueueAsync(
+                c,
+                OperationsContract.SendEmail,
+                Gatekeep.Modules.Notifications.Contracts.NotificationsContract.EmailPayload(
+                    user,
+                    Gatekeep.Modules.Notifications.Contracts.NotificationsContract.VerificationTemplate,
+                    new Secret<byte[]>(Encoding.UTF8.GetBytes(token.Value))),
+                runAfter: null,
+                CanaryFlowContext.Cancellation));
+
+        var sender = new Gatekeep.Tests.Isolation.Notifications.RecordingEmailSender
+        {
+            Result = failing ? EmailSendResult.Transient("http_503") : EmailSendResult.Sent,
+        };
+
+        var captured = new CapturedConsole();
+        using (var logging = CapturedLogging.Create(captured, LogLevel.Trace))
+        {
+            var logger = logging.GetRequiredService<ILoggerFactory>().CreateLogger("Gatekeep.Jobs");
+            await using var runner = OperationsContract.CreateRunner(
+                OperationsContract.ProductionRegistry, database.Databases, JobDatabase.FastOptions, custody, logger, email: sender);
+
+            for (var attempt = 1; attempt <= (failing ? MaxAttempts : 1); attempt++)
+            {
+                await database.MakeDueAsync(job);
+                Assert.True(await runner.RunOnceAsync(CanaryFlowContext.Cancellation));
+            }
+        }
+
+        run.Capture("email job log", captured.Text);
+
+        Assert.Equal(failing ? "dead" : "done", await database.StatusAsync(job));
+        Assert.Equal(failing ? MaxAttempts : 1, sender.Sends.Count);
+        Assert.Equal(failing ? 0L : 1L, await database.ScalarAsync<long>(
+            $"SELECT count(*) FROM audit_event WHERE tenant_id = '{JobDatabase.TenantA}' AND type_code = "
+            + $"'{(failing ? Gatekeep.Modules.Notifications.Contracts.NotificationsEvents.EmailUndeliverable : Gatekeep.Modules.Notifications.Contracts.NotificationsEvents.EmailSent).Code.Value}'"));
+
+        // The provider got the link: the path really ran. What it received left the Deployment, so it isn't scanned.
+        Assert.All(sender.Sends, s => Assert.Contains(Uri.EscapeDataString(token.Value), s.Message.Body, StringComparison.Ordinal));
+        Assert.All(sender.Sends, s => Assert.Equal(providerSecret.Value, s.Secret));
     }
 
     /// <summary>

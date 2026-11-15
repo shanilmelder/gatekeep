@@ -68,6 +68,8 @@ internal sealed class Tenants(IAuditAppender appender) : ITenants
 
     private const string ReadIssuer = "SELECT issuer FROM tenant WHERE id = @id";
 
+    private const string ReadEmailIdentity = "SELECT name, email_link_base, status FROM tenant WHERE id = @id";
+
     private const string SetLabel = "UPDATE tenant SET label = @label WHERE id = @id AND status = 'active'";
 
     /// <summary>
@@ -266,6 +268,22 @@ internal sealed class Tenants(IAuditAppender appender) : ITenants
         command.CommandText = ReadIssuer;
         Add(command, "id", tenantId);
         return await command.ExecuteScalarAsync(cancellationToken) as string;
+    }
+
+    public async Task<TenantEmailIdentity?> GetEmailIdentityAsync(CommandContext context, Guid tenantId, CancellationToken cancellationToken)
+    {
+        RequireOwnContext(context, tenantId);
+
+        await using var command = context.CreateCommand();
+        command.CommandText = ReadEmailIdentity;
+        Add(command, "id", tenantId);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        if (!await reader.ReadAsync(cancellationToken))
+        {
+            return null;
+        }
+
+        return new TenantEmailIdentity(reader.GetString(0), reader.GetString(1), TenantValues.ParseStatus(reader.GetString(2)));
     }
 
     private static async Task<TenantLabelState?> LabelAsync(CommandContext context, Guid tenantId, string sql, CancellationToken cancellationToken)

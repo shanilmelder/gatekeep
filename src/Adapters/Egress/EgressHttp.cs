@@ -1,5 +1,7 @@
 using System.Net;
+using System.Net.Security;
 using System.Net.Sockets;
+using System.Security.Cryptography.X509Certificates;
 
 namespace Gatekeep.Adapters.Egress;
 
@@ -49,12 +51,38 @@ public sealed class EgressRefusedException : Exception
 
 /// <summary>
 /// What the isolation tests may relax, in process only: every fixture they reach sits on a
-/// private address and speaks plain HTTP. No setting, environment variable, Cli argument or
-/// Compose value reaches this; <see cref="EgressHttp.Create()"/> always uses <see cref="None"/>.
+/// private address and speaks plain HTTP, and a TLS fixture (Story 4.5) presents a certificate
+/// issued by a test root, which <paramref name="TrustedRoot"/> then names as the only trusted root.
+/// No setting, environment variable, Cli argument or Compose value reaches this;
+/// <see cref="EgressHttp.Create()"/> and <see cref="EgressSmtp.Create()"/> always use <see cref="None"/>.
 /// </summary>
-internal sealed record EgressPermit(bool PrivateAddresses, bool PlainHttp)
+internal sealed record EgressPermit(bool PrivateAddresses, bool PlainHttp, X509Certificate2? TrustedRoot = null)
 {
     public static readonly EgressPermit None = new(PrivateAddresses: false, PlainHttp: false);
+
+    /// <summary>
+    /// Null, so the platform's own validation applies, unless a test root is named: then a certificate is accepted only
+    /// for the name asked for, and only when it chains to that root.
+    /// </summary>
+    public RemoteCertificateValidationCallback? CertificateValidation() =>
+        TrustedRoot is not { } root
+            ? null
+            : (_, certificate, _, errors) =>
+            {
+                if (certificate is null
+                    || (errors & (SslPolicyErrors.RemoteCertificateNotAvailable | SslPolicyErrors.RemoteCertificateNameMismatch)) != 0)
+                {
+                    return false;
+                }
+
+                using var chain = new X509Chain();
+                chain.ChainPolicy.TrustMode = X509ChainTrustMode.CustomRootTrust;
+                chain.ChainPolicy.CustomTrustStore.Add(root);
+                chain.ChainPolicy.RevocationMode = X509RevocationMode.NoCheck;
+                chain.ChainPolicy.DisableCertificateDownloads = true;
+                using var owned = certificate is X509Certificate2 ? null : X509CertificateLoader.LoadCertificate(certificate.GetRawCertData());
+                return chain.Build(certificate as X509Certificate2 ?? owned!);
+            };
 }
 
 /// <summary>
@@ -83,7 +111,7 @@ public static class EgressHttp
     {
         ArgumentNullException.ThrowIfNull(permit);
 
-        return new SocketsHttpHandler
+        var handler = new SocketsHttpHandler
         {
             UseProxy = false,
             Proxy = null,
@@ -95,6 +123,13 @@ public static class EgressHttp
             ConnectCallback = (context, cancellationToken) =>
                 ConnectAsync(context, permit, resolve ?? Dns.GetHostAddressesAsync, connect ?? ConnectSocketAsync, cancellationToken),
         };
+
+        if (permit.CertificateValidation() is { } validation)
+        {
+            handler.SslOptions = new SslClientAuthenticationOptions { RemoteCertificateValidationCallback = validation };
+        }
+
+        return handler;
     }
 
     private static async ValueTask<Stream> ConnectAsync(
@@ -111,6 +146,22 @@ public static class EgressHttp
             throw new EgressRefusedException(host, EgressRefusal.PlainHttp);
         }
 
+        return await ConnectCheckedAsync(host, context.DnsEndPoint.Port, permit, resolve, connect, cancellationToken);
+    }
+
+    /// <summary>
+    /// The vetted connect every egress path shares, HTTP's and SMTP's (Story 4.5): resolves <paramref name="host"/> itself,
+    /// keeps only the addresses <see cref="EgressAddresses"/> allows, unless <paramref name="permit"/> relaxes that, and
+    /// connects only to one of those, IPv4 first, with no second lookup.
+    /// </summary>
+    internal static async ValueTask<Stream> ConnectCheckedAsync(
+        string host,
+        int port,
+        EgressPermit permit,
+        Func<string, CancellationToken, Task<IPAddress[]>> resolve,
+        Func<IPEndPoint, CancellationToken, ValueTask<Stream>> connect,
+        CancellationToken cancellationToken)
+    {
         var literal = host.StartsWith('[') && host.EndsWith(']') ? host[1..^1] : host;
         IPAddress[] candidates = IPAddress.TryParse(literal, out var address)
             ? [address]
@@ -133,7 +184,7 @@ public static class EgressHttp
         {
             try
             {
-                return await connect(new IPEndPoint(target, context.DnsEndPoint.Port), cancellationToken);
+                return await connect(new IPEndPoint(target, port), cancellationToken);
             }
             catch (SocketException e)
             {
@@ -144,7 +195,7 @@ public static class EgressHttp
         throw last!;
     }
 
-    private static async ValueTask<Stream> ConnectSocketAsync(IPEndPoint target, CancellationToken cancellationToken)
+    internal static async ValueTask<Stream> ConnectSocketAsync(IPEndPoint target, CancellationToken cancellationToken)
     {
         var socket = new Socket(target.AddressFamily, SocketType.Stream, ProtocolType.Tcp) { NoDelay = true };
         try

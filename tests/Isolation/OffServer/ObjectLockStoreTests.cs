@@ -274,7 +274,7 @@ public sealed class ObjectLockStoreTests(ObjectLockFixture bucket) : IDisposable
             Content = new ByteArrayContent("x"u8.ToArray()),
         };
 
-        var canonical = SigV4.Sign(request, "x"u8, "AKIDEXAMPLE", "secret-example-key", "us-east-1", DateTimeOffset.UtcNow);
+        var canonical = SigV4.Sign(request, "x"u8, "AKIDEXAMPLE", "secret-example-key", "us-east-1", DateTimeOffset.UtcNow, SigV4.S3);
 
         Assert.Equal("[2001:db8::1]:9000", request.Headers.Host);
         Assert.Contains("\nhost:[2001:db8::1]:9000\n", canonical, StringComparison.Ordinal);

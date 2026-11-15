@@ -1,3 +1,4 @@
+using Gatekeep.Kernel.Email;
 using Gatekeep.Kernel.Persistence;
 using Gatekeep.Kernel.Secrets;
 using Gatekeep.Modules.Operations.Contracts;
@@ -9,9 +10,16 @@ namespace Gatekeep.Modules.Operations.Core;
 /// <summary>
 /// What Operations' own job handlers need beyond the context: the run-as database, the Operation
 /// registry, the runner's key custody for stage handlers, null when the Worker has none, and the
-/// runner's logger, for a handler that reports a failure it doesn't throw (Story 2.3).
+/// runner's logger, for a handler that reports a failure it doesn't throw (Story 2.3), and the email port the send job
+/// hands each message to (Story 4.5), null when the host has none.
 /// </summary>
-internal sealed record JobRunServices(NpgsqlDataSource Source, OperationRegistry Operations, IKeyCustody? Custody = null, ILogger? Logger = null, TimeProvider? Time = null)
+internal sealed record JobRunServices(
+    NpgsqlDataSource Source,
+    OperationRegistry Operations,
+    IKeyCustody? Custody = null,
+    ILogger? Logger = null,
+    TimeProvider? Time = null,
+    IEmailSender? Email = null)
 {
     public override string ToString() => nameof(JobRunServices);
 }

@@ -226,7 +226,7 @@ internal static partial class EmailProviderRules
             _ => new EmailProviderSettings
             {
                 Endpoint = Required(element, "endpoint", EmailProviderFields.Endpoint, MaxEndpointLength, IsEndpoint, errors),
-                AuthHeaderName = Optional(element, "authHeaderName", EmailProviderFields.AuthHeaderName, MaxAuthHeaderNameLength, IsToken, errors)
+                AuthHeaderName = Optional(element, "authHeaderName", EmailProviderFields.AuthHeaderName, MaxAuthHeaderNameLength, IsAuthHeaderName, errors)
                     ?? DefaultAuthHeaderName,
             },
         };
@@ -423,6 +423,9 @@ internal static partial class EmailProviderRules
             _ => false,
         };
     }
+
+    /// <summary>An HTTP token that isn't a header framing or routing the request (Story 4.5), such as <c>Host</c> or <c>Content-Length</c>.</summary>
+    internal static bool IsAuthHeaderName(string value) => IsToken(value) && !Gatekeep.Kernel.Email.EmailHeaderNames.IsReserved(value);
 
     /// <summary>An HTTP header name: an RFC 9110 token.</summary>
     internal static bool IsToken(string value) => value.Length > 0 && !value.AsSpan().ContainsAnyExcept(TokenCharacters);

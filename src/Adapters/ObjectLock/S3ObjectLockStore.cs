@@ -160,7 +160,7 @@ public sealed class S3ObjectLockStore : IOffServerStore, IDisposable
         request.Headers.TryAddWithoutValidation(
             "x-amz-object-lock-retain-until-date",
             RetainUntil(now).UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss'.000Z'", CultureInfo.InvariantCulture));
-        SigV4.Sign(request, body, accessKeyId, secretAccessKey, _options.Region, now);
+        SigV4.Sign(request, body, accessKeyId, secretAccessKey, _options.Region, now, SigV4.S3);
 
         HttpResponseMessage response;
         try

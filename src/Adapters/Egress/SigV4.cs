@@ -2,24 +2,30 @@ using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 
-namespace Gatekeep.Adapters.ObjectLock;
+namespace Gatekeep.Adapters.Egress;
 
 /// <summary>
-/// AWS Signature Version 4 for one S3 request, header-signed, as the S3 API documents it. It
-/// signs <c>host</c>, <c>content-md5</c>, <c>content-type</c> and every <c>x-amz-*</c> header the
-/// request carries, over the SHA-256 of the exact body. The secret key is used only to derive the
-/// signing key and never leaves this method.
+/// AWS Signature Version 4 for one request, header-signed, as AWS documents it: an S3 request for the
+/// off-server store (Story 1.30) and an SES request for email (Story 4.5), so it sits beside the egress
+/// path both send through. It signs <c>host</c>, <c>content-md5</c>, <c>content-type</c> and every
+/// <c>x-amz-*</c> header the request carries, over the SHA-256 of the exact body. The secret key is used
+/// only to derive the signing key and never leaves this method.
 /// </summary>
 public static class SigV4
 {
     public const string Algorithm = "AWS4-HMAC-SHA256";
-    private const string Service = "s3";
+    /// <summary>The S3 service name, the default.</summary>
+    public const string S3 = "s3";
+
+    /// <summary>The SES service name (Story 4.5).</summary>
+    public const string Ses = "ses";
     private const string Terminator = "aws4_request";
 
     /// <summary>
     /// Adds <c>x-amz-date</c>, <c>x-amz-content-sha256</c>, <c>Host</c> and <c>Authorization</c> to
     /// <paramref name="request"/>, whose URI path and query must already be in the encoded form
-    /// <see cref="UriEncode"/> gives. Returns the canonical request it signed, which holds no secret.
+    /// <see cref="UriEncode"/> gives, signed for <paramref name="service"/>. Returns the canonical
+    /// request it signed, which holds no secret.
     /// </summary>
     public static string Sign(
         HttpRequestMessage request,
@@ -27,8 +33,10 @@ public static class SigV4
         string accessKeyId,
         string secretAccessKey,
         string region,
-        DateTimeOffset now)
+        DateTimeOffset now,
+        string service)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(service);
         ArgumentNullException.ThrowIfNull(request);
         var uri = request.RequestUri ?? throw new ArgumentException("The request has no URI.", nameof(request));
 
@@ -79,7 +87,7 @@ public static class SigV4
             signedHeaders,
             payloadHash);
 
-        var scope = $"{date}/{region}/{Service}/{Terminator}";
+        var scope = $"{date}/{region}/{service}/{Terminator}";
         var stringToSign = string.Join(
             '\n',
             Algorithm,
@@ -87,7 +95,7 @@ public static class SigV4
             scope,
             Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(canonicalRequest))));
 
-        var signingKey = SigningKey(secretAccessKey, date, region);
+        var signingKey = SigningKey(secretAccessKey, date, region, service);
         var signature = Convert.ToHexStringLower(HMACSHA256.HashData(signingKey, Encoding.UTF8.GetBytes(stringToSign)));
         CryptographicOperations.ZeroMemory(signingKey);
 
@@ -138,14 +146,14 @@ public static class SigV4
         return string.Join('&', pairs.Select(p => $"{p.Name}={p.Value}"));
     }
 
-    private static byte[] SigningKey(string secretAccessKey, string date, string region)
+    private static byte[] SigningKey(string secretAccessKey, string date, string region, string service)
     {
         var secret = Encoding.UTF8.GetBytes("AWS4" + secretAccessKey);
         try
         {
             var dateKey = HMACSHA256.HashData(secret, Encoding.UTF8.GetBytes(date));
             var regionKey = HMACSHA256.HashData(dateKey, Encoding.UTF8.GetBytes(region));
-            var serviceKey = HMACSHA256.HashData(regionKey, Encoding.UTF8.GetBytes(Service));
+            var serviceKey = HMACSHA256.HashData(regionKey, Encoding.UTF8.GetBytes(service));
             return HMACSHA256.HashData(serviceKey, Encoding.UTF8.GetBytes(Terminator));
         }
         finally

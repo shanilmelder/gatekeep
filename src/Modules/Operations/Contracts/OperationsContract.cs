@@ -1,3 +1,4 @@
+using Gatekeep.Kernel.Email;
 using Gatekeep.Kernel.Jobs;
 using Gatekeep.Kernel.Secrets;
 using Gatekeep.Modules.Operations.Core;
@@ -146,7 +147,8 @@ public static class OperationsContract
     /// <summary>
     /// A runner over a registry. <paramref name="custody"/> decrypts credentials. Without it,
     /// a job carrying one fails with a fixed reason code. The Operation jobs look up stage
-    /// handlers in <paramref name="operations"/>, by default <see cref="ProductionOperationRegistry"/>.
+    /// handlers in <paramref name="operations"/>, by default <see cref="ProductionOperationRegistry"/>. The email job
+    /// sends through <paramref name="email"/> (Story 4.5); without it, such a job fails with a fixed reason code and is retried.
     /// </summary>
     public static IJobRunner CreateRunner(
         JobRegistry registry,
@@ -154,8 +156,15 @@ public static class OperationsContract
         JobRunnerOptions? options,
         IKeyCustody? custody,
         ILogger? logger,
-        OperationRegistry? operations = null) =>
-        new JobRunner(registry, databases, options ?? new JobRunnerOptions(), custody, operations ?? ProductionOperations.Registry, logger);
+        OperationRegistry? operations = null,
+        IEmailSender? email = null) =>
+        new JobRunner(registry, databases, options ?? new JobRunnerOptions(), custody, operations ?? ProductionOperations.Registry, logger, email);
+
+    /// <summary>
+    /// Sends one email to a User through the Tenant's provider (Story 4.5): <c>notifications.email.send</c>,
+    /// enqueued by Host.Hosted or Host.Worker, run as <c>gk_worker</c>.
+    /// </summary>
+    public static JobType SendEmail => ProductionJobs.SendEmail;
 
     /// <summary>A schedule runner. It enqueues as the role of <paramref name="workerDatabase"/>.</summary>
     public static IJobScheduleRunner CreateScheduleRunner(

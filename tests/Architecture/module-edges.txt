@@ -79,10 +79,13 @@ dependency Adapters.Hosting -> Adapters.OpenBao
 dependency Adapters.Hosting -> Adapters.Egress
 dependency Adapters.Hosting -> Adapters.AlertChannel
 dependency Adapters.Hosting -> Adapters.ObjectLock
+dependency Adapters.Hosting -> Adapters.Email
 dependency Adapters.AlertChannel -> Adapters.Egress
 dependency Adapters.ObjectLock -> Adapters.Egress
+dependency Adapters.Email -> Adapters.Egress
 dependency Tests.Isolation -> Adapters.AlertChannel
 dependency Tests.Isolation -> Adapters.Egress
+dependency Tests.Isolation -> Adapters.Email
 dependency Tests.Isolation -> Adapters.Fido2
 dependency Tests.Isolation -> Adapters.Hosting
 dependency Tests.Isolation -> Adapters.Logging
@@ -96,6 +99,7 @@ dependency Tests.Isolation -> Directory
 dependency Tests.Isolation -> Cli
 dependency Tests.Isolation -> Keys
 dependency Tests.Isolation -> Management
+dependency Tests.Isolation -> Notifications
 dependency Tests.Isolation -> Operations
 dependency Tests.Isolation -> Protocol
 dependency Tests.Isolation -> Sessions

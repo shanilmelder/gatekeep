@@ -30,7 +30,6 @@ public sealed class TenantAttemptLimiterTests(PostgresFixture postgres)
     public static TheoryData<string> OtherRoles =>
     [
         TableRegistry.Admin,
-        TableRegistry.Worker,
         TableRegistry.Dispatch,
         TableRegistry.Sealer,
         TableRegistry.Retention,
@@ -79,6 +78,19 @@ public sealed class TenantAttemptLimiterTests(PostgresFixture postgres)
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
             _limiter.AttemptAsync(scope.CreateCommandContext(), TwoPerHour, Subject, Cancellation));
         Assert.Equal(0L, await PostgresFixture.ScalarAsync<long>(postgres.SuperuserConnection(database), "SELECT count(*) FROM tenant_attempt"));
+    }
+
+    /// <summary>Story 4.5: Host.Worker counts the per-recipient email limit, as Host.Hosted counts its attempts.</summary>
+    [Fact]
+    public async Task Worker_counts_in_its_Tenant_scope()
+    {
+        var database = await DatabaseAsync();
+        await using var source = NpgsqlDataSource.Create(postgres.RoleConnection(TableRegistry.Worker, database));
+        await using var scope = await TenantScope.BeginAsync(source, TenantA, Cancellation);
+
+        Assert.True((await _limiter.AttemptAsync(scope.CreateCommandContext(), TwoPerHour, Subject, Cancellation)).Allowed);
+        Assert.True((await _limiter.AttemptAsync(scope.CreateCommandContext(), TwoPerHour, Subject, Cancellation)).Allowed);
+        Assert.False((await _limiter.AttemptAsync(scope.CreateCommandContext(), TwoPerHour, Subject, Cancellation)).Allowed);
     }
 
     [Theory]

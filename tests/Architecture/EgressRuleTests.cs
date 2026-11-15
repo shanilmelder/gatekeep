@@ -5,7 +5,8 @@ using Xunit;
 namespace Gatekeep.Tests.Architecture;
 
 /// <summary>
-/// AD-26, Story 1.30: every outbound HTTP request in <c>src/</c> goes through <c>EgressHttp</c>.
+/// AD-26, Story 1.30: every outbound HTTP request in <c>src/</c> goes through <c>EgressHttp</c>, and Story 4.5's SMTP
+/// through <c>EgressSmtp</c>, whose stream the SMTP adapter hands to MailKit.
 /// Only <c>Adapters.Egress</c> makes a handler, beside the two allowed exceptions: OpenBao's unix
 /// socket handler (<c>OpenBaoKeyCustody.CreateHandler</c>) and the loopback health probe. No source
 /// subclasses a handler, opens a socket, TCP client or web socket of its own, asks for HTTP/3 (whose
@@ -29,6 +30,15 @@ public class EgressRuleTests
 
     /// <summary>The only places a socket may be opened: EgressHttp's vetted connect and OpenBao's unix socket.</summary>
     private static readonly string[] SocketAllowed = [HandlerAllowed[0], HandlerAllowed[1]];
+
+    /// <summary>
+    /// Story 4.5: the Egress SMTP connect. <c>EgressSmtp</c> opens the TCP stream through EgressHttp's vetted connect, and
+    /// the SMTP adapter hands that stream to MailKit, which then opens nothing of its own. The adapter may name
+    /// <c>ConnectAsync</c> only with that stream, so MailKit's own host-and-port connect stays refused.
+    /// </summary>
+    private const string SmtpHandoff = "src/Adapters/Email/SmtpDelivery.cs";
+
+    private static readonly Regex StreamHandoff = new(@"\.ConnectAsync\s*\(\s*stream\s*,", RegexOptions.Compiled);
 
     private const string AdminProject = "src/Gatekeep.Host.Admin/Gatekeep.Host.Admin.csproj";
 
@@ -129,6 +139,13 @@ public class EgressRuleTests
     [InlineData("src/Adapters/OpenBao/OpenBaoKeyCustody.cs", "await socket.ConnectAsync(new UnixDomainSocketEndPoint(path), ct);", 0)]
     [InlineData("src/Adapters/Hosting/HealthProbe.cs", "using var tcp = new TcpClient();", 1)]
     [InlineData("src/Gatekeep.Cli/X.cs", "await connection.OpenAsync(ct);", 0)]
+    [InlineData(SmtpHandoff, "var stream = await egress.OpenAsync(host, port, ct); await client.ConnectAsync(stream, host, port, options, ct);", 0)]
+    [InlineData(SmtpHandoff, "await client.ConnectAsync(host, port, options, ct);", 1)]
+    [InlineData(SmtpHandoff, "var stream = await egress.OpenAsync(host, port, ct); await client.ConnectAsync(host, port, options, ct);", 1)]
+    [InlineData(SmtpHandoff, "await client.ConnectAsync(stream, host, port, options, ct);", 1)]
+    [InlineData(SmtpHandoff, "var other = await egress.OpenAsync(host, port, ct); var stream = new NetworkStream(socket); await client.ConnectAsync(stream, host, port, options, ct);", 1)]
+    [InlineData(SmtpHandoff, "var stream = await egress.OpenAsync(host, port, ct); stream = Open(host); await client.ConnectAsync(stream, host, port, options, ct);", 1)]
+    [InlineData("src/Adapters/Email/Other.cs", "var stream = await egress.OpenAsync(host, port, ct); await client.ConnectAsync(stream, host, port, options, ct);", 1)]
     public void Socket_detection(string path, string source, int expected)
     {
         Assert.Equal(expected, SocketViolations([(path, Clean(source))]).Count);
@@ -217,8 +234,19 @@ public class EgressRuleTests
 
     private static List<string> SocketViolations(IEnumerable<(string Path, string Code)> sources) =>
         [.. sources
-            .Where(s => !SocketAllowed.Contains(s.Path) && OpensSocket.IsMatch(s.Code))
+            .Where(s => !SocketAllowed.Contains(s.Path) && OpensSocket.IsMatch(s.Code) && !IsEgressStreamHandoff(s.Path, s.Code))
             .Select(s => $"{s.Path} opens a connection of its own: outbound traffic goes through EgressHttp (AD-26).")];
+
+    /// <summary>The SMTP adapter, whose every connect hands MailKit the stream EgressSmtp opened, and nothing else.</summary>
+    private static bool IsEgressStreamHandoff(string path, string code) =>
+        path == SmtpHandoff
+        && code.Contains("egress.OpenAsync(", StringComparison.Ordinal)
+        && OpensSocket.Matches(code).All(m => StreamHandoff.Match(code, m.Index) is { Success: true } h && h.Index == m.Index)
+        && StreamAssignment.Matches(code).Count > 0
+        && StreamAssignment.Matches(code).All(m => m.Groups["source"].Value.StartsWith("await egress.OpenAsync(", StringComparison.Ordinal));
+
+    /// <summary>Every assignment to <c>stream</c>, with what it is assigned from.</summary>
+    private static readonly Regex StreamAssignment = new(@"\bstream\s*=(?!=)\s*(?<source>[^;]*)", RegexOptions.Compiled);
 
     private static List<string> Http3Violations(IEnumerable<(string Path, string Code)> sources) =>
         [.. sources

@@ -101,7 +101,8 @@ public static class AuthenticationContract
     /// The Kernel <see cref="IRateLimiter"/> for Tenant attempts, such as token requests (AD-14, Story
     /// 2.5). It counts in <c>tenant_attempt</c>, keyed by the context's Tenant, and serves a Tenant scope
     /// only: in a Deployment one it throws <see cref="InvalidOperationException"/> and writes nothing.
-    /// It runs as <c>gk_hosted</c>, the only role that counts there.
+    /// It runs as <c>gk_hosted</c>, and as <c>gk_worker</c> for the email send job's per-recipient limit (Story 4.5): the
+    /// only roles that count there.
     /// </summary>
     public static IRateLimiter CreateAttemptLimiter() => new TenantAttemptLimiter();
 

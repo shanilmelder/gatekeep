@@ -47,6 +47,7 @@ public static class TenantKeyedTypes
         ["keys.transit_keys.sweep"] = KeyScope.DeploymentWide("Not one Tenant's job: it lists every key in custody. Each key's row is read in that key's own Tenant scope, and only orphaned sig- and mgmt- keys are deleted."),
         ["sessions.expired_state.sweep"] = KeyScope.DeploymentWide("Not one Tenant's job: it reads only active Tenant IDs and the job table, and enqueues one sessions.expired_state.purge job in each Tenant's own scope. It deletes nothing."),
         ["sessions.expired_state.purge"] = KeyScope.Tenant,
+        ["notifications.email.send"] = KeyScope.Tenant,
     };
 
     /// <summary>
@@ -69,6 +70,7 @@ public static class TenantKeyedTypes
         ["Gatekeep.Modules.Authentication.Contracts.AuthenticationContract.TokenRequestSourcePolicy"] = KeyScope.Tenant,
         ["Gatekeep.Modules.Authentication.Contracts.AuthenticationContract.CrossTenantMismatchPolicy"] = KeyScope.Tenant,
         ["Gatekeep.Modules.Authentication.Contracts.AuthenticationContract.CrossTenantMismatchLogPolicy"] = KeyScope.Tenant,
+        ["Gatekeep.Modules.Notifications.Contracts.NotificationsContract.EmailRecipientPolicy"] = KeyScope.Tenant,
         ["Gatekeep.Modules.Protocol.Contracts.TokenRequestLimits.Tenant"] = KeyScope.Tenant,
         ["Gatekeep.Modules.Protocol.Contracts.TokenRequestLimits.Source"] = KeyScope.Tenant,
         ["Gatekeep.Modules.Admins.Contracts.AdminsContract.EnrolmentPolicy"] = KeyScope.DeploymentWide("recover-admin enrolment use per client (Story 1.32); Admins are Deployment-scoped."),

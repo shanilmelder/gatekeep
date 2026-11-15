@@ -1,6 +1,7 @@
 using System.Data.Common;
 using System.Text.Json;
 using Gatekeep.Kernel.Audit;
+using Gatekeep.Kernel.Email;
 using Gatekeep.Kernel.Jobs;
 using Gatekeep.Kernel.Persistence;
 using Gatekeep.Kernel.Secrets;
@@ -110,6 +111,7 @@ internal sealed class JobRunner : IJobRunner
     private readonly IKeyCustody? _custody;
     private readonly OperationRegistry _operations;
     private readonly ILogger? _logger;
+    private readonly IEmailSender? _email;
     private readonly IAuditAppender _appender = AuditContract.CreateAppender();
     private readonly NpgsqlDataSource _dispatch;
     private readonly Dictionary<string, NpgsqlDataSource> _runAs;
@@ -122,7 +124,8 @@ internal sealed class JobRunner : IJobRunner
         JobRunnerOptions options,
         IKeyCustody? custody,
         OperationRegistry operations,
-        ILogger? logger)
+        ILogger? logger,
+        IEmailSender? email = null)
     {
         ArgumentNullException.ThrowIfNull(registry);
         ArgumentNullException.ThrowIfNull(operations);
@@ -141,6 +144,7 @@ internal sealed class JobRunner : IJobRunner
         _custody = custody;
         _operations = operations;
         _logger = logger;
+        _email = email;
 
         _dispatch = Create(databases.Dispatch, nameof(databases.Dispatch));
         _runAs = new Dictionary<string, NpgsqlDataSource>(StringComparer.Ordinal)
@@ -339,7 +343,7 @@ internal sealed class JobRunner : IJobRunner
                 : await DeploymentScope.BeginAsync(source, lease.Token);
 
             var context = scope.CreateCommandContext();
-            var services = new JobRunServices(source, _operations, _custody, _logger, _options.Time);
+            var services = new JobRunServices(source, _operations, _custody, _logger, _options.Time, _email);
             var run = claim.TenantId is { } tenant
                 ? await TenantRunAsync(claim, definition, tenant, context, services, lease.Token)
                 : new JobRun(claim.Id, definition.Type, null, claim.OperationId, claim.Attempt, NoIds, context, null, services);
