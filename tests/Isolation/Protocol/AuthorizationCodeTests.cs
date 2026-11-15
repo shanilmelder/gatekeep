@@ -747,17 +747,16 @@ public sealed class AuthorizationCodeTests(PostgresFixture postgres, OpenBaoFixt
         Assert.False(query.ContainsKey("code"));
     }
 
+    /// <summary>
+    /// Hosted Login's Generic error step (Story 4.1): its JSON names the Tenant, an OpenIddict error code and
+    /// the trace ID, and the page echoes nothing of the request.
+    /// </summary>
     private static async Task AssertStaticPageAsync(HttpResponseMessage response, params string[] notEchoed)
     {
-        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
-        Assert.Null(response.Headers.Location);
-        Assert.True(response.Headers.CacheControl?.NoStore, "The page isn't no-store.");
-        Assert.Equal([SecurityHeaders.ContentSecurityPolicy], response.Headers.GetValues("Content-Security-Policy"));
-        Assert.Equal("text/html", response.Content.Headers.ContentType?.MediaType);
+        var data = await StepPage.AssertGenericErrorAsync(response, ProtocolDatabase.TestTenantName);
+        Assert.Contains(data.GetProperty("code").GetString(), new[] { "invalid_request", "invalid_client" });
 
         var body = await response.Content.ReadAsStringAsync(Cancellation);
-        Assert.Contains("<h1>Something went wrong</h1>", body, StringComparison.Ordinal);
-        Assert.Contains("This sign-in link isn't valid. Go back to the app and try again.", body, StringComparison.Ordinal);
         foreach (var value in notEchoed.Where(v => v.Length > 0))
         {
             Assert.DoesNotContain(value, body, StringComparison.Ordinal);

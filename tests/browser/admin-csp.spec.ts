@@ -104,11 +104,12 @@ test('sends the headers on a deep link and on a 404', async ({ request }) => {
 
 test("can't be framed by a page on another origin", async ({ page, baseURL }) => {
   const origin = new URL(baseURL!).origin;
-  // The Hosted Login preview (playwright.config.ts): a real page on another loopback origin
-  // that sends no anti-framing header, so the browser's local network rules allow the frame
-  // and only the Admin host's own headers can refuse it. Its own page, framed the same way,
-  // is the control: it shows an allowed frame does render and is read here.
-  const framer = 'http://127.0.0.1:4310';
+  // The Admin Dashboard's `vite preview` (playwright.config.ts): a real page on another loopback
+  // origin that sends no anti-framing header or CSP, so the browser's local network rules allow
+  // the frame and only the Admin host's own headers can refuse it. Its own page, framed the same
+  // way, is the control: it shows an allowed frame does render and is read here. (Hosted Login's
+  // server sends the AD-21 headers since Story 4.1, so it can't frame anything.)
+  const framer = 'http://127.0.0.1:4311';
   await page.goto(`${framer}/`);
 
   const adminResponse = page.waitForResponse((response) => response.url() === `${origin}/`);

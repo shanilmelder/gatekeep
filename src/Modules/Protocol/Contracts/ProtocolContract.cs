@@ -57,17 +57,17 @@ public static class ProtocolContract
     /// request limits are <see cref="TokenRequestLimits"/>'s, unless the host registered its own first.
     /// The authorization endpoint completes a sign-in through <see cref="IAuthorizationSignIn"/>:
     /// <see cref="UnavailableSignIn"/>, which completes none, unless the host registered its own first.
-    /// <paramref name="pageHeaders"/> sets the host's browser-page headers (AD-21) on the one page the
-    /// authorization endpoint shows itself, for a request it can't send back to any client.
+    /// <paramref name="stepPages"/> builds the host's Hosted Login step pages (AD-21, Story 4.1), which the
+    /// authorization endpoint shows Generic error through for a request it can't send back to any client.
     /// </summary>
     public static IServiceCollection AddGatekeepProtocol(
         this IServiceCollection services,
         Func<IServiceProvider, string> hostedConnectionString,
-        Action<IHeaderDictionary> pageHeaders)
+        Func<IServiceProvider, IStepPages> stepPages)
     {
         ArgumentNullException.ThrowIfNull(services);
         ArgumentNullException.ThrowIfNull(hostedConnectionString);
-        ArgumentNullException.ThrowIfNull(pageHeaders);
+        ArgumentNullException.ThrowIfNull(stepPages);
 
         services.AddSingleton<ITenantKeyReader>(provider => new TenantKeyReader(() => hostedConnectionString(provider)));
 
@@ -75,7 +75,7 @@ public static class ProtocolContract
         services.AddSingleton<ITenantKeyChanges>(provider => new SigningKeyChangeListener(
             () => hostedConnectionString(provider),
             provider.GetService<Microsoft.Extensions.Logging.ILogger<SigningKeyChangeListener>>()));
-        services.AddSingleton(new ProtocolPageHeaders(pageHeaders));
+        services.AddSingleton<IStepPages>(stepPages);
 
         // The release build's sign-in, unless the host registered its own first (only tests do).
         services.TryAddSingleton<IAuthorizationSignIn, UnavailableSignIn>();

@@ -94,8 +94,8 @@ development_status:
   3-7-authorize-a-machine-to-machine-application: done
   epic-3-retrospective: optional
 
-  epic-4: backlog
-  4-1-serve-hosted-login-step-screens: backlog
+  epic-4: in-progress
+  4-1-serve-hosted-login-step-screens: done
   4-2-bind-sign-in-transactions-and-issue-sessions: backlog
   4-3-purge-expired-sign-in-state: backlog
   4-4-configure-a-tenant-s-email-provider: backlog

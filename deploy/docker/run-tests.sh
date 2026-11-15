@@ -21,7 +21,7 @@ echo "== design tokens: generator tests and drift check"
 pnpm --filter @gatekeep/design-tokens test
 pnpm --filter @gatekeep/design-tokens check
 
-echo "== ui: lint tests, bundled fonts and raw hex lint"
+echo "== ui: lint tests, bundled fonts, raw hex and hard-coded string lints"
 pnpm --filter @gatekeep/ui test
 pnpm --filter @gatekeep/ui check
 
@@ -42,6 +42,10 @@ sh deploy/docker/api-contract.sh --self-check
 
 echo "== build workspaces"
 pnpm -r build
+
+echo "== hosted-login: bundle budget check tests and the 150 kB gzip budget"
+pnpm --filter @gatekeep/hosted-login test
+pnpm --filter @gatekeep/hosted-login budget
 
 echo "== browser tests"
 pnpm --filter @gatekeep/browser-tests test

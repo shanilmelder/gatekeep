@@ -22,9 +22,6 @@ using static OpenIddict.Server.OpenIddictServerEvents;
 
 namespace Gatekeep.Modules.Protocol.Core;
 
-/// <summary>The host's browser-page headers (AD-21), set on the one page the authorization endpoint shows itself.</summary>
-internal sealed record ProtocolPageHeaders(Action<IHeaderDictionary> Apply);
-
 /// <summary>The authorization endpoint's shared pieces (Story 2.9).</summary>
 internal static class AuthorizeEndpoint
 {
@@ -146,29 +143,6 @@ internal static class AuthorizeEndpoint
         Parameters.LoginHint,
         Parameters.UiLocales,
     };
-
-    /// <summary>
-    /// The fixed page for an authorization request that can't be sent back to a client: an unknown
-    /// client, or a redirect URI that is missing, malformed or not registered (Story 2.9, the Generic
-    /// error page). It never echoes a request value. Story 4.1 replaces it.
-    /// </summary>
-    public const string InvalidRequestPage =
-        """
-        <!doctype html>
-        <html lang="en">
-        <head>
-        <meta charset="utf-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1">
-        <title>Something went wrong</title>
-        </head>
-        <body>
-        <main>
-        <h1>Something went wrong</h1>
-        <p>This sign-in link isn't valid. Go back to the app and try again.</p>
-        </main>
-        </body>
-        </html>
-        """;
 }
 
 /// <summary>
@@ -416,14 +390,14 @@ internal sealed class KeepResponseModes : IOpenIddictServerHandler<ApplyAuthoriz
 
 /// <summary>
 /// An authorization request that can't be sent back to a client, an unknown client or a redirect URI
-/// that isn't registered exactly, gets the one fixed page (Story 2.9): 400, <c>no-store</c> and the
-/// host's AD-21 headers, the Hosted CSP among them. It never redirects and echoes nothing of the
-/// request. It runs after every redirecting response and before OpenIddict's plain-text error.
+/// that isn't registered exactly, gets Hosted Login's Generic error step (Stories 2.9 and 4.1): 400,
+/// through the host's <see cref="IStepPages"/>, so <c>no-store</c> with the host's AD-21 headers, the
+/// Hosted CSP among them. Its only data are the Tenant's name, the OpenIddict error it answers as the
+/// code, and the request's trace ID: it never redirects and echoes nothing of the request. It runs
+/// after every redirecting response and before OpenIddict's plain-text error.
 /// </summary>
-internal sealed class AnswerInvalidRequestPage(ProtocolPageHeaders headers) : IOpenIddictServerHandler<ApplyAuthorizationResponseContext>
+internal sealed class AnswerInvalidRequestPage(IStepPages pages) : IOpenIddictServerHandler<ApplyAuthorizationResponseContext>
 {
-    private static readonly byte[] Page = Encoding.UTF8.GetBytes(AuthorizeEndpoint.InvalidRequestPage);
-
     public static OpenIddictServerHandlerDescriptor Descriptor { get; } =
         OpenIddictServerHandlerDescriptor.CreateBuilder<ApplyAuthorizationResponseContext>()
             .UseSingletonHandler<AnswerInvalidRequestPage>()
@@ -440,15 +414,10 @@ internal sealed class AnswerInvalidRequestPage(ProtocolPageHeaders headers) : IO
             return;
         }
 
-        var response = TokenEndpoint.Http(context).Response;
-        response.StatusCode = StatusCodes.Status400BadRequest;
-        response.Headers.Location = default;
-        response.Headers.CacheControl = "no-store";
-        response.Headers.Pragma = "no-cache";
-        headers.Apply(response.Headers);
-        response.ContentType = "text/html; charset=utf-8";
-        response.ContentLength = Page.Length;
-        await response.Body.WriteAsync(Page, context.CancellationToken);
+        var http = TokenEndpoint.Http(context);
+        var step = StepResponse.GenericError(TokenEndpoint.Tenant(context).Name, context.Error, pages.TraceId(http));
+        http.Response.Headers.Location = default;
+        await pages.WriteAsync(http, StatusCodes.Status400BadRequest, step, context.CancellationToken);
         context.HandleRequest();
     }
 }

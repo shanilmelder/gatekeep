@@ -48,6 +48,46 @@ public sealed class HostStartupTests(PostgresFixture postgres) : IDisposable
         }
     }
 
+    /// <summary>
+    /// Story 4.1: Host.Hosted without the built Hosted Login bundle, a web root with no index.html, one
+    /// whose index.html lacks a marker, or one with no assets folder, refuses to start naming the web
+    /// root, rather than answering its first step with a 500.
+    /// </summary>
+    [Theory]
+    [InlineData("none")]
+    [InlineData("no-marker")]
+    [InlineData("no-assets")]
+    public async Task Hosted_without_a_valid_bundle_refuses_naming_the_web_root(string bundle)
+    {
+        var database = await postgres.NewMigratedDatabaseAsync();
+        var root = Directory.CreateDirectory(Path.Combine(_directory, $"webroot-{Guid.NewGuid():N}")).FullName;
+        if (bundle != "no-assets")
+        {
+            Directory.CreateDirectory(Path.Combine(root, "assets"));
+        }
+
+        if (bundle != "none")
+        {
+            var index = "<!doctype html><html><head><!--gk-head--></head><body><!--gk-step--></body></html>";
+            await File.WriteAllTextAsync(
+                Path.Combine(root, "index.html"),
+                bundle == "no-marker" ? index.Replace("<!--gk-step-->", string.Empty, StringComparison.Ordinal) : index,
+                Cancellation);
+        }
+
+        using var process = HostProcess.Start(
+            "Hosted",
+            Connections(Databases("Hosted"), database)
+                .Concat(Custody())
+                .Append($"--Gatekeep:HealthPort={HostProcess.FreePort()}")
+                .Append($"--webroot={root}"));
+        var output = await process.WaitForExitAsync(Timeout, Cancellation);
+
+        Assert.Equal(1, process.ExitCode);
+        Assert.Contains("Host.Hosted refuses to start", output);
+        Assert.Contains("webroot", output);
+    }
+
     [Theory]
     [MemberData(nameof(Hosts))]
     public async Task Host_without_custody_settings_refuses_naming_them(string host)

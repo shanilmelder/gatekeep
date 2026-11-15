@@ -263,11 +263,8 @@ public sealed class ApplicationSettingsProtocolTests(PostgresFixture postgres, O
 
     private static async Task AssertStaticPageAsync(HttpResponseMessage response, string redirectUri)
     {
-        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
-        Assert.Null(response.Headers.Location);
-        Assert.Equal("text/html", response.Content.Headers.ContentType?.MediaType);
+        await StepPage.AssertGenericErrorAsync(response, ProtocolDatabase.TestTenantName);
         var body = await response.Content.ReadAsStringAsync(Cancellation);
-        Assert.Contains("<h1>Something went wrong</h1>", body, StringComparison.Ordinal);
         Assert.DoesNotContain("echo-me-not", body, StringComparison.Ordinal);
         Assert.DoesNotContain(redirectUri, body, StringComparison.Ordinal);
     }

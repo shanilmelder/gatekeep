@@ -276,7 +276,8 @@ public interface ITenants
 
 /// <summary>
 /// The Tenant a Host.Hosted request's host resolved to, by exact match on the stored host of an
-/// active Tenant (AD-6): its ID and the issuer, RP ID and email link base stored at creation. It is
-/// the only Tenant source on Host.Hosted (AD-4): no header, cookie, Session or claim names one.
+/// active Tenant (AD-6): its ID and the issuer, RP ID and email link base stored at creation, and
+/// its display name, which Hosted Login shows (Story 4.1). It is the only Tenant source on
+/// Host.Hosted (AD-4): no header, cookie, Session or claim names one.
 /// </summary>
-public sealed record ResolvedTenant(Guid TenantId, string Issuer, string RpId, string EmailLinkBase);
+public sealed record ResolvedTenant(Guid TenantId, string Issuer, string RpId, string EmailLinkBase, string Name);

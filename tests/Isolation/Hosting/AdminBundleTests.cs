@@ -45,6 +45,19 @@ public sealed partial class AdminBundleTests(PostgresFixture postgres) : IDispos
         Assert.DoesNotMatch(@"(?i)\s(?:src|href)\s*=\s*[""']?(?:https?:)?//", index);
     }
 
+    /// <summary>Story 4.1: the build filled index.html from the catalogue: no placeholder is left, and the title is the catalogue's.</summary>
+    [Fact]
+    public void Built_index_title_is_the_catalogues()
+    {
+        var index = File.ReadAllText(IndexPath());
+        var catalogue = File.ReadAllText(Path.Combine(Repository.Root, "packages", "ui", "src", "messages.tsx"));
+        var title = Regex.Match(catalogue, @"^\s*adminDocumentTitle: '(?<title>[^']+)',", RegexOptions.Multiline).Groups["title"].Value;
+
+        Assert.NotEmpty(title);
+        Assert.DoesNotContain("%gk:", index, StringComparison.Ordinal);
+        Assert.Equal(title, Regex.Match(index, "<title>(?<title>[^<]*)</title>").Groups["title"].Value);
+    }
+
     [Theory]
     [InlineData("/")]
     [InlineData("/tenants/x")]

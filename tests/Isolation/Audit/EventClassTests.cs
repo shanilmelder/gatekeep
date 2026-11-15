@@ -367,7 +367,7 @@ public sealed class EventClassTests(PostgresFixture postgres)
         builder.Logging.ClearProviders();
         builder.Services.AddSingleton(AuditContract.CreateAppender());
         builder.Services.AddSingleton<Gatekeep.Modules.Protocol.Contracts.IAuthorizationSignIn, Gatekeep.Modules.Protocol.Contracts.UnavailableSignIn>();
-        Gatekeep.Modules.Protocol.Contracts.ProtocolContract.AddGatekeepProtocol(builder.Services, _ => hosted, Gatekeep.Adapters.Hosting.SecurityHeaders.Apply);
+        Gatekeep.Modules.Protocol.Contracts.ProtocolContract.AddGatekeepProtocol(builder.Services, _ => hosted, Gatekeep.Tests.Isolation.Protocol.TestStepPages.Create);
 
         await using var app = builder.Build();
         Gatekeep.Modules.Tenancy.Contracts.TenancyContract.UseTenantResolution(app, () => hosted);
