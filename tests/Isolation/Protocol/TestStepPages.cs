@@ -34,6 +34,9 @@ internal sealed class TestStepPages(StepPageTemplate template) : IStepPages
             TenancyContract.Theme(http.Features.Get<ResolvedTenant>() ?? throw new InvalidOperationException("No resolved Tenant.")).Href,
             step.ToJson(),
             cancellationToken);
+
+    public Task WriteJsonAsync(HttpContext http, int statusCode, StepResponse step, CancellationToken cancellationToken) =>
+        StepPageTemplate.WriteJsonAsync(http, statusCode, step.ToJson(), cancellationToken);
 }
 
 /// <summary>Reads and checks a Hosted Login step page (Story 4.1).</summary>

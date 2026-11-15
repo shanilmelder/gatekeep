@@ -24,6 +24,17 @@ public sealed record StartedSession(
     DateTimeOffset AbsoluteExpiresAt);
 
 /// <summary>
+/// A live User Session (Story 4.2): not ended, and within both its idle and absolute expiry. Times are in UTC.
+/// </summary>
+public sealed record LiveSession(
+    Guid SessionId,
+    Guid UserId,
+    IReadOnlyList<string> Amr,
+    DateTimeOffset AuthTime,
+    DateTimeOffset IdleExpiresAt,
+    DateTimeOffset AbsoluteExpiresAt);
+
+/// <summary>
 /// A Token Family (AD-13) as a refresh reads it (Story 2.10): its authorization's status and creation, from
 /// which the absolute refresh limit counts, and the Session it is anchored to, whose User, authentication
 /// methods and authentication time the refreshed tokens carry. Times are in UTC.
@@ -76,6 +87,42 @@ public interface ISessions
     /// <remarks>A User not in the context's Tenant fails on the foreign key, and the caller's scope must be discarded.</remarks>
     [StateChanging]
     Task<StartedSession> StartAsync(CommandContext context, NewSession session, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Issues a Session for a completed authentication (Story 4.2, NFR-3): always a new 256-bit identifier,
+    /// stored only as its SHA-256. When <paramref name="presented"/> is the identifier of a live Session of
+    /// the same User in the context's Tenant, that row is rotated in the same command: its identifier hash,
+    /// authentication methods, authentication time and Connection are replaced and its idle expiry slides, so
+    /// the presented value stops working, with one <c>sessions.session.rotated</c> event. Otherwise a new
+    /// Session starts as <see cref="StartAsync(CommandContext, NewSession, CancellationToken)"/> starts one,
+    /// with its <c>sessions.session.started</c> event. A presented value of another User, ended, expired or
+    /// unknown is never changed.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The context has no Tenant. Nothing is written.</exception>
+    /// <exception cref="ArgumentException">The User ID is empty or no authentication method is given.</exception>
+    [StateChanging]
+    Task<StartedSession> StartOrRotateAsync(CommandContext context, NewSession session, Secret<string>? presented, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// The live Session whose identifier is <paramref name="presented"/> in the context's Tenant (Story 4.2):
+    /// not ended, and within its idle and absolute expiry now. Null for any other, a malformed value included.
+    /// It writes nothing.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The context has no Tenant.</exception>
+    Task<LiveSession?> FindLiveAsync(CommandContext context, Secret<string> presented, CancellationToken cancellationToken);
+
+    /// <summary>The live Session <paramref name="sessionId"/> in the context's Tenant, as the other overload finds one by its identifier.</summary>
+    /// <exception cref="InvalidOperationException">The context has no Tenant.</exception>
+    Task<LiveSession?> FindLiveAsync(CommandContext context, Guid sessionId, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Slides a live Session's idle expiry to the §5.2 idle lifetime from now, never past its absolute expiry
+    /// (Story 4.2): a reused Session stays alive while it is used. Unaudited: a touch is the AD-5 exemption for
+    /// reads that keep a Session alive. Whether the Session was live and touched.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The context has no Tenant. Nothing is written.</exception>
+    [StateChanging]
+    Task<bool> TouchAsync(CommandContext context, Guid sessionId, CancellationToken cancellationToken);
 
     /// <summary>
     /// The one revocation path (AD-13, AR-23). Logout, every FR-48 trigger, refresh reuse, code

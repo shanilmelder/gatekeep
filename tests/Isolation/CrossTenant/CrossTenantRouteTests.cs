@@ -155,10 +155,9 @@ public sealed class CrossTenantRouteTests(PostgresFixture postgres, OpenBaoFixtu
         var b = await database.AddTenantAsync(HostB);
         Assert.True(await database.ProvisionAsync(bao, a.TenantId));
         Assert.True(await database.ProvisionAsync(bao, b.TenantId));
-        // The test-only sign-in completes a sign-in only for a request naming a User (Story 2.9), so it changes
+        // The test-only credential step authenticates only an identifier of its own form (Story 4.2), so it changes
         // nothing for a case that names none.
-        await using var host = await ProtocolHost.StartAsync(
-            database.Hosted, bao, signIn: provider => new TestAuthorizationSignIn(provider.GetRequiredService<TimeProvider>()));
+        await using var host = await ProtocolHost.StartAsync(database.Hosted, bao);
 
         switch (entry.Pattern)
         {
@@ -212,7 +211,7 @@ public sealed class CrossTenantRouteTests(PostgresFixture postgres, OpenBaoFixtu
             case ProtocolContract.AuthorizePath:
             {
                 // Tenant A's real web client, at B's host (Story 2.9): B doesn't know it, so the request gets
-                // Generic error (Story 4.1), never a redirect to A's client, and naming nothing of A. Nothing begins.
+                // Generic error (Story 4.1), never a redirect to A's client or to Login, and naming nothing of A. Nothing begins.
                 var client = await database.CreateWebClientAsync(a.TenantId, [CodeFlowSetup.Callback]);
                 var user = await database.AddUserAsync(a.TenantId);
                 using var response = await CodeFlow.AuthorizeAsync(host, HostB, client.ClientId, CodeFlowSetup.Callback, Pkce.New(), user, state: "cross-tenant");
@@ -256,6 +255,53 @@ public sealed class CrossTenantRouteTests(PostgresFixture postgres, OpenBaoFixtu
                 Assert.Equal(0L, await database.ScalarAsync<long>("SELECT count(*) FROM audit_event WHERE type_code = 'sessions.access.revoked'"));
                 using var refreshed = await CodeFlow.RefreshAsync(host, HostA, flow.ClientA.ClientId, flow.ClientA.Secret, tokens.Refresh);
                 Assert.Equal(HttpStatusCode.OK, refreshed.Status);
+                break;
+            }
+
+            case ProtocolContract.LoginPath:
+            case ProtocolContract.LoginIdentifierPath:
+            case ProtocolContract.LoginExtendPath:
+            {
+                // Tenant A's real sign-in transaction cookie, presented at B's host (Story 4.2): B's lookup, under B's
+                // row-level security, finds nothing, so it is refused as invalid_transaction, the refusal logged in B's
+                // Log only, and A's transaction is untouched. The CSRF token is the cookie's own, so only the lookup refuses.
+                var client = await database.CreateWebClientAsync(a.TenantId, [CodeFlowSetup.Callback]);
+                var atA = new HostedBrowser(host, HostA);
+                using (var begun = await atA.GetAsync(CodeFlow.AuthorizeUrl(client.ClientId, CodeFlowSetup.Callback, Pkce.New())))
+                {
+                    Assert.True(HostedBrowser.IsLoginRedirect(begun), "A's request didn't go to Login.");
+                }
+
+                var atB = new HostedBrowser(host, HostB);
+                atB.Cookies[ProtocolContract.TransactionCookie] = atA.Cookies[ProtocolContract.TransactionCookie];
+                var csrf = (await atA.LoginStepAsync()).Csrf;
+                var before = await database.ScalarAsync<string>("SELECT tenant_id || '/' || expires_at::text || '/' || step_version FROM signin_transaction");
+                var eventsA = await database.ScalarAsync<long>($"SELECT count(*) FROM audit_event WHERE tenant_id = '{a.TenantId}'");
+
+                using var response = entry.Pattern == ProtocolContract.LoginPath
+                    ? await atB.GetAsync(ProtocolContract.LoginPath)
+                    : await atB.PostAsync(entry.Pattern, new { stepVersion = 1, email = "someone@example.com" }, csrf);
+                string body;
+                if (entry.Pattern == ProtocolContract.LoginPath)
+                {
+                    await StepPage.AssertGenericErrorAsync(response, ProtocolDatabase.TestTenantName, "invalid_transaction");
+                    body = await response.Content.ReadAsStringAsync(Cancellation);
+                }
+                else
+                {
+                    Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+                    body = await response.Content.ReadAsStringAsync(Cancellation);
+                    using var step = JsonDocument.Parse(body);
+                    Assert.Equal("invalid_transaction", step.RootElement.GetProperty("data").GetProperty("code").GetString());
+                }
+
+                Assert.DoesNotContain(HostA, body, StringComparison.OrdinalIgnoreCase);
+                Assert.DoesNotContain(a.TenantId.ToString(), body, StringComparison.OrdinalIgnoreCase);
+                Assert.Equal(before, await database.ScalarAsync<string>("SELECT tenant_id || '/' || expires_at::text || '/' || step_version FROM signin_transaction"));
+                Assert.Equal(1L, await database.ScalarAsync<long>(
+                    $"SELECT count(*) FROM audit_event WHERE tenant_id = '{b.TenantId}' AND type_code = 'authentication.signin_transaction.refused'"));
+                Assert.Equal(eventsA, await database.ScalarAsync<long>($"SELECT count(*) FROM audit_event WHERE tenant_id = '{a.TenantId}'"));
+                Assert.All(atB.SetCookies, c => Assert.DoesNotContain("Domain", c, StringComparison.OrdinalIgnoreCase));
                 break;
             }
 

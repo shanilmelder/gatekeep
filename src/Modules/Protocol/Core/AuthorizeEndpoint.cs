@@ -423,20 +423,23 @@ internal sealed class AnswerInvalidRequestPage(IStepPages pages) : IOpenIddictSe
 }
 
 /// <summary>
-/// The authorization endpoint's passthrough (Story 2.9, AD-8): a request OpenIddict has validated, client,
-/// exact redirect URI, <c>response_type=code</c>, S256 PKCE and Gatekeep's scope and prompt rules, reaches
-/// it in the request's open transaction. It begins the sign-in with <c>IAuthentication.BeginAsync</c>,
-/// then asks the host's <see cref="IAuthorizationSignIn"/> to complete it, passing the freshness
-/// <c>prompt=login</c> and <c>max_age</c> demand (Story 2.11). A result older than that is refused with
-/// <c>login_required</c>, so no code is issued and nothing is committed; Story 4.2 replaces the refusal
-/// with a new sign-in. A result fresh enough signs the User in: the
-/// claims are <c>sub</c> (the User's <c>usr_</c> ID), <c>sid</c>, <c>auth_time</c> and <c>amr</c>, the ID
-/// token gets those and the <c>nonce</c>, and the access token <c>sub</c> and, from Story 3.7, the named API as its
-/// audience, or none; one ad-hoc
-/// authorization, the Token Family, is anchored to the result's Session, and OpenIddict issues the code.
-/// No result is <c>temporarily_unavailable</c>. Either way OpenIddict's response, with <c>iss</c>, ends
-/// the transaction. The authorization grants <c>openid</c>, and <c>offline_access</c> when it was asked
-/// for (Story 2.10), so that the code's exchange also returns a refresh token.
+/// The authorization endpoint's passthrough (Stories 2.9 and 4.2, AD-8): a request OpenIddict has validated, client,
+/// exact redirect URI, <c>response_type=code</c>, S256 PKCE and Gatekeep's scope and prompt rules, reaches it in the
+/// request's open transaction. It asks Protocol's <see cref="IAuthorizationSignIn"/> what the request comes to, passing
+/// the freshness <c>prompt=login</c> and <c>max_age</c> demand (Story 2.11):
+/// <list type="bullet">
+/// <item>Completed, by a reusable Session or a resume: the User is signed in. The claims are <c>sub</c> (the User's
+/// <c>usr_</c> ID), <c>sid</c>, <c>auth_time</c> and <c>amr</c>, the ID token gets those and the <c>nonce</c>, and the
+/// access token <c>sub</c> and, from Story 3.7, the named API as its audience, or none; one ad-hoc authorization, the
+/// Token Family, is anchored to the Session, and OpenIddict issues the code, with <c>iss</c>, ending the transaction.
+/// The authorization grants <c>openid</c>, and <c>offline_access</c> when it was asked for (Story 2.10).</item>
+/// <item>Login: a transaction began, bound by its cookie. The request's own transaction is committed though no code is
+/// issued, and the browser goes to <c>/login</c> by a 302.</item>
+/// <item>Refused: a resume whose transaction can't be used gets Generic error <c>invalid_transaction</c>, 400, keeping
+/// only the refusal's event.</item>
+/// </list>
+/// Parameters too large to keep are <c>invalid_request</c>, and a Tenant with no current Signing Key <c>server_error</c>,
+/// before any sign-in begins.
 /// </summary>
 internal static class AuthorizePassthrough
 {
@@ -469,11 +472,28 @@ internal static class AuthorizePassthrough
         var application = await applications.FindByClientIdAsync(request.ClientId!, cancellationToken) as DirectoryApplication
             ?? throw new InvalidOperationException("The validated client has no Application.");
 
-        StartedSignIn started;
+        // Story 3.7's API is taken out of the request before validation; a transaction keeps it as resource, so the
+        // resumed request names the same API (Story 4.2).
+        var kept = KeptParameters(request);
+        if (transaction.GetProperty<DirectoryApiTarget>(ApiTargets.ApiProperty) is { } named)
+        {
+            kept[Parameters.Resource] = named.Identifier;
+        }
+
+        var signIn = http.RequestServices.GetRequiredService<IAuthorizationSignIn>();
+        AuthorizationSignInOutcome outcome;
         try
         {
-            started = await services.Authentication.BeginAsync(
-                requestTransaction.Context, new SignInRequest(application.Id, KeptParameters(request)), cancellationToken);
+            outcome = await signIn.SignInAsync(
+                requestTransaction.Context,
+                new AuthorizationSignInRequest(
+                    application.Id,
+                    kept,
+                    authenticatedSince,
+                    request.HasPromptValue(PromptValues.Login),
+                    request.GetParameter(ProtocolContract.ResumeParameter) is not null),
+                http,
+                cancellationToken);
         }
         catch (ArgumentException)
         {
@@ -482,19 +502,15 @@ internal static class AuthorizePassthrough
             return;
         }
 
-        var signIn = http.RequestServices.GetRequiredService<IAuthorizationSignIn>();
-        var result = await signIn.CompleteAsync(requestTransaction.Context, started, authenticatedSince, http, cancellationToken);
-        if (result is null)
+        if (outcome.Kind == AuthorizationSignInKind.Login)
         {
-            await RefuseAsync(http, Errors.TemporarilyUnavailable, "Sign-in isn't available. Try again later.");
+            await GoToLoginAsync(http, requestTransaction, cancellationToken);
             return;
         }
 
-        // An authentication older than prompt=login or max_age allows gets no code (OIDC Core §3.1.2.1): refused,
-        // not re-prompted, until Story 4.2. The refusal rolls back the sign-in's Session with the rest.
-        if (!AuthorizeEndpoint.IsFreshEnough(result.AuthTime, authenticatedSince, request.HasPromptValue(PromptValues.Login)))
+        if (outcome is not { Kind: AuthorizationSignInKind.Completed, Result: { } result })
         {
-            await RefuseAsync(http, Errors.LoginRequired, "The User must sign in again.");
+            await AnswerRefusedTransactionAsync(http, requestTransaction, services);
             return;
         }
 
@@ -534,10 +550,56 @@ internal static class AuthorizePassthrough
         descriptor.Scopes.UnionWith(scopes);
         descriptor.Properties[SessionsContract.SessionAnchorProperty] = JsonSerializer.SerializeToElement(result.SessionId.ToString());
 
+        // Story 4.2: the family keeps this sign-in's own authentication, so a later sign-in that rotates the Session
+        // never changes the auth_time and amr its refreshed ID tokens carry (OIDC Core §12.2).
+        descriptor.Properties[SessionsContract.FamilyAuthTimeProperty] = JsonSerializer.SerializeToElement(
+            result.AuthTime.ToUniversalTime().ToString("yyyy-MM-dd'T'HH:mm:ss.ffffff'Z'", CultureInfo.InvariantCulture));
+        descriptor.Properties[SessionsContract.FamilyAmrProperty] = JsonSerializer.SerializeToElement(result.Amr);
+
         var authorization = await authorizations.CreateAsync(descriptor, cancellationToken);
         identity.SetAuthorizationId(await authorizations.GetIdAsync(authorization, cancellationToken));
 
         await http.SignInAsync(OpenIddictServerAspNetCoreDefaults.AuthenticationScheme, principal);
+    }
+
+    /// <summary>
+    /// A new transaction began (Story 4.2): the request's transaction is committed, though no code is issued, so the
+    /// transaction the cookie binds exists, and the browser goes to Login. A transaction a store marked failed never
+    /// commits: the request is refused with <c>server_error</c> instead, by the usual end.
+    /// </summary>
+    private static async Task GoToLoginAsync(HttpContext http, TokenRequestTransaction transaction, CancellationToken cancellationToken)
+    {
+        if (transaction.Failed)
+        {
+            http.Response.Headers.Remove(Microsoft.Net.Http.Headers.HeaderNames.SetCookie);
+            await RefuseAsync(http, Errors.ServerError, RequestEnd.FailedDescription);
+            return;
+        }
+
+        await transaction.CommitAsync(cancellationToken);
+        http.Response.StatusCode = StatusCodes.Status302Found;
+        http.Response.Headers.Location = ProtocolContract.LoginPath;
+        http.Response.Headers.CacheControl = "no-store";
+        http.Response.Headers.Pragma = "no-cache";
+    }
+
+    /// <summary>
+    /// A resume whose transaction can't be used (Story 4.2): its work undone, only the refusal's event kept, and
+    /// Generic error <c>invalid_transaction</c>, 400, through the host's step pages. It never redirects to the client.
+    /// </summary>
+    private static async Task AnswerRefusedTransactionAsync(HttpContext http, TokenRequestTransaction transaction, TokenEndpointServices services)
+    {
+        transaction.KeepOnFailure(services.Authentication.RefuseAsync);
+        await transaction.FailAsync();
+
+        var pages = http.RequestServices.GetRequiredService<IStepPages>();
+        var tenant = http.Features.Get<Gatekeep.Modules.Tenancy.Contracts.ResolvedTenant>()
+            ?? throw new InvalidOperationException("No resolved Tenant.");
+        await pages.WriteAsync(
+            http,
+            StatusCodes.Status400BadRequest,
+            StepResponse.GenericError(tenant.Name, SignInStepResponses.InvalidTransaction, pages.TraceId(http)),
+            http.RequestAborted);
     }
 
     /// <summary>The kept parameters, each as its text.</summary>

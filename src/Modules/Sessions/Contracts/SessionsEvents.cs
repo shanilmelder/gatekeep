@@ -14,6 +14,15 @@ public static class SessionsEvents
         "A User's Session started. Names the User only: the Session ID is stored only as its hash.",
         AuditOutcome.Success);
 
+    /// <summary>
+    /// Written when a User authenticates again in a browser presenting their live Session (Story 4.2): the
+    /// Session's identifier is replaced, so the old one stops working. The User is Actor and target.
+    /// </summary>
+    public static readonly AuditEventDefinition SessionRotated = new(
+        new AuditTypeCode("sessions.session.rotated"),
+        "A User authenticated again in a browser holding their live Session, so its identifier was replaced and the old one stopped working. Names the User only.",
+        AuditOutcome.Success);
+
     /// <summary>Written once by every <c>ISessions.RevokeAccessAsync</c> call, the one revocation path (AD-13).</summary>
     public static readonly AuditEventDefinition AccessRevoked = new(
         new AuditTypeCode("sessions.access.revoked"),

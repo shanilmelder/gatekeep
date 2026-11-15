@@ -139,6 +139,12 @@ public static class RouteRegistry
         // Hosted Login (Story 4.1): the resolved Tenant's theme stylesheet. Its assets are static files, not routes.
         new("GET", "/login/theme/{hash}.css", CaseKind.HostResolved),
 
+        // Hosted Login's sign-in surface (Story 4.2): the step page and its two API requests, each on the
+        // resolved Tenant's sign-in transaction only.
+        new("GET", "/login", CaseKind.HostResolved),
+        new("POST", "/login/api/identifier", CaseKind.HostResolved),
+        new("POST", "/login/api/transaction/extend", CaseKind.HostResolved),
+
         new("*", "{*path:nonfile}", CaseKind.NotTenantBound, Reason: "the one fixed 404, the same as an unknown host's (AD-6)"),
     ];
 }

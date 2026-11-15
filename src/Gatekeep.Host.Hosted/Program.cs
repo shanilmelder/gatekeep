@@ -28,9 +28,9 @@ builder.AddGatekeepHost(new HostProfile(
 
 // Each Tenant's OpenID Provider (Stories 2.3, 2.5 and 2.9): discovery, JWKS, Client Credentials and
 // the code flow with PKCE, as gk_hosted. Its audit events, such as a refused cross-Tenant credential,
-// go to the Tenant's Log. No sign-in step exists before Story 4.2, so a release build completes no
-// sign-in (Protocol's default UnavailableSignIn): every valid authorization request gets
-// temporarily_unavailable and no code.
+// go to the Tenant's Log. From Story 4.2 a valid authorization request reuses a live Session or goes to
+// Login under a bound sign-in transaction. No credential step exists in a release build before Story
+// 4.9, so after Login's email the step is Generic error temporarily_unavailable.
 // Every Hosted Login step page is the bundle's index.html with the step embedded as JSON and the
 // Tenant's theme linked, under the AD-21 headers. The authorization endpoint shows Generic error
 // through it for a request it can't send back. A refused host never builds it.
@@ -63,6 +63,10 @@ app.UseRouting();
 
 // The request's Tenant's theme stylesheet, at its content hash (Story 4.1).
 app.MapThemeStylesheet();
+
+// Hosted Login's sign-in surface (Story 4.2): the /login step page and its two Origin- and
+// CSRF-checked API requests.
+app.MapGatekeepLogin();
 
 // Any other path on a resolved host gets the same fixed 404 as an unknown host.
 app.MapFallback(TenancyContract.NotFoundAsync);

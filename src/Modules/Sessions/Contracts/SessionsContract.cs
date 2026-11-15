@@ -16,6 +16,16 @@ public static class SessionsContract
     /// </summary>
     public const string SessionAnchorProperty = ".gatekeep_user_session_id";
 
+    /// <summary>
+    /// The authorization property a new Token Family keeps its sign-in's authentication time in (Story 4.2, OIDC Core
+    /// §12.2): ISO 8601 UTC text. A refresh's ID token carries it, not the Session's, which a later sign-in rotating the
+    /// Session replaces. A family created before has none, and reads the Session's.
+    /// </summary>
+    public const string FamilyAuthTimeProperty = ".gatekeep_auth_time";
+
+    /// <summary>The authorization property a new Token Family keeps its sign-in's authentication methods in, as a JSON array (Story 4.2).</summary>
+    public const string FamilyAmrProperty = ".gatekeep_amr";
+
     /// <summary>Sessions over the Kernel audit port. <paramref name="time"/> sets every expiry.</summary>
     public static ISessions CreateSessions(IAuditAppender audit, TimeProvider time) => new SessionService(audit, time);
 

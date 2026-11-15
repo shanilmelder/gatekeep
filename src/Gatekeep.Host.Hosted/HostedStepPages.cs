@@ -20,4 +20,10 @@ internal sealed class HostedStepPages(StepPageTemplate template) : IStepPages
         var tenant = http.Features.Get<ResolvedTenant>() ?? throw new InvalidOperationException("A step page needs a resolved Tenant.");
         return template.WriteAsync(http, statusCode, TenancyContract.Theme(tenant).Href, step.ToJson(), cancellationToken);
     }
+
+    public Task WriteJsonAsync(HttpContext http, int statusCode, StepResponse step, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(step);
+        return StepPageTemplate.WriteJsonAsync(http, statusCode, step.ToJson(), cancellationToken);
+    }
 }

@@ -32,6 +32,8 @@ public class BootstrapStateRuleTests
         $@"\bDELETE\s+FROM\s+(?:ONLY\s+)?{Name}|\bTRUNCATE\s+(?:TABLE\s+)?(?:ONLY\s+)?(?:\w+\s*,\s*)*{Name}|\bDROP\s+TABLE\s+(?:IF\s+EXISTS\s+)?(?:\w+\s*,\s*)*{Name}",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
+    private static readonly Regex NamesTable = new(@"\bbootstrap_state\b|BootstrapState", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
     // An assignment, quoted or qualified, or the parenthesised SET (a, completed_at) = (…) form.
     private static readonly Regex Completes = new(
         @"(?:\b|"")completed_at""?\s*=(?!=)|\bSET\s*\([^)]*\bcompleted_at\b",
@@ -86,7 +88,9 @@ public class BootstrapStateRuleTests
             .ToList();
 
         Assert.Empty(files.Where(f => Removes.IsMatch(f.Text)).Select(f => f.Path));
-        Assert.Equal([Claimer], files.Where(f => Completes.IsMatch(f.Text)).Select(f => f.Path));
+        // Only a source naming bootstrap_state can complete it: Story 4.2's signin_transaction has a completed_at of its own.
+        Assert.Equal([Claimer], files.Where(f => Completes.IsMatch(f.Text) && NamesTable.IsMatch(f.Text)).Select(f => f.Path));
+        Assert.Contains(files, f => f.Path == "src/Modules/Authentication/Core/AuthenticationService.cs" && Completes.IsMatch(f.Text) && !NamesTable.IsMatch(f.Text));
     }
 
     [Fact]

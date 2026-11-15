@@ -367,6 +367,8 @@ public static class TableRegistry
             ],
             [Worker] = [new ColumnGrant(Select, ["tenant_id", "application_id", "authorization_id"])],
         }, SystemApplicationGuard),
+        // Story 4.2: gk_hosted binds, slides and moves a transaction on (step_version, identifier,
+        // authenticated_session_id, completed_at) through its table grants; it still deletes nothing.
         new("signin_transaction", TableClass.Tenant, "Authentication", TableUse.Runtime, new Dictionary<string, IReadOnlyList<string>>
         {
             [Hosted] = [Select, Insert, Update],

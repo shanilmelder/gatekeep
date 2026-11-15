@@ -23,6 +23,12 @@ const BANNED = [
   ['history.', /(?<![\w.])history\s*\./],
   ['window.', /\bwindow\s*\./],
 ];
+/**
+ * Story 4.2: what one Hosted Login client file may use, by file name: api.ts makes the two API posts,
+ * and navigate.ts the one top-level GET.
+ */
+const HOSTED_LOGIN_ALLOWED = Object.freeze({ 'api.ts': ['fetch('], 'navigate.ts': ['location.', 'window.'] });
+
 /** Router and state libraries, by package name. */
 const STATE_LIBRARY =
   /^(?:react-router(?:-dom)?|@remix-run\/router|wouter|@tanstack\/.+|redux|react-redux|@reduxjs\/toolkit|zustand|jotai|mobx(?:-react(?:-lite)?)?|recoil|valtio|xstate|@xstate\/react|swr)$/;
@@ -56,14 +62,24 @@ describe('Props-only screens', () => {
     }
   });
 
-  // Story 4.1: the Hosted Login client only reads the step the server embedded and renders its
-  // screen. It never fetches, uses XMLHttpRequest or storage, or navigates by script.
-  it('finds none of them in apps/hosted-login/src either', async () => {
+  // Story 4.1: the Hosted Login client reads the step the server embedded and renders its screen.
+  // Story 4.2: its only network requests are the two API posts, in api.ts alone, and its only
+  // navigation a top-level GET, in navigate.ts alone. It never uses XMLHttpRequest, storage or history.
+  it('finds none of them in apps/hosted-login/src but the API posts and the one navigation', async () => {
     const files = await sources(path.join(repository, 'apps/hosted-login/src'));
     assert.ok(files.length > 0);
     for (const file of files) {
-      assert.deepEqual(impurities(await readFile(file, 'utf8')), [], path.relative(repository, file));
+      const allowed = HOSTED_LOGIN_ALLOWED[path.basename(file)] ?? [];
+      const found = impurities(await readFile(file, 'utf8')).filter((name) => !allowed.includes(name));
+      assert.deepEqual(found, [], path.relative(repository, file));
     }
+  });
+
+  it('lets api.ts fetch only the two Hosted Login API paths, once', async () => {
+    const code = stripComments(await readFile(path.join(repository, 'apps/hosted-login/src/api.ts'), 'utf8'));
+    assert.equal(code.match(/\bfetch\s*\(/g)?.length, 1);
+    const paths = [...code.matchAll(/'(\/[^']*)'/g)].map((match) => match[1]).sort();
+    assert.deepEqual(paths, ['/login/api/identifier', '/login/api/transaction/extend']);
   });
 
   it('catches each banned use, and ignores comments and look-alikes', () => {

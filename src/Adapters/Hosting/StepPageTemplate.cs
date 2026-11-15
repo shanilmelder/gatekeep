@@ -98,6 +98,26 @@ public sealed partial class StepPageTemplate
     }
 
     /// <summary>
+    /// Writes one step as Hosted Login's API answers it (Story 4.2), with <paramref name="statusCode"/>:
+    /// <paramref name="stepJson"/> as <c>application/json; charset=utf-8</c>, <c>no-store</c> and the AD-21 headers.
+    /// </summary>
+    public static async Task WriteJsonAsync(HttpContext context, int statusCode, string stepJson, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        ArgumentException.ThrowIfNullOrEmpty(stepJson);
+        var body = Encoding.UTF8.GetBytes(stepJson);
+
+        var response = context.Response;
+        response.StatusCode = statusCode;
+        response.Headers.CacheControl = "no-store";
+        response.Headers.Pragma = "no-cache";
+        SecurityHeaders.Apply(response.Headers);
+        response.ContentType = "application/json; charset=utf-8";
+        response.ContentLength = body.Length;
+        await response.Body.WriteAsync(body, cancellationToken);
+    }
+
+    /// <summary>
     /// JSON made safe inside a <c>script</c> element: <c>&lt;</c>, <c>&gt;</c>, <c>&amp;</c>, U+2028 and
     /// U+2029 become <c>\uXXXX</c> escapes, so no value, a Tenant's name included, can close the block or
     /// open a comment in it. In valid JSON they occur only inside strings, where the escape means the same.

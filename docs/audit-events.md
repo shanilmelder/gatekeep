@@ -24,6 +24,10 @@ Every audit type code Gatekeep writes, declared in its module's contract. Codes 
 | `admin.signin.failed` | Admins | Failure | A sign-in whose signature verified over an Admin's WebAuthn credential was refused. Holds no credential ID, challenge or user handle. | None |
 | `admin.signin.succeeded` | Admins | Success | An Admin signed in with a WebAuthn credential and a full Admin Session started. Holds no credential ID, challenge, user handle or Session ID. | None |
 | `audit.retention.checkpoint` | Audit | Success | Retention deleted a chain's sealed prefix past the Log period. Names the last deleted row's epoch, seq and hash. | None |
+| `authentication.signin_transaction.completed` | Authentication | Success | An authenticated sign-in transaction completed its authorization request, and can't be used again. The caller is anonymous. | None |
+| `authentication.signin_transaction.extended` | Authentication | Success | A sign-in transaction's 30-minute sliding life was extended: its Login page was opened, Keep going was chosen or its email was recorded. Anonymous. | None |
+| `authentication.signin_transaction.identified` | Authentication | Success | A sign-in transaction recorded the email entered at Login. The caller is anonymous, and the email isn't in the event. | None |
+| `authentication.signin_transaction.refused` | Authentication | Failure | A Hosted Login request was refused: its sign-in transaction was missing, completed, another Application's or not at that step, or its Origin or CSRF token was wrong. Anonymous. | None |
 | `authentication.signin_transaction.started` | Authentication | Success | A sign-in transaction began for an Application. The caller is anonymous, so no person is named. | None |
 | `bootstrap.admin.created` | Admins | Success | The bootstrap token was claimed: the first Admin was created as Deployment Owner and bootstrap completed. Holds no token or hash. | None |
 | `bootstrap.token.issued` | Admins | Success | gatekeep init issued the first one-time bootstrap token. It expires 15 minutes after issue. Holds no token or hash. | None |
@@ -55,6 +59,7 @@ Every audit type code Gatekeep writes, declared in its module's contract. Codes 
 | `operations.operation.retried` | Operations | Success | An Admin retried a failed Operation's failed steps. Names the Operation's Tenant only, when it has one. | None |
 | `protocol.client.cross_tenant_rejected` | Protocol | Failure | A client credential issued by another Tenant was refused at this Tenant's token endpoint. Names nothing of the other Tenant. | Rejected cross-Tenant attempts |
 | `sessions.access.revoked` | Sessions | Success | Sessions in scope ended and their Token Families and tokens were revoked. User scope targets the User. | Session and token revocation |
+| `sessions.session.rotated` | Sessions | Success | A User authenticated again in a browser holding their live Session, so its identifier was replaced and the old one stopped working. Names the User only. | None |
 | `sessions.session.started` | Sessions | Success | A User's Session started. Names the User only: the Session ID is stored only as its hash. | None |
 | `tenancy.tenant.activated` | Tenancy | Success | A Tenant's creation Operation succeeded: its settings exist and its Tenant Subdomain now resolves. | None |
 | `tenancy.tenant.created` | Tenancy | Success | A Deployment Owner created a Tenant and became its Tenant Owner, and its creation Operation started. Names the Tenant only. | None |
