@@ -1,8 +1,10 @@
 using Gatekeep.Adapters.AlertChannel;
 using Gatekeep.Adapters.Egress;
+using Gatekeep.Adapters.Email;
 using Gatekeep.Adapters.ObjectLock;
 using Gatekeep.Adapters.OpenBao;
 using Gatekeep.Kernel.Alerts;
+using Gatekeep.Kernel.Email;
 using Gatekeep.Kernel.Records;
 using Gatekeep.Kernel.Secrets;
 using Microsoft.AspNetCore.Builder;
@@ -67,6 +69,12 @@ public static class GatekeepHosting
         if (settings.OffServer is { } offServer)
         {
             AddOffServer(builder.Services, offServer);
+        }
+
+        // Story 4.5: built when first asked for, so nothing connects at startup.
+        if (profile.SendsEmail)
+        {
+            builder.Services.AddSingleton<IEmailSender>(provider => EmailSender.Create(provider.GetService<TimeProvider>()));
         }
 
         builder.WebHost.ConfigureKestrel(kestrel =>

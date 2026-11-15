@@ -30,6 +30,11 @@ namespace Gatekeep.Adapters.Hosting;
 /// required, and the host gets <c>IAlertChannel</c> and <c>IOffServerStore</c> over
 /// <c>EgressHttp</c>. Only a host whose Compose service joins the <c>egress</c> network sets it.
 /// </param>
+/// <param name="SendsEmail">
+/// Whether the host sends Tenants' email (Story 4.5), as Host.Worker does: it then gets <c>IEmailSender</c>, whose
+/// adapters reach providers only through <c>EgressHttp</c> and <c>EgressSmtp</c>. Only a host whose Compose service joins
+/// the <c>egress</c> network sets it.
+/// </param>
 public sealed record HostProfile(
     string Name,
     IReadOnlyList<string> Databases,
@@ -37,7 +42,8 @@ public sealed record HostProfile(
     bool HasPublicOrigin = false,
     bool HasForwardingProxy = false,
     Func<IConfiguration, IEnumerable<string>>? RefusedHostSettings = null,
-    bool UsesOffServer = false);
+    bool UsesOffServer = false,
+    bool SendsEmail = false);
 
 /// <summary>
 /// The names of every setting a host reads. A refusal names these, never a value. None of

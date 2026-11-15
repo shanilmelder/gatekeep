@@ -11,4 +11,12 @@ public static class IdentityContract
     /// Tenant deletion calls it after Sessions' purge, whose rows reference them.
     /// </summary>
     public static ITenantPurge TenantPurge { get; } = new IdentityPurge();
+
+    /// <summary>
+    /// The context Tenant's User's email address, read now, or null when there is no such User or it has no email
+    /// (Story 4.5). It writes nothing. Host.Worker reads only the User's ID and email.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The context isn't a Tenant's.</exception>
+    public static Task<string?> ReadEmailAsync(CommandContext context, Guid userId, CancellationToken cancellationToken) =>
+        UserEmails.ReadAsync(context, userId, cancellationToken);
 }

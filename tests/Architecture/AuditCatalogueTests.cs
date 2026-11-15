@@ -28,7 +28,7 @@ public class AuditCatalogueTests
     // A regular or verbatim C# string literal. Raw strings hold SQL, never a whole code.
     private static readonly Regex StringLiteral = new(@"@?""(?:[^""\\\r\n]|\\.)*""", RegexOptions.Compiled);
 
-    private static readonly Regex FailureAction = new(@"(?:refused|denied|rejected|failed|regressed|dead)\z", RegexOptions.Compiled);
+    private static readonly Regex FailureAction = new(@"(?:refused|denied|rejected|failed|regressed|dead|undeliverable|held_back)\z", RegexOptions.Compiled);
 
     private static IReadOnlyList<CatalogueEvent> Catalogue => AuditCatalogue.Load(Root, Project);
 
@@ -144,7 +144,8 @@ public class AuditCatalogueTests
     /// <summary>
     /// Story 7.4: an outcome search finds exactly the codes declared Failure, so the declaration
     /// must agree with what the code says happened. An action ending in refused, denied, rejected,
-    /// failed, regressed or dead is a Failure, and no other is.
+    /// failed, regressed or dead is a Failure, and no other is. Story 4.5 adds an email that was undeliverable
+    /// or held back.
     /// </summary>
     [Fact]
     public void Every_refused_denied_failed_or_dead_code_is_a_failure_and_no_other()

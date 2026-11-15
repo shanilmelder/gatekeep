@@ -99,7 +99,7 @@ development_status:
   4-2-bind-sign-in-transactions-and-issue-sessions: done
   4-3-purge-expired-sign-in-state: done
   4-4-configure-a-tenant-s-email-provider: done
-  4-5-send-email-through-the-job-pipeline: in-progress
+  4-5-send-email-through-the-job-pipeline: done
   4-6-configure-the-database-connection: backlog
   4-7-sign-up-and-verify-an-email-address: backlog
   4-8-keep-sign-up-neutral-and-limited: backlog

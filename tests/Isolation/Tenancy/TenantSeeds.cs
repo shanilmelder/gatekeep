@@ -61,6 +61,9 @@ internal static class TenantSeeds
         ("email_provider", (t, _) =>
             "INSERT INTO email_provider (tenant_id, kind, settings, from_address, secret_ciphertext) " +
             $"VALUES ('{t}', 'sendgrid', '{{\"region\":\"eu\"}}', 'no-reply@seeded.example', 'vault:v1:AAAA') ON CONFLICT DO NOTHING"),
+        ("email_template", (t, _) =>
+            "INSERT INTO email_template (tenant_id, template_id, subject, body) " +
+            $"VALUES ('{t}', '01930000-0000-7000-8000-0000000045e1', 'Seeded subject', 'Seeded body') ON CONFLICT DO NOTHING"),
         ("protection_key_wrap", (t, _) =>
             $"INSERT INTO protection_key_wrap (tenant_id, ciphertext) VALUES ('{t}', 'vault:v1:AAAA') ON CONFLICT DO NOTHING"),
     ];

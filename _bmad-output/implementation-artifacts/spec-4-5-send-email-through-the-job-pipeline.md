@@ -2,9 +2,10 @@
 title: 'Story 4.5: Send email through the job pipeline'
 type: 'feature'
 created: '2026-11-16'
-status: 'ready-for-dev'
+status: 'done'
+baseline_revision: '68695964c13f9d4b6f3d885c0ea816144ce09a5d'
 review_loop_iteration: 0
-followup_review_recommended: false
+followup_review_recommended: true
 context:
   - '{project-root}/_bmad-output/implementation-artifacts/epic-4-context.md'
   - '{project-root}/_bmad-output/implementation-artifacts/spec-4-4-configure-a-tenant-s-email-provider.md'
@@ -166,6 +167,46 @@ deferred: []
 
 ## Review Triage Log
 
+### 2026-11-16 — Review pass
+- verdicts: 36 findings — high 0, medium 4, low 24, false 8, maybe-false 0
+- findings:
+  - `low` `reject` (Blind) A transient result rolls back the limiter count although the provider may have accepted the message, so retries can deliver uncounted copies — only on provider misbehaviour (accept, then 5xx/timeout); fixing it needs a counter outside the run's transaction, more than a direct correction.
+  - `low` `patch` (Blind) `IsAuthHeaderName` carries two `<summary>` elements and `IsToken` none — moved the summary back onto `IsToken`.
+  - `low` `patch` (Blind) `EmailSender.SendGrid`'s first line indented 16 spaces — re-indented.
+  - `low` `reject` (Blind) Audit events carry no reason detail — the intent requires no detail, and adding one adds catalogued event surface.
+  - `low` `reject` (Blind) A rejected payload credential is retried then dead, unlike the provider secret — reachable only with a tampered or misbound payload row; the runner's dead path is the standard outcome.
+  - `false` `reject` (Blind) `MaxAttempts` duplicates the runner's limit — the registry passes `EmailSendJobs.MaxAttempts` itself (`ProductionJobs.cs:207`), and the last-attempt branch is removed by the patch below.
+  - `low` `reject` (Blind) TLS/certificate failures are retried as transient — at most 5 handshakes per job, and a renewed certificate can succeed on a retry; discriminating inner exceptions adds branches.
+  - `low` `reject` (Blind) `gk_worker` gets table-wide `SELECT` on `tenant_attempt` — mirrors `gk_hosted`'s grant, the limiter reads `subject`, and RLS keeps it to the run's Tenant.
+  - `low` `patch` (Blind) Reserved header list misses framing headers — added `Expect` and `Keep-Alive` (grouped with Edge Case #8).
+  - `low` `reject` (Blind) `Secret.Use(s => s)` unwraps the provider secret into a string — header values are strings that can't be zeroed whatever the shape; restructuring buys nothing.
+  - `false` `reject` (Blind) Unknown regions fall back to the US host — save-time validation allows only `global`/`eu` and `us`/`eu` (`EmailProviderRules.cs:210,219`); nothing else is stored.
+  - `low` `reject` (Blind) A server omitting an intermediate certificate is refused — deliberate (`DisableCertificateDownloads`, TB-12 accepted risk); servers normally send their chain.
+  - `low` `reject` (Blind) The link token rides in the query string — the intent prescribes `?token=`; Referrer-Policy on the pages belongs to 4.7 and 4.11.
+  - `low` `patch` (Blind) `SigV4.Sign` defaults `service` to S3 — made it required and passed `SigV4.S3` from `S3ObjectLockStore`.
+  - `medium` `patch` (Intent) Exhausted retries end `undeliverable` instead of going dead as the intent and matrix say — removed the last-attempt branch; tests now expect `dead` after 5 with no event (grouped with Edge Case #1's subject).
+  - `low` `patch` (Intent) The per-recipient limit runs after render, against the intent's order — moved it before the template read and render (grouped with Edge Case #9).
+  - `false` `reject` (Intent) SMTP 4xx transient / 5xx permanent contradicts "any other 4xx permanent" — the 4xx/429/5xx wording is HTTP's; a refused SMTP recipient (550) is 5xx and SMTP 4xx are temporary by RFC 5321.
+  - `low` `reject` (Intent) Inactive-Tenant and misconfiguration exits write no event — a deleting Tenant's events are purged with it and nobody reads them; misconfiguration goes dead as today.
+  - `low` `patch` (Intent) Production `EgressSmtp.Create()` and its validation aren't exercised — covered by the chain-policy test below (grouped with Verification Gap #4).
+  - `low` `reject` (Intent) No test triggers a timeout — the classification arm is the same `Transient` as connect failure, which is tested; a timing test adds flake.
+  - `false` `reject` (Intent) "The Worker can't encrypt" is tested with `custody: null` — the claim is about enqueuing; the runner's custody only decrypts.
+  - `false` `reject` (Intent) The allowlist entry sits in `Adapters.Email`, not Egress — the stream is opened by `EgressSmtp`; the MailKit handoff the rule matches is where the intent puts it (smtp row).
+  - `medium` `patch` (Verification Gap) Provider-secret decrypt with custody `Unavailable` untested — added a test: job stays pending, `handler_failed`, no event, no count, no send.
+  - `low` `patch` (Verification Gap) SMTP AUTH rejection as permanent unpinned — `FakeSmtpServer` can answer 535; test asserts `Permanent("smtp_auth")` and no `MAIL`.
+  - `medium` `patch` (Verification Gap) A failed QUIT after an accepted DATA untested — `FakeSmtpServer` can drop on QUIT; test asserts `Sent` and one DATA.
+  - `medium` `patch` (Verification Gap) SMTP chain policy never asserted — added a test of the production and test-root policies' properties, listed in TB-12.
+  - `false` `reject` (Edge Case) `Unavailable` on the final attempt goes dead with no event — that is the intent's "goes dead as today".
+  - `low` `reject` (Edge Case) Payload credential rejection not caught — as the Blind Hunter's matching row.
+  - `low` `patch` (Edge Case) Payload credential decrypt has no custody timeout — bounded with `KeyCustodyCallTimeout`.
+  - `low` `patch` (Edge Case) Decrypted credential bytes never zeroed — zeroed after decoding.
+  - `low` `reject` (Edge Case) Send succeeds then commit fails, so a retry re-sends — as the Blind Hunter's first row.
+  - `false` `reject` (Edge Case) A non-https custom endpoint escapes `IEmailSender` — save-time validation accepts only absolute `https` (`EmailProviderRules.cs:411`).
+  - `low` `reject` (Edge Case) Certificate refusal retried — as the Blind Hunter's TLS row.
+  - `low` `patch` (Edge Case) `Expect`/`Keep-Alive` not reserved — grouped with the Blind Hunter's row.
+  - `low` `patch` (Edge Case) Limit applied after render — grouped with the Intent row.
+  - `false` `reject` (Edge Case) Links use `email_link_base`, not `issuer` — the intent names the stored `EmailLinkBase` as the issuer-derived base; it is never taken from request headers.
+
 ## Design Notes
 
 **Default copy:** short, plain and on brand. Name the Tenant, never "Gatekeep". Keep every string in one Notifications defaults file. For example:
@@ -179,3 +220,39 @@ deferred: []
 **Commands:**
 - **.NET build:** with `MSYS_NO_PATHCONV=1`, run `docker run --rm -v "D:/Projects/Personal/gatekeep:/src" -v gk-nuget:/root/.nuget -w /src mcr.microsoft.com/dotnet/sdk:10.0.403-noble sh -c 'dotnet build Gatekeep.slnx -p:NuGetAudit=false -v q'`. Expected: 0 warnings and 0 errors. Restore must succeed with the lockfiles updated.
 - **Isolation:** with Testcontainers, pinning the IPv4 as `run-tests.sh` does, run `EmailSendTests`, `Jobs/*`, `MigrateCommandTests`, `TenantPurge*`, `TenantTablesTests`, `CrossTenant*`, `Canary*` and `AuditCatalogue*`, plus the Architecture suite. Don't run the full Isolation suite. The local-only `.claude/worktrees` failure is expected.
+
+## Auto Run Result
+
+Status: done
+
+**Summary:** the Tenant-scoped `notifications.email.send` job. Its payload holds IDs and an optional Transit-encrypted credential. At send time, Operations reads the provider, resolves the User's email, applies the 5-per-15-minute per-recipient limit (over the limit, the mail is dropped and `held_back` is written), renders the Tenant's override or the built-in template by fixed substitution with links on `EmailLinkBase`, decrypts the provider secret and sends through the Kernel `IEmailSender`. `Adapters.Email` implements the six kinds: SMTP over MailKit on a stream opened by `Adapters.Egress`, and the HTTP kinds through `EgressHttp`. The migration adds `user.email`, the `email_template` table, the `gk_worker` grants and the re-rendered job guard.
+
+**Files changed (main ones):**
+- `src/Gatekeep.Kernel/Email/IEmailSender.cs`: the port, the message and result types, and the reserved header names.
+- `src/Adapters/Email/*`: `EmailSender` (the HTTP kinds and SES via SigV4) and `SmtpDelivery` (MailKit).
+- `src/Adapters/Egress/EgressSmtp.cs`, plus `SigV4.cs` moved here from ObjectLock: the vetted SMTP connect and chain policy, and the shared signer.
+- `src/Modules/Notifications/*`: template IDs, defaults, the renderer and store, transports, provider reads, events and purge.
+- `src/Modules/Operations/Core/EmailSendJobs.cs`, plus registry entries: the handler.
+- `src/Modules/Identity/Core/UserEmails.cs`: the email read by User ID.
+- `src/Adapters/Postgres/Migrations/Migration20261126000000SendEmail.cs` and `TableRegistry.cs`: schema, grants and guard.
+- Hosting wiring for the Worker, plus docs (threat model TB-12, audit events, module dependencies).
+- Tests: `EmailSendTests`, `EmailTemplateRendererTests`, `EmailTestDoubles`, `EgressSmtpTests`, the canary flow, and updates to the architecture and isolation tests.
+
+**Review findings:** 36 findings. 14 entries were patched:
+- the exhausted job now goes dead;
+- the limit now comes before render;
+- the credential decrypt is bounded and its bytes zeroed;
+- a doc comment is fixed, as is an indent;
+- `Expect` and `Keep-Alive` are reserved;
+- the SigV4 service is now required;
+- tests are added for custody unavailable, SMTP AUTH 535, a drop on QUIT and the chain policy.
+
+None deferred. All the rest were rejected, with each reason in the triage log.
+
+**Follow-up review recommended:** true. Four `medium` entries were patched on a first pass, so two risks are unverified: the changed retry path (transient → dead, with the payload left as ciphertext) and the reordered limit (render failures now use up a slot). Patched counts: high 0, medium 4, low 10.
+
+**Verification:** no compile or test ran locally. The local SDKs don't match the `global.json` pin of 10.0.403, and Docker Desktop wasn't running. CI is the test source of truth; it runs on the PR.
+
+**Residual risks:**
+- A provider that accepts a message and then reports a transient failure can cause duplicate deliveries that the limit doesn't count.
+- A revoked SMTP certificate is accepted until it expires (accepted risk in TB-12).

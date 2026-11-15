@@ -99,13 +99,6 @@ public static class TableRegistry
     /// <summary>Story 2.9: an authorization row changes only by the one revocation path: its status.</summary>
     private static readonly IReadOnlyList<string> AuthorizationUpdateColumns = ["status", "concurrency_token"];
 
-    /// <summary>A Tenant purge's read (Story 1.29): the one column its <c>WHERE</c> names, never the content.</summary>
-    private static readonly IReadOnlyDictionary<string, IReadOnlyList<ColumnGrant>> PurgeColumns =
-        new Dictionary<string, IReadOnlyList<ColumnGrant>>
-        {
-            [Worker] = [new ColumnGrant(Select, ["tenant_id"])],
-        };
-
     public static readonly IReadOnlyList<TableEntry> Tables =
     [
         // Story 1.27: Host.Admin creates a Tenant, always creating, which its creation Operation's
@@ -315,11 +308,15 @@ public static class TableRegistry
         // and writes Sessions, transactions and OpenIddict's entities. Only a Tenant's deletion
         // deletes (Story 1.29): its Operation's purges, as gk_worker in the Tenant's own scope, which
         // read nothing but the tenant_id their WHERE names.
+        // Story 4.5: the email send job, as gk_worker, resolves a recipient from a User's ID: the ID and email only.
         new("user", TableClass.Tenant, "Identity", TableUse.Runtime, new Dictionary<string, IReadOnlyList<string>>
         {
             [Hosted] = [Select],
             [Worker] = [Delete],
-        }, PurgeColumns, RowGuard),
+        }, new Dictionary<string, IReadOnlyList<ColumnGrant>>
+        {
+            [Worker] = [new ColumnGrant(Select, ["tenant_id", "id", "email"])],
+        }, RowGuard),
         // Story 9.3: a Signing Key revocation, as gk_admin, may also end every Session of its Tenant by the
         // one revocation path, reading only the columns its WHERE names and setting only the end. Story 4.3:
         // the expired-state purge, as gk_worker, reads only whether a Session is over.
@@ -760,8 +757,22 @@ public static class TableRegistry
             },
             RowGuard),
 
+        // Story 4.5: a Tenant's overrides of the five email templates, a subject and a plain-text body each. Story 15.4
+        // writes them; Host.Worker reads them to send, and deletes them in a Tenant's purge.
+        new(
+            "email_template",
+            TableClass.Tenant,
+            "Notifications",
+            TableUse.Configuration,
+            new Dictionary<string, IReadOnlyList<string>>
+            {
+                [Worker] = [Select, Delete],
+            },
+            Triggers: RowGuard),
+
         // Story 2.5 (AD-14): Tenant attempt counters, such as token requests per Tenant and per source,
         // and cross-Tenant mismatches per source. Host.Hosted counts; only a Tenant's deletion deletes.
+        // Story 4.5: Host.Worker counts emails per recipient the same way.
         new(
             "tenant_attempt",
             TableClass.Tenant,
@@ -770,13 +781,14 @@ public static class TableRegistry
             new Dictionary<string, IReadOnlyList<string>>
             {
                 [Hosted] = [Select, Insert],
-                [Worker] = [Delete],
+                [Worker] = [Select, Insert, Delete],
             },
             new Dictionary<string, IReadOnlyList<ColumnGrant>>
             {
                 // Counting: the window and the count. Never the Tenant, policy or subject.
                 [Hosted] = [new ColumnGrant(Update, ["window_start", "attempts"])],
-                [Worker] = [new ColumnGrant(Select, ["tenant_id"])],
+                // Story 2.5's purge read, kept beside Story 4.5's table SELECT, and the count.
+                [Worker] = [new ColumnGrant(Select, ["tenant_id"]), new ColumnGrant(Update, ["window_start", "attempts"])],
             },
             RowGuard,
             Unlogged: true),

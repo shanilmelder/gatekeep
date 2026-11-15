@@ -150,7 +150,8 @@ public sealed class ObjectLockFixture : IAsyncLifetime
             asRoot ? RootUser : AccessKeyId,
             asRoot ? RootPassword : SecretAccessKey,
             Region,
-            DateTimeOffset.UtcNow);
+            DateTimeOffset.UtcNow,
+            SigV4.S3);
 
         var response = await http.SendAsync(request);
         var text = await response.Content.ReadAsStringAsync();

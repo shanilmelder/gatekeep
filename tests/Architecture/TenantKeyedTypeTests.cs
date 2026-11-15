@@ -175,12 +175,14 @@ public sealed class TenantKeyedTypeTests
     /// <summary>
     /// Where the Tenant limiter's policies are declared (Story 2.5, AD-14): Authentication's, whose
     /// limiter counts only in a Tenant scope, in <c>tenant_attempt</c> keyed by <c>tenant_id</c>, and
-    /// Protocol's <c>TokenRequestLimits</c>, which carries those same policies to the token endpoint.
+    /// Protocol's <c>TokenRequestLimits</c>, which carries those same policies to the token endpoint, and
+    /// Notifications' contract, whose per-recipient email policy the send job counts on that same limiter (Story 4.5).
     /// </summary>
     private static readonly string[] TenantLimiterTypes =
     [
         "Gatekeep.Modules.Authentication.Contracts.AuthenticationContract",
         "Gatekeep.Modules.Protocol.Contracts.TokenRequestLimits",
+        "Gatekeep.Modules.Notifications.Contracts.NotificationsContract",
     ];
 
     private static bool OnTenantLimiter(string policy) =>

@@ -65,6 +65,8 @@ internal sealed class JobDatabase
 
     public string Connection(string role) => _postgres.RoleConnection(role, Name);
 
+    public string SuperuserConnectionString => _postgres.SuperuserConnection(Name);
+
     public NpgsqlDataSource Source(string role) => NpgsqlDataSource.Create(Connection(role));
 
     public IJobRunner Runner(
@@ -129,6 +131,9 @@ internal sealed class FakeKeyCustody : IKeyCustody
 
     public List<string> KeysUsed { get; } = [];
 
+    /// <summary>Keys whose name starts with this fail to decrypt as <see cref="KeyCustodyFailure.Unavailable"/>, as if custody were down.</summary>
+    public string? UnavailableKeyPrefix { get; init; }
+
     public Task<KeyCiphertext> EncryptAsync(KeyName key, Guid? tenantId, Secret<byte[]> plaintext, CancellationToken cancellationToken)
     {
         Encrypts++;
@@ -141,6 +146,11 @@ internal sealed class FakeKeyCustody : IKeyCustody
     {
         Decrypts++;
         KeysUsed.Add(key.Value);
+        if (UnavailableKeyPrefix is { } prefix && key.Value.StartsWith(prefix, StringComparison.Ordinal))
+        {
+            throw new KeyCustodyException(key.Value, KeyOperation.Decrypt, KeyCustodyFailure.Unavailable);
+        }
+
         var bytes = Convert.FromBase64String(ciphertext.Value[Prefix.Length..]);
         var binding = Encoding.UTF8.GetBytes($"{tenantId}|");
 

@@ -1,6 +1,9 @@
 using System.Reflection;
 using System.Security.Cryptography;
 using Gatekeep.Adapters.AlertChannel;
+using Gatekeep.Adapters.Email;
+using Gatekeep.Kernel.Email;
+using Gatekeep.Modules.Operations.Contracts;
 using Gatekeep.Adapters.Hosting;
 using Gatekeep.Adapters.ObjectLock;
 using Gatekeep.Kernel.Alerts;
@@ -58,6 +61,33 @@ public sealed class OffServerRegistrationTests : IDisposable
 
         Assert.Contains("new HostProfile(", program, StringComparison.Ordinal);
         Assert.DoesNotContain("UsesOffServer", program, StringComparison.Ordinal);
+        Assert.DoesNotContain("SendsEmail", program, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Story 4.5: Host.Worker's own profile sends email, so the shared startup gives it the real <see cref="EmailSender"/>,
+    /// and the Worker's job wiring hands that sender to the runner. Without it every send job would fail.
+    /// </summary>
+    [Fact]
+    public async Task Worker_profile_resolves_the_email_sender_and_its_runner_gets_it()
+    {
+        var profile = WorkerProfile();
+        Assert.True(profile.SendsEmail);
+
+        await using var app = Build(profile, addJobs: true);
+
+        var sender = Assert.IsType<EmailSender>(app.Services.GetRequiredService<IEmailSender>());
+        var runner = app.Services.GetRequiredService<IJobRunner>();
+        var field = runner.GetType().GetField("_email", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        Assert.Same(sender, field.GetValue(runner));
+    }
+
+    [Fact]
+    public async Task Profile_that_doesnt_send_email_gets_no_sender()
+    {
+        await using var app = Build(new HostProfile("Host.Admin", ["Admin"], HasPublicEndpoint: false));
+
+        Assert.Null(app.Services.GetService<IEmailSender>());
     }
 
     /// <summary>Host.Worker's <c>WorkerSettings.Profile</c>, from the assembly the Worker runs as.</summary>
@@ -69,7 +99,7 @@ public sealed class OffServerRegistrationTests : IDisposable
     }
 
     /// <summary>The shared startup for <paramref name="profile"/>, with every setting valid and nothing reachable.</summary>
-    private WebApplication Build(HostProfile profile)
+    private WebApplication Build(HostProfile profile, bool addJobs = false)
     {
         string Secret(string contents)
         {
@@ -99,6 +129,15 @@ public sealed class OffServerRegistrationTests : IDisposable
         var builder = WebApplication.CreateBuilder();
         builder.Configuration.AddInMemoryCollection(settings);
         builder.AddGatekeepHost(profile);
+        if (addJobs)
+        {
+            // Host.Worker's own job wiring, from the assembly the Worker runs as. Nothing connects until a job runs.
+            var worker = Assembly.LoadFrom(BuildOutput.AssemblyPath("Gatekeep.Host.Worker", "Gatekeep.Host.Worker"));
+            worker.GetType("Gatekeep.Host.Worker.WorkerJobs", throwOnError: true)!
+                .GetMethod("AddGatekeepJobs", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static)!
+                .Invoke(null, [builder.Services]);
+        }
+
         return builder.Build();
     }
 }

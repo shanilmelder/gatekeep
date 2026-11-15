@@ -55,12 +55,45 @@ internal static partial class EmailProviderStore
         RETURNING updated_at
         """;
 
+    // Host.Worker only: gk_admin may not read the ciphertext.
+    private const string SelectForSend =
+        """
+        SELECT kind, settings::text, from_address, from_name, updated_at, secret_ciphertext
+        FROM email_provider WHERE tenant_id = @tenant_id
+        """;
+
     internal const string Delete = "DELETE FROM email_provider WHERE tenant_id = @tenant_id";
 
     public static async Task<EmailProviderConfiguration?> ReadAsync(CommandContext context, CancellationToken cancellationToken)
     {
         var tenantId = RequireTenant(context);
         return await SelectAsync(context, tenantId, cancellationToken);
+    }
+
+    /// <summary>The provider with its secret's ciphertext, as Host.Worker reads it to send (Story 4.5); null when there is none.</summary>
+    public static async Task<EmailDelivery?> ReadForSendAsync(CommandContext context, CancellationToken cancellationToken)
+    {
+        var tenantId = RequireTenant(context);
+
+        await using var command = context.CreateCommand();
+        command.CommandText = SelectForSend;
+        Add(command, "tenant_id", tenantId);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        if (!await reader.ReadAsync(cancellationToken))
+        {
+            return null;
+        }
+
+        var kind = reader.GetString(0);
+        var settings = EmailProviderRules.Parse(reader.GetString(1));
+        var provider = new EmailProviderConfiguration(
+            kind,
+            settings,
+            reader.GetString(2),
+            reader.IsDBNull(3) ? null : reader.GetString(3),
+            reader.GetFieldValue<DateTimeOffset>(4),
+            EmailProviderRules.UsesSecret(kind, settings));
+        return new EmailDelivery(provider, reader.IsDBNull(5) ? null : reader.GetString(5));
     }
 
     public static async Task<EmailProviderSave> SaveAsync(

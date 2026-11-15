@@ -136,6 +136,12 @@ public static class TenantLabelChange
 public sealed record TenantLabelState(TenantLabel Label, TenantStatus Status);
 
 /// <summary>
+/// A Tenant as its emails name it (Story 4.5): its display name, the email link base stored at creation, which every
+/// email link starts with, and its status.
+/// </summary>
+public sealed record TenantEmailIdentity(string Name, string EmailLinkBase, TenantStatus Status);
+
+/// <summary>
 /// A Tenant's status and stored <c>subdomain</c> host, as read under its row lock by a deletion's
 /// start (Story 1.29). The host is null for a Tenant with none, which no typed value then matches.
 /// </summary>
@@ -217,6 +223,13 @@ public interface ITenants
     /// </summary>
     /// <exception cref="InvalidOperationException">The context isn't <paramref name="tenantId"/>'s.</exception>
     Task<string?> GetIssuerAsync(CommandContext context, Guid tenantId, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// What an email of the Tenant names (Story 4.5): its display name, its email link base as stored at creation (AD-6),
+    /// never a request's host, and its status, read with no lock, in its own context; null when there is no such Tenant.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The context isn't <paramref name="tenantId"/>'s.</exception>
+    Task<TenantEmailIdentity?> GetEmailIdentityAsync(CommandContext context, Guid tenantId, CancellationToken cancellationToken);
 
     /// <summary>
     /// Sets an <c>active</c> Tenant's label, and nothing else, in its own context, and appends

@@ -311,4 +311,22 @@ public static class SecurityLimits
 
     /// <summary>The longest From name an email provider sends with (Story 4.4), as the table checks.</summary>
     public const int MaxEmailFromNameLength = 128;
+
+    /// <summary>
+    /// The most emails one recipient is sent in <see cref="EmailPerRecipientWindow"/>: 5 (Story 4.5, AD-14), counted per
+    /// User. One past it is held back: dropped and logged, never delayed, so a flood is never delivered later.
+    /// </summary>
+    public const int EmailPerRecipientLimit = 5;
+
+    /// <summary>The fixed window emails per recipient are counted in: 15 minutes (Story 4.5).</summary>
+    public static readonly TimeSpan EmailPerRecipientWindow = TimeSpan.FromMinutes(15);
+
+    /// <summary>How long one send may take, connecting included, before it is retried: 30 seconds (Story 4.5).</summary>
+    public static readonly TimeSpan EmailSendTimeout = TimeSpan.FromSeconds(30);
+
+    /// <summary>The longest email template subject a Tenant may store (Story 4.5), as the table checks.</summary>
+    public const int MaxEmailTemplateSubjectLength = 200;
+
+    /// <summary>The longest email template body a Tenant may store (Story 4.5), as the table checks.</summary>
+    public const int MaxEmailTemplateBodyLength = 10_000;
 }
