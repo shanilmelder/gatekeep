@@ -24,7 +24,7 @@ namespace Gatekeep.Tests.Isolation.Protocol;
 
 /// <summary>
 /// Host.Hosted's public pipeline as <c>Program.cs</c> builds it (Tenant resolution, then Hosted Login's
-/// files, the Protocol module, routing, the theme stylesheet and the fixed 404), on a TestServer, with
+/// files, the Protocol module, routing, the theme stylesheet, Hosted Login's sign-in surface and the fixed 404), on a TestServer, with
 /// step pages over the built Hosted Login bundle (<see cref="TestStepPages"/>), with the real Protocol
 /// registration over a migrated database as <c>gk_hosted</c> and the real OpenBao through the
 /// <c>host-hosted</c> login, wrapped so a test can count or fail custody calls. Logs are captured
@@ -62,11 +62,11 @@ internal sealed class ProtocolHost : IAsyncDisposable
     /// <summary>
     /// Starts the host. <paramref name="limits"/> replaces the token request limits, for a test that
     /// can't send a thousand requests; <paramref name="logging"/> replaces the capturing logger, for a
-    /// test that needs the production scrubbing pipeline. <paramref name="signIn"/> completes the
-    /// authorization endpoint's sign-ins (Story 2.9): by default the release build's
-    /// <see cref="UnavailableSignIn"/>, which completes none; a code flow test passes the test-only one.
-    /// <paramref name="configure"/> changes the services once Protocol registered its own, for a test
-    /// that wraps one.
+    /// test that needs the production scrubbing pipeline. The step after Login's email is the test-only
+    /// <see cref="TestOnlyCredentialStep"/> (Story 4.2), which authenticates only an identifier of its own form,
+    /// so any other email gets the release build's answer; <paramref name="releaseSignIn"/> leaves Authentication's
+    /// release default in place instead. <paramref name="configure"/> changes the services once Protocol
+    /// registered its own, for a test that wraps one.
     /// </summary>
     public static async Task<ProtocolHost> StartAsync(
         string hostedConnection,
@@ -74,7 +74,7 @@ internal sealed class ProtocolHost : IAsyncDisposable
         TimeProvider? time = null,
         TokenRequestLimits? limits = null,
         Action<ILoggingBuilder>? logging = null,
-        Func<IServiceProvider, IAuthorizationSignIn>? signIn = null,
+        bool releaseSignIn = false,
         Action<IServiceCollection>? configure = null)
     {
         var custody = new ControlledCustody(bao.Custody(OpenBaoFixture.Hosted));
@@ -105,10 +105,11 @@ internal sealed class ProtocolHost : IAsyncDisposable
 
         builder.Services.AddSingleton<IKeyCustody>(custody);
         builder.Services.AddSingleton(AuditContract.CreateAppender());
-        // With none, Protocol's own default stands, as on Host.Hosted.
-        if (signIn is not null)
+        // With none, Authentication's release default stands, as on Host.Hosted.
+        if (!releaseSignIn)
         {
-            builder.Services.AddSingleton(signIn);
+            builder.Services.AddSingleton<Gatekeep.Modules.Authentication.Contracts.ICredentialStep>(
+                provider => new TestOnlyCredentialStep(provider.GetRequiredService<TimeProvider>()));
         }
 
         builder.Services.AddGatekeepProtocol(_ => hostedConnection, TestStepPages.Create);
@@ -132,6 +133,7 @@ internal sealed class ProtocolHost : IAsyncDisposable
         app.UseGatekeepProtocol();
         app.UseRouting();
         app.MapThemeStylesheet();
+        app.MapGatekeepLogin();
         app.MapFallback(TenancyContract.NotFoundAsync);
 
         await app.StartAsync(TestContext.Current.CancellationToken);

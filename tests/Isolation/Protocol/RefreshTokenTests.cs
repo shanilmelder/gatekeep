@@ -652,8 +652,7 @@ public sealed class RefreshTokenTests(PostgresFixture postgres, OpenBaoFixture b
         await using var host = await ProtocolHost.StartAsync(
             flow.Database.Hosted,
             bao,
-            limits: limits,
-            signIn: provider => new TestAuthorizationSignIn(provider.GetRequiredService<TimeProvider>()));
+            limits: limits);
 
         // The code exchange is the first token request, the refresh the second; the third is over the limit.
         var r1 = await OfflineAsync(host, flow);

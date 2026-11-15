@@ -9,7 +9,16 @@
 //
 // Any other path is a step page. ?fixture= picks its step: generic_error (the default), hostile (a
 // Tenant name that tries to close the block), unknown (an unknown step name), broken (unparsable
-// JSON) or missing (no data block at all).
+// JSON), missing (no data block at all), login (Story 4.2's Login step), login_kept (Login with
+// the email kept from a restart), or a redirect step to another origin, which the client must never
+// follow: redirect_protocol_relative, redirect_absolute, redirect_backslash or redirect_tab.
+//
+// Story 4.2: Hosted Login's two API requests are stubbed, as Host.Hosted answers them, each refusing
+// a request without the fixture's CSRF token or this server's exact Origin with 403:
+// - POST /login/api/identifier: "nope" gets Login with the email_invalid field error, redirect@example.com
+//   a redirect step to /login/?fixture=generic_error, and any other email Generic error
+//   temporarily_unavailable, as a release build answers.
+// - POST /login/api/transaction/extend: Login with a fresh 30-minute life.
 //
 //   node hosted-step-server.mjs <port>
 
@@ -90,8 +99,35 @@ const genericError = (tenant) => ({
   csrfToken: null,
 });
 
+/** The fixture transaction's CSRF token, which the stubbed API requires. */
+export const CSRF = 'fixture-csrf-token';
+
+/** A sign-in transaction's sliding life, as SecurityLimits.SignInTransactionLifetime: 30 minutes. */
+const LIFE = 1800;
+
+const login = (email = null, error = null, expiresInSeconds = LIFE) => ({
+  step: 'login',
+  stepVersion: 1,
+  expiresInSeconds,
+  data: { tenant: 'Northwind', email, error },
+  csrfToken: CSRF,
+});
+
 /** Each fixture's data block text, before escaping; null leaves the block out. */
 const fixtures = {
+  login: JSON.stringify(login()),
+  login_kept: JSON.stringify(login('kept@example.com')),
+  ...Object.fromEntries(
+    Object.entries({
+      redirect_protocol_relative: '//evil.example/x',
+      redirect_absolute: 'https://evil.example',
+      redirect_backslash: '/\\evil.example',
+      redirect_tab: '/\t/evil.example',
+    }).map(([name, location]) => [
+      name,
+      JSON.stringify({ step: 'redirect', stepVersion: 2, expiresInSeconds: LIFE, data: { tenant: 'Northwind', location }, csrfToken: null }),
+    ]),
+  ),
   generic_error: JSON.stringify(genericError('Northwind')),
   hostile: JSON.stringify(genericError('</script><b>x')),
   unknown: JSON.stringify({ ...genericError('Northwind'), step: 'nope' }),
@@ -120,6 +156,17 @@ function stepPage(fixture) {
     .replace(STEP_MARKER, block);
 }
 
+/** The stubbed API's answer to one request, as Host.Hosted's /login/api endpoints answer. */
+function answer(pathname, body) {
+  if (pathname === '/login/api/transaction/extend') return login();
+  const email = typeof body.email === 'string' ? body.email.trim() : '';
+  if (email === 'nope') return login(email, 'email_invalid');
+  if (email === 'redirect@example.com') {
+    return { step: 'redirect', stepVersion: 3, expiresInSeconds: LIFE, data: { tenant: 'Northwind', location: '/login/?fixture=generic_error' }, csrfToken: null };
+  }
+  return { ...genericError('Northwind'), data: { ...genericError('Northwind').data, code: 'temporarily_unavailable' } };
+}
+
 const types = { '.js': 'text/javascript', '.css': 'text/css', '.woff2': 'font/woff2', '.svg': 'image/svg+xml' };
 
 const server = createServer((request, response) => {
@@ -130,6 +177,25 @@ const server = createServer((request, response) => {
     response.end(request.method === 'HEAD' ? undefined : body);
   };
 
+  if (request.method === 'POST' && (url.pathname === '/login/api/identifier' || url.pathname === '/login/api/transaction/extend')) {
+    let raw = '';
+    request.setEncoding('utf8');
+    request.on('data', (chunk) => (raw += chunk));
+    request.on('end', () => {
+      const json = (status, value) => send(status, 'application/json; charset=utf-8', JSON.stringify(value), { 'Cache-Control': 'no-store', Pragma: 'no-cache' });
+      const origin = `http://${request.headers.host}`;
+      if (request.headers.origin !== origin) return json(403, { ...genericError('Northwind'), data: { ...genericError('Northwind').data, code: 'origin_mismatch' } });
+      if (request.headers['x-gatekeep-csrf'] !== CSRF) return json(403, { ...genericError('Northwind'), data: { ...genericError('Northwind').data, code: 'csrf_mismatch' } });
+      let body;
+      try {
+        body = JSON.parse(raw);
+      } catch {
+        body = {};
+      }
+      return json(200, answer(url.pathname, body ?? {}));
+    });
+    return;
+  }
   if (request.method !== 'GET' && request.method !== 'HEAD') return send(404);
   if (url.pathname.startsWith('/login/assets/')) {
     // Only a file directly in dist/assets: no directory, nothing outside it.
@@ -147,7 +213,8 @@ const server = createServer((request, response) => {
 
   const fixture = url.searchParams.get('fixture') ?? 'generic_error';
   if (!Object.hasOwn(fixtures, fixture)) return send(404);
-  return send(400, 'text/html; charset=utf-8', stepPage(fixture), { 'Cache-Control': 'no-store', Pragma: 'no-cache' });
+  const status = fixture.startsWith('login') ? 200 : 400;
+  return send(status, 'text/html; charset=utf-8', stepPage(fixture), { 'Cache-Control': 'no-store', Pragma: 'no-cache' });
 });
 
 server.listen(Number(port), '127.0.0.1', () => console.log(`Hosted Login step pages on http://127.0.0.1:${port}/login/`));

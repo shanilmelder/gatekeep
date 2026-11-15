@@ -3,6 +3,7 @@ using Gatekeep.Kernel.Limits;
 using Gatekeep.Kernel.Persistence;
 using Gatekeep.Kernel.RateLimiting;
 using Gatekeep.Modules.Authentication.Core;
+using Gatekeep.Modules.Sessions.Contracts;
 
 namespace Gatekeep.Modules.Authentication.Contracts;
 
@@ -48,9 +49,53 @@ public static class AuthenticationContract
     /// <summary>The fixed subject a per-Tenant limit is counted under.</summary>
     public const string TenantSubject = "tenant";
 
-    /// <summary>Sign-in over the Kernel audit port. <paramref name="time"/> sets every expiry.</summary>
-    public static IAuthentication CreateAuthentication(IAuditAppender audit, TimeProvider time) =>
-        new AuthenticationService(audit, time);
+    /// <summary>
+    /// Sign-in over the Kernel audit port. <paramref name="time"/> sets every expiry. Sessions are issued through
+    /// Sessions' own <c>ISessions</c>, and the step after Login's email is <paramref name="credentialStep"/>'s:
+    /// <see cref="NoCredentialStep"/>, which offers none, unless one is given (only the tests give one, Story 4.2).
+    /// </summary>
+    public static IAuthentication CreateAuthentication(IAuditAppender audit, TimeProvider time, ICredentialStep? credentialStep = null) =>
+        new AuthenticationService(audit, time, SessionsContract.CreateSessions(audit, time), credentialStep ?? NoCredentialStep);
+
+    /// <summary>
+    /// The release build's credential step (Story 4.2): it offers none, so a sign-in past Login's email can't
+    /// continue until Story 4.9's password step. It is the only credential step in <c>src</c>.
+    /// </summary>
+    public static ICredentialStep NoCredentialStep { get; } = new NoCredentialStep();
+
+    /// <summary>
+    /// Login's email as a sign-in records it (Story 4.2): the input trimmed, when that is a valid address of at
+    /// most 254 characters: one <c>@</c> with a local part and a dotted domain, and no whitespace or control
+    /// character. False otherwise, and Login shows "Enter a valid email address." with nothing written.
+    /// </summary>
+    public static bool TryNormalizeEmail(string? input, out string email)
+    {
+        email = string.Empty;
+        var trimmed = input?.Trim();
+        if (string.IsNullOrEmpty(trimmed) || trimmed.Length > SecurityLimits.MaxEmailLength
+            || trimmed.Any(static c => char.IsWhiteSpace(c) || char.IsControl(c)))
+        {
+            return false;
+        }
+
+        var at = trimmed.LastIndexOf('@');
+        if (at <= 0 || at != trimmed.IndexOf('@') || at == trimmed.Length - 1)
+        {
+            return false;
+        }
+
+        var domain = trimmed[(at + 1)..];
+        if (!domain.Contains('.', StringComparison.Ordinal) || domain.StartsWith('.') || domain.EndsWith('.')
+            || domain.Contains("..", StringComparison.Ordinal)
+            || !System.Net.Mail.MailAddress.TryCreate(trimmed, out var parsed)
+            || !string.Equals(parsed.Address, trimmed, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        email = trimmed;
+        return true;
+    }
 
     /// <summary>
     /// The Kernel <see cref="IRateLimiter"/> for Tenant attempts, such as token requests (AD-14, Story

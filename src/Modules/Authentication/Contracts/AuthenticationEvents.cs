@@ -13,4 +13,35 @@ public static class AuthenticationEvents
         new AuditTypeCode("authentication.signin_transaction.started"),
         "A sign-in transaction began for an Application. The caller is anonymous, so no person is named.",
         AuditOutcome.Success);
+
+    /// <summary>
+    /// Written each time a sign-in transaction's sliding life is extended (Story 4.2): by opening the Login page, by
+    /// "Keep going", and by recording Login's email. A stale step or an invalid email extends nothing. Anonymous.
+    /// </summary>
+    public static readonly AuditEventDefinition SignInTransactionExtended = new(
+        new AuditTypeCode("authentication.signin_transaction.extended"),
+        "A sign-in transaction's 30-minute sliding life was extended: its Login page was opened, Keep going was chosen or its email was recorded. Anonymous.",
+        AuditOutcome.Success);
+
+    /// <summary>Written when a sign-in transaction records the email entered at Login (Story 4.2). Anonymous, and it holds no email.</summary>
+    public static readonly AuditEventDefinition SignInTransactionIdentified = new(
+        new AuditTypeCode("authentication.signin_transaction.identified"),
+        "A sign-in transaction recorded the email entered at Login. The caller is anonymous, and the email isn't in the event.",
+        AuditOutcome.Success);
+
+    /// <summary>Written when an authenticated sign-in transaction completes its authorization request (Story 4.2). Anonymous.</summary>
+    public static readonly AuditEventDefinition SignInTransactionCompleted = new(
+        new AuditTypeCode("authentication.signin_transaction.completed"),
+        "An authenticated sign-in transaction completed its authorization request, and can't be used again. The caller is anonymous.",
+        AuditOutcome.Success);
+
+    /// <summary>
+    /// Written when a Hosted Login request is refused for its sign-in transaction or its request checks (Story 4.2):
+    /// no, a completed or another Application's transaction, a step not yet passed, or a wrong Origin or CSRF token.
+    /// Anonymous, with no target.
+    /// </summary>
+    public static readonly AuditEventDefinition SignInTransactionRefused = new(
+        new AuditTypeCode("authentication.signin_transaction.refused"),
+        "A Hosted Login request was refused: its sign-in transaction was missing, completed, another Application's or not at that step, or its Origin or CSRF token was wrong. Anonymous.",
+        AuditOutcome.Failure);
 }

@@ -106,6 +106,22 @@ export interface Messages {
   hostedFallbackTitle: string;
   /** Hosted Login's fixed `<noscript>` text, written into index.html at build: JavaScript is required. */
   hostedNoScript: string;
+  /** A Hosted Login page's `<title>` after a failed submit (EXPERIENCE.md, Focus and titles). Placeholder: {title}, the usual title. */
+  hostedErrorTitle: string;
+  /** Login's heading (Story 4.2). */
+  loginTitle: string;
+  /** Login's subtitle, naming the Tenant, never Gatekeep. Placeholder: {tenant}. */
+  loginSubtitle: string;
+  /** Login's email field label. */
+  loginEmailLabel: string;
+  /** Login's field error for an email that isn't a valid address (code email_invalid). */
+  emailInvalid: string;
+  /** The sign-in expiry warning's heading, two minutes before the sign-in transaction expires (Story 4.2, UX-DR33). */
+  expiryWarningTitle: string;
+  /** The expiry warning's body: what Keep going does. Keep it naming `keepGoing`. */
+  expiryWarningBody: string;
+  /** The expiry warning's one action, which extends the sign-in. */
+  keepGoing: string;
   /** The Admin Dashboard's `<title>`, written into its index.html at build. */
   adminDocumentTitle: string;
   /** The product's name, which the Admin pages before a session speak for, as a Tenant's name does on Hosted Login. */
@@ -829,6 +845,14 @@ export const defaultMessages: Readonly<Messages> = Object.freeze({
   hostedPageTitle: '{heading} – {tenant}',
   hostedFallbackTitle: 'Sign in',
   hostedNoScript: 'Sign-in needs JavaScript. Turn it on in your browser, then reload this page.',
+  hostedErrorTitle: 'Error: {title}',
+  loginTitle: 'Welcome back',
+  loginSubtitle: 'Log in to {tenant} to continue',
+  loginEmailLabel: 'Email address',
+  emailInvalid: 'Enter a valid email address.',
+  expiryWarningTitle: 'Your session is about to expire.',
+  expiryWarningBody: 'Choose Keep going to stay on this page and carry on signing in.',
+  keepGoing: 'Keep going',
   adminDocumentTitle: 'Gatekeep Admin Dashboard',
   productName: 'Gatekeep',
   bootstrapTitle: 'Claim this Deployment',

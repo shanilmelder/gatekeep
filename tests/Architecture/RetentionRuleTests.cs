@@ -35,10 +35,15 @@ public class RetentionRuleTests
 
     /// <summary>
     /// Declarations that equal 90 days but aren't retention, each named in full so nothing else
-    /// slips through. Story 2.10: the §5.2 hard maximum of a refresh token's absolute lifetime.
+    /// slips through. Story 2.10: the §5.2 hard maximum of a refresh token's absolute lifetime. Story 4.2:
+    /// how long an expired sign-in transaction can still restart at Login, a sign-in window the spec names
+    /// SignInRestartRetention, not how long a Log or record is kept.
     /// </summary>
     private static readonly string[] NotRetention =
-        ["public static readonly TimeSpan HardRefreshTokenAbsoluteLifetime = TimeSpan.FromDays(90);"];
+    [
+        "public static readonly TimeSpan HardRefreshTokenAbsoluteLifetime = TimeSpan.FromDays(90);",
+        "public static readonly TimeSpan SignInRestartRetention = TimeSpan.FromHours(1);",
+    ];
 
     private static readonly Regex PeriodDeclaration = new(
         @"\b(?:int|long|short|uint|ulong|double|decimal|TimeSpan)\??\s+\w*(?i:retention|logdays|logfloor)\w*\s*(?:=|=>|\{)",

@@ -155,7 +155,7 @@ public sealed partial class HostedStepTests(PostgresFixture postgres, OpenBaoFix
             AssertHeaders(response);
         }
 
-        foreach (var path in new[] { "/login/assets/missing.js", "/login/index.html", "/login/", "/index.html" })
+        foreach (var path in new[] { "/login/assets/missing.js", "/login/index.html", "/index.html" })
         {
             using var missing = await SendAsync(port, path);
             Assert.Equal(HttpStatusCode.NotFound, missing.StatusCode);
@@ -165,6 +165,39 @@ public sealed partial class HostedStepTests(PostgresFixture postgres, OpenBaoFix
                 AssertHeaders(missing);
             }
         }
+    }
+
+    /// <summary>
+    /// Story 4.2 on the real host: a valid authorization request goes to Login with a host-only transaction cookie,
+    /// committed, and <c>/login</c> with that cookie is the Login step's page, with the AD-21 headers; without it,
+    /// the page is Generic error <c>invalid_transaction</c>. Program.cs maps the sign-in surface, as ProtocolHost does.
+    /// </summary>
+    [Fact]
+    public async Task A_valid_request_goes_to_Login_whose_page_is_the_Login_step()
+    {
+        var (port, clientId) = await StartAsync();
+
+        using var authorize = await SendAsync(port, AuthorizeUrl(clientId, Callback));
+        Assert.Equal(HttpStatusCode.Found, authorize.StatusCode);
+        Assert.Equal("/login", authorize.Headers.Location?.OriginalString);
+        var cookie = Assert.Single(authorize.Headers.GetValues("Set-Cookie"));
+        Assert.Matches("^__Host-gk_txn=[A-Za-z0-9_-]{43}; Path=/; Secure; HttpOnly; SameSite=Lax$", cookie);
+
+        using var page = await SendAsync(port, "/login", cookie: cookie.Split(';')[0]);
+        Assert.Equal(HttpStatusCode.OK, page.StatusCode);
+        Assert.True(page.Headers.CacheControl?.NoStore, "The Login page isn't no-store.");
+        AssertHeaders(page);
+        var body = await page.Content.ReadAsStringAsync(Cancellation);
+        AssertPage(body);
+        using (var step = StepPage.Read(body))
+        {
+            Assert.Equal("login", step.RootElement.GetProperty("step").GetString());
+            Assert.Equal(ProtocolDatabase.TestTenantName, step.RootElement.GetProperty("data").GetProperty("tenant").GetString());
+            Assert.Matches("^[A-Za-z0-9_-]{43}$", step.RootElement.GetProperty("csrfToken").GetString());
+        }
+
+        using var refused = await SendAsync(port, "/login/");
+        await StepPage.AssertGenericErrorAsync(refused, ProtocolDatabase.TestTenantName, "invalid_transaction");
     }
 
     public void Dispose()
@@ -264,11 +297,16 @@ public sealed partial class HostedStepTests(PostgresFixture postgres, OpenBaoFix
         + $"&client_id={Uri.EscapeDataString(clientId)}&redirect_uri={Uri.EscapeDataString(redirectUri)}"
         + $"&code_challenge={Pkce.New().Challenge}&code_challenge_method=S256";
 
-    private static async Task<HttpResponseMessage> SendAsync(int port, string path, string? trace = null)
+    private static async Task<HttpResponseMessage> SendAsync(int port, string path, string? trace = null, string? cookie = null)
     {
-        using var http = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false });
+        using var http = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false, UseCookies = false });
         using var request = new HttpRequestMessage(HttpMethod.Get, new Uri($"http://127.0.0.1:{port}{path}"));
         request.Headers.Host = Host;
+        if (cookie is not null)
+        {
+            request.Headers.Add("Cookie", cookie);
+        }
+
         if (trace is not null)
         {
             request.Headers.Add("traceparent", $"00-{trace}-{trace[..16]}-01");

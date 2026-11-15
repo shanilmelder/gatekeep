@@ -7,3 +7,4 @@
 // packages/ui/scripts/check-dependencies.mjs enforces.
 
 export { GenericErrorScreen, type GenericErrorScreenProps } from './GenericErrorScreen';
+export { LoginScreen, type LoginScreenProps } from './LoginScreen';

@@ -2,14 +2,29 @@
 title: 'Story 4.2: Bind sign-in transactions and issue Sessions'
 type: 'feature'
 created: '2026-11-15'
-status: 'ready-for-dev'
+status: 'done'
+baseline_revision: '0149fa60cc7cbfd317447641c309ba0504dad97a'
 review_loop_iteration: 0
-followup_review_recommended: false
+followup_review_recommended: true
 context:
   - '{project-root}/_bmad-output/implementation-artifacts/epic-4-context.md'
   - '{project-root}/_bmad-output/implementation-artifacts/spec-4-1-serve-hosted-login-step-screens.md'
 warnings: ['oversized']
-deferred: []
+deferred:
+  - summary: >-
+      Anonymous Hosted Login requests write audit events (refusals, and an extended event on every reload) with no rate limit.
+    evidence: |-
+      GET /login without a cookie, bad-Origin or bad-CSRF posts and unknown transactions each commit authentication.signin_transaction.refused, and each GET /login on a live transaction writes extended (the product owner chose to audit every extension). Nothing limits them per source or per Tenant; Epic 10 owns rate limits (IRateLimiter).
+    location: >-
+      src/Modules/Protocol/Core/HostedSignIn.cs (LoginEndpoints)
+    severity: medium
+  - summary: >-
+      signin_transaction.identifier keeps the email entered at Login until a purge removes the row.
+    evidence: |-
+      In release every sign-in stops after the email is recorded (no credential step before Story 4.9), and nothing removes expired transactions yet. Story 4.3's purge must remove expired rows, identifier included, after the one-hour restart retention.
+    location: >-
+      src/Adapters/Postgres/Migrations/Migration20261123000000BindSignInTransactions.cs
+    severity: medium
 ---
 
 <intent-contract>
@@ -183,6 +198,45 @@ deferred: []
 
 ## Review Triage Log
 
+### 2026-11-15 — Review pass
+- verdicts: 35 findings — high 2, medium 11, low 17, false 4, maybe-false 1
+- findings:
+  - `[high]` `[patch]` (blind) The resume trusts the URL's parameters: only the Application is compared, so a cross-site top-level GET carrying the Lax cookie could swap `redirect_uri` or the PKCE challenge on an authenticated transaction and get a code — the resume now requires the kept parameters to equal the stored ones exactly; tests for a tampered `redirect_uri`, `code_challenge` and `state`.
+  - `[medium]` `[patch]` (blind) `isSameOriginPath` passes `"/\t/evil.example"`, which the browser normalises to `//evil.example` — control characters are rejected and the location is resolved against the page origin; browser test with hostile locations.
+  - `[medium]` `[patch]` (blind) An expired transaction can be restarted repeatedly from one cookie within the hour — the restart retires the old row in the same command; a second restart with the old cookie is refused (test).
+  - `[medium]` `[defer]` (blind) Anonymous requests write unbounded audit events (refusals, `extended` on each reload) with no rate limit — rate limiting is Epic 10's (`IRateLimiter`), and every extension being audited was the product owner's decision; recorded for Epic 10.
+  - `[low]` `[patch]` (blind) The parsed `JsonDocument` is never disposed; `Content-Type` isn't checked — the document is disposed on every path. The media-type check is rejected: CSRF doesn't rely on it.
+  - `[low]` `[reject]` (blind) `GET /login` slides a transaction without CSRF — a slide only extends the life of the victim's own transaction; with the resume now tied to its exact parameters, a longer life grants nothing.
+  - `[low]` `[reject]` (blind) The countdown uses relative timers that throttle in background tabs — the server is authoritative: a late Keep going on an expired transaction gets the redirect to `/login`, which restarts it.
+  - `[low]` `[patch]` (blind) Unknown error codes are shown as the email error — lookup uses `Object.hasOwn`, and an unknown code makes the step unreadable (Generic error `invalid_step`).
+  - `[low]` `[reject]` (blind) The warning says "session" for the transaction — the copy is the spec's; to Users the sign-in is their session.
+  - `[medium]` `[patch]` (blind) In-place rotation overwrites `auth_time`/`amr` that earlier Token Families read on refresh (OIDC Core 12.2 wants the original) — `auth_time` and `amr` are anchored on the family at creation and read from there; a test refreshes the first family after a rotation.
+  - `[low]` `[reject]` (blind) No concurrency test for the step-version lock — `FindAsync` takes `FOR UPDATE`; a race test adds timing-dependent flakiness for a Postgres guarantee.
+  - `[low]` `[patch]` (blind) `IdentifyAsync` accepts emails the endpoint would refuse — the service now validates with `TryNormalizeEmail`.
+  - `[medium]` `[defer]` (blind) `signin_transaction.identifier` keeps emails with no removal until Story 4.3's purge — Story 4.3 purges expired transactions; recorded so its purge covers `identifier`.
+  - `[low]` `[patch]` (blind) Small inconsistencies: the `extended` description says every accepted request writes it; `SetSession` reads the clock twice — the description is corrected; the clock read is rejected (sub-second difference, no effect).
+  - `[low]` `[reject]` (blind) Unnamed CHECK constraints and no index on `authenticated_session_id` — no later migration targets them yet; the index belongs with a query that needs it (4.3).
+  - `[high]` `[patch]` (edge) Resume with different redirect_uri/state/nonce/code_challenge/scope — grouped with the blind high row; fixed.
+  - `[medium]` `[patch]` (edge) The same expired cookie spawns another live transaction each time — grouped with the restart row; fixed.
+  - `[low]` `[patch]` (edge) `JsonDocument` never disposed — grouped with the blind row; fixed.
+  - `[medium]` `[patch]` (edge) Tab or newline after the first slash passes the guard — grouped with the same-origin row; fixed.
+  - `[low]` `[patch]` (edge) An error code equal to a prototype key resolves to undefined — `Object.hasOwn`; fixed with the unknown-code row.
+  - `[low]` `[patch]` (edge) Keep going's stale closure can overwrite a newer step — a functional update only refreshes the expiry and CSRF token when the `stepVersion` still matches.
+  - `[low]` `[reject]` (edge) The claim "expiry restarts with the email kept" fails for an email typed on Login but not yet submitted — the server keeps the recorded email; keeping an unsubmitted one would need client state the props-only client doesn't hold. Losing a typed email after 28 idle minutes on Login is minor.
+  - `[false]` `[reject]` (edge) A previous User's Session stays valid after another User signs in on the browser — the spec's rule: rotation only for the same User; the other Session is that User's own and isn't fixation (no attacker-chosen value reaches a `__Host-`, HttpOnly cookie). Ending it would need a revocation reason outside 4.2.
+  - `[low]` `[patch]` (edge) `extended`'s description doesn't match what writes it — grouped with the description row; fixed.
+  - `[low]` `[reject]` (intent) Cookie isolation is shown by server lookups and attribute checks, not a browser — `__Host-` with no `Domain` is enforced by browsers; the tests pin the attributes and both Tenant directions.
+  - `[low]` `[reject]` (intent) A typed but unsubmitted email is lost at expiry — grouped with the edge row; same reason.
+  - `[false]` `[reject]` (intent) "The old one stops working" read as any prior Session — the spec settles same-User rotation (R3b); see the edge row.
+  - `[low]` `[reject]` (intent) The Application binding is checked only at resume; a cookie is a bearer value — `/login` carries no Application context, and the Application matters where the code is issued; device binding beyond the cookie is not in the requirements.
+  - `[false]` `[reject]` (intent) "Post-step URL" realised as a refused resume and a current-step answer — no step routes exist; the server picks the step from its record, which is the requirement's purpose.
+  - `[false]` `[reject]` (intent) Expiry within an hour restarts instead of refusing — AC6 requires restart at Login with the email kept; the expired transaction itself never continues.
+  - `[medium]` `[patch]` (verification) A resume of an expired authenticated transaction, or one whose Session ended, is untested — both cases added, asserting no code and no `completed` event.
+  - `[medium]` `[patch]` (verification) Rotation never presents an ended or expired same-User Session — case added: a new Session starts, no `rotated`, old row unchanged.
+  - `[medium]` `[patch]` (verification) The client's redirect guard is never exercised with a hostile location — browser case added with four hostile locations.
+  - `[medium]` `[patch]` (verification, other) Tab or newline bypass of `isSameOriginPath` — grouped with the same-origin row; fixed.
+  - `[maybe-false]` `[reject]` (verification, other) `GoToLoginAsync`'s failed-commit branch may be untested — settling it needs a coverage trace; if true it is low: an infrastructure-failure path that answers `server_error`.
+
 ## Design Notes
 
 **Why resume through `/connect/authorize`.** OpenIddict issues the code only inside its authorization endpoint, so completion returns there with a top-level GET. `gk_resume=1` ties that request to a completed, bound, single-use transaction. Its Session then counts as fresh, which avoids a `prompt=login` loop. Every other request takes the reuse-or-start path.
@@ -196,3 +250,34 @@ deferred: []
 - **JS:** in `gatekeep/tests:local`, run `pnpm -r build`, `pnpm --filter @gatekeep/ui check` and `test`, and the hosted-login tests. Expected: all pass.
 - **Browser:** run the Playwright `hosted-step` and `hosted-login` projects. Expected: all pass.
 - **Isolation:** with Testcontainers, pinning the IPv4 as `deploy/docker/run-tests.sh` does, run `SignInTransactionTests`, `Protocol/*`, `CrossTenant*`, `HostedStepTests`, `MigrateCommandTests` and `Sessions/*`, plus the Architecture suite. Don't run the full Isolation suite. The local-only `.claude/worktrees` Architecture failure is expected.
+
+## Auto Run Result
+
+**Summary:** `/connect/authorize` now reuses a live, fresh-enough Session or starts a sign-in transaction bound to the browser (`__Host-gk_txn`), Tenant and Application, and redirects to `/login`. Hosted Login serves the identifier step; `POST /login/api/identifier` and `/login/api/transaction/extend` check exact-host Origin, then a derived CSRF token, before reading anything. The transaction slides for 30 minutes (each slide audited), restarts at Login with the email kept after expiry, and returns the current step for a stale `stepVersion`. Authentication (through a test-only credential step until Story 4.9; release shows Generic error `temporarily_unavailable`) issues a new 256-bit Session identifier, stored as SHA-256, rotating a live same-User Session in place, and resumes `/connect/authorize` with `gk_resume=1`, which must match the transaction's stored parameters exactly and completes it once.
+
+**Files changed:**
+- `src/Gatekeep.Kernel/{Limits/SecurityLimits.cs,Secrets/OpaqueValues.cs}` -- new limits and the one opaque-value helper.
+- `src/Adapters/Postgres/Migrations/Migration20261123000000BindSignInTransactions.cs` -- `step_version`, `identifier`, `authenticated_session_id`, `completed_at`.
+- `src/Modules/Sessions/**` -- find live, touch, start-or-rotate (`sessions.session.rotated`); families read their own `auth_time`/`amr`.
+- `src/Modules/Authentication/**` -- find, restart (retiring the old row), extend, identify, complete, refuse; the credential-step port with an empty default; four new events.
+- `src/Modules/Protocol/**` -- `HostedSignIn.cs` (the real `IAuthorizationSignIn` and the `/login` endpoints), authorize changes, `login` and `redirect` steps; `UnavailableSignIn` removed.
+- `src/Gatekeep.Host.Hosted/Program.cs` -- maps the Login endpoints.
+- `packages/hosted-screens/src/LoginScreen.tsx`, `packages/ui/src/messages.tsx`, `apps/hosted-login/src/**` -- Login, the expiry warning, the API client and the guarded navigation.
+- Tests: new `SignInTransactionTests`, `HostedBrowser`, `TestOnlyCredentialStep`; updated code-flow helpers, `AuthorizationCodeTests`, `RefreshTokenTests`, `RouteRegistry`, `CrossTenantRouteTests`, `HostedStepTests`, `SignInPortRuleTests`, the migration count and audit catalogue; browser harness and `hosted-step.spec.ts`.
+
+**Review findings:** 35 findings (high 2, medium 11, low 17, false 4, maybe-false 1). Patched 10 entries (high 1, medium 6, low 3, counted by group): the resume now requires the stored parameters exactly; a restart retires the old row; families keep their own `auth_time`/`amr`; the client's redirect guard rejects control characters and other origins (browser-tested); unknown error codes and prototype keys no longer show the email error; Keep going can't overwrite a newer step; `IdentifyAsync` validates; the body is disposed; the `extended` description is corrected; tests for expired or ended-Session resumes and for an expired Session not being rotated. Deferred 2 (rate limits for anonymous audit writes, Epic 10; email retention until 4.3's purge). Rejected 16 with reasons in the Review Triage Log.
+
+**Follow-up review:** recommended. This pass patched a high finding. The specific unverified risk: the exact-parameter resume rule and the family-anchored `auth_time`/`amr` now sit on every code flow's path; the targeted suites pass, but the full Isolation and Playwright suites run only in CI. Patched counts: high 1, medium 6, low 3.
+
+**Verification:**
+- .NET build: 0 warnings / 0 errors; API contract matches.
+- `pnpm -r build`; `@gatekeep/ui` check passes; ui 62 and hosted-login 4 tests pass (admin-dashboard 122 and api-client 36 before the fixes, which didn't touch them).
+- Isolation `Protocol/*`, `CrossTenant*`, `HostedStepTests`, `MigrateCommandTests`, `Sessions/*`, `Applications/*`, `EventClassTests`, `Canary*` and `AuditCatalogue*`: 874 of 874 after the fixes.
+- Architecture: 794 of 795; the one failure is the known local-only `.claude/worktrees` check.
+- Playwright `hosted-step` and `hosted-login` (implementer): 35 of 35 after the fixes.
+
+**Residual risks:**
+- An email typed on Login but not submitted is lost when the transaction expires; only a recorded email survives the restart.
+- A different User's live Session stays valid when another User signs in on the same browser (only same-User Sessions rotate).
+- Cookie isolation is proven by server-side lookups and `Set-Cookie` attributes, not in a browser.
+- Anonymous audit writes are unlimited until Epic 10, and recorded emails stay until 4.3's purge (both deferred).

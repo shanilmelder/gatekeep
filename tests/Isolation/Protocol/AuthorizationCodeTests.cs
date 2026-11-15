@@ -236,9 +236,9 @@ public sealed class AuthorizationCodeTests(PostgresFixture postgres, OpenBaoFixt
     {
         var flow = await CodeFlowSetup.CreateAsync(postgres, bao, HostA, HostB);
         await using var host = await flow.StartHostAsync();
-        var before = DateTimeOffset.UtcNow;
 
-        // The test sign-in authenticates now, after the request started.
+        // Story 4.2: the request goes to Login, the User authenticates there, and the resumed request counts that
+        // authentication as fresh, though it was before the resume, so prompt=login doesn't loop.
         var pkce = Pkce.New();
         using var authorize = await CodeFlow.AuthorizeAsync(
             host, HostA, flow.ClientA.ClientId, Callback, pkce, flow.UserA, state: "state-f1", extra: [("prompt", "login")]);
@@ -246,18 +246,13 @@ public sealed class AuthorizationCodeTests(PostgresFixture postgres, OpenBaoFixt
         var query = QueryHelpers.ParseQuery(authorize.Headers.Location!.Query);
         Assert.False(query.ContainsKey("error"));
 
-        // The sign-in was asked for an authentication at or after the request's start.
-        var since = ((TestAuthorizationSignIn)host.Services.GetRequiredService<IAuthorizationSignIn>()).LastAuthenticatedSince;
-        Assert.NotNull(since);
-        Assert.InRange(since.Value, before, DateTimeOffset.UtcNow);
-
         using var token = await CodeFlow.ExchangeAsync(host, HostA, flow.ClientA.ClientId, flow.ClientA.Secret, query["code"].ToString(), Callback, pkce.Verifier);
         Assert.Equal(HttpStatusCode.OK, token.Status);
         await AssertIdTokenAuthAsync(flow, token.Body.RootElement.GetProperty("id_token").GetString()!);
     }
 
     [Fact]
-    public async Task Prompt_login_with_a_sign_in_older_than_the_request_is_a_login_required_redirect_and_commits_nothing()
+    public async Task Prompt_login_with_a_Session_older_than_the_request_goes_to_Login_and_reuses_nothing()
     {
         var flow = await CodeFlowSetup.CreateAsync(postgres, bao, HostA, HostB);
         await using var host = await flow.StartHostAsync();
@@ -266,13 +261,11 @@ public sealed class AuthorizationCodeTests(PostgresFixture postgres, OpenBaoFixt
             host, HostA, flow.ClientA.ClientId, Callback, Pkce.New(), flow.UserA, state: "state-f2", extra: [("prompt", "login")],
             authTime: DateTimeOffset.UtcNow - TimeSpan.FromMinutes(5));
 
-        AssertErrorRedirect(authorize, flow.A, "login_required", "state-f2");
-        await AssertNothingBegunAsync(flow);
-        Assert.Equal(0L, await flow.Database.ScalarAsync<long>("SELECT count(*) FROM token"));
+        await AssertLoginWithoutReuseAsync(flow, authorize);
     }
 
     [Fact]
-    public async Task Prompt_login_with_a_sign_in_half_a_second_before_the_request_is_a_login_required_redirect()
+    public async Task Prompt_login_with_a_Session_half_a_second_before_the_request_goes_to_Login()
     {
         var flow = await CodeFlowSetup.CreateAsync(postgres, bao, HostA, HostB);
         await using var host = await flow.StartHostAsync();
@@ -282,8 +275,7 @@ public sealed class AuthorizationCodeTests(PostgresFixture postgres, OpenBaoFixt
             host, HostA, flow.ClientA.ClientId, Callback, Pkce.New(), flow.UserA, state: "state-f6", extra: [("prompt", "login")],
             authTime: DateTimeOffset.UtcNow - TimeSpan.FromMilliseconds(500));
 
-        AssertErrorRedirect(authorize, flow.A, "login_required", "state-f6");
-        await AssertNothingBegunAsync(flow);
+        await AssertLoginWithoutReuseAsync(flow, authorize);
     }
 
     [Fact]
@@ -328,7 +320,7 @@ public sealed class AuthorizationCodeTests(PostgresFixture postgres, OpenBaoFixt
     [Theory]
     [InlineData("60", 300)]
     [InlineData("0", 1)]
-    public async Task Max_age_shorter_than_the_sign_ins_age_is_a_login_required_redirect(string maxAge, int ageSeconds)
+    public async Task Max_age_shorter_than_the_Sessions_age_goes_to_Login(string maxAge, int ageSeconds)
     {
         var flow = await CodeFlowSetup.CreateAsync(postgres, bao, HostA, HostB);
         await using var host = await flow.StartHostAsync();
@@ -337,8 +329,7 @@ public sealed class AuthorizationCodeTests(PostgresFixture postgres, OpenBaoFixt
             host, HostA, flow.ClientA.ClientId, Callback, Pkce.New(), flow.UserA, state: "state-f4", extra: [("max_age", maxAge)],
             authTime: DateTimeOffset.UtcNow - TimeSpan.FromSeconds(ageSeconds));
 
-        AssertErrorRedirect(authorize, flow.A, "login_required", "state-f4");
-        await AssertNothingBegunAsync(flow);
+        await AssertLoginWithoutReuseAsync(flow, authorize);
     }
 
     [Theory]
@@ -418,15 +409,27 @@ public sealed class AuthorizationCodeTests(PostgresFixture postgres, OpenBaoFixt
     }
 
     [Fact]
-    public async Task The_release_sign_in_completes_nothing_so_no_code_is_issued_and_the_transaction_rolls_back()
+    public async Task The_release_credential_step_offers_none_so_Continue_is_temporarily_unavailable_and_no_code_is_issued()
     {
         var flow = await CodeFlowSetup.CreateAsync(postgres, bao, HostA, HostB);
-        await using var host = await ProtocolHost.StartAsync(flow.Database.Hosted, bao);
+        await using var host = await ProtocolHost.StartAsync(flow.Database.Hosted, bao, releaseSignIn: true);
+        var browser = new HostedBrowser(host, HostA);
 
-        using var authorize = await CodeFlow.AuthorizeAsync(host, HostA, flow.ClientA.ClientId, Callback, Pkce.New(), flow.UserA, state: "state-7");
+        using (var authorize = await browser.GetAsync(CodeFlow.AuthorizeUrl(flow.ClientA.ClientId, Callback, Pkce.New(), state: "state-7")))
+        {
+            Assert.True(HostedBrowser.IsLoginRedirect(authorize), "A valid request didn't go to Login.");
+        }
 
-        AssertErrorRedirect(authorize, flow.A, "temporarily_unavailable", "state-7");
-        await AssertNothingBegunAsync(flow);
+        var login = await browser.LoginStepAsync();
+        using var continued = await browser.PostAsync(
+            ProtocolContract.LoginIdentifierPath, new { stepVersion = login.StepVersion, email = TestOnlyCredentialStep.Email(flow.UserA) }, login.Csrf);
+        Assert.Equal(HttpStatusCode.OK, continued.StatusCode);
+        using var step = await HostedBrowser.StepAsync(continued);
+        Assert.Equal("generic_error", step.RootElement.GetProperty("step").GetString());
+        Assert.Equal("temporarily_unavailable", step.RootElement.GetProperty("data").GetProperty("code").GetString());
+
+        Assert.Equal(0L, await flow.Database.ScalarAsync<long>("SELECT count(*) FROM user_session"));
+        Assert.Equal(0L, await flow.Database.ScalarAsync<long>("SELECT count(*) FROM \"authorization\""));
         Assert.Equal(0L, await flow.Database.ScalarAsync<long>("SELECT count(*) FROM token"));
     }
 
@@ -728,11 +731,12 @@ public sealed class AuthorizationCodeTests(PostgresFixture postgres, OpenBaoFixt
     }
 
     [Fact]
-    public async Task The_test_sign_in_lives_only_in_the_tests_and_is_no_src_type()
+    public async Task The_test_credential_step_lives_only_in_the_tests_and_the_release_default_offers_none()
     {
-        Assert.Equal(typeof(AuthorizationCodeTests).Assembly, typeof(TestAuthorizationSignIn).Assembly);
-        Assert.Equal(typeof(ProtocolContract).Assembly, typeof(UnavailableSignIn).Assembly);
-        Assert.Null(await new UnavailableSignIn().CompleteAsync(null!, null!, null, new DefaultHttpContext(), Cancellation));
+        Assert.Equal(typeof(AuthorizationCodeTests).Assembly, typeof(TestOnlyCredentialStep).Assembly);
+        var release = Gatekeep.Modules.Authentication.Contracts.AuthenticationContract.NoCredentialStep;
+        Assert.Equal(typeof(Gatekeep.Modules.Authentication.Contracts.ICredentialStep).Assembly, release.GetType().Assembly);
+        Assert.Null(await release.AfterIdentifierAsync(null!, null!, Cancellation));
     }
 
     private static void AssertErrorRedirect(HttpResponseMessage response, ResolvedTenant tenant, string error, string state)
@@ -779,6 +783,19 @@ public sealed class AuthorizationCodeTests(PostgresFixture postgres, OpenBaoFixt
         Assert.Contains($"\"amr\":[\"{Gatekeep.Tests.Isolation.Sessions.TestOnlyAuthenticator.Method}\"]", Encoding.UTF8.GetString(Base64UrlEncoder.DecodeBytes(idToken.Split('.')[1])), StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// Story 4.2: a request whose Session isn't fresh enough goes to Login with a new transaction, and the Session is
+    /// neither reused nor touched: the only Token Family is the earlier sign-in's.
+    /// </summary>
+    private static async Task AssertLoginWithoutReuseAsync(CodeFlowSetup flow, HttpResponseMessage authorize)
+    {
+        Assert.True(HostedBrowser.IsLoginRedirect(authorize), $"The request answered {(int)authorize.StatusCode} {authorize.Headers.Location}, not the redirect to Login.");
+        Assert.Contains(SetCookie.Of(authorize), c => SetCookie.Name(c) == ProtocolContract.TransactionCookie);
+        Assert.Equal(1L, await flow.Database.ScalarAsync<long>("SELECT count(*) FROM user_session"));
+        Assert.Equal(1L, await flow.Database.ScalarAsync<long>("SELECT count(*) FROM \"authorization\""));
+        Assert.Equal(1L, await flow.Database.ScalarAsync<long>("SELECT count(*) FROM signin_transaction WHERE completed_at IS NULL AND cardinality(completed_steps) = 0"));
+    }
+
     private static async Task AssertNothingBegunAsync(CodeFlowSetup flow)
     {
         Assert.Equal(0L, await flow.Database.ScalarAsync<long>("SELECT count(*) FROM signin_transaction"));
@@ -817,7 +834,7 @@ internal sealed record CodeFlowSetup(
         return new CodeFlowSetup(database, a, b, client, user, bao);
     }
 
-    /// <summary>The Hosted pipeline with the test-only sign-in plugged into Protocol's port.</summary>
+    /// <summary>The Hosted pipeline with the test-only credential step plugged into Authentication's port (Story 4.2).</summary>
     public Task<ProtocolHost> StartHostAsync(
         TimeProvider? time = null,
         Action<Microsoft.Extensions.Logging.ILoggingBuilder>? logging = null,
@@ -827,7 +844,6 @@ internal sealed record CodeFlowSetup(
             Bao,
             time: time,
             logging: logging,
-            signIn: provider => new TestAuthorizationSignIn(provider.GetRequiredService<TimeProvider>()),
             configure: configure);
 }
 
@@ -847,9 +863,13 @@ internal static class CodeFlow
     private static CancellationToken Cancellation => TestContext.Current.CancellationToken;
 
     /// <summary>
-    /// GETs the authorization endpoint on <paramref name="tenantHost"/>. A null <paramref name="pkce"/>
-    /// sends no challenge; a null <paramref name="user"/> names no User to the test sign-in, and
-    /// <paramref name="authTime"/>, when given, is the authentication time it returns (Story 2.11).
+    /// The authorization request on <paramref name="tenantHost"/>, as a browser makes it (Story 4.2). A null
+    /// <paramref name="pkce"/> sends no challenge. A null <paramref name="user"/> signs no one in: the endpoint's first
+    /// response is returned, the redirect to Login for a valid request. With a User, a fresh browser signs them in through
+    /// Hosted Login and the test-only credential step, and the response of the resumed request is returned. With
+    /// <paramref name="authTime"/> too, the browser first signs the User in for the same request without <c>prompt</c> or
+    /// <c>max_age</c>, authenticated at that time, then makes the request itself presenting that Session: a Session fresh
+    /// enough is reused and its code returned; otherwise the request goes to Login, and that redirect is returned.
     /// </summary>
     public static async Task<HttpResponseMessage> AuthorizeAsync(
         ProtocolHost host,
@@ -864,6 +884,40 @@ internal static class CodeFlow
         string responseType = "code",
         (string Name, string Value)[]? extra = null,
         DateTimeOffset? authTime = null)
+    {
+        var url = AuthorizeUrl(clientId, redirectUri, pkce, state, nonce, scope, responseType, extra);
+        var browser = new HostedBrowser(host, tenantHost);
+        if (user is not { } id)
+        {
+            return await browser.GetAsync(url);
+        }
+
+        if (authTime is not { } at)
+        {
+            return await browser.SignInAsync(url, id);
+        }
+
+        var plain = AuthorizeUrl(
+            clientId, redirectUri, pkce, state, nonce, scope, responseType, [.. (extra ?? []).Where(p => p.Name is not ("prompt" or "max_age"))]);
+        using (var earlier = await browser.SignInAsync(plain, id, at))
+        {
+            Assert.Equal(HttpStatusCode.Found, earlier.StatusCode);
+            Assert.True(earlier.Headers.Location?.Query.Contains("code=", StringComparison.Ordinal), "The earlier sign-in issued no code.");
+        }
+
+        return await browser.GetAsync(url);
+    }
+
+    /// <summary>The authorization endpoint's path and query for a request with these parameters.</summary>
+    public static string AuthorizeUrl(
+        string clientId,
+        string? redirectUri,
+        Pkce? pkce,
+        string state = "state",
+        string? nonce = null,
+        string? scope = "openid",
+        string responseType = "code",
+        (string Name, string Value)[]? extra = null)
     {
         var query = new List<KeyValuePair<string, string?>>
         {
@@ -898,19 +952,7 @@ internal static class CodeFlow
             query.Add(new(name, value));
         }
 
-        using var request = new HttpRequestMessage(
-            HttpMethod.Get, new Uri($"http://{tenantHost}{ProtocolContract.AuthorizePath}{QueryString.Create(query)}"));
-        if (user is { } id)
-        {
-            request.Headers.TryAddWithoutValidation(TestAuthorizationSignIn.UserHeader, id.ToString());
-        }
-
-        if (authTime is { } at)
-        {
-            request.Headers.TryAddWithoutValidation(TestAuthorizationSignIn.AuthTimeHeader, at.ToString("O", System.Globalization.CultureInfo.InvariantCulture));
-        }
-
-        return await host.Http.SendAsync(request, Cancellation);
+        return $"{ProtocolContract.AuthorizePath}{QueryString.Create(query)}";
     }
 
     /// <summary>A code, from a successful authorization request.</summary>

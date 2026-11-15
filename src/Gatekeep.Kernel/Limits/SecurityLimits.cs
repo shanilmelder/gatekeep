@@ -10,6 +10,27 @@ public static class SecurityLimits
     /// <summary>A sign-in transaction's sliding lifetime: 30 minutes (AD-12, per EXPERIENCE).</summary>
     public static readonly TimeSpan SignInTransactionLifetime = TimeSpan.FromMinutes(30);
 
+    /// <summary>
+    /// How long before a sign-in transaction expires Hosted Login warns, with "Keep going": 2 minutes
+    /// (Story 4.2, UX-DR33). The client's <c>EXPIRY_WARNING_SECONDS</c> is this value.
+    /// </summary>
+    public static readonly TimeSpan SignInExpiryWarning = TimeSpan.FromMinutes(2);
+
+    /// <summary>
+    /// How long an expired, uncompleted sign-in transaction can still restart at Login with its email kept:
+    /// 1 hour (Story 4.2, AD-12). Past it the transaction is refused like an unknown one, and Story 4.3 purges it.
+    /// </summary>
+    public static readonly TimeSpan SignInRestartRetention = TimeSpan.FromHours(1);
+
+    /// <summary>
+    /// The random bytes in an opaque browser value, a sign-in transaction binding or a User Session identifier:
+    /// 32, so 256 bits (AD-12, NFR-3). Only the SHA-256 of its base64url text is stored.
+    /// </summary>
+    public const int OpaqueValueBytes = 32;
+
+    /// <summary>The longest email address a sign-in records: 254 characters (Story 4.2, RFC 5321's path limit), as the table checks.</summary>
+    public const int MaxEmailLength = 254;
+
     /// <summary>The default User Session idle lifetime: 3 days (PRD §5.2, AD-12).</summary>
     public static readonly TimeSpan UserSessionIdleDefault = TimeSpan.FromDays(3);
 

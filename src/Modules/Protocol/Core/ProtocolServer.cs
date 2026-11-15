@@ -48,7 +48,9 @@ internal static class ProtocolServer
             DirectoryContract.CreateDirectory(provider.GetRequiredService<IAuditAppender>(), provider.GetRequiredService<TimeProvider>()),
             provider.GetRequiredService<IAuditAppender>(),
             provider.GetRequiredService<TokenRequestLimits>(),
-            AuthenticationContract.CreateAuthentication(provider.GetRequiredService<IAuditAppender>(), provider.GetRequiredService<TimeProvider>()),
+            // Story 4.2: the host's credential step when it registered one (only tests do), the release default otherwise.
+            AuthenticationContract.CreateAuthentication(
+                provider.GetRequiredService<IAuditAppender>(), provider.GetRequiredService<TimeProvider>(), provider.GetService<ICredentialStep>()),
             SessionsContract.CreateSessions(provider.GetRequiredService<IAuditAppender>(), provider.GetRequiredService<TimeProvider>()),
             provider.GetRequiredService<TimeProvider>(),
             provider.GetService<ILoggerFactory>()));

@@ -5,8 +5,8 @@ using Gatekeep.Modules.Protocol.Core;
 using Gatekeep.Modules.Tenancy.Contracts;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.DependencyInjection.Extensions;
 using OpenIddict.Server;
 
 namespace Gatekeep.Modules.Protocol.Contracts;
@@ -40,6 +40,27 @@ public static class ProtocolContract
     /// </summary>
     public const string RevocationPath = "/connect/revoke";
 
+    /// <summary>Hosted Login's step page (Story 4.2): the current step of the browser's sign-in transaction.</summary>
+    public const string LoginPath = "/login";
+
+    /// <summary>Login's identifier step (Story 4.2): <c>{stepVersion, email}</c>, answered with a step.</summary>
+    public const string LoginIdentifierPath = "/login/api/identifier";
+
+    /// <summary>"Keep going" (Story 4.2): slides the sign-in transaction's life, answered with the current step.</summary>
+    public const string LoginExtendPath = "/login/api/transaction/extend";
+
+    /// <summary>The cookie binding a sign-in transaction to the browser (Story 4.2): host-only, Secure, HttpOnly, SameSite=Lax.</summary>
+    public const string TransactionCookie = "__Host-gk_txn";
+
+    /// <summary>The User Session cookie (Story 4.2): host-only, Secure, HttpOnly, SameSite=Lax, until the Session's absolute expiry.</summary>
+    public const string SessionCookie = "__Host-gk_session";
+
+    /// <summary>The header every Hosted Login state-changing request carries its CSRF token in (Story 4.2).</summary>
+    public const string CsrfHeader = "X-Gatekeep-CSRF";
+
+    /// <summary>The authorization parameter a completed sign-in resumes the request with (Story 4.2). It never reaches the client.</summary>
+    public const string ResumeParameter = "gk_resume";
+
     /// <summary>The <c>kid</c> of the global signing credential, which is inert: no Tenant's JWKS or token carries it.</summary>
     public const string InertSigningKeyId = InertCredentials.SigningKeyId;
 
@@ -55,10 +76,12 @@ public static class ProtocolContract
     /// The authorization and token endpoints run as <c>gk_hosted</c> too, in one transaction per request.
     /// Key custody is the host's <c>IKeyCustody</c>, and audit the host's <c>IAuditAppender</c>. The token
     /// request limits are <see cref="TokenRequestLimits"/>'s, unless the host registered its own first.
-    /// The authorization endpoint completes a sign-in through <see cref="IAuthorizationSignIn"/>:
-    /// <see cref="UnavailableSignIn"/>, which completes none, unless the host registered its own first.
+    /// The authorization endpoint completes a sign-in through <see cref="IAuthorizationSignIn"/>, Protocol's own
+    /// (Story 4.2). The step after Login's email is the host's <c>ICredentialStep</c> when it registered one (only
+    /// tests do), Authentication's release default otherwise, which offers none.
     /// <paramref name="stepPages"/> builds the host's Hosted Login step pages (AD-21, Story 4.1), which the
-    /// authorization endpoint shows Generic error through for a request it can't send back to any client.
+    /// authorization endpoint shows Generic error through for a request it can't send back to any client, and
+    /// Hosted Login's <c>/login</c> surface its steps through.
     /// </summary>
     public static IServiceCollection AddGatekeepProtocol(
         this IServiceCollection services,
@@ -77,8 +100,8 @@ public static class ProtocolContract
             provider.GetService<Microsoft.Extensions.Logging.ILogger<SigningKeyChangeListener>>()));
         services.AddSingleton<IStepPages>(stepPages);
 
-        // The release build's sign-in, unless the host registered its own first (only tests do).
-        services.TryAddSingleton<IAuthorizationSignIn, UnavailableSignIn>();
+        // Story 4.2: the one sign-in, over the bound sign-in transaction and the Session cookie.
+        services.AddSingleton<IAuthorizationSignIn, HostedAuthorizationSignIn>();
         ProtocolServer.Add(services, hostedConnectionString);
         return services;
     }
@@ -94,51 +117,74 @@ public static class ProtocolContract
         app.UseAuthentication();
         return app.Use(AuthorizePassthrough.InvokeAsync);
     }
+
+    /// <summary>
+    /// Hosted Login's sign-in surface (Story 4.2), after routing, on the resolved Tenant only: <c>GET /login</c>,
+    /// the step page of the transaction the <c>__Host-gk_txn</c> cookie binds, and the two state-changing API
+    /// requests, <c>POST /login/api/identifier</c> and <c>POST /login/api/transaction/extend</c>, each checked for an
+    /// exact-host <c>Origin</c> and the transaction's CSRF token before anything is read or written.
+    /// </summary>
+    public static IEndpointRouteBuilder MapGatekeepLogin(this IEndpointRouteBuilder endpoints)
+    {
+        ArgumentNullException.ThrowIfNull(endpoints);
+        LoginEndpoints.Map(endpoints);
+        return endpoints;
+    }
 }
 
 /// <summary>
-/// The sign-in seam of the authorization endpoint (Story 2.9, AD-8). Protocol begins the sign-in with
-/// <c>IAuthentication.BeginAsync</c>, then asks this port to complete it. A result signs the User in:
-/// the Token Family is anchored to its Session and a code is issued. <see langword="null"/> means no
-/// sign-in completed, and the client gets <c>temporarily_unavailable</c>. A release build registers
-/// <see cref="UnavailableSignIn"/> until Stories 4.1 and 4.2 add the screens; only the tests plug in an
-/// authenticator.
+/// The sign-in seam of the authorization endpoint (Stories 2.9 and 4.2, AD-8, AD-12). For a validated
+/// authorization request it decides, in the request's own Tenant context, whether the request completes now,
+/// goes to Hosted Login, or is refused, setting or clearing the request's sign-in cookies as it does:
+/// <list type="bullet">
+/// <item>A resume (<c>gk_resume</c>) completes with the Session of the transaction its <c>__Host-gk_txn</c>
+/// cookie binds, when that transaction is this Application's, authenticated and not completed; its Session
+/// counts as fresh. Any other resume is refused.</item>
+/// <item>Otherwise a live <c>__Host-gk_session</c> fresh enough for <c>prompt=login</c> and <c>max_age</c>
+/// completes the request at once, its idle expiry touched.</item>
+/// <item>Otherwise a new transaction starts, bound to this browser, Tenant and Application, and the request
+/// goes to Login.</item>
+/// </list>
+/// Its one implementation in <c>src</c> is Protocol's own, registered by <see cref="ProtocolContract.AddGatekeepProtocol"/>.
 /// </summary>
 public interface IAuthorizationSignIn
 {
-    /// <summary>
-    /// Completes <paramref name="signIn"/>, begun for the validated authorization request on
-    /// <paramref name="http"/>, in the request's own Tenant <paramref name="context"/>, whose transaction
-    /// commits only if a code is issued. <paramref name="authenticatedSince"/> is the freshness the request
-    /// demands (Story 2.11, OIDC Core §3.1.2.1): from <c>prompt=login</c>, the time the request started; from
-    /// <c>max_age</c>, that many seconds before now; the later of the two when both are given; null when
-    /// neither is. A result whose <see cref="AuthenticationResult.AuthTime"/> is before it (exactly for
-    /// <c>prompt=login</c>, to the second for <c>max_age</c>) is refused with <c>login_required</c> and no code, so a sign-in should authenticate the User again
-    /// rather than reuse an older authentication (Story 4.2).
-    /// </summary>
-    ValueTask<AuthenticationResult?> CompleteAsync(
+    /// <summary>What <paramref name="request"/>, validated on <paramref name="http"/>, comes to.</summary>
+    /// <exception cref="ArgumentException">The request's parameters can't be kept. Nothing is written.</exception>
+    ValueTask<AuthorizationSignInOutcome> SignInAsync(
         CommandContext context,
-        StartedSignIn signIn,
-        DateTimeOffset? authenticatedSince,
+        AuthorizationSignInRequest request,
         HttpContext http,
         CancellationToken cancellationToken);
 }
 
 /// <summary>
-/// The release build's sign-in (Story 2.9): it completes nothing, so the authorization endpoint answers
-/// every valid request with <c>temporarily_unavailable</c> and issues no code. Stories 4.1 and 4.2
-/// replace it with the sign-in screens and transaction-cookie resumption.
+/// A validated authorization request, as the sign-in seam sees it (Story 4.2): its Application, the parameters a
+/// transaction keeps, the freshness <c>prompt=login</c> and <c>max_age</c> demand (Story 2.11), whether that
+/// freshness is compared exactly (<c>prompt=login</c>), and whether it is a resume.
 /// </summary>
-public sealed class UnavailableSignIn : IAuthorizationSignIn
+public sealed record AuthorizationSignInRequest(
+    Guid ApplicationId,
+    IReadOnlyDictionary<string, string> Parameters,
+    DateTimeOffset? AuthenticatedSince,
+    bool ExactFreshness,
+    bool Resume);
+
+/// <summary>What an authorization request's sign-in came to (Story 4.2).</summary>
+public enum AuthorizationSignInKind
 {
-    public ValueTask<AuthenticationResult?> CompleteAsync(
-        CommandContext context,
-        StartedSignIn signIn,
-        DateTimeOffset? authenticatedSince,
-        HttpContext http,
-        CancellationToken cancellationToken) =>
-        ValueTask.FromResult<AuthenticationResult?>(null);
+    /// <summary>The User is signed in: a code is issued for <see cref="AuthorizationSignInOutcome.Result"/>.</summary>
+    Completed,
+
+    /// <summary>A new transaction began, and the request goes to Login, keeping that transaction.</summary>
+    Login,
+
+    /// <summary>The resume's transaction is refused: Generic error <c>invalid_transaction</c>, keeping only the refusal's event.</summary>
+    Refused,
 }
+
+/// <summary>An authorization request's sign-in outcome, with the completed authentication's result.</summary>
+public sealed record AuthorizationSignInOutcome(AuthorizationSignInKind Kind, AuthenticationResult? Result = null);
 
 /// <summary>
 /// A Tenant's OpenIddict options, as its requests use them: a copy of the Deployment's options
