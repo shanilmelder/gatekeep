@@ -6,6 +6,7 @@ using Gatekeep.Modules.Authentication.Contracts;
 using Gatekeep.Modules.Directory.Contracts;
 using Gatekeep.Modules.Identity.Contracts;
 using Gatekeep.Modules.Keys.Contracts;
+using Gatekeep.Modules.Notifications.Contracts;
 using Gatekeep.Modules.Operations.Contracts;
 using Gatekeep.Modules.Sessions.Contracts;
 using Gatekeep.Modules.Tenancy.Contracts;
@@ -61,6 +62,7 @@ internal static class TenantDeletion
         ("Directory", DirectoryContract.TenantPurge),
         ("Identity", IdentityContract.TenantPurge),
         ("Keys", KeysContract.TenantPurge),
+        ("Notifications", NotificationsContract.TenantPurge),
         ("Tenancy", TenancyContract.TenantPurge),
     ];
 

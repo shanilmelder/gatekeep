@@ -790,6 +790,82 @@ export interface Messages {
   apiGrantRemoveLabel: string;
   apiGrantRemoved: string;
   apiGrantFailed: string;
+  /** Story 4.4: the Email provider page. Its nav label, title and description. */
+  navEmailProvider: string;
+  emailProviderTitle: string;
+  emailProviderDescription: string;
+  /** The empty state's one line, and its Add for a Tenant Owner. */
+  emailProviderEmpty: string;
+  emailProviderAdd: string;
+  /** The kind cards' legend, and each card's name and one line. */
+  emailProviderKindLegend: string;
+  emailProviderKindSmtp: string;
+  emailProviderKindSmtpDescription: string;
+  emailProviderKindSendgrid: string;
+  emailProviderKindSendgridDescription: string;
+  emailProviderKindPostmark: string;
+  emailProviderKindPostmarkDescription: string;
+  emailProviderKindMailgun: string;
+  emailProviderKindMailgunDescription: string;
+  emailProviderKindSes: string;
+  emailProviderKindSesDescription: string;
+  emailProviderKindCustomHttp: string;
+  emailProviderKindCustomHttpDescription: string;
+  /** The settings card's heading, and each setting's label, helper and choices. */
+  emailProviderSettingsTitle: string;
+  emailProviderHost: string;
+  emailProviderPort: string;
+  emailProviderTls: string;
+  emailProviderTlsStarttls: string;
+  emailProviderTlsImplicit: string;
+  emailProviderUsername: string;
+  emailProviderOptional: string;
+  emailProviderRegion: string;
+  emailProviderRegionGlobal: string;
+  emailProviderRegionEu: string;
+  emailProviderRegionUs: string;
+  emailProviderSesRegionHelper: string;
+  emailProviderMessageStream: string;
+  emailProviderDomain: string;
+  emailProviderAccessKeyId: string;
+  emailProviderEndpoint: string;
+  emailProviderEndpointHelper: string;
+  emailProviderAuthHeaderName: string;
+  emailProviderAuthHeaderNameHelper: string;
+  /** The secret field's label per kind, and its helpers. The secret is write-only: it is never shown. */
+  emailProviderSecretSmtp: string;
+  emailProviderSecretApiKey: string;
+  emailProviderSecretServerToken: string;
+  emailProviderSecretAccessKey: string;
+  emailProviderSecretHeaderValue: string;
+  emailProviderSecretSaved: string;
+  emailProviderSecretNew: string;
+  emailProviderSecretNotUsed: string;
+  /** The sender card: the From address and name. */
+  emailProviderSenderTitle: string;
+  emailProviderFromAddress: string;
+  emailProviderFromName: string;
+  /** A refused field's text: missing, malformed, or too long; and the specific ones. */
+  emailProviderFieldRequired: string;
+  emailProviderFieldInvalid: string;
+  emailProviderFieldTooLong: string;
+  emailProviderHostInvalid: string;
+  emailProviderPortInvalid: string;
+  emailProviderEndpointInvalid: string;
+  emailProviderFromAddressInvalid: string;
+  emailProviderSecretRequired: string;
+  emailProviderSettingsInvalid: string;
+  /** Save and its outcome, and Remove with its confirmation. */
+  emailProviderSave: string;
+  emailProviderSaved: string;
+  emailProviderSaveFailed: string;
+  emailProviderConfirming: string;
+  emailProviderRemove: string;
+  emailProviderRemoveTitle: string;
+  emailProviderRemoveBody: string;
+  emailProviderRemoveConfirm: string;
+  emailProviderRemoved: string;
+  emailProviderRemoveFailed: string;
 }
 
 export const defaultMessages: Readonly<Messages> = Object.freeze({
@@ -1304,6 +1380,74 @@ export const defaultMessages: Readonly<Messages> = Object.freeze({
   apiGrantRemoveLabel: 'Remove authorization for {name}',
   apiGrantRemoved: 'Authorization removed',
   apiGrantFailed: "Couldn't change the authorization.",
+  navEmailProvider: 'Email provider',
+  emailProviderTitle: 'Email provider',
+  emailProviderDescription: 'How this tenant sends verification and password reset emails.',
+  emailProviderEmpty: 'No provider set',
+  emailProviderAdd: 'Add',
+  emailProviderKindLegend: 'Provider',
+  emailProviderKindSmtp: 'SMTP',
+  emailProviderKindSmtpDescription: 'Any mail server, over STARTTLS or implicit TLS.',
+  emailProviderKindSendgrid: 'SendGrid',
+  emailProviderKindSendgridDescription: "Twilio SendGrid's API.",
+  emailProviderKindPostmark: 'Postmark',
+  emailProviderKindPostmarkDescription: "Postmark's API, with a server token.",
+  emailProviderKindMailgun: 'Mailgun',
+  emailProviderKindMailgunDescription: "Mailgun's API, for one sending domain.",
+  emailProviderKindSes: 'Amazon SES',
+  emailProviderKindSesDescription: 'Amazon Simple Email Service, with an access key.',
+  emailProviderKindCustomHttp: 'Custom HTTP',
+  emailProviderKindCustomHttpDescription: 'Your own HTTPS endpoint, with an auth header.',
+  emailProviderSettingsTitle: 'Settings',
+  emailProviderHost: 'Host',
+  emailProviderPort: 'Port',
+  emailProviderTls: 'TLS',
+  emailProviderTlsStarttls: 'STARTTLS',
+  emailProviderTlsImplicit: 'Implicit TLS',
+  emailProviderUsername: 'Username',
+  emailProviderOptional: 'Optional',
+  emailProviderRegion: 'Region',
+  emailProviderRegionGlobal: 'Global',
+  emailProviderRegionEu: 'EU',
+  emailProviderRegionUs: 'US',
+  emailProviderSesRegionHelper: 'Such as eu-west-1',
+  emailProviderMessageStream: 'Message stream',
+  emailProviderDomain: 'Sending domain',
+  emailProviderAccessKeyId: 'Access key ID',
+  emailProviderEndpoint: 'Endpoint',
+  emailProviderEndpointHelper: 'An https URL',
+  emailProviderAuthHeaderName: 'Auth header',
+  emailProviderAuthHeaderNameHelper: 'Authorization when left empty',
+  emailProviderSecretSmtp: 'Password',
+  emailProviderSecretApiKey: 'API key',
+  emailProviderSecretServerToken: 'Server token',
+  emailProviderSecretAccessKey: 'Secret access key',
+  emailProviderSecretHeaderValue: 'Auth header value',
+  emailProviderSecretSaved: 'Saved – enter a new value to replace it',
+  emailProviderSecretNew: "Stored encrypted. It can't be viewed after saving.",
+  emailProviderSecretNotUsed: 'SMTP with no username sends with no password.',
+  emailProviderSenderTitle: 'Sender',
+  emailProviderFromAddress: 'From address',
+  emailProviderFromName: 'From name',
+  emailProviderFieldRequired: 'Enter a value.',
+  emailProviderFieldInvalid: 'Enter a valid value.',
+  emailProviderFieldTooLong: 'This is too long.',
+  emailProviderHostInvalid: 'Use a DNS name or a public IP address.',
+  emailProviderPortInvalid: 'Use a whole number from 1 to 65535.',
+  emailProviderEndpointInvalid: "Use an https URL with no user name or fragment, whose host isn't localhost or a private address.",
+  emailProviderFromAddressInvalid: 'Enter a valid email address.',
+  emailProviderSecretRequired: 'Enter a value: a new provider, or changed settings, need a new one.',
+  emailProviderSettingsInvalid: "These settings don't match the provider. Check them and try again.",
+  emailProviderSave: 'Save',
+  emailProviderSaved: 'Email provider saved',
+  emailProviderSaveFailed: "Couldn't save the email provider. Nothing was changed.",
+  emailProviderConfirming: "Confirm it's you to save.",
+  emailProviderRemove: 'Remove provider',
+  emailProviderRemoveTitle: 'Remove email provider?',
+  emailProviderRemoveBody: "Verification and password reset emails can't be sent until a provider is added again. The saved secret is deleted.",
+  emailProviderRemoveConfirm: 'Remove',
+  emailProviderRemoved: 'Email provider removed',
+  emailProviderRemoveFailed: "Couldn't remove the email provider.",
 });
 
 /**

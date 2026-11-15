@@ -25,6 +25,7 @@
 // Story 1.29: deleting a Tenant, retrying its deletion and the lost-Tenant banner (admin-tenant-delete.spec.ts), on that same host.
 // Story 7.4: a Tenant's Logs, its field search, URL, Load more and sidebar item (admin-logs.spec.ts), on that same host.
 // Story 9.1: the Signing keys page, its JWKS sample and its failures (admin-signing-keys.spec.ts), on that same host.
+// Story 4.4: the Email provider page, its kind cards, save and removal (admin-email-provider.spec.ts), on that same host.
 // Story 4.1: the built Hosted Login bundle is served as Host.Hosted serves it, step JSON and theme
 // injected under the AD-21 headers, by hosted-step-server.mjs (hosted-step.spec.ts), and the
 // hosted-login surface tests run against that same server rather than `vite preview`.
@@ -68,7 +69,7 @@ export default defineConfig({
       name,
       // Every spec that isn't another project's own, so a new spec runs by default.
       testMatch: '*.spec.ts',
-      testIgnore: ['hosted-step.spec.ts', 'admin-csp.spec.ts', 'bootstrap.spec.ts', 'credential-setup.spec.ts', 'signin.spec.ts', 'controls.spec.ts', 'data.spec.ts', 'overlay.spec.ts', 'drawer.spec.ts', 'hosted.spec.ts', 'shell.spec.ts', 'admin-shell.spec.ts', 'admin-credentials.spec.ts', 'admin-recovery.spec.ts', 'admin-tenants.spec.ts', 'admin-tenant-switcher.spec.ts', 'admin-tenant-delete.spec.ts', 'admin-logs.spec.ts', 'admin-signing-keys.spec.ts', 'admin-applications.spec.ts', 'admin-apis.spec.ts'],
+      testIgnore: ['hosted-step.spec.ts', 'admin-csp.spec.ts', 'bootstrap.spec.ts', 'credential-setup.spec.ts', 'signin.spec.ts', 'controls.spec.ts', 'data.spec.ts', 'overlay.spec.ts', 'drawer.spec.ts', 'hosted.spec.ts', 'shell.spec.ts', 'admin-shell.spec.ts', 'admin-credentials.spec.ts', 'admin-recovery.spec.ts', 'admin-tenants.spec.ts', 'admin-tenant-switcher.spec.ts', 'admin-tenant-delete.spec.ts', 'admin-logs.spec.ts', 'admin-signing-keys.spec.ts', 'admin-applications.spec.ts', 'admin-apis.spec.ts', 'admin-email-provider.spec.ts'],
       use: { baseURL: `http://127.0.0.1:${port}` },
     })),
     // Hosted Login's step pages (Story 4.1), on the built bundle as Host.Hosted serves it.
@@ -173,6 +174,12 @@ export default defineConfig({
     {
       name: 'admin-apis',
       testMatch: 'admin-apis.spec.ts',
+      use: { baseURL: `http://localhost:${adminHost.port}` },
+    },
+    // A Tenant's email provider (Story 4.4), from localhost, with the API intercepted and a virtual authenticator.
+    {
+      name: 'admin-email-provider',
+      testMatch: 'admin-email-provider.spec.ts',
       use: { baseURL: `http://localhost:${adminHost.port}` },
     },
   ],

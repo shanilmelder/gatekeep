@@ -97,6 +97,7 @@ public sealed class TenantPurgeRegistryTests(PostgresFixture postgres)
             await Gatekeep.Modules.Authentication.Contracts.AuthenticationContract.TenantPurge.PurgeAsync(context, Cancellation);
             await Gatekeep.Modules.Directory.Contracts.DirectoryContract.TenantPurge.PurgeAsync(context, Cancellation);
             await Gatekeep.Modules.Keys.Contracts.KeysContract.TenantPurge.PurgeAsync(context, Cancellation);
+            await NotificationsPurge().PurgeAsync(context, Cancellation);
             await Gatekeep.Modules.Tenancy.Contracts.TenancyContract.TenantPurge.PurgeAsync(context, Cancellation);
             return 0;
         });
@@ -117,6 +118,7 @@ public sealed class TenantPurgeRegistryTests(PostgresFixture postgres)
             Gatekeep.Modules.Directory.Contracts.DirectoryContract.TenantPurge,
             IdentityPurge(),
             Gatekeep.Modules.Keys.Contracts.KeysContract.TenantPurge,
+            NotificationsPurge(),
             Gatekeep.Modules.Tenancy.Contracts.TenancyContract.TenantPurge,
         ];
 
@@ -147,6 +149,11 @@ public sealed class TenantPurgeRegistryTests(PostgresFixture postgres)
     /// <summary>Identity's purge, by reflection: this project references Identity only through Operations.</summary>
     private static ITenantPurge IdentityPurge() =>
         (ITenantPurge)Type.GetType("Gatekeep.Modules.Identity.Contracts.IdentityContract, Gatekeep.Modules.Identity", throwOnError: true)!
+            .GetProperty("TenantPurge")!.GetValue(null)!;
+
+    /// <summary>Notifications' purge (Story 4.4), by reflection: this project references Notifications only through Management.</summary>
+    internal static ITenantPurge NotificationsPurge() =>
+        (ITenantPurge)Type.GetType("Gatekeep.Modules.Notifications.Contracts.NotificationsContract, Gatekeep.Modules.Notifications", throwOnError: true)!
             .GetProperty("TenantPurge")!.GetValue(null)!;
 
     /// <summary>Starts the Tenant's deletion as its Deployment Owner would, through Management, in a Deployment scope as gk_admin.</summary>

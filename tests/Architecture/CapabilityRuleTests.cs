@@ -284,6 +284,32 @@ public class CapabilityRuleTests
         Assert.Equal("tenant.signing_keys.revoke", revoke.GetProperty("capability").GetString());
         Assert.False(revoke.GetProperty("machineAllowed").GetBoolean());
         Assert.Equal("always", revoke.GetProperty("freshAssertion").GetString());
+
+        // Story 4.4: the email provider's read is tenant.configuration.read; its save and removal are
+        // tenant.email_provider.manage, Owner only, refused to machine principals, and checks-enforced (Always) with no
+        // target beside the path Tenant. These are the only routes that declare it.
+        const string EmailProvider = "/api/v1/tenants/{tenantId}/email-provider";
+        Assert.Null(Fresh(operations["get " + EmailProvider]));
+        Assert.Equal("tenant.configuration.read", operations["get " + EmailProvider].GetProperty("x-gatekeep-access").GetProperty("capability").GetString());
+        foreach (var method in new[] { "put", "delete" })
+        {
+            var emailFresh = Fresh(operations[$"{method} {EmailProvider}"])!;
+            Assert.Equal("checks", emailFresh.EnforcedBy);
+            Assert.Equal("tenant.email_provider.manage", emailFresh.Action);
+            Assert.Null(emailFresh.Target);
+            var email = operations[$"{method} {EmailProvider}"].GetProperty("x-gatekeep-access");
+            Assert.Equal("capability", email.GetProperty("kind").GetString());
+            Assert.Equal("tenant.email_provider.manage", email.GetProperty("capability").GetString());
+            Assert.False(email.GetProperty("machineAllowed").GetBoolean());
+            Assert.Equal("always", email.GetProperty("freshAssertion").GetString());
+        }
+
+        Assert.Equal(
+            ["delete " + EmailProvider, "put " + EmailProvider],
+            operations
+                .Where(o => o.Value.GetProperty("x-gatekeep-access").TryGetProperty("capability", out var c) && c.GetString() == "tenant.email_provider.manage")
+                .Select(o => o.Key)
+                .Order(StringComparer.Ordinal));
     }
 
     private static readonly (string Route, string Capability)[] ApiRoutes =

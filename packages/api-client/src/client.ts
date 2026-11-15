@@ -85,6 +85,14 @@ export type AddApiPermissionRequest = components['schemas']['AddApiPermissionReq
 export type ApiGrant = components['schemas']['ApiGrantResponse'];
 /** The Permissions to grant a machine-to-machine Application on an API (Story 3.7): they replace what it holds. */
 export type SetApiGrantRequest = components['schemas']['SetApiGrantRequest'];
+/** The Tenant's email provider (Story 4.4): `configured` only when it has none, and never its secret. */
+export type EmailProviderResponse = components['schemas']['EmailProviderResponse'];
+/** An email provider's non-secret settings: only its kind's members (Story 4.4). */
+export type EmailProviderSettings = components['schemas']['EmailProviderSettings'];
+/** An email provider save (Story 4.4): leave `secret` out to keep the stored one. */
+export type SetEmailProviderRequest = components['schemas']['SetEmailProviderRequest'];
+/** An email provider's kind (Story 4.4). */
+export type EmailProviderKind = NonNullable<SetEmailProviderRequest['kind']>;
 
 /** A path the committed OpenAPI document has, so a removed endpoint fails to compile. */
 export type ApiPath = keyof paths;
@@ -539,6 +547,20 @@ export function createApiClient(options: ApiClientOptions = {}) {
         `/api/v1/tenants/${encodeURIComponent(tenantId)}/apis/${encodeURIComponent(apiId)}/grants/${encodeURIComponent(applicationId)}` as '/api/v1/tenants/{tenantId}/apis/{apiId}/grants/{applicationId}',
         'delete',
       ),
+    /** The Tenant's email provider without its secret (Story 4.4): `{ configured: false }` when it has none. Its ID goes into the path encoded. */
+    getEmailProvider: (tenantId: string) =>
+      request(`/api/v1/tenants/${encodeURIComponent(tenantId)}/email-provider` as '/api/v1/tenants/{tenantId}/email-provider', 'get'),
+    /**
+     * Saves the Tenant's email provider (Story 4.4): a full replace, but `secret` left out keeps the stored one. Tenant
+     * Owners only, after a fresh assertion for tenant.email_provider.manage. A refused field is 400
+     * email_provider_invalid with errors naming it. The answer is the provider as the read gives it. Its ID goes into
+     * the path encoded.
+     */
+    setEmailProvider: (tenantId: string, body: SetEmailProviderRequest) =>
+      request(`/api/v1/tenants/${encodeURIComponent(tenantId)}/email-provider` as '/api/v1/tenants/{tenantId}/email-provider', 'put', body),
+    /** Removes the Tenant's email provider and its secret (Story 4.4): a 204, even when it had none. The same access as a save. */
+    removeEmailProvider: (tenantId: string) =>
+      request(`/api/v1/tenants/${encodeURIComponent(tenantId)}/email-provider` as '/api/v1/tenants/{tenantId}/email-provider', 'delete'),
     /** Begins a fresh assertion for a Tenant action, bound to the Tenant `tenantId` names. The Deployment complete finishes it. */
     beginTenantFreshAssertion: (tenantId: string, binding: FreshAssertionBeginRequest) =>
       request(`/api/v1/tenants/${encodeURIComponent(tenantId)}/assertions` as '/api/v1/tenants/{tenantId}/assertions', 'post', binding),

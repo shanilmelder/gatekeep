@@ -13,8 +13,9 @@ public sealed class ApiProblem
     public required string TraceId { get; init; }
 
     /// <summary>
-    /// Only on <c>application_invalid</c> from an Application settings save (Story 3.2) or tokens save (Story 3.4):
-    /// each refused line or field, never its value. Absent on every other problem.
+    /// Only on <c>application_invalid</c> from an Application settings save (Story 3.2) or tokens save (Story 3.4),
+    /// <c>api_invalid</c> (Story 3.6) and <c>email_provider_invalid</c> (Story 4.4): each refused line or field, never its
+    /// value. Absent on every other problem.
     /// </summary>
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
     public IReadOnlyList<ApiProblemError>? Errors { get; init; }
@@ -27,7 +28,7 @@ public sealed class ApiProblem
     public int? RetryAfterSeconds { get; init; }
 }
 
-/// <summary>One refused line or field of an Application settings save (Story 3.2) or tokens save (Story 3.4).</summary>
+/// <summary>One refused line or field of an Application settings save (Story 3.2) or tokens save (Story 3.4), an API write (Story 3.6) or an email provider save (Story 4.4).</summary>
 public sealed class ApiProblemError
 {
     /// <summary>
@@ -187,6 +188,12 @@ internal static class AdminResponses
     public const string ApplicationNotMachine = "application_not_machine";
 
     /// <summary>
+    /// An email provider save (Story 4.4) that is malformed: not JSON, over its size cap or a top-level member of the
+    /// wrong type (no errors), or a field that breaks a rule (errors name each). Nothing was written.
+    /// </summary>
+    public const string EmailProviderInvalid = "email_provider_invalid";
+
+    /// <summary>
     /// A Signing Key rotation on demand (Story 9.2) while the next key was published less than 15 minutes ago,
     /// the JWKS cache limit. The body's <c>retryAfterSeconds</c> and the <c>Retry-After</c> header say how long
     /// remains. Nothing was written.
@@ -269,6 +276,7 @@ internal static class AdminResponses
         ApiBuiltIn,
         SigningKeyNotReady,
         ApplicationNotMachine,
+        EmailProviderInvalid,
     ];
 
     /// <summary>The Session cookie, expired: sent with a sign-out and a 401 for a stale cookie.</summary>

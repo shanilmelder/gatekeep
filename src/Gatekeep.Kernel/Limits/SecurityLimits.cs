@@ -296,4 +296,19 @@ public static class SecurityLimits
 
     /// <summary>The longest Permission description: 200 characters (Story 3.6), as the table checks. It may be empty.</summary>
     public const int MaxPermissionDescriptionLength = 200;
+
+    /// <summary>The longest email provider secret, a password, API key or token: 4096 characters (Story 4.4). It has no NUL.</summary>
+    public const int MaxEmailProviderSecretLength = 4096;
+
+    /// <summary>
+    /// The longest Transit ciphertext an email provider secret is stored as (Story 4.4), as the table checks: room for
+    /// <see cref="MaxEmailProviderSecretLength"/> characters of four UTF-8 bytes each, base64, with Transit's prefix.
+    /// </summary>
+    public const int MaxEmailProviderCiphertextLength = 24576;
+
+    /// <summary>The longest stored email provider settings object, as JSON text (Story 4.4), as the table checks.</summary>
+    public const int MaxEmailProviderSettingsLength = 8192;
+
+    /// <summary>The longest From name an email provider sends with (Story 4.4), as the table checks.</summary>
+    public const int MaxEmailFromNameLength = 128;
 }

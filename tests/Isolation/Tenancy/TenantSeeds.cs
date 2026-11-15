@@ -58,6 +58,9 @@ internal static class TenantSeeds
             // Retired, so it never collides with the current and next keys a real creation makes.
             "INSERT INTO signing_key (id, tenant_id, purpose, state, transit_name, transit_version, published_at, promoted_at, rotated_at, retired_at) " +
             $"VALUES ('{n}', '{t}', 'signing', 'retired', 'sig-{t}-{n}', 1, now(), now(), now(), now())"),
+        ("email_provider", (t, _) =>
+            "INSERT INTO email_provider (tenant_id, kind, settings, from_address, secret_ciphertext) " +
+            $"VALUES ('{t}', 'sendgrid', '{{\"region\":\"eu\"}}', 'no-reply@seeded.example', 'vault:v1:AAAA') ON CONFLICT DO NOTHING"),
         ("protection_key_wrap", (t, _) =>
             $"INSERT INTO protection_key_wrap (tenant_id, ciphertext) VALUES ('{t}', 'vault:v1:AAAA') ON CONFLICT DO NOTHING"),
     ];

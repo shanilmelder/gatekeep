@@ -436,6 +436,16 @@ internal static class CanaryFlows
             "Story 9.3 build review",
             new DateOnly(2026, 11, 14)),
         new(
+            new(SurfaceKind.Route, "/api/v1/tenants/{tenantId}/email-provider"),
+            "The read has no body and returns the path Tenant's provider kind, non-secret settings, From address and name, "
+            + "update time and whether a secret is stored, never the secret or its ciphertext, which gk_admin can't select. The "
+            + "save encrypts the secret in custody under the Tenant's email key before any write, stores only Transit's "
+            + "ciphertext and writes an ID-only event; the secret is held as Secret<T> and is never returned or logged. The "
+            + "removal has no body and writes an ID-only event. A refused field is named by field and reason, never its value; "
+            + "refusals are logged by fixed code only, and a custody failure as one fixed message with the trace ID.",
+            "Story 4.4 build review",
+            new DateOnly(2026, 11, 16)),
+        new(
             new(SurfaceKind.Route, "/api/v1/tenants/{tenantId}/applications"),
             "The list reads the path Tenant's Applications' IDs, names, types and creation times; the create takes a name and a "
             + "type only, writes the row and an ID-only event, and creates no client secret. Neither returns or logs a credential: "
