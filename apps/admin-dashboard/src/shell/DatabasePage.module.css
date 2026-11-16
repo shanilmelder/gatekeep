@@ -1,0 +1,141 @@
+/*
+ * Database (Story 4.6): the header's badge and name, then each tab's cards on the sf surface, as an Application's
+ * tabs, with the password policy and its "what users see" preview side by side where there is room. Tokens only.
+ */
+
+.title {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--gk-space-8);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gk-space-16);
+  min-width: 0;
+  margin: 0;
+}
+
+.policy {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
+  align-items: start;
+  gap: var(--gk-space-16);
+  min-width: 0;
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  background: var(--gk-color-sf);
+  border: 1px solid var(--gk-color-bd);
+  border-radius: var(--gk-radius-card);
+}
+
+.cardHeader {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gk-space-4);
+  padding: var(--gk-space-12) var(--gk-space-16);
+  border-bottom: 1px solid var(--gk-color-bd);
+}
+
+.cardHeader > h2 {
+  margin: 0;
+  font: var(--gk-font-section);
+  font-weight: var(--gk-font-section-weight);
+}
+
+.cardBody {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gk-space-16);
+  padding: var(--gk-space-16);
+  min-width: 0;
+}
+
+.rows {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: 0 var(--gk-space-16);
+}
+
+.nested {
+  padding: var(--gk-space-8) 0 var(--gk-space-12);
+}
+
+.option {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.optionName {
+  font-weight: var(--gk-font-section-weight);
+}
+
+.optionDescription {
+  font: var(--gk-font-small);
+  color: var(--gk-color-tx2);
+}
+
+.preview {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gk-space-12);
+  padding: var(--gk-space-16);
+  min-width: 0;
+}
+
+.rules {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gk-space-8);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.rules > li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--gk-space-8);
+  min-width: 0;
+}
+
+.glyph {
+  flex: 0 0 auto;
+  font-weight: var(--gk-font-section-weight);
+}
+
+.met .glyph {
+  color: var(--gk-color-ok);
+}
+
+.notMet .glyph {
+  color: var(--gk-color-bad);
+}
+
+.ruleState {
+  font: var(--gk-font-small);
+  color: var(--gk-color-tx2);
+}
+
+.note {
+  margin: 0;
+  color: var(--gk-color-tx2);
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--gk-space-8);
+}

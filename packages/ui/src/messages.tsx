@@ -866,6 +866,73 @@ export interface Messages {
   emailProviderRemoveConfirm: string;
   emailProviderRemoved: string;
   emailProviderRemoveFailed: string;
+  /** Story 4.6: the Database page. Its nav label, the header's badge and name, its description and its tabs. */
+  navDatabase: string;
+  databaseBadge: string;
+  databaseName: string;
+  databaseDescription: string;
+  databaseTabsLabel: string;
+  databaseTabSettings: string;
+  databaseTabPasswordPolicy: string;
+  /** The Settings tab's one row. */
+  databaseSignup: string;
+  databaseSignupDescription: string;
+  /** Both tabs' Save, its toast, and a save that failed. */
+  databaseSave: string;
+  databaseSaved: string;
+  databaseSaveFailed: string;
+  /** The Password policy tab's fields. */
+  passwordMinLength: string;
+  /** Placeholders: {min}, {max}. */
+  passwordMinLengthHelper: string;
+  passwordStrength: string;
+  passwordStrengthGood: string;
+  passwordStrengthGoodDescription: string;
+  passwordStrengthExcellent: string;
+  passwordStrengthExcellentDescription: string;
+  passwordHistory: string;
+  passwordHistoryDescription: string;
+  passwordHistoryCount: string;
+  /** Placeholder: {max}. */
+  passwordHistoryCountHelper: string;
+  passwordDictionary: string;
+  passwordDictionaryDescription: string;
+  passwordPersonalData: string;
+  passwordPersonalDataDescription: string;
+  /** The browser's own refusals, when the server's rule text isn't there. Placeholders: {min}, {max}. */
+  /** A minimum below the floor, as the server words it. Placeholder: {min}. */
+  passwordMinLengthFloor: string;
+  passwordMinLengthInvalid: string;
+  passwordHistoryCountInvalid: string;
+  passwordFieldInvalid: string;
+  /** The "what users see" preview: its title, the sample field, which is never sent, and its rules. */
+  passwordPreviewTitle: string;
+  passwordPreviewSample: string;
+  passwordPreviewSampleHelper: string;
+  /** Placeholder: {count}. */
+  passwordRuleLength: string;
+  passwordRuleClasses: string;
+  passwordRuleRepeats: string;
+  passwordRuleMet: string;
+  passwordRuleNotMet: string;
+  passwordPreviewServerChecks: string;
+  /** Story 4.6: the Tenant settings page's Sign-up card. */
+  tenantSignupTitle: string;
+  tenantSignupDescription: string;
+  tenantTermsUrl: string;
+  tenantTermsUrlHelper: string;
+  tenantTermsUrlInvalid: string;
+  tenantDefaultAudience: string;
+  tenantDefaultAudienceHelper: string;
+  tenantDefaultAudienceNone: string;
+  tenantDefaultAudienceInvalid: string;
+  tenantEmailVerificationOff: string;
+  tenantEmailVerificationOffDescription: string;
+  tenantEmailVerificationOffInvalid: string;
+  tenantFieldTooLong: string;
+  tenantSignupSave: string;
+  tenantSignupSaved: string;
+  tenantSignupSaveFailed: string;
 }
 
 export const defaultMessages: Readonly<Messages> = Object.freeze({
@@ -1448,6 +1515,62 @@ export const defaultMessages: Readonly<Messages> = Object.freeze({
   emailProviderRemoveConfirm: 'Remove',
   emailProviderRemoved: 'Email provider removed',
   emailProviderRemoveFailed: "Couldn't remove the email provider.",
+  navDatabase: 'Database',
+  databaseBadge: 'DB',
+  databaseName: 'Username-Password',
+  databaseDescription: 'Users sign up and log in with an email address and a password.',
+  databaseTabsLabel: 'Database Connection',
+  databaseTabSettings: 'Settings',
+  databaseTabPasswordPolicy: 'Password policy',
+  databaseSignup: 'Allow sign up',
+  databaseSignupDescription: 'When off, the Sign up link is hidden and no one can create an account.',
+  databaseSave: 'Save',
+  databaseSaved: 'Changes saved',
+  databaseSaveFailed: "Couldn't save your changes. Nothing was changed.",
+  passwordMinLength: 'Minimum length',
+  passwordMinLengthHelper: '{min} to {max} characters.',
+  passwordStrength: 'Strength',
+  passwordStrengthGood: 'Good',
+  passwordStrengthGoodDescription: 'The minimum length, and 3 of: lower case, upper case, number, special character.',
+  passwordStrengthExcellent: 'Excellent',
+  passwordStrengthExcellentDescription: 'As Good, and no more than 2 identical characters in a row.',
+  passwordHistory: 'Password history',
+  passwordHistoryDescription: "Users can't reuse their most recent passwords.",
+  passwordHistoryCount: 'Passwords remembered',
+  passwordHistoryCountHelper: '1 to {max}.',
+  passwordDictionary: 'Refuse dictionary words',
+  passwordDictionaryDescription: 'Common words and passwords are refused.',
+  passwordPersonalData: 'Refuse personal data',
+  passwordPersonalDataDescription: "Passwords that contain the user's email address are refused.",
+  passwordMinLengthFloor: 'Minimum is {min} characters.',
+  passwordMinLengthInvalid: 'Enter a whole number from {min} to {max}.',
+  passwordHistoryCountInvalid: 'Enter a whole number from 1 to {max}.',
+  passwordFieldInvalid: 'Check this value.',
+  passwordPreviewTitle: 'What users see',
+  passwordPreviewSample: 'Try a password',
+  passwordPreviewSampleHelper: 'Checked here only. Never sent or saved.',
+  passwordRuleLength: 'At least {count} characters',
+  passwordRuleClasses: '3 of: lower case, upper case, number, special character',
+  passwordRuleRepeats: 'No more than 2 identical characters in a row',
+  passwordRuleMet: 'Met',
+  passwordRuleNotMet: 'Not met',
+  passwordPreviewServerChecks: 'Dictionary words, personal data and reused passwords are checked when the user submits.',
+  tenantSignupTitle: 'Sign-up',
+  tenantSignupDescription: 'What new users see and get when they sign up.',
+  tenantTermsUrl: 'Terms URL',
+  tenantTermsUrlHelper: 'An https link shown when users sign up. Leave empty for none.',
+  tenantTermsUrlInvalid: 'Enter an https URL.',
+  tenantDefaultAudience: 'Default audience',
+  tenantDefaultAudienceHelper: "The API a user's token is for when an Application asks for none.",
+  tenantDefaultAudienceNone: 'None',
+  tenantDefaultAudienceInvalid: "Choose one of the Tenant's APIs.",
+  tenantEmailVerificationOff: 'Turn off email verification',
+  tenantEmailVerificationOffDescription: 'Dev Tenants only. New users can log in without verifying their email address.',
+  tenantEmailVerificationOffInvalid: 'Only a Dev Tenant can turn off email verification.',
+  tenantFieldTooLong: 'This is too long.',
+  tenantSignupSave: 'Save',
+  tenantSignupSaved: 'Changes saved',
+  tenantSignupSaveFailed: "Couldn't save the sign-up settings. Nothing was changed.",
 });
 
 /**

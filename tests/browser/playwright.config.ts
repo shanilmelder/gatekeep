@@ -69,7 +69,7 @@ export default defineConfig({
       name,
       // Every spec that isn't another project's own, so a new spec runs by default.
       testMatch: '*.spec.ts',
-      testIgnore: ['hosted-step.spec.ts', 'admin-csp.spec.ts', 'bootstrap.spec.ts', 'credential-setup.spec.ts', 'signin.spec.ts', 'controls.spec.ts', 'data.spec.ts', 'overlay.spec.ts', 'drawer.spec.ts', 'hosted.spec.ts', 'shell.spec.ts', 'admin-shell.spec.ts', 'admin-credentials.spec.ts', 'admin-recovery.spec.ts', 'admin-tenants.spec.ts', 'admin-tenant-switcher.spec.ts', 'admin-tenant-delete.spec.ts', 'admin-logs.spec.ts', 'admin-signing-keys.spec.ts', 'admin-applications.spec.ts', 'admin-apis.spec.ts', 'admin-email-provider.spec.ts'],
+      testIgnore: ['hosted-step.spec.ts', 'admin-csp.spec.ts', 'bootstrap.spec.ts', 'credential-setup.spec.ts', 'signin.spec.ts', 'controls.spec.ts', 'data.spec.ts', 'overlay.spec.ts', 'drawer.spec.ts', 'hosted.spec.ts', 'shell.spec.ts', 'admin-shell.spec.ts', 'admin-credentials.spec.ts', 'admin-recovery.spec.ts', 'admin-tenants.spec.ts', 'admin-tenant-switcher.spec.ts', 'admin-tenant-delete.spec.ts', 'admin-logs.spec.ts', 'admin-signing-keys.spec.ts', 'admin-applications.spec.ts', 'admin-apis.spec.ts', 'admin-email-provider.spec.ts', 'admin-database.spec.ts'],
       use: { baseURL: `http://127.0.0.1:${port}` },
     })),
     // Hosted Login's step pages (Story 4.1), on the built bundle as Host.Hosted serves it.
@@ -180,6 +180,12 @@ export default defineConfig({
     {
       name: 'admin-email-provider',
       testMatch: 'admin-email-provider.spec.ts',
+      use: { baseURL: `http://localhost:${adminHost.port}` },
+    },
+    // A Tenant's database Connection and its Sign-up settings (Story 4.6), from localhost, with the API intercepted.
+    {
+      name: 'admin-database',
+      testMatch: 'admin-database.spec.ts',
       use: { baseURL: `http://localhost:${adminHost.port}` },
     },
   ],

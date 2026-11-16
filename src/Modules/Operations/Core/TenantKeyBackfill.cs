@@ -20,7 +20,8 @@ namespace Gatekeep.Modules.Operations.Core;
 /// active Tenant its hidden <c>system</c> Application (AD-12) when it has none, through
 /// <see cref="IDirectory.EnsureSystemApplicationAsync"/>, so a Tenant an older Worker activated during an
 /// upgrade, after the migration's one-time backfill, gets one too. Story 3.6: likewise its built-in Management API and
-/// every Management Permission it lacks, through <see cref="IDirectory.EnsureBuiltInApiAsync"/>.
+/// every Management Permission it lacks, through <see cref="IDirectory.EnsureBuiltInApiAsync"/>. Story 4.6: likewise its
+/// default database Connection, through <see cref="IDirectory.EnsureDatabaseConnectionAsync"/>.
 /// </summary>
 internal static class TenantKeyBackfill
 {
@@ -65,6 +66,9 @@ internal static class TenantKeyBackfill
 
                 // Story 3.6: the built-in Management API and any Management Permission it lacks.
                 changed |= await Applications.EnsureBuiltInApiAsync(context, cancellationToken);
+
+                // Story 4.6: the default database Connection, when the Tenant has none.
+                changed |= await Applications.EnsureDatabaseConnectionAsync(context, cancellationToken);
 
                 if (changed)
                 {

@@ -10,6 +10,8 @@ internal sealed class IdentityPurge : ITenantPurge
 {
     private static readonly string[] Statements =
     [
+        // Story 4.6: a User's password history references the User, so it goes first.
+        "DELETE FROM password_history WHERE tenant_id = @tenant_id",
         "DELETE FROM \"user\" WHERE tenant_id = @tenant_id",
     ];
 

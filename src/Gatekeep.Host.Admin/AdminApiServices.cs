@@ -84,6 +84,12 @@ internal sealed class AdminApiServices : IAsyncDisposable
     /// <summary>A Tenant's email provider (Story 4.4).</summary>
     public IEmailProviderManagement EmailProviders { get; } = ManagementContract.CreateEmailProviders(AuditContract.CreateAppender());
 
+    /// <summary>A Tenant's database Connection (Story 4.6).</summary>
+    public IDatabaseConnectionManagement DatabaseConnections { get; } = ManagementContract.CreateDatabaseConnections(AuditContract.CreateAppender());
+
+    /// <summary>A Tenant's sign-up settings (Story 4.6).</summary>
+    public ITenantSettingsManagement TenantSettings { get; } = ManagementContract.CreateTenantSettings(AuditContract.CreateAppender());
+
     public IRateLimiter Limiter { get; } = AdminsContract.CreateAttemptLimiter();
 
     public IAdminSessions Sessions { get; }

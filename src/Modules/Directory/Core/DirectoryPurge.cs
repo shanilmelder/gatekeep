@@ -20,6 +20,9 @@ internal sealed class DirectoryPurge : ITenantPurge
         // Story 3.6: an API's Permissions before the API.
         "DELETE FROM permission WHERE tenant_id = @tenant_id",
         "DELETE FROM api WHERE tenant_id = @tenant_id",
+
+        // Story 4.6: the database Connection, which nothing references.
+        "DELETE FROM connection WHERE tenant_id = @tenant_id",
     ];
 
     public async Task PurgeAsync(CommandContext context, CancellationToken cancellationToken)

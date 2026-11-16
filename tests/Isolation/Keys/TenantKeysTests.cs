@@ -242,6 +242,29 @@ public sealed class TenantKeysTests(PostgresFixture postgres, OpenBaoFixture bao
         Assert.Equal(0L, await database.ScalarAsync<long>("SELECT count(*) FROM job WHERE type = 'keys.tenant_keys.backfill' AND status <> 'done'"));
     }
 
+    /// <summary>Story 4.6: an active Tenant with no database Connection gets exactly one with the defaults, and no event; a rerun keeps it.</summary>
+    [Fact]
+    public async Task Backfill_gives_an_active_Tenant_its_one_database_Connection_and_a_rerun_adds_nothing()
+    {
+        var database = await CreateAsync(postgres, registry: null);
+        var protocol = new ProtocolDatabase(postgres, database.Name);
+        Assert.True(await protocol.ProvisionAsync(bao, TenantA));
+        Assert.Equal(0L, await database.ScalarAsync<long>($"SELECT count(*) FROM connection WHERE tenant_id = '{TenantA}'"));
+
+        using var worker = bao.Custody(OpenBaoFixture.Worker);
+        await RunBackfillAsync(database, worker, logger: null);
+
+        var connection = await database.ScalarAsync<Guid>(
+            $"SELECT id FROM connection WHERE tenant_id = '{TenantA}' AND kind = 'database' AND name = 'Username-Password' AND signup_enabled AND password_min_length = 12");
+        Assert.Equal(0L, await database.ScalarAsync<long>($"SELECT count(*) FROM audit_event WHERE tenant_id = '{TenantA}' AND type_code LIKE 'directory.connection.%'"));
+
+        await RunBackfillAsync(database, worker, logger: null);
+
+        Assert.Equal(1L, await database.ScalarAsync<long>($"SELECT count(*) FROM connection WHERE tenant_id = '{TenantA}'"));
+        Assert.Equal(connection, await database.ScalarAsync<Guid>($"SELECT id FROM connection WHERE tenant_id = '{TenantA}'"));
+        Assert.Equal(0L, await database.ScalarAsync<long>("SELECT count(*) FROM job WHERE type = 'keys.tenant_keys.backfill' AND status <> 'done'"));
+    }
+
     [Fact]
     public async Task Backfill_logs_one_Tenants_failure_and_still_provisions_the_others()
     {

@@ -449,6 +449,32 @@ internal static class CanaryFlows
             "Story 4.4 build review",
             new DateOnly(2026, 11, 16)),
         new(
+            new(SurfaceKind.Route, "/api/v1/tenants/{tenantId}/connections/database"),
+            "A read with no body: it returns the path Tenant's database Connection's fixed name, switches, password policy "
+            + "numbers and switches and update time, and writes nothing. No credential, password or hash is held or returned.",
+            "Story 4.6 build review",
+            new DateOnly(2026, 11, 16)),
+        new(
+            new(SurfaceKind.Route, "/api/v1/tenants/{tenantId}/connections/database/settings"),
+            "A write whose body is one boolean: it sets the sign-up switch and writes an ID-only event, returning the Connection "
+            + "as the read does. Refusals are logged by fixed code only.",
+            "Story 4.6 build review",
+            new DateOnly(2026, 11, 16)),
+        new(
+            new(SurfaceKind.Route, "/api/v1/tenants/{tenantId}/connections/database/password-policy"),
+            "A write whose body is policy numbers, a fixed strength and switches: no password is taken, held or checked. It writes "
+            + "an ID-only event and returns the Connection; a refused field is named with its fixed rule text, never its value, "
+            + "and refusals are logged by fixed code only.",
+            "Story 4.6 build review",
+            new DateOnly(2026, 11, 16)),
+        new(
+            new(SurfaceKind.Route, "/api/v1/tenants/{tenantId}/settings"),
+            "The read has no body and returns the path Tenant's terms URL, default audience and verification switch; the save takes "
+            + "those three, writes them and an ID-only event. No credential or token is held or returned; a refused field is named "
+            + "with its fixed rule text, never its value, and refusals are logged by fixed code only.",
+            "Story 4.6 build review",
+            new DateOnly(2026, 11, 16)),
+        new(
             new(SurfaceKind.Route, "/api/v1/tenants/{tenantId}/applications"),
             "The list reads the path Tenant's Applications' IDs, names, types and creation times; the create takes a name and a "
             + "type only, writes the row and an ID-only event, and creates no client secret. Neither returns or logs a credential: "

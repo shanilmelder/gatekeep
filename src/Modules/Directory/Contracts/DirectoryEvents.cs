@@ -103,4 +103,22 @@ public static class DirectoryEvents
         new AuditTypeCode("directory.api.grant_removed"),
         "A machine-to-machine Application's authorization on an API was removed: its next token for the API carries no Permission. Names the API only. Removing a grant that doesn't exist writes no event.",
         AuditOutcome.Success);
+
+    /// <summary>
+    /// Written when an Editor, Owner or machine client turns sign-up on or off for the Tenant's database Connection (Story
+    /// 4.6, FR-17). A save that changes nothing writes no event. The target is the Tenant, which has exactly one.
+    /// </summary>
+    public static readonly AuditEventDefinition ConnectionUpdated = new(
+        new AuditTypeCode("directory.connection.updated"),
+        "Sign-up was turned on or off for the Tenant's database Connection. Records no value. A save that changes nothing writes no event.",
+        AuditOutcome.Success);
+
+    /// <summary>
+    /// Written when a Tenant Owner or machine client changes the database Connection's password policy (Story 4.6, FR-18).
+    /// A save that changes nothing writes no event. The target is the Tenant.
+    /// </summary>
+    public static readonly AuditEventDefinition ConnectionPasswordPolicyUpdated = new(
+        new AuditTypeCode("directory.connection.password_policy_updated"),
+        "The password policy of the Tenant's database Connection was changed. Records no value. A save that changes nothing writes no event.",
+        AuditOutcome.Success);
 }

@@ -30,6 +30,17 @@ public static class TenancyContract
     public static ITenantPurge TenantPurge { get; } = new TenancyPurge();
 
     /// <summary>
+    /// Every problem with a Tenant settings save (Story 4.6) in a Tenant labelled <paramref name="label"/>, each naming its
+    /// field (one of <see cref="TenantSettingsFields"/>), its reason (one of <see cref="TenantSettingsReasons"/>) and the
+    /// rule's text: a terms URL that isn't null or an absolute https URL with no userinfo of at most 2048 characters, email
+    /// verification off outside a Dev Tenant, and a default audience that isn't null or a well-formed identifier. Whether the
+    /// audience names one of the Tenant's APIs is the caller's to check, through Directory. When empty,
+    /// <paramref name="settings"/> is what to save; otherwise it is null.
+    /// </summary>
+    public static IReadOnlyList<TenantSettingsProblem> CheckSettings(TenantSettingsInput input, TenantLabel label, out TenantSettings? settings) =>
+        TenantSettingsRules.Check(input, label, out settings);
+
+    /// <summary>
     /// Host.Hosted's first middleware on its public port (AD-6), before routing: resolves the
     /// request's host to an active Tenant as <c>gk_hosted</c> through <paramref name="connectionString"/>,
     /// read on first use, and sets <see cref="ResolvedTenant"/> as a request feature. Any other host,

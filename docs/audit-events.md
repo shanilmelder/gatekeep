@@ -45,6 +45,8 @@ Every audit type code Gatekeep writes, declared in its module's contract. Codes 
 | `directory.client_secret.created` | Directory | Success | A client secret was created for an Application. Names the Application only: the secret is shown once to its creator and stored only as its hash. | None |
 | `directory.client_secret.revoked` | Directory | Success | One of an Application's client secrets was revoked, or a rotated-out secret was ended early: it is refused at once. Names the Application only, never a secret. | None |
 | `directory.client_secret.rotated` | Directory | Success | An Application's client secret was rotated: a new secret was created, and the old one stays valid for 24 hours unless ended sooner. Names the Application only, never a secret. | None |
+| `directory.connection.password_policy_updated` | Directory | Success | The password policy of the Tenant's database Connection was changed. Records no value. A save that changes nothing writes no event. | None |
+| `directory.connection.updated` | Directory | Success | Sign-up was turned on or off for the Tenant's database Connection. Records no value. A save that changes nothing writes no event. | None |
 | `keys.signing_key.created` | Keys | Success | A Tenant's replacement next Signing or Management key was created in key custody. Names no key. | Key operations |
 | `keys.signing_key.destroyed` | Keys | Success | A Tenant's retired or revoked Signing or Management key was destroyed in key custody. Names no key. | None |
 | `keys.signing_key.destruction_failed` | Keys | Failure | Key custody failed to destroy a Tenant's retired or revoked Signing or Management key; the destruction retries. Names no key. | None |
@@ -73,6 +75,7 @@ Every audit type code Gatekeep writes, declared in its module's contract. Codes 
 | `tenancy.tenant.deletion_started` | Tenancy | Success | A Deployment Owner deleted a Tenant after typing its Tenant Subdomain and a fresh WebAuthn assertion: its host stops resolving, its roles end, its deletion Operation starts. Names the Tenant only. | None |
 | `tenancy.tenant.label_changed` | Tenancy | Success | A Tenant Owner changed a Tenant's environment label, other than removing Prod. Names the Tenant only. | None |
 | `tenancy.tenant.prod_label_removed` | Tenancy | Success | A Tenant Owner removed a Tenant's Prod label after a fresh WebAuthn assertion. No setting changed with it. | None |
+| `tenancy.tenant.settings_updated` | Tenancy | Success | A Tenant's terms URL, default audience or Dev-only email verification setting was changed. Records no value. | None |
 
 ## FR-40 Tenant Log classes
 

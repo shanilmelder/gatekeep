@@ -2,14 +2,23 @@
 title: 'Story 4.6: Configure the database Connection'
 type: 'feature'
 created: '2026-11-16'
-status: 'ready-for-dev'
+status: 'done'
+baseline_revision: 'd19f1b90dd6812896a52bb02f5a4169a3aaa80f6'
 review_loop_iteration: 0
-followup_review_recommended: false
+followup_review_recommended: true
 context:
   - '{project-root}/_bmad-output/implementation-artifacts/epic-4-context.md'
   - '{project-root}/_bmad-output/implementation-artifacts/spec-4-4-configure-a-tenant-s-email-provider.md'
 warnings: ['oversized']
-deferred: []
+deferred:
+  - summary: >-
+      Database page and Sign-up card refusal (409, 403, 5xx) and load-failure banners have no browser test.
+    evidence: |-
+      No spec under tests/browser mentions database-*-not-active, -forbidden, -save-failed or -load-failed; the
+      sibling Admin pages share the gap. Server outcomes are covered by DatabaseConnectionApiTests and TenantSettingsApiTests.
+    location: >-
+      apps/admin-dashboard/src/shell/DatabasePage.tsx:96
+    severity: low
 ---
 
 <intent-contract>
@@ -168,6 +177,39 @@ deferred: []
 
 ## Review Triage Log
 
+### 2026-11-16 — Review pass
+- verdicts: 29 findings — high 0, medium 3, low 23, false 3, maybe-false 0
+- findings:
+  - `low` `reject` (Intent) The floor error in the UI is the client's pre-check copy, not the real server's detail — the text is identical ("Minimum is 12 characters."), and server detail is shown on any 400; there's no visible difference.
+  - `false` `reject` (Intent) The API suites create Tenants by SQL, not the creation path — the creation path is covered by `TenantCreationOperationTests`, which asserts the one default Connection.
+  - `low` `reject` (Intent) The relabel in the Dev test is done by SQL, not the label route — the read side under test is the same; the label route has its own tests.
+  - `low` `reject` (Intent) 409 applies to saves only; a Connection GET on a Tenant still being created is 404 — reading a non-active Tenant changes nothing, and the 409 rule guards writes.
+  - `low` `reject` (Intent) The Viewer also sees the "Tenant Owner only" label — harmless extra labelling; the view-only banner the intent asks for is there.
+  - `false` `reject` (Intent) The read ports aren't used by Hosted yet — the intent scopes their consumers to 4.7, 4.9 and 4.11.
+  - `false` `reject` (Intent) Purge coverage relies on the registry test — `TenantPurgeRegistryTests` is registry-driven and `TenantSeeds` seeds both new tables, so the removal is asserted.
+  - `medium` `patch` (Blind) `gk_worker` holds `SELECT` on `password_history.password_hash` — narrowed to `SELECT (tenant_id), DELETE`, as the `user` purge grant is.
+  - `low` `reject` (Blind) `connection` has no update or delete guard — `ActiveAsync` locks the Tenant row before every write, and 4.4's `email_provider` has no such guard either; adding triggers is more than a direct correction.
+  - `low` `reject` (Blind) Verification off stays stored after a relabel and comes back if the Tenant is relabelled Dev — this is the intent's design (effective only while Dev); the stored flag is the Dev Tenant's own choice.
+  - `low` `reject` (Blind) The default audience is free text with no reference — the intent decides on text (the purge order), and 4.9 falls back.
+  - `low` `reject` (Blind) Audit events carry no detail — the intent says "the detail holds no values".
+  - `low` `reject` (Blind) The settings management answers 403, not 404, when the settings row is missing — that's only a Tenant still being created, which the settings page doesn't edit; it adds a mapping for a state users don't reach.
+  - `low` `reject` (Blind) The strength rules exist only in TypeScript — enforcement, and its server rules, are 4.7's by the intent.
+  - `low` `reject` (Blind) Caseless letters count toward no class — preview only; 4.7 settles the server rule.
+  - `low` `reject` (Blind) The `SaveSettings` upsert tolerates a missing row — activation can't complete without the row (GK005), so it never happens in production; the fix reworks fixtures.
+  - `low` `reject` (Blind) `password_history` has no bounds or pruning — writes are 4.7's and 4.11's by the intent.
+  - `low` `reject` (Blind) Missing tests: concurrency, machine-client save, purge, backfill skipping deleting Tenants, CHECKs equal to the limits — purge is covered (see the Intent row above); the backfill's status filter is in its SQL; the rest is low value for added complexity.
+  - `low` `patch` (Blind) The preview sample field is plain text — made `type="password"`.
+  - `low` `reject` (Blind) Naming inconsistencies (`ConnectionStatus` reused, a bare `"signupEnabled"`) — no caller diverges; cosmetic.
+  - `medium` `patch` (Edge Case) A stored default audience whose API was removed fails every later settings save — the audience is now looked up only when it changed.
+  - `medium` `patch` (Edge Case) The card sends the removed audience back, so the terms URL can't be saved — same root cause as the row above, fixed by it.
+  - `low` `patch` (Edge Case) One in-flight ref serves both Database tabs — each tab has its own.
+  - `low` `reject` (Edge Case) A partial API list failure, or more than 20 pages — more than 1,000 APIs isn't a v1 case, and a failure shows the card's load error.
+  - `low` `patch` (Edge Case) The stale verification-off error stays after the toggle is flipped — cleared on change.
+  - `low` `reject` (Edge Case) An unchanged-looking save on a relabelled Tenant writes an event — the write clears the dormant stored flag, so the event is true.
+  - `low` `patch` (Verification Gap) No test of a stored audience missing from `/apis` — browser test added.
+  - `low` `patch` (Verification Gap) The API paging loop is untested — browser test with two pages added.
+  - `low` `defer` (Verification Gap) The refusal and load-failure banners are untested — display-only states shared with the sibling pages; the server outcomes are covered.
+
 ## Design Notes
 
 - **The ensure lives in `ActivateAsync`, not in a new stage.** A Tenant already mid-creation when this ships would have no planned step for a new stage. `ActivateAsync` is where Stories 2.8 and 3.6 ensured the system Application and built-in API, and it still runs inside the creation Operation.
@@ -180,3 +222,49 @@ deferred: []
 - **.NET build:** with `MSYS_NO_PATHCONV=1`, run `docker run --rm -v "D:/Projects/Personal/gatekeep:/src" -v gk-nuget:/root/.nuget -w /src mcr.microsoft.com/dotnet/sdk:10.0.403-noble sh -c 'dotnet build Gatekeep.slnx -p:NuGetAudit=false -v q'`. Expected: 0 warnings and 0 errors. If Docker isn't available, skip it; CI is the test source of truth.
 - **Dashboard:** `pnpm -r build`, plus the dashboard unit tests. Expected: green.
 - **Isolation, Architecture and browser suites:** CI on the PR. Don't run the full suites locally.
+
+## Auto Run Result
+
+Status: done
+
+**Summary:**
+- Directory's `connection` table holds one `database` Connection per Tenant: whether sign-up is on, and the password policy (minimum length 12 to 64, Good or Excellent, a history of 0 to 24, and the dictionary and personal-data rules).
+- Identity's `password_history` is created empty.
+- `tenant_settings` gains the terms URL, Dev-only email verification off, and the default audience.
+- The default Connection is ensured when a Tenant is activated and by the hourly backfill, and existing Tenants get it from a backfill in the migration.
+- Five Admin API routes, each save one audited command that writes only when something changed.
+- A Database page with Settings and Password policy tabs, and a Sign-up card on Tenant settings.
+- Read ports for 4.7, 4.9 and 4.11.
+
+**Files changed (main ones):**
+- `Migration20261127000000ConfigureDatabaseConnection.cs` and `TableRegistry.cs`: the schema, grants, RLS and backfill.
+- `src/Modules/Directory/{Contracts/DatabaseConnection.cs, Core/DirectoryService.Connections.cs, Core/PasswordPolicyRules.cs}`: the Connection model, its rules, store, ensure and read port.
+- `src/Modules/Tenancy/{Contracts/TenantSettings.cs, Core/TenantSettingsRules.cs, Core/Tenants.cs}`: the settings rules, save and sign-up read.
+- `src/Modules/Management/{Contracts/IConnectionManagement.cs, Core/ConnectionManagement.cs}`: the commands.
+- `src/Gatekeep.Host.Admin/{DatabaseConnectionApi,TenantSettingsApi}.cs` and `AdminApi.cs`: the routes.
+- `TenantCreation.cs` and `TenantKeyBackfill.cs`: the ensure.
+- `apps/admin-dashboard/src/shell/{DatabasePage.tsx, database.ts, TenantSettingsPage.tsx, nav.ts, Shell.tsx}`: the UI.
+- Generated: OpenAPI, the API client, audit events and the log catalogue.
+- Tests: the Connection, its API, and Tenant settings API suites; a browser spec; dashboard unit tests; and updates to the touched suites.
+
+**Review findings:** 29 findings.
+- 8 entries patched:
+  - the worker no longer reads password hashes;
+  - a stored audience whose API is gone no longer blocks a save;
+  - each Database tab has its own in-flight guard;
+  - a stale error clears when the toggle changes;
+  - the preview field is masked;
+  - two browser tests were added.
+- 1 deferred: the refusal and load-failure banner tests.
+- The rest rejected, each with a reason in the triage log.
+
+**Follow-up review recommended:** true. Two `medium` entries were patched on this first pass, so two things need checking: that the narrowed `gk_worker` grant still lets the Tenant purge delete by `tenant_id`, and the changed default-audience lookup. Patched counts: high 0, medium 2, low 6.
+
+**Verification:**
+- The .NET build of the whole solution: 0 warnings, 0 errors, built with the local SDK 10.0.204 by changing `global.json` for the build only.
+- `pnpm -r build` and the dashboard, ui and api-client unit tests: green.
+- The Isolation, Architecture and browser suites run on CI, which is the source of truth.
+
+**Residual risks:**
+- Other browser specs that open Tenant settings don't answer its new settings request, so the Sign-up card shows its load error there. Their axe checks are unconfirmed.
+- The strength rules exist only in the dashboard preview until 4.7 adds them on the server.

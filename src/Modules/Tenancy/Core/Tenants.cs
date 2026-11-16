@@ -100,6 +100,38 @@ internal sealed class Tenants(IAuditAppender appender) : ITenants
 
     private const string MarkDeleted = "UPDATE tenant SET status = 'deleted' WHERE id = @id AND status = 'deleting'";
 
+    // Story 4.6: the settings with the label they're judged by. A Tenant with no settings row yet reads the defaults.
+    private const string ReadSettings =
+        """
+        SELECT t.label, t.status, s.terms_url, coalesce(s.email_verification_off, false), s.default_audience
+        FROM tenant t
+        LEFT JOIN tenant_settings s ON s.tenant_id = t.id
+        WHERE t.id = @id
+        """;
+
+    // The label's own lock (FOR NO KEY UPDATE), so a label change waits for the save that judged the label, and the
+    // save for it.
+    private const string LockSettings = ReadSettings + " FOR NO KEY UPDATE OF t";
+
+    // Verification off counts only while the Tenant is Dev, whatever is stored.
+    private const string ReadSignupSettings =
+        """
+        SELECT s.terms_url, coalesce(s.email_verification_off, false) AND t.label = 'dev', s.default_audience
+        FROM tenant t
+        LEFT JOIN tenant_settings s ON s.tenant_id = t.id
+        WHERE t.id = @id
+        """;
+
+    // A Tenant whose creation wrote its row has one; one inserted as a test fixture may not, and gets it now.
+    private const string SaveSettings =
+        """
+        INSERT INTO tenant_settings (tenant_id, terms_url, email_verification_off, default_audience)
+        VALUES (@tenant_id, @terms_url, @email_verification_off, @default_audience)
+        ON CONFLICT (tenant_id) DO UPDATE
+        SET terms_url = EXCLUDED.terms_url, email_verification_off = EXCLUDED.email_verification_off,
+            default_audience = EXCLUDED.default_audience, updated_at = now()
+        """;
+
     private readonly IAuditAppender _appender = appender ?? throw new ArgumentNullException(nameof(appender));
 
     public async Task<TenantInsertResult> InsertAsync(CommandContext context, TenantDraft draft, CancellationToken cancellationToken)
@@ -410,6 +442,88 @@ internal sealed class Tenants(IAuditAppender appender) : ITenants
 
         await _appender.AppendAsync(context, new AuditEvent(TenancyEvents.TenantDeleted.Code, Actor.System, AuditTargetKind.Tenant, tenantId), null, cancellationToken);
         return true;
+    }
+
+    public Task<TenantSettingsState?> GetSettingsAsync(CommandContext context, Guid tenantId, CancellationToken cancellationToken) =>
+        SettingsAsync(context, tenantId, ReadSettings, cancellationToken);
+
+    public Task<TenantSettingsState?> LockSettingsAsync(CommandContext context, Guid tenantId, CancellationToken cancellationToken) =>
+        SettingsAsync(context, tenantId, LockSettings, cancellationToken);
+
+    public async Task<TenantSignupSettings?> GetSignupSettingsAsync(CommandContext context, Guid tenantId, CancellationToken cancellationToken)
+    {
+        RequireOwnContext(context, tenantId);
+
+        await using var command = context.CreateCommand();
+        command.CommandText = ReadSignupSettings;
+        Add(command, "id", tenantId);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        if (!await reader.ReadAsync(cancellationToken))
+        {
+            return null;
+        }
+
+        return new TenantSignupSettings(
+            reader.IsDBNull(0) ? null : reader.GetString(0),
+            reader.GetBoolean(1),
+            reader.IsDBNull(2) ? null : reader.GetString(2));
+    }
+
+    public async Task<bool> SaveSettingsAsync(
+        CommandContext context, Guid tenantId, TenantSettings settings, Actor actor, CancellationToken cancellationToken)
+    {
+        RequireOwnContext(context, tenantId);
+        ArgumentNullException.ThrowIfNull(settings);
+        ArgumentNullException.ThrowIfNull(actor);
+
+        // The caller holds the lock and has checked the rules; this decides only whether anything changes.
+        var stored = await SettingsAsync(context, tenantId, ReadSettings, cancellationToken)
+            ?? throw new InvalidOperationException("No Tenant's settings were found.");
+        if (stored.Status != TenantStatus.Active)
+        {
+            throw new InvalidOperationException("Only an active Tenant's settings change.");
+        }
+
+        if (stored.Settings == settings)
+        {
+            return false;
+        }
+
+        await using (var command = context.CreateCommand())
+        {
+            command.CommandText = SaveSettings;
+            Add(command, "tenant_id", tenantId);
+            Add(command, "terms_url", settings.TermsUrl);
+            Add(command, "email_verification_off", settings.EmailVerificationOff);
+            Add(command, "default_audience", settings.DefaultAudience);
+            await command.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        await _appender.AppendAsync(
+            context, new AuditEvent(TenancyEvents.SettingsUpdated.Code, actor, AuditTargetKind.Tenant, tenantId), null, cancellationToken);
+        return true;
+    }
+
+    private static async Task<TenantSettingsState?> SettingsAsync(CommandContext context, Guid tenantId, string sql, CancellationToken cancellationToken)
+    {
+        RequireOwnContext(context, tenantId);
+
+        await using var command = context.CreateCommand();
+        command.CommandText = sql;
+        Add(command, "id", tenantId);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        if (!await reader.ReadAsync(cancellationToken))
+        {
+            return null;
+        }
+
+        return new TenantSettingsState(
+            new TenantSettings(
+                reader.IsDBNull(2) ? null : reader.GetString(2),
+                reader.GetBoolean(3),
+                reader.IsDBNull(4) ? null : reader.GetString(4)),
+            TenantValues.ParseLabel(reader.GetString(0)),
+            TenantValues.ParseStatus(reader.GetString(1)));
     }
 
     private static void RequireDeployment(CommandContext context)

@@ -72,6 +72,9 @@ public sealed class TenantCreationTests(PostgresFixture postgres)
             await host.ScalarAsync<long>(
                 $"SELECT count(*) FROM deployment_audit_event WHERE type_code = 'tenancy.tenant.created' AND actor_kind = 'admin' AND actor_id = '{owner}' AND target_kind = 'tenant' AND target_id = '{tenantId}'"));
         Assert.Equal(0L, await host.ScalarAsync<long>("SELECT count(*) FROM tenant_settings"));
+
+        // Story 4.6: the database Connection comes with activation, not before.
+        Assert.Equal(0L, await host.ScalarAsync<long>("SELECT count(*) FROM connection"));
     }
 
     [Fact]

@@ -285,6 +285,39 @@ public interface ITenants
     /// </exception>
     [StateChanging]
     Task<bool> MarkDeletedAsync(CommandContext context, Guid tenantId, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// The Tenant's settings as stored (Story 4.6), with its label and status, read with no lock, in its own context; the
+    /// defaults when it has no settings row yet, and null when there is no such Tenant. The stored verification switch is
+    /// given as stored: <see cref="GetSignupSettingsAsync"/> is what counts.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The context isn't <paramref name="tenantId"/>'s.</exception>
+    Task<TenantSettingsState?> GetSettingsAsync(CommandContext context, Guid tenantId, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// As <see cref="GetSettingsAsync"/>, under the Tenant row's lock (<c>FOR NO KEY UPDATE</c>, the label change's own),
+    /// held to the end of the caller's transaction: a settings save decides on the label it is judged by.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The context isn't <paramref name="tenantId"/>'s.</exception>
+    Task<TenantSettingsState?> LockSettingsAsync(CommandContext context, Guid tenantId, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// The settings sign-up and sign-in read (Story 4.6, for Stories 4.7 and 4.9): the terms URL, whether email verification
+    /// is off, which is false unless the Tenant is Dev now whatever is stored, and the default audience; null when there is
+    /// no such Tenant. It only reads, with no lock, in the Tenant's own context.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The context isn't <paramref name="tenantId"/>'s.</exception>
+    Task<TenantSignupSettings?> GetSignupSettingsAsync(CommandContext context, Guid tenantId, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Replaces an <c>active</c> Tenant's settings (Story 4.6) with <paramref name="settings"/>, which the caller has checked
+    /// with <see cref="TenancyContract.CheckSettings"/> on the label it holds the lock of (<see cref="LockSettingsAsync"/>).
+    /// When they differ from what is stored it writes them and <see cref="TenancyEvents.SettingsUpdated"/>, the Actor
+    /// <paramref name="actor"/> and the target the Tenant; when they don't it writes nothing. Whether it wrote.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The context isn't <paramref name="tenantId"/>'s, or the Tenant isn't active.</exception>
+    [StateChanging]
+    Task<bool> SaveSettingsAsync(CommandContext context, Guid tenantId, TenantSettings settings, Actor actor, CancellationToken cancellationToken);
 }
 
 /// <summary>
