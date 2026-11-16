@@ -51,6 +51,8 @@ internal static partial class LogCatalogue
         new("directory.client_secret.created", AuditOutcome.Success, "A client secret was created for an Application. Names the Application only: the secret is shown once to its creator and stored only as its hash."),
         new("directory.client_secret.revoked", AuditOutcome.Success, "One of an Application's client secrets was revoked, or a rotated-out secret was ended early: it is refused at once. Names the Application only, never a secret."),
         new("directory.client_secret.rotated", AuditOutcome.Success, "An Application's client secret was rotated: a new secret was created, and the old one stays valid for 24 hours unless ended sooner. Names the Application only, never a secret."),
+        new("directory.connection.password_policy_updated", AuditOutcome.Success, "The password policy of the Tenant's database Connection was changed. Records no value. A save that changes nothing writes no event."),
+        new("directory.connection.updated", AuditOutcome.Success, "Sign-up was turned on or off for the Tenant's database Connection. Records no value. A save that changes nothing writes no event."),
         new("keys.signing_key.created", AuditOutcome.Success, "A Tenant's replacement next Signing or Management key was created in key custody. Names no key."),
         new("keys.signing_key.destroyed", AuditOutcome.Success, "A Tenant's retired or revoked Signing or Management key was destroyed in key custody. Names no key."),
         new("keys.signing_key.destruction_failed", AuditOutcome.Failure, "Key custody failed to destroy a Tenant's retired or revoked Signing or Management key; the destruction retries. Names no key."),
@@ -79,5 +81,6 @@ internal static partial class LogCatalogue
         new("tenancy.tenant.deletion_started", AuditOutcome.Success, "A Deployment Owner deleted a Tenant after typing its Tenant Subdomain and a fresh WebAuthn assertion: its host stops resolving, its roles end, its deletion Operation starts. Names the Tenant only."),
         new("tenancy.tenant.label_changed", AuditOutcome.Success, "A Tenant Owner changed a Tenant's environment label, other than removing Prod. Names the Tenant only."),
         new("tenancy.tenant.prod_label_removed", AuditOutcome.Success, "A Tenant Owner removed a Tenant's Prod label after a fresh WebAuthn assertion. No setting changed with it."),
+        new("tenancy.tenant.settings_updated", AuditOutcome.Success, "A Tenant's terms URL, default audience or Dev-only email verification setting was changed. Records no value."),
     ];
 }

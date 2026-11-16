@@ -719,6 +719,61 @@ describe('api-client', () => {
     assert.deepEqual(refused.problem?.errors, [{ field: 'secret', index: null, reason: 'required' }]);
   });
 
+  it("reads and saves a Tenant's database Connection and settings with its ID encoded, the page Tenant and the CSRF header on the writes", async () => {
+    const connection = {
+      kind: 'database',
+      name: 'Username-Password',
+      enabled: true,
+      signupEnabled: true,
+      passwordPolicy: { minLength: 12, strength: 'good', historyCount: 5, dictionary: true, personalData: true },
+      updatedAt: '2026-11-16T00:00:00.000Z',
+    };
+    const { fetch, calls } = fakeFetch(200, JSON.stringify(connection));
+    const client = createApiClient({ fetch, csrfToken: () => 'csrf-1', pageTenant: () => 'ten_a' });
+
+    const read = await client.getDatabaseConnection('ten_a/b');
+    await client.setDatabaseConnectionSettings('ten_a', { signupEnabled: false });
+    const policy = { minLength: 16, strength: 'excellent', historyCount: 0, dictionary: false, personalData: true };
+    await client.setPasswordPolicy('ten_a', policy);
+    await client.getTenantSettings('ten_a/b');
+    const settings = { termsUrl: 'https://example.com/terms', emailVerificationOff: false, defaultAudience: null };
+    await client.setTenantSettings('ten_a', settings);
+
+    assert.equal(calls[0].input, '/api/v1/tenants/ten_a%2Fb/connections/database');
+    assert.equal(calls[0].init.method, 'GET');
+    assert.equal(calls[0].init.headers[CSRF_HEADER], undefined);
+    assert.deepEqual(read.data, connection);
+    assert.equal(calls[1].input, '/api/v1/tenants/ten_a/connections/database/settings');
+    assert.equal(calls[1].init.method, 'PUT');
+    assert.equal(calls[1].init.body, JSON.stringify({ signupEnabled: false }));
+    assert.equal(calls[1].init.headers[CSRF_HEADER], 'csrf-1');
+    assert.equal(calls[1].init.headers[TENANT_HEADER], 'ten_a');
+    assert.equal(calls[2].input, '/api/v1/tenants/ten_a/connections/database/password-policy');
+    assert.equal(calls[2].init.method, 'PUT');
+    assert.equal(calls[2].init.body, JSON.stringify(policy));
+    assert.equal(calls[3].input, '/api/v1/tenants/ten_a%2Fb/settings');
+    assert.equal(calls[3].init.method, 'GET');
+    assert.equal(calls[4].input, '/api/v1/tenants/ten_a/settings');
+    assert.equal(calls[4].init.method, 'PUT');
+    assert.equal(calls[4].init.body, JSON.stringify(settings));
+    assert.equal(calls[4].init.headers[TENANT_HEADER], 'ten_a');
+  });
+
+  it("keeps a password policy refusal's rule text as each error's detail", async () => {
+    const problem = {
+      code: 'connection_invalid',
+      traceId: 't',
+      errors: [{ field: 'minLength', index: null, reason: 'below_minimum', detail: 'Minimum is 12 characters.' }],
+    };
+    const { fetch } = fakeFetch(400, JSON.stringify(problem), 'application/problem+json');
+    const client = createApiClient({ fetch, csrfToken: () => 'csrf-1', pageTenant: () => 'ten_a' });
+
+    const refused = await client.setPasswordPolicy('ten_a', { minLength: 11, strength: 'good', historyCount: 5, dictionary: true, personalData: true });
+
+    assert.equal(refused.ok, false);
+    assert.deepEqual(refused.problem?.errors, problem.errors);
+  });
+
   it('reads an Application deletion refusal as its problem code', async () => {
     const { fetch } = fakeFetch(404, JSON.stringify({ code: 'not_found', traceId: 't' }), 'application/problem+json');
     const client = createApiClient({ fetch, csrfToken: () => 'csrf-1', pageTenant: () => 'ten_a' });

@@ -2851,6 +2851,477 @@
         }
       }
     },
+    "/api/v1/tenants/{tenantId}/connections/database": {
+      "get": {
+        "tags": [
+          "Tenants"
+        ],
+        "summary": "The path Tenant's database Connection: its sign-up switch and password policy.",
+        "description": "Any Tenant Role in the path Tenant. Read only, in the Tenant's own scope. The Tenant's one database Connection, Username-Password: whether it is enabled, whether Users may sign up, and its password policy (minimum length, strength, history count, dictionary and personal-data rules), and when it was last changed. A Tenant with no Connection yet, such as one still being created, is 404 not_found. It writes nothing. A malformed, unknown or role-less Tenant is 403 access_denied, audited as every Tenant capability refusal is.",
+        "operationId": "GetDatabaseConnection",
+        "parameters": [
+          {
+            "name": "tenantId",
+            "in": "path",
+            "description": "The Tenant's public ID: ten_ and the UUID's 16 bytes in lowercase RFC 4648 base32 with no padding, whose last character carries two zero bits. Only this canonical spelling, after URL decoding, names a Tenant, and the empty UUID's never does; anything else is refused like a Tenant the Admin holds no role in.",
+            "required": true,
+            "schema": {
+              "pattern": "^ten_[a-z2-7]{25}[aeimquy4]$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseConnectionResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "access_denied, with the problem body, when the capability is refused. No body when an earlier check refuses first: a Session restricted to setup, or on a state-changing call a wrong Origin or CSRF token.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "adminSession": [ ]
+          }
+        ],
+        "x-gatekeep-setup-allowed": false,
+        "x-gatekeep-access": {
+          "kind": "capability",
+          "capability": "tenant.configuration.read",
+          "scope": "tenant",
+          "machineAllowed": true,
+          "freshAssertion": "never"
+        },
+        "x-gatekeep-recovery-allowed": false
+      }
+    },
+    "/api/v1/tenants/{tenantId}/connections/database/settings": {
+      "put": {
+        "tags": [
+          "Tenants"
+        ],
+        "summary": "Turn sign-up on or off for the path Tenant's database Connection.",
+        "description": "Editors and Owners, and machine principals allowed tenant.connections.toggle, in an active Tenant. When signupEnabled is false the Sign up link is hidden and no one can create an account. A change writes directory.connection.updated on the Tenant's own Log, targeting the Tenant and recording no value; an unchanged save writes nothing and is 200. The answer is the Connection as GET gives it. A body that isn't JSON, is over 4096 bytes or has the wrong type is 400 connection_invalid with no errors; a missing signupEnabled is 400 connection_invalid naming it. A Tenant that isn't active is 409 tenant_not_active. A malformed, unknown or role-less Tenant, and a Viewer, is 403 access_denied, audited as every Tenant capability refusal is.",
+        "operationId": "SetDatabaseConnectionSettings",
+        "parameters": [
+          {
+            "name": "tenantId",
+            "in": "path",
+            "description": "The Tenant's public ID: ten_ and the UUID's 16 bytes in lowercase RFC 4648 base32 with no padding, whose last character carries two zero bits. Only this canonical spelling, after URL decoding, names a Tenant, and the empty UUID's never does; anything else is refused like a Tenant the Admin holds no role in.",
+            "required": true,
+            "schema": {
+              "pattern": "^ten_[a-z2-7]{25}[aeimquy4]$",
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Gatekeep-Tenant",
+            "in": "header",
+            "description": "The Tenant the page shows, its ten_ ID: it must equal {tenantId}, or 409 tenant_mismatch. It never selects a Tenant.",
+            "required": true,
+            "schema": {
+              "pattern": "^ten_[a-z2-7]{25}[aeimquy4]$",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetDatabaseConnectionSettingsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseConnectionResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "access_denied, with the problem body, when the capability is refused. No body when an earlier check refuses first: a Session restricted to setup, or on a state-changing call a wrong Origin or CSRF token.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "tenant_mismatch, with the problem body, when X-Gatekeep-Tenant is missing, sent twice or isn't {tenantId}, and nothing ran; or another conflict the operation's description names.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "adminSession": [ ],
+            "csrf": [ ]
+          }
+        ],
+        "x-gatekeep-setup-allowed": false,
+        "x-gatekeep-access": {
+          "kind": "capability",
+          "capability": "tenant.connections.toggle",
+          "scope": "tenant",
+          "machineAllowed": true,
+          "freshAssertion": "never"
+        },
+        "x-gatekeep-recovery-allowed": false
+      }
+    },
+    "/api/v1/tenants/{tenantId}/connections/database/password-policy": {
+      "put": {
+        "tags": [
+          "Tenants"
+        ],
+        "summary": "Replace the password policy of the path Tenant's database Connection.",
+        "description": "Tenant Owners only, and machine principals allowed tenant.password_policy.manage, in an active Tenant. Every member is required: minLength 12 to 64, strength good (the minimum and 3 of lower case, upper case, number and special) or excellent (the same, and no more than 2 identical characters in a row), historyCount 0 to 24 (0 turns it off), and the dictionary and personalData switches. A minimum below 12 is refused with the detail \"Minimum is 12 characters.\". A change writes directory.connection.password_policy_updated on the Tenant's own Log, targeting the Tenant and recording no value; an unchanged save writes nothing and is 200. Enforcing the policy on a password is sign-up's and reset's. The answer is the Connection as GET gives it. A body that isn't JSON, is over 4096 bytes or has a member of the wrong type is 400 connection_invalid with no errors; a field that breaks a rule is 400 connection_invalid naming each field, its reason (required, invalid, below_minimum or above_maximum) and the rule's text as detail. A Tenant that isn't active is 409 tenant_not_active. A malformed, unknown or role-less Tenant, and a Viewer or Editor, is 403 access_denied, audited as every Tenant capability refusal is.",
+        "operationId": "SetPasswordPolicy",
+        "parameters": [
+          {
+            "name": "tenantId",
+            "in": "path",
+            "description": "The Tenant's public ID: ten_ and the UUID's 16 bytes in lowercase RFC 4648 base32 with no padding, whose last character carries two zero bits. Only this canonical spelling, after URL decoding, names a Tenant, and the empty UUID's never does; anything else is refused like a Tenant the Admin holds no role in.",
+            "required": true,
+            "schema": {
+              "pattern": "^ten_[a-z2-7]{25}[aeimquy4]$",
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Gatekeep-Tenant",
+            "in": "header",
+            "description": "The Tenant the page shows, its ten_ ID: it must equal {tenantId}, or 409 tenant_mismatch. It never selects a Tenant.",
+            "required": true,
+            "schema": {
+              "pattern": "^ten_[a-z2-7]{25}[aeimquy4]$",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetPasswordPolicyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseConnectionResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "access_denied, with the problem body, when the capability is refused. No body when an earlier check refuses first: a Session restricted to setup, or on a state-changing call a wrong Origin or CSRF token.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "tenant_mismatch, with the problem body, when X-Gatekeep-Tenant is missing, sent twice or isn't {tenantId}, and nothing ran; or another conflict the operation's description names.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "adminSession": [ ],
+            "csrf": [ ]
+          }
+        ],
+        "x-gatekeep-setup-allowed": false,
+        "x-gatekeep-access": {
+          "kind": "capability",
+          "capability": "tenant.password_policy.manage",
+          "scope": "tenant",
+          "machineAllowed": true,
+          "freshAssertion": "never"
+        },
+        "x-gatekeep-recovery-allowed": false
+      }
+    },
+    "/api/v1/tenants/{tenantId}/settings": {
+      "get": {
+        "tags": [
+          "Tenants"
+        ],
+        "summary": "The path Tenant's settings a sign-up reads: its terms URL, default audience and Dev-only email verification switch.",
+        "description": "Any Tenant Role in the path Tenant. Read only, in the Tenant's own scope. termsUrl and defaultAudience are null when unset. emailVerificationOff is never true unless the Tenant is Dev now, and emailVerificationOffAvailable says whether it is. It writes nothing. A malformed, unknown or role-less Tenant is 403 access_denied, audited as every Tenant capability refusal is.",
+        "operationId": "GetTenantSettings",
+        "parameters": [
+          {
+            "name": "tenantId",
+            "in": "path",
+            "description": "The Tenant's public ID: ten_ and the UUID's 16 bytes in lowercase RFC 4648 base32 with no padding, whose last character carries two zero bits. Only this canonical spelling, after URL decoding, names a Tenant, and the empty UUID's never does; anything else is refused like a Tenant the Admin holds no role in.",
+            "required": true,
+            "schema": {
+              "pattern": "^ten_[a-z2-7]{25}[aeimquy4]$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TenantSettingsResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "access_denied, with the problem body, when the capability is refused. No body when an earlier check refuses first: a Session restricted to setup, or on a state-changing call a wrong Origin or CSRF token.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "adminSession": [ ]
+          }
+        ],
+        "x-gatekeep-setup-allowed": false,
+        "x-gatekeep-access": {
+          "kind": "capability",
+          "capability": "tenant.configuration.read",
+          "scope": "tenant",
+          "machineAllowed": true,
+          "freshAssertion": "never"
+        },
+        "x-gatekeep-recovery-allowed": false
+      },
+      "put": {
+        "tags": [
+          "Tenants"
+        ],
+        "summary": "Replace the path Tenant's terms URL, default audience and Dev-only email verification switch.",
+        "description": "Editors and Owners, and machine principals allowed tenant.settings.manage, in an active Tenant. termsUrl is null or an absolute https URL with no userinfo, at most 2048 characters. defaultAudience is null or the identifier of one of the Tenant's APIs, never the built-in Management API; it is kept as text, so an API removed later leaves token issue to fall back. emailVerificationOff is required, and true only in a Dev Tenant, judged under the label's lock. A change writes tenancy.tenant.settings_updated on the Tenant's own Log, targeting the Tenant and recording no value; an unchanged save writes nothing and is 200. The answer is the settings as GET gives them. A body that isn't JSON, is over 16384 bytes or has a member of the wrong type is 400 tenant_settings_invalid with no errors; a field that breaks a rule is 400 tenant_settings_invalid naming each field, its reason (required, invalid, too_long, dev_only, not_found or built_in) and the rule's text as detail. A Tenant that isn't active is 409 tenant_not_active. A malformed, unknown or role-less Tenant, and a Viewer, is 403 access_denied, audited as every Tenant capability refusal is.",
+        "operationId": "SetTenantSettings",
+        "parameters": [
+          {
+            "name": "tenantId",
+            "in": "path",
+            "description": "The Tenant's public ID: ten_ and the UUID's 16 bytes in lowercase RFC 4648 base32 with no padding, whose last character carries two zero bits. Only this canonical spelling, after URL decoding, names a Tenant, and the empty UUID's never does; anything else is refused like a Tenant the Admin holds no role in.",
+            "required": true,
+            "schema": {
+              "pattern": "^ten_[a-z2-7]{25}[aeimquy4]$",
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Gatekeep-Tenant",
+            "in": "header",
+            "description": "The Tenant the page shows, its ten_ ID: it must equal {tenantId}, or 409 tenant_mismatch. It never selects a Tenant.",
+            "required": true,
+            "schema": {
+              "pattern": "^ten_[a-z2-7]{25}[aeimquy4]$",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetTenantSettingsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TenantSettingsResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "access_denied, with the problem body, when the capability is refused. No body when an earlier check refuses first: a Session restricted to setup, or on a state-changing call a wrong Origin or CSRF token.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "tenant_mismatch, with the problem body, when X-Gatekeep-Tenant is missing, sent twice or isn't {tenantId}, and nothing ran; or another conflict the operation's description names.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "adminSession": [ ],
+            "csrf": [ ]
+          }
+        ],
+        "x-gatekeep-setup-allowed": false,
+        "x-gatekeep-access": {
+          "kind": "capability",
+          "capability": "tenant.settings.manage",
+          "scope": "tenant",
+          "machineAllowed": true,
+          "freshAssertion": "never"
+        },
+        "x-gatekeep-recovery-allowed": false
+      }
+    },
     "/api/v1/tenants/{tenantId}/applications": {
       "get": {
         "tags": [
@@ -4993,7 +5464,9 @@
               "api_built_in",
               "signing_key_not_ready",
               "application_not_machine",
-              "email_provider_invalid"
+              "email_provider_invalid",
+              "connection_invalid",
+              "tenant_settings_invalid"
             ],
             "type": "string"
           },
@@ -5055,7 +5528,16 @@
               "settings.authHeaderName",
               "fromAddress",
               "fromName",
-              "secret"
+              "secret",
+              "signupEnabled",
+              "minLength",
+              "strength",
+              "historyCount",
+              "dictionary",
+              "personalData",
+              "termsUrl",
+              "emailVerificationOff",
+              "defaultAudience"
             ],
             "type": "string"
           },
@@ -5080,7 +5562,10 @@
               "invalid",
               "reserved",
               "unknown",
-              "required"
+              "required",
+              "dev_only",
+              "not_found",
+              "built_in"
             ],
             "type": "string"
           },
@@ -5090,6 +5575,12 @@
               "integer"
             ],
             "format": "int32"
+          },
+          "detail": {
+            "type": [
+              "null",
+              "string"
+            ]
           }
         }
       },
@@ -5739,6 +6230,40 @@
           }
         }
       },
+      "DatabaseConnectionResponse": {
+        "required": [
+          "kind",
+          "name",
+          "enabled",
+          "signupEnabled",
+          "passwordPolicy",
+          "updatedAt"
+        ],
+        "type": "object",
+        "properties": {
+          "kind": {
+            "enum": [
+              "database"
+            ],
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "signupEnabled": {
+            "type": "boolean"
+          },
+          "passwordPolicy": {
+            "$ref": "#/components/schemas/PasswordPolicyResponse"
+          },
+          "updatedAt": {
+            "type": "string"
+          }
+        }
+      },
       "DeleteTenantRequest": {
         "required": [
           "confirmation"
@@ -6069,6 +6594,43 @@
           }
         }
       },
+      "PasswordPolicyResponse": {
+        "required": [
+          "minLength",
+          "strength",
+          "historyCount",
+          "dictionary",
+          "personalData"
+        ],
+        "type": "object",
+        "properties": {
+          "minLength": {
+            "maximum": 64,
+            "minimum": 12,
+            "type": "integer",
+            "format": "int32"
+          },
+          "strength": {
+            "enum": [
+              "good",
+              "excellent"
+            ],
+            "type": "string"
+          },
+          "historyCount": {
+            "maximum": 24,
+            "minimum": 0,
+            "type": "integer",
+            "format": "int32"
+          },
+          "dictionary": {
+            "type": "boolean"
+          },
+          "personalData": {
+            "type": "boolean"
+          }
+        }
+      },
       "RecoveryCodeConfirmRequest": {
         "required": [
           "issueId"
@@ -6223,6 +6785,17 @@
           }
         }
       },
+      "SetDatabaseConnectionSettingsRequest": {
+        "type": "object",
+        "properties": {
+          "signupEnabled": {
+            "type": [
+              "null",
+              "boolean"
+            ]
+          }
+        }
+      },
       "SetEmailProviderRequest": {
         "type": "object",
         "properties": {
@@ -6326,6 +6899,51 @@
           }
         }
       },
+      "SetPasswordPolicyRequest": {
+        "type": "object",
+        "properties": {
+          "minLength": {
+            "maximum": 64,
+            "minimum": 12,
+            "type": [
+              "null",
+              "integer"
+            ],
+            "format": "int32"
+          },
+          "strength": {
+            "enum": [
+              "good",
+              "excellent"
+            ],
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "historyCount": {
+            "maximum": 24,
+            "minimum": 0,
+            "type": [
+              "null",
+              "integer"
+            ],
+            "format": "int32"
+          },
+          "dictionary": {
+            "type": [
+              "null",
+              "boolean"
+            ]
+          },
+          "personalData": {
+            "type": [
+              "null",
+              "boolean"
+            ]
+          }
+        }
+      },
       "SetTenantLabelRequest": {
         "required": [
           "label"
@@ -6339,6 +6957,32 @@
               "prod"
             ],
             "type": "string"
+          }
+        }
+      },
+      "SetTenantSettingsRequest": {
+        "type": "object",
+        "properties": {
+          "termsUrl": {
+            "maxLength": 2048,
+            "pattern": "^https://",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "emailVerificationOff": {
+            "type": [
+              "null",
+              "boolean"
+            ]
+          },
+          "defaultAudience": {
+            "maxLength": 255,
+            "type": [
+              "null",
+              "string"
+            ]
           }
         }
       },
@@ -6813,6 +7457,38 @@
               {
                 "$ref": "#/components/schemas/TenantDeletion"
               }
+            ]
+          }
+        }
+      },
+      "TenantSettingsResponse": {
+        "required": [
+          "termsUrl",
+          "emailVerificationOff",
+          "emailVerificationOffAvailable",
+          "defaultAudience"
+        ],
+        "type": "object",
+        "properties": {
+          "termsUrl": {
+            "maxLength": 2048,
+            "pattern": "^https://",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "emailVerificationOff": {
+            "type": "boolean"
+          },
+          "emailVerificationOffAvailable": {
+            "type": "boolean"
+          },
+          "defaultAudience": {
+            "maxLength": 255,
+            "type": [
+              "null",
+              "string"
             ]
           }
         }

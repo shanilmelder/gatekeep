@@ -833,6 +833,121 @@ internal static class AdminApi
             .Produces<ApiProblem>(StatusCodes.Status409Conflict, AdminResponses.ProblemContentType)
             .Produces(StatusCodes.Status503ServiceUnavailable);
 
+        app.MapGet("/api/v1/tenants/{tenantId}/connections/database", static (HttpContext context, AdminApiServices services) => DatabaseConnectionApi.GetAsync(context, services))
+            .WithMetadata(TenantApiEndpoint.Instance, new RequiresCapability(AdminCapabilities.TenantConfigurationRead))
+            .WithName("GetDatabaseConnection")
+            .WithTags(TenantTag)
+            .WithSummary("The path Tenant's database Connection: its sign-up switch and password policy.")
+            .WithDescription(
+                "Any Tenant Role in the path Tenant. Read only, in the Tenant's own scope. The Tenant's one database Connection, " +
+                "Username-Password: whether it is enabled, whether Users may sign up, and its password policy (minimum length, " +
+                "strength, history count, dictionary and personal-data rules), and when it was last changed. A Tenant with no " +
+                "Connection yet, such as one still being created, is 404 not_found. It writes nothing. A malformed, unknown or " +
+                "role-less Tenant is 403 access_denied, audited as every Tenant capability refusal is.")
+            .Produces<DatabaseConnectionResponse>(StatusCodes.Status200OK)
+            .Produces(StatusCodes.Status401Unauthorized)
+            .Produces<ApiProblem>(StatusCodes.Status403Forbidden, AdminResponses.ProblemContentType)
+            .Produces<ApiProblem>(StatusCodes.Status404NotFound, AdminResponses.ProblemContentType)
+            .Produces(StatusCodes.Status503ServiceUnavailable);
+
+        app.MapPut("/api/v1/tenants/{tenantId}/connections/database/settings", static (HttpContext context, AdminApiServices services) => DatabaseConnectionApi.SetSettingsAsync(context, services))
+            .WithMetadata(
+                TenantApiEndpoint.Instance,
+                new RequiresCapability(AdminCapabilities.TenantConnectionsToggle),
+                new JsonRequestBody(typeof(SetDatabaseConnectionSettingsRequest)))
+            .WithName("SetDatabaseConnectionSettings")
+            .WithTags(TenantTag)
+            .WithSummary("Turn sign-up on or off for the path Tenant's database Connection.")
+            .WithDescription(
+                "Editors and Owners, and machine principals allowed tenant.connections.toggle, in an active Tenant. When " +
+                "signupEnabled is false the Sign up link is hidden and no one can create an account. A change writes " +
+                "directory.connection.updated on the Tenant's own Log, targeting the Tenant and recording no value; an unchanged " +
+                "save writes nothing and is 200. The answer is the Connection as GET gives it. A body that isn't JSON, is over 4096 " +
+                "bytes or has the wrong type is 400 connection_invalid with no errors; a missing signupEnabled is 400 " +
+                "connection_invalid naming it. A Tenant that isn't active is 409 tenant_not_active. A malformed, unknown or " +
+                "role-less Tenant, and a Viewer, is 403 access_denied, audited as every Tenant capability refusal is.")
+            .Produces<DatabaseConnectionResponse>(StatusCodes.Status200OK)
+            .Produces<ApiProblem>(StatusCodes.Status400BadRequest, AdminResponses.ProblemContentType)
+            .Produces(StatusCodes.Status401Unauthorized)
+            .Produces<ApiProblem>(StatusCodes.Status403Forbidden, AdminResponses.ProblemContentType)
+            .Produces<ApiProblem>(StatusCodes.Status404NotFound, AdminResponses.ProblemContentType)
+            // tenant_not_active, and the request checks' tenant_mismatch, which every state-changing Tenant route declares.
+            .Produces<ApiProblem>(StatusCodes.Status409Conflict, AdminResponses.ProblemContentType)
+            .Produces(StatusCodes.Status503ServiceUnavailable);
+
+        app.MapPut("/api/v1/tenants/{tenantId}/connections/database/password-policy", static (HttpContext context, AdminApiServices services) => DatabaseConnectionApi.SetPasswordPolicyAsync(context, services))
+            .WithMetadata(
+                TenantApiEndpoint.Instance,
+                new RequiresCapability(AdminCapabilities.TenantPasswordPolicyManage),
+                new JsonRequestBody(typeof(SetPasswordPolicyRequest)))
+            .WithName("SetPasswordPolicy")
+            .WithTags(TenantTag)
+            .WithSummary("Replace the password policy of the path Tenant's database Connection.")
+            .WithDescription(
+                "Tenant Owners only, and machine principals allowed tenant.password_policy.manage, in an active Tenant. Every " +
+                "member is required: minLength 12 to 64, strength good (the minimum and 3 of lower case, upper case, number and " +
+                "special) or excellent (the same, and no more than 2 identical characters in a row), historyCount 0 to 24 (0 " +
+                "turns it off), and the dictionary and personalData switches. A minimum below 12 is refused with the detail " +
+                "\"Minimum is 12 characters.\". A change writes directory.connection.password_policy_updated on the Tenant's own " +
+                "Log, targeting the Tenant and recording no value; an unchanged save writes nothing and is 200. Enforcing the " +
+                "policy on a password is sign-up's and reset's. The answer is the Connection as GET gives it. A body that isn't " +
+                "JSON, is over 4096 bytes or has a member of the wrong type is 400 connection_invalid with no errors; a field " +
+                "that breaks a rule is 400 connection_invalid naming each field, its reason (required, invalid, below_minimum or " +
+                "above_maximum) and the rule's text as detail. A Tenant that isn't active is 409 tenant_not_active. A malformed, " +
+                "unknown or role-less Tenant, and a Viewer or Editor, is 403 access_denied, audited as every Tenant capability " +
+                "refusal is.")
+            .Produces<DatabaseConnectionResponse>(StatusCodes.Status200OK)
+            .Produces<ApiProblem>(StatusCodes.Status400BadRequest, AdminResponses.ProblemContentType)
+            .Produces(StatusCodes.Status401Unauthorized)
+            .Produces<ApiProblem>(StatusCodes.Status403Forbidden, AdminResponses.ProblemContentType)
+            .Produces<ApiProblem>(StatusCodes.Status404NotFound, AdminResponses.ProblemContentType)
+            // tenant_not_active, and the request checks' tenant_mismatch, which every state-changing Tenant route declares.
+            .Produces<ApiProblem>(StatusCodes.Status409Conflict, AdminResponses.ProblemContentType)
+            .Produces(StatusCodes.Status503ServiceUnavailable);
+
+        app.MapGet("/api/v1/tenants/{tenantId}/settings", static (HttpContext context, AdminApiServices services) => TenantSettingsApi.GetAsync(context, services))
+            .WithMetadata(TenantApiEndpoint.Instance, new RequiresCapability(AdminCapabilities.TenantConfigurationRead))
+            .WithName("GetTenantSettings")
+            .WithTags(TenantTag)
+            .WithSummary("The path Tenant's settings a sign-up reads: its terms URL, default audience and Dev-only email verification switch.")
+            .WithDescription(
+                "Any Tenant Role in the path Tenant. Read only, in the Tenant's own scope. termsUrl and defaultAudience are null " +
+                "when unset. emailVerificationOff is never true unless the Tenant is Dev now, and emailVerificationOffAvailable " +
+                "says whether it is. It writes nothing. A malformed, unknown or role-less Tenant is 403 access_denied, audited as " +
+                "every Tenant capability refusal is.")
+            .Produces<TenantSettingsResponse>(StatusCodes.Status200OK)
+            .Produces(StatusCodes.Status401Unauthorized)
+            .Produces<ApiProblem>(StatusCodes.Status403Forbidden, AdminResponses.ProblemContentType)
+            .Produces(StatusCodes.Status503ServiceUnavailable);
+
+        app.MapPut("/api/v1/tenants/{tenantId}/settings", static (HttpContext context, AdminApiServices services) => TenantSettingsApi.SetAsync(context, services))
+            .WithMetadata(
+                TenantApiEndpoint.Instance,
+                new RequiresCapability(AdminCapabilities.TenantSettingsManage),
+                new JsonRequestBody(typeof(SetTenantSettingsRequest)))
+            .WithName("SetTenantSettings")
+            .WithTags(TenantTag)
+            .WithSummary("Replace the path Tenant's terms URL, default audience and Dev-only email verification switch.")
+            .WithDescription(
+                "Editors and Owners, and machine principals allowed tenant.settings.manage, in an active Tenant. termsUrl is null " +
+                "or an absolute https URL with no userinfo, at most 2048 characters. defaultAudience is null or the identifier of " +
+                "one of the Tenant's APIs, never the built-in Management API; it is kept as text, so an API removed later leaves " +
+                "token issue to fall back. emailVerificationOff is required, and true only in a Dev Tenant, judged under the " +
+                "label's lock. A change writes tenancy.tenant.settings_updated on the Tenant's own Log, targeting the Tenant and " +
+                "recording no value; an unchanged save writes nothing and is 200. The answer is the settings as GET gives them. A " +
+                "body that isn't JSON, is over 16384 bytes or has a member of the wrong type is 400 tenant_settings_invalid with " +
+                "no errors; a field that breaks a rule is 400 tenant_settings_invalid naming each field, its reason (required, " +
+                "invalid, too_long, dev_only, not_found or built_in) and the rule's text as detail. A Tenant that isn't active is " +
+                "409 tenant_not_active. A malformed, unknown or role-less Tenant, and a Viewer, is 403 access_denied, audited as " +
+                "every Tenant capability refusal is.")
+            .Produces<TenantSettingsResponse>(StatusCodes.Status200OK)
+            .Produces<ApiProblem>(StatusCodes.Status400BadRequest, AdminResponses.ProblemContentType)
+            .Produces(StatusCodes.Status401Unauthorized)
+            .Produces<ApiProblem>(StatusCodes.Status403Forbidden, AdminResponses.ProblemContentType)
+            // tenant_not_active, and the request checks' tenant_mismatch, which every state-changing Tenant route declares.
+            .Produces<ApiProblem>(StatusCodes.Status409Conflict, AdminResponses.ProblemContentType)
+            .Produces(StatusCodes.Status503ServiceUnavailable);
+
         app.MapGet("/api/v1/tenants/{tenantId}/applications", static (HttpContext context, AdminApiServices services) => ApplicationsApi.ListAsync(context, services))
             .WithMetadata(
                 TenantApiEndpoint.Instance,

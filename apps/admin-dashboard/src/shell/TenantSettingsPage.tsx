@@ -1,14 +1,19 @@
-import type { AdminTenant } from '@gatekeep/api-client';
+import type { AdminTenant, ApiResource } from '@gatekeep/api-client';
 import {
   Banner,
   Button,
   ConfirmModal,
   EnvironmentBadge,
   ErrorReference,
+  Field,
+  Input,
   Radio,
   RadioGroup,
   SectionPage,
+  Select,
+  SettingsRow,
   SkeletonRows,
+  Toggle,
   formatMessage,
   useMessages,
   useToast,
@@ -19,6 +24,20 @@ import { api } from '../session';
 import { useCapabilities } from './capabilities';
 import type { ShellRequest } from './CredentialsPage';
 import styles from './CreateTenantPage.module.css';
+import {
+  TERMS_URL_MAX_LENGTH,
+  checkSettingsDraft,
+  isSettingsDirty,
+  serverSettingsErrors,
+  settingsDraftOf,
+  settingsRequestOf,
+  type FieldError,
+  type SettingsDraft,
+  type SettingsErrors,
+  type SettingsField,
+  type StoredSettings,
+} from './database';
+import cards from './DatabasePage.module.css';
 import { ENVIRONMENTS } from './environments';
 import { needsFreshAssertion, type Confirmation, type FreshAssertion } from './freshAssertion';
 import { useUnsavedChanges } from './unsavedChanges';
@@ -319,6 +338,7 @@ export function TenantSettingsPage({ request, fresh, tenantId, tenant, onSaved }
         </Banner>
       )}
       {body}
+      {load.kind === 'ready' && <SignupSettingsCard request={request} tenantId={tenantId} active={active} />}
       <ConfirmModal
         open={confirming}
         onCancel={closeModal}
@@ -345,5 +365,286 @@ export function TenantSettingsPage({ request, fresh, tenantId, tenant, onSaved }
         </p>
       </ConfirmModal>
     </SectionPage>
+  );
+}
+
+/** The most API pages the audience select reads: 20 pages of 50. */
+const MAX_API_PAGES = 20;
+
+type SignupLoad =
+  | { kind: 'loading' }
+  | { kind: 'ready'; settings: StoredSettings; apis: readonly ApiResource[] }
+  | { kind: 'failed'; code: string; traceId: string };
+
+type SignupRefusal = { kind: 'saveFailed'; code: string; traceId: string } | { kind: 'forbidden' } | { kind: 'notActive' } | null;
+
+/** A refused field's text: the server's own rule text when it gave one, else the browser's. */
+function signupErrorText(field: SettingsField, error: FieldError | undefined, messages: Messages): string | undefined {
+  if (error === undefined) return undefined;
+  if (error.detail) return error.detail;
+  if (error.reason === 'too_long') return messages.tenantFieldTooLong;
+  switch (field) {
+    case 'termsUrl':
+      return messages.tenantTermsUrlInvalid;
+    case 'defaultAudience':
+      return messages.tenantDefaultAudienceInvalid;
+    default:
+      return messages.tenantEmailVerificationOffInvalid;
+  }
+}
+
+function isStoredSettings(value: unknown): value is StoredSettings {
+  if (typeof value !== 'object' || value === null) return false;
+  const { termsUrl, emailVerificationOff, emailVerificationOffAvailable, defaultAudience } = value as Record<string, unknown>;
+  return (
+    (termsUrl === null || typeof termsUrl === 'string') &&
+    typeof emailVerificationOff === 'boolean' &&
+    typeof emailVerificationOffAvailable === 'boolean' &&
+    (defaultAudience === null || typeof defaultAudience === 'string')
+  );
+}
+
+interface SignupSettingsCardProps {
+  request: ShellRequest;
+  tenantId: string;
+  /** Only an active Tenant's settings change. */
+  active: boolean;
+}
+
+/**
+ * Tenant settings' Sign-up card (Story 4.6): the terms URL, the default audience, a choice of the Tenant's own APIs
+ * other than the built-in Management API or None, and, in a Dev Tenant only, the switch that turns email verification
+ * off. tenant.settings.manage (Editors and Owners) saves it; anyone else sees it read-only. Errors show on their field,
+ * with the server's rule text. The server decides every request (AD-20).
+ */
+function SignupSettingsCard({ request, tenantId, active }: SignupSettingsCardProps) {
+  const messages = useMessages();
+  const toast = useToast();
+  const { has } = useCapabilities();
+  const [load, setLoad] = useState<SignupLoad>({ kind: 'loading' });
+  const [attempt, setAttempt] = useState(0);
+  const [draft, setDraft] = useState<SettingsDraft>({ termsUrl: '', defaultAudience: '', emailVerificationOff: false });
+  const [errors, setErrors] = useState<SettingsErrors>({});
+  const [refusal, setRefusal] = useState<SignupRefusal>(null);
+  const [saving, setSaving] = useState(false);
+  const inFlight = useRef(false);
+  const termsInput = useRef<HTMLInputElement>(null);
+  const audienceInput = useRef<HTMLSelectElement>(null);
+
+  const editable = has('tenant.settings.manage') && active;
+  const stored = load.kind === 'ready' ? load.settings : null;
+  const available = stored?.emailVerificationOffAvailable === true;
+  const dirty = editable && isSettingsDirty(draft, stored, available);
+  useUnsavedChanges(dirty && !saving);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    setLoad({ kind: 'loading' });
+    void (async () => {
+      let settings;
+      const apis: ApiResource[] = [];
+      try {
+        settings = await request('get', () => api.getTenantSettings(tenantId), controller.signal);
+        // Every page of the Tenant's APIs, so any of them can be chosen.
+        let cursor: string | undefined;
+        for (let page = 0; page < MAX_API_PAGES; page++) {
+          const list = await request('get', () => api.listApis(tenantId, cursor), controller.signal);
+          if (!list.ok || !list.data || !Array.isArray(list.data.apis)) break;
+          apis.push(...list.data.apis);
+          cursor = list.data.nextCursor ?? undefined;
+          if (cursor === undefined) break;
+        }
+      } catch {
+        settings = null;
+      }
+      if (controller.signal.aborted) return;
+      if (settings?.ok && isStoredSettings(settings.data)) {
+        setLoad({ kind: 'ready', settings: settings.data, apis: apis.filter((one) => !one.builtIn) });
+        setDraft(settingsDraftOf(settings.data));
+      } else {
+        const problem = settings && !settings.ok ? settings.problem : null;
+        setLoad({ kind: 'failed', code: problem?.code ?? '', traceId: problem?.traceId ?? '' });
+      }
+    })();
+    return () => controller.abort();
+  }, [request, tenantId, attempt]);
+
+  function showErrors(next: SettingsErrors) {
+    setErrors(next);
+    if (next.termsUrl) termsInput.current?.focus();
+    else if (next.defaultAudience) audienceInput.current?.focus();
+  }
+
+  async function save(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!editable || stored === null || inFlight.current) return;
+    const found = checkSettingsDraft(draft);
+    if (Object.keys(found).length > 0) {
+      showErrors(found);
+      return;
+    }
+
+    inFlight.current = true;
+    setSaving(true);
+    setRefusal(null);
+    let answer;
+    try {
+      answer = await request('put', () => api.setTenantSettings(tenantId, settingsRequestOf(draft, available)));
+    } catch {
+      answer = null;
+    }
+    inFlight.current = false;
+    setSaving(false);
+
+    if (answer?.ok && isStoredSettings(answer.data)) {
+      const settings = answer.data;
+      setErrors({});
+      setLoad((now) => (now.kind === 'ready' ? { ...now, settings } : now));
+      setDraft(settingsDraftOf(settings));
+      toast(messages.tenantSignupSaved);
+      return;
+    }
+    if (answer?.status === 401) return;
+    const problem = answer && !answer.ok ? (answer.problem ?? null) : null;
+    if (answer?.status === 400 && problem?.code === 'tenant_settings_invalid') {
+      const next = serverSettingsErrors(problem.errors);
+      if (Object.keys(next).length > 0) {
+        showErrors(next);
+        return;
+      }
+    }
+    if (answer?.status === 409 && problem?.code === 'tenant_mismatch') return;
+    if (answer?.status === 409 && problem?.code === 'tenant_not_active') {
+      setRefusal({ kind: 'notActive' });
+      return;
+    }
+    if (answer?.status === 403) {
+      setRefusal({ kind: 'forbidden' });
+      return;
+    }
+    setRefusal({ kind: 'saveFailed', code: problem?.code ?? 'unavailable', traceId: problem?.traceId ?? '' });
+  }
+
+  let content: ReactNode;
+  if (load.kind === 'loading') {
+    content = <SkeletonRows rows={3} caption={false} />;
+  } else if (load.kind === 'failed') {
+    content = (
+      <Banner tone="bad" action={{ label: messages.retry, onClick: () => setAttempt((n) => n + 1) }} data-testid="tenant-signup-load-failed">
+        <p>{messages.loadFailed}</p>
+        <ErrorReference code={load.code} traceId={load.traceId} />
+      </Banner>
+    );
+  } else {
+    // A stored audience whose API is gone still shows, by its identifier, so the select never misreports it.
+    const listed = load.apis.some((one) => one.identifier === draft.defaultAudience);
+    content = (
+      <>
+        <div className={cards.cardBody}>
+          <Field
+            label={messages.tenantTermsUrl}
+            helper={messages.tenantTermsUrlHelper}
+            error={signupErrorText('termsUrl', errors.termsUrl, messages)}
+          >
+            <Input
+              ref={termsInput}
+              type="url"
+              code
+              autoComplete="off"
+              spellCheck={false}
+              maxLength={TERMS_URL_MAX_LENGTH}
+              value={draft.termsUrl}
+              readOnly={!editable || saving}
+              onChange={(event) => {
+                const value = event.target.value;
+                setDraft((now) => ({ ...now, termsUrl: value }));
+                if (errors.termsUrl) setErrors((now) => ({ ...now, termsUrl: undefined }));
+              }}
+              data-testid="tenant-terms-url"
+            />
+          </Field>
+          <Field
+            label={messages.tenantDefaultAudience}
+            helper={messages.tenantDefaultAudienceHelper}
+            error={signupErrorText('defaultAudience', errors.defaultAudience, messages)}
+          >
+            <Select
+              ref={audienceInput}
+              value={draft.defaultAudience}
+              disabled={!editable || saving}
+              onChange={(event) => {
+                const value = event.target.value;
+                setDraft((now) => ({ ...now, defaultAudience: value }));
+                if (errors.defaultAudience) setErrors((now) => ({ ...now, defaultAudience: undefined }));
+              }}
+              data-testid="tenant-default-audience"
+            >
+              <option value="">{messages.tenantDefaultAudienceNone}</option>
+              {!listed && draft.defaultAudience !== '' && <option value={draft.defaultAudience}>{draft.defaultAudience}</option>}
+              {load.apis.map((one) => (
+                <option key={one.id} value={one.identifier}>
+                  {`${one.name} (${one.identifier})`}
+                </option>
+              ))}
+            </Select>
+          </Field>
+        </div>
+        {available && (
+          <div className={cards.rows}>
+            <SettingsRow
+              label={messages.tenantEmailVerificationOff}
+              description={signupErrorText('emailVerificationOff', errors.emailVerificationOff, messages) ?? messages.tenantEmailVerificationOffDescription}
+            >
+              <Toggle
+                label={messages.tenantEmailVerificationOff}
+                hideLabel
+                checked={draft.emailVerificationOff}
+                disabled={!editable || saving}
+                onCheckedChange={(on) => {
+                  setDraft((now) => ({ ...now, emailVerificationOff: on }));
+                  if (errors.emailVerificationOff) setErrors((now) => ({ ...now, emailVerificationOff: undefined }));
+                }}
+                data-testid="tenant-email-verification-off"
+              />
+            </SettingsRow>
+          </div>
+        )}
+      </>
+    );
+  }
+
+  return (
+    <form className={cards.form} onSubmit={save} noValidate data-testid="tenant-signup">
+      {refusal?.kind === 'saveFailed' && (
+        <Banner tone="bad" data-testid="tenant-signup-save-failed">
+          <p>{messages.tenantSignupSaveFailed}</p>
+          <ErrorReference code={refusal.code} traceId={refusal.traceId} />
+        </Banner>
+      )}
+      {refusal?.kind === 'forbidden' && (
+        <Banner tone="bad" data-testid="tenant-signup-forbidden">
+          {messages.actionForbidden}
+        </Banner>
+      )}
+      {refusal?.kind === 'notActive' && (
+        <Banner tone="warn" data-testid="tenant-signup-not-active">
+          {messages.tenantNotActive}
+        </Banner>
+      )}
+      <section className={cards.card} aria-labelledby="tenant-signup-heading">
+        <header className={cards.cardHeader}>
+          <h2 id="tenant-signup-heading">{messages.tenantSignupTitle}</h2>
+          <p className={cards.note}>{messages.tenantSignupDescription}</p>
+        </header>
+        {content}
+      </section>
+      {editable && load.kind === 'ready' && (
+        <div className={cards.actions}>
+          <Button type="submit" variant="primary" pending={saving} data-testid="tenant-signup-save">
+            {messages.tenantSignupSave}
+          </Button>
+        </div>
+      )}
+    </form>
   );
 }

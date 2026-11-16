@@ -66,4 +66,14 @@ public static class TenancyEvents
         new AuditTypeCode("tenancy.tenant.deleted"),
         "A Tenant's deletion Operation succeeded: every module's Tenant data is purged and its keys are destroyed. Its Logs are kept until their retention ends.",
         AuditOutcome.Success);
+
+    /// <summary>
+    /// Written on the Tenant's own chain when an Editor, Owner or machine client changes its terms URL, its default
+    /// audience or, in a Dev Tenant, whether email verification is off (Story 4.6), in the transaction that writes them.
+    /// A save that changes nothing writes none. The Actor is the Admin; the target the Tenant.
+    /// </summary>
+    public static readonly AuditEventDefinition SettingsUpdated = new(
+        new AuditTypeCode("tenancy.tenant.settings_updated"),
+        "A Tenant's terms URL, default audience or Dev-only email verification setting was changed. Records no value.",
+        AuditOutcome.Success);
 }

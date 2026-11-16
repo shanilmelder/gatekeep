@@ -182,6 +182,36 @@ public static class DirectoryContract
                 || (application.IsNative && LoopbackRedirects.SameButPort(registered, redirectUri)));
     }
 
+    /// <summary>The <c>connection.kind</c> of a Tenant's database Connection (Story 4.6): the only kind in v1, one per Tenant.</summary>
+    public const string DatabaseConnectionKind = "database";
+
+    /// <summary>The fixed name of each Tenant's database Connection (Story 4.6). The migration's default and backfill write the same text.</summary>
+    public const string DatabaseConnectionName = "Username-Password";
+
+    /// <summary>Whether a new database Connection lets Users sign up (Story 4.6): yes. The column's default is the same; a test holds them equal.</summary>
+    public const bool DefaultSignupEnabled = true;
+
+    /// <summary>
+    /// A new database Connection's password policy (Story 4.6): a minimum of 12 characters, Good strength, the last 5
+    /// passwords refused, and the dictionary and personal-data rules on. The columns' defaults are the same; a test holds
+    /// them equal.
+    /// </summary>
+    public static readonly PasswordPolicy DefaultPasswordPolicy = new(
+        Gatekeep.Kernel.Limits.SecurityLimits.PasswordMinimumLengthFloor,
+        PasswordStrengths.Good,
+        HistoryCount: 5,
+        Dictionary: true,
+        PersonalData: true);
+
+    /// <summary>
+    /// Every problem with a password policy save (Story 4.6, FR-18), each naming its field (one of
+    /// <see cref="PasswordPolicyFields"/>), its reason (one of <see cref="PasswordPolicyReasons"/>) and the rule's text: a
+    /// minimum below 12 is <see cref="PasswordPolicyReasons.BelowMinimum"/> with exactly "Minimum is 12 characters.". When
+    /// empty, <paramref name="policy"/> is the policy to save; otherwise it is null.
+    /// </summary>
+    public static IReadOnlyList<PasswordPolicyProblem> CheckPasswordPolicy(PasswordPolicyInput input, out PasswordPolicy? policy) =>
+        PasswordPolicyRules.Check(input, out policy);
+
     /// <summary>Applications and client secrets over the Kernel audit port. <paramref name="time"/> stamps each creation.</summary>
     public static IDirectory CreateDirectory(IAuditAppender audit, TimeProvider time) => new DirectoryService(audit, time);
 
@@ -198,7 +228,8 @@ public static class DirectoryContract
 
     /// <summary>
     /// Directory's Tenant purge (Story 2.5, AD-30): deletes the context Tenant's <c>client_secret</c>, then
-    /// <c>application</c> rows, and from Story 3.6 its <c>permission</c>, then <c>api</c> rows. Sessions' and Authentication's purges must run first: their rows reference Applications.
+    /// <c>application</c> rows, and from Story 3.6 its <c>permission</c>, then <c>api</c> rows, and from Story 4.6 its
+    /// <c>connection</c>. Sessions' and Authentication's purges must run first: their rows reference Applications.
     /// </summary>
     public static ITenantPurge TenantPurge { get; } = new DirectoryPurge();
 

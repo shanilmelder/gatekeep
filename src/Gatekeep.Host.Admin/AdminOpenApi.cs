@@ -215,12 +215,28 @@ internal static class AdminOpenApi
                         schema,
                         "field",
                         [.. ManagementContract.ApplicationSettingsFields.Concat(ManagementContract.ApplicationLifetimeFields).Concat(ManagementContract.ApiFields)
-                            .Concat(ManagementContract.EmailProviderFields).Distinct(StringComparer.Ordinal)]);
+                            .Concat(ManagementContract.EmailProviderFields).Concat(ManagementContract.ConnectionFields).Distinct(StringComparer.Ordinal)]);
                     Enumerate(
                         schema,
                         "reason",
                         [.. ManagementContract.ApplicationSettingsReasons.Concat(ManagementContract.ApplicationLifetimeReasons).Concat(ManagementContract.ApiReasons)
-                            .Concat(ManagementContract.EmailProviderReasons).Distinct(StringComparer.Ordinal)]);
+                            .Concat(ManagementContract.EmailProviderReasons).Concat(ManagementContract.ConnectionReasons).Distinct(StringComparer.Ordinal)]);
+                }
+                else if (type == typeof(SetPasswordPolicyRequest) || type == typeof(PasswordPolicyResponse))
+                {
+                    // Feedback for clients: the server decides each field and names each one it refuses (Story 4.6).
+                    Enumerate(schema, "strength", ManagementContract.PasswordStrengths);
+                    Range(schema, "minLength", ManagementContract.PasswordMinimumLengthFloor, ManagementContract.PasswordMinimumLengthCeiling);
+                    Range(schema, "historyCount", 0, ManagementContract.PasswordHistoryMaximum);
+                }
+                else if (type == typeof(DatabaseConnectionResponse))
+                {
+                    Enumerate(schema, "kind", ["database"]);
+                }
+                else if (type == typeof(SetTenantSettingsRequest) || type == typeof(TenantSettingsResponse))
+                {
+                    Bound(schema, "termsUrl", pattern: "^https://", maxLength: ManagementContract.MaxTermsUrlLength);
+                    Bound(schema, "defaultAudience", pattern: null, maxLength: ManagementContract.MaxApiIdentifierLength);
                 }
                 else if (type == typeof(SetEmailProviderRequest))
                 {
@@ -657,6 +673,16 @@ internal static class AdminOpenApi
             {
                 target.MaxLength = max;
             }
+        }
+    }
+
+    /// <summary>An integer property's bounds (Story 4.6), inclusive.</summary>
+    private static void Range(OpenApiSchema schema, string property, int minimum, int maximum)
+    {
+        if (schema.Properties?.TryGetValue(property, out var found) == true && found is OpenApiSchema target)
+        {
+            target.Minimum = minimum.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            target.Maximum = maximum.ToString(System.Globalization.CultureInfo.InvariantCulture);
         }
     }
 

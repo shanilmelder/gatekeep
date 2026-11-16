@@ -61,6 +61,15 @@ public sealed class TenantCreationOperationTests(PostgresFixture postgres)
 
         // Story 3.6: the built-in Management API with its 17 Permissions, and no event of its own.
         await AssertBuiltInApiAsync(database, tenant);
+
+        // Story 4.6: exactly one database Connection with the defaults, and no event of its own.
+        Assert.Equal(1L, await database.ScalarAsync<long>(
+            $"SELECT count(*) FROM connection WHERE tenant_id = '{tenant}' AND kind = '{DirectoryContract.DatabaseConnectionKind}' " +
+            $"AND name = '{DirectoryContract.DatabaseConnectionName}' AND enabled AND signup_enabled AND password_min_length = 12 " +
+            "AND password_strength = 'good' AND password_history_count = 5 AND password_dictionary AND password_personal_data"));
+        Assert.Equal(1L, await database.ScalarAsync<long>($"SELECT count(*) FROM connection WHERE tenant_id = '{tenant}'"));
+        Assert.Equal(0L, await database.ScalarAsync<long>(
+            $"SELECT count(*) FROM audit_event WHERE tenant_id = '{tenant}' AND type_code LIKE 'directory.connection.%'"));
     }
 
     /// <summary>Story 3.6: the Tenant's one built-in Management API, with exactly Directory's Management Permissions and no event.</summary>
@@ -88,6 +97,9 @@ public sealed class TenantCreationOperationTests(PostgresFixture postgres)
         Assert.Equal(system, await SystemApplicationAsync(database, tenant));
         Assert.Equal(1L, await database.ScalarAsync<long>($"SELECT count(*) FROM audit_event WHERE tenant_id = '{tenant}' AND type_code = '{Activated}'"));
         await AssertBuiltInApiAsync(database, tenant);
+
+        // Story 4.6: still the one database Connection.
+        Assert.Equal(1L, await database.ScalarAsync<long>($"SELECT count(*) FROM connection WHERE tenant_id = '{tenant}'"));
     }
 
     /// <summary>Story 2.8: a completion for a Tenant whose deletion started activates nothing, so no system Application is written.</summary>
@@ -101,6 +113,7 @@ public sealed class TenantCreationOperationTests(PostgresFixture postgres)
 
         Assert.Equal("deleting", await StatusAsync(database, tenant));
         Assert.Equal(0L, await database.ScalarAsync<long>($"SELECT count(*) FROM application WHERE tenant_id = '{tenant}'"));
+        Assert.Equal(0L, await database.ScalarAsync<long>($"SELECT count(*) FROM connection WHERE tenant_id = '{tenant}'"));
     }
 
     [Fact]

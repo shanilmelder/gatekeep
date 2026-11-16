@@ -310,7 +310,39 @@ public class CapabilityRuleTests
                 .Where(o => o.Value.GetProperty("x-gatekeep-access").TryGetProperty("capability", out var c) && c.GetString() == "tenant.email_provider.manage")
                 .Select(o => o.Key)
                 .Order(StringComparer.Ordinal));
+
+        // Story 4.6: the Database page and Tenant settings card take the capabilities the table already has, unchanged:
+        // reads are tenant.configuration.read; sign-up is tenant.connections.toggle (Editors), the password policy
+        // tenant.password_policy.manage (Owners), the settings tenant.settings.manage (Editors); none needs a fresh assertion.
+        foreach (var (route, capability, machine) in ConnectionRoutes)
+        {
+            Assert.Null(Fresh(operations[route]));
+            var routeAccess = operations[route].GetProperty("x-gatekeep-access");
+            Assert.Equal("capability", routeAccess.GetProperty("kind").GetString());
+            Assert.Equal(capability, routeAccess.GetProperty("capability").GetString());
+            Assert.Equal(machine, routeAccess.GetProperty("machineAllowed").GetBoolean());
+            Assert.Equal("never", routeAccess.GetProperty("freshAssertion").GetString());
+        }
+
+        foreach (var capability in new[] { "tenant.connections.toggle", "tenant.password_policy.manage", "tenant.settings.manage" })
+        {
+            Assert.Equal(
+                ConnectionRoutes.Where(r => r.Capability == capability).Select(r => r.Route).Order(StringComparer.Ordinal),
+                operations
+                    .Where(o => o.Value.GetProperty("x-gatekeep-access").TryGetProperty("capability", out var c) && c.GetString() == capability)
+                    .Select(o => o.Key)
+                    .Order(StringComparer.Ordinal));
+        }
     }
+
+    private static readonly (string Route, string Capability, bool MachineAllowed)[] ConnectionRoutes =
+    [
+        ("get /api/v1/tenants/{tenantId}/connections/database", "tenant.configuration.read", true),
+        ("put /api/v1/tenants/{tenantId}/connections/database/settings", "tenant.connections.toggle", true),
+        ("put /api/v1/tenants/{tenantId}/connections/database/password-policy", "tenant.password_policy.manage", true),
+        ("get /api/v1/tenants/{tenantId}/settings", "tenant.configuration.read", true),
+        ("put /api/v1/tenants/{tenantId}/settings", "tenant.settings.manage", true),
+    ];
 
     private static readonly (string Route, string Capability)[] ApiRoutes =
     [

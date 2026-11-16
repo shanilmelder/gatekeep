@@ -407,4 +407,41 @@ public interface IDirectory
     /// <exception cref="InvalidOperationException">The context has no Tenant. Nothing is written.</exception>
     [StateChanging]
     Task<bool> EnsureBuiltInApiAsync(CommandContext context, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Makes sure the context's Tenant has its one database Connection (Story 4.6, FR-17), named
+    /// <see cref="DirectoryContract.DatabaseConnectionName"/>, enabled, with sign-up open and
+    /// <see cref="DirectoryContract.DefaultPasswordPolicy"/>: it inserts it only when the Tenant has none, and attempts no
+    /// insert at all when it has one. Whether it inserted. Like the built-in Management API it writes no audit event: the
+    /// Tenant's activation, or the backfill, is the record.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The context has no Tenant. Nothing is written.</exception>
+    [StateChanging]
+    Task<bool> EnsureDatabaseConnectionAsync(CommandContext context, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// The context Tenant's database Connection with its sign-up switch and password policy (Story 4.6), as sign-up,
+    /// sign-in and reset read it (Stories 4.7, 4.9, 4.11); null when it has none. It only reads.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The context has no Tenant.</exception>
+    Task<DatabaseConnection?> FindDatabaseConnectionAsync(CommandContext context, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Sets whether the context Tenant's database Connection lets Users sign up (Story 4.6, FR-17), under the row's lock, in
+    /// the caller's transaction. When it changes it writes it and <c>directory.connection.updated</c> by
+    /// <paramref name="actor"/>, the Tenant as target; when it doesn't, nothing and no event.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The context has no Tenant. Nothing is written.</exception>
+    [StateChanging]
+    Task<ConnectionWrite> UpdateDatabaseConnectionSettingsAsync(CommandContext context, Actor actor, bool signupEnabled, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Replaces the context Tenant's database Connection's password policy (Story 4.6, FR-18), under the row's lock, in the
+    /// caller's transaction. When it changes it writes it and <c>directory.connection.password_policy_updated</c> by
+    /// <paramref name="actor"/>, the Tenant as target; when it doesn't, nothing and no event.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The context has no Tenant. Nothing is written.</exception>
+    /// <exception cref="ArgumentException">The policy breaks a rule of <see cref="DirectoryContract.CheckPasswordPolicy"/>. Nothing is written.</exception>
+    [StateChanging]
+    Task<ConnectionWrite> UpdatePasswordPolicyAsync(CommandContext context, Actor actor, PasswordPolicy policy, CancellationToken cancellationToken);
 }

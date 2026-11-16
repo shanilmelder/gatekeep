@@ -329,4 +329,19 @@ public static class SecurityLimits
 
     /// <summary>The longest email template body a Tenant may store (Story 4.5), as the table checks.</summary>
     public const int MaxEmailTemplateBodyLength = 10_000;
+
+    /// <summary>
+    /// The shortest minimum length a database Connection's password policy may set: 12 characters (Story 4.6, FR-18).
+    /// A lower one is refused with "Minimum is 12 characters.", and the table checks it too.
+    /// </summary>
+    public const int PasswordMinimumLengthFloor = 12;
+
+    /// <summary>The longest minimum length a database Connection's password policy may set: 64 characters (Story 4.6), as the table checks.</summary>
+    public const int PasswordMinimumLengthCeiling = 64;
+
+    /// <summary>The most earlier passwords a database Connection's history rule may refuse to reuse: 24 (Story 4.6). 0 turns the rule off.</summary>
+    public const int PasswordHistoryMaximum = 24;
+
+    /// <summary>The longest terms URL a Tenant's sign-up links to: 2048 characters (Story 4.6), as the table checks.</summary>
+    public const int MaxTermsUrlLength = 2048;
 }

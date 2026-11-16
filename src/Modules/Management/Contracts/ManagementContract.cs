@@ -37,6 +37,49 @@ public static class ManagementContract
         return new EmailProviderManagement(appender);
     }
 
+    /// <summary>
+    /// A Tenant's database Connection (Story 4.6), as <c>gk_admin</c>, in the path Tenant's own scope, over Directory's
+    /// contract. A save writes its event through <paramref name="appender"/>.
+    /// </summary>
+    public static IDatabaseConnectionManagement CreateDatabaseConnections(IAuditAppender appender)
+    {
+        ArgumentNullException.ThrowIfNull(appender);
+        return new DatabaseConnectionManagement(appender);
+    }
+
+    /// <summary>
+    /// A Tenant's sign-up settings (Story 4.6), as <c>gk_admin</c>, in the path Tenant's own scope, over Tenancy's contract,
+    /// with the default audience checked through Directory's. A save writes its event through <paramref name="appender"/>.
+    /// </summary>
+    public static ITenantSettingsManagement CreateTenantSettings(IAuditAppender appender)
+    {
+        ArgumentNullException.ThrowIfNull(appender);
+        return new TenantSettingsManagement(appender);
+    }
+
+    /// <summary>A database Connection's password strengths (Story 4.6), in a fixed order: <c>good</c>, <c>excellent</c>.</summary>
+    public static IReadOnlyList<string> PasswordStrengths => Gatekeep.Modules.Directory.Contracts.PasswordStrengths.All;
+
+    /// <summary>The fields a database Connection or Tenant settings save's errors name (Story 4.6).</summary>
+    public static IReadOnlyList<string> ConnectionFields =>
+        ["signupEnabled", .. Gatekeep.Modules.Directory.Contracts.PasswordPolicyFields.All, .. Gatekeep.Modules.Tenancy.Contracts.TenantSettingsFields.All];
+
+    /// <summary>The reasons a database Connection or Tenant settings save's errors give (Story 4.6).</summary>
+    public static IReadOnlyList<string> ConnectionReasons =>
+        [.. Gatekeep.Modules.Directory.Contracts.PasswordPolicyReasons.All.Concat(Gatekeep.Modules.Tenancy.Contracts.TenantSettingsReasons.All).Distinct(StringComparer.Ordinal)];
+
+    /// <summary>The shortest password minimum a policy may set (Story 4.6).</summary>
+    public const int PasswordMinimumLengthFloor = Gatekeep.Kernel.Limits.SecurityLimits.PasswordMinimumLengthFloor;
+
+    /// <summary>The longest password minimum a policy may set (Story 4.6).</summary>
+    public const int PasswordMinimumLengthCeiling = Gatekeep.Kernel.Limits.SecurityLimits.PasswordMinimumLengthCeiling;
+
+    /// <summary>The most earlier passwords a policy may refuse (Story 4.6).</summary>
+    public const int PasswordHistoryMaximum = Gatekeep.Kernel.Limits.SecurityLimits.PasswordHistoryMaximum;
+
+    /// <summary>The longest terms URL (Story 4.6).</summary>
+    public const int MaxTermsUrlLength = Gatekeep.Kernel.Limits.SecurityLimits.MaxTermsUrlLength;
+
     /// <summary>The email provider kinds (Story 4.4), in a fixed order.</summary>
     public static IReadOnlyList<string> EmailProviderKinds => Gatekeep.Modules.Notifications.Contracts.EmailProviderKinds.All;
 

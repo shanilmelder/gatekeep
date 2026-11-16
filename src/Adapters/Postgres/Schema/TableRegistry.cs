@@ -317,6 +317,17 @@ public static class TableRegistry
         {
             [Worker] = [new ColumnGrant(Select, ["tenant_id", "id", "email"])],
         }, RowGuard),
+        // Story 4.6: a User's earlier password hashes, created empty. Host.Hosted keeps and reads them (Stories 4.7 and
+        // 4.11); a Tenant's deletion purges them before the Users they reference, reading only the tenant_id its WHERE
+        // names, never a hash.
+        new("password_history", TableClass.Tenant, "Identity", TableUse.Runtime, new Dictionary<string, IReadOnlyList<string>>
+        {
+            [Hosted] = [Select, Insert, Delete],
+            [Worker] = [Delete],
+        }, new Dictionary<string, IReadOnlyList<ColumnGrant>>
+        {
+            [Worker] = [new ColumnGrant(Select, ["tenant_id"])],
+        }, RowGuard),
         // Story 9.3: a Signing Key revocation, as gk_admin, may also end every Session of its Tenant by the
         // one revocation path, reading only the columns its WHERE names and setting only the end. Story 4.3:
         // the expired-state purge, as gk_worker, reads only whether a Session is over.
@@ -735,6 +746,33 @@ public static class TableRegistry
             new Dictionary<string, IReadOnlyList<ColumnGrant>>
             {
                 [Worker] = [new ColumnGrant(Select, ["tenant_id", "application_id"])],
+            },
+            RowGuard),
+        // Story 4.6 (FR-17, FR-18): each Tenant's one database Connection, its sign-up switch and its password policy.
+        // Host.Admin reads it and changes only the switch and the policy; Host.Hosted reads it to sign Users up and in;
+        // Host.Worker writes the default one at Tenant activation and in the hourly backfill, and purges it.
+        new(
+            "connection",
+            TableClass.Tenant,
+            "Directory",
+            TableUse.Configuration,
+            new Dictionary<string, IReadOnlyList<string>>
+            {
+                [Hosted] = [Select],
+                [Admin] = [Select],
+                [Worker] = [Select, Insert, Delete],
+            },
+            new Dictionary<string, IReadOnlyList<ColumnGrant>>
+            {
+                [Admin] =
+                [
+                    new ColumnGrant(
+                        Update,
+                        [
+                            "signup_enabled", "password_min_length", "password_strength", "password_history_count",
+                            "password_dictionary", "password_personal_data", "updated_at",
+                        ]),
+                ],
             },
             RowGuard),
 

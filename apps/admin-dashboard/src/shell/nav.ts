@@ -12,11 +12,13 @@
 // sees too; Story 3.1 Applications → Applications, which any Tenant Role sees, and later Epic 3
 // stories the other Applications ones: Story 3.6 Applications → APIs, which any Tenant Role sees too;
 // Story 7.7 Deployment → Log, for deployment.log.read, which only the Deployment Owner holds; Story 4.4
-// Branding → Email provider, which any Tenant Role sees, read-only but for a Tenant Owner.
+// Branding → Email provider, which any Tenant Role sees, read-only but for a Tenant Owner; Story 4.6 Authentication →
+// Database, which any Tenant Role sees, its password policy read-only but for a Tenant Owner.
 
 import type { AdminNavGroupId, AdminNavItem, Messages } from '@gatekeep/ui/admin';
 import { apisPath } from './apis';
 import { applicationsPath } from './applications';
+import { databasePath } from './database';
 import { emailProviderPath } from './emailProvider';
 import type { Capability } from './capabilities';
 import { DEPLOYMENT_LOGS_PATH } from './logs';
@@ -50,6 +52,12 @@ export const NAV: readonly NavEntry[] = [
     group: 'applications',
     label: 'apisTitle',
     href: apisPath,
+    requires: 'tenant.configuration.read',
+  },
+  {
+    group: 'authentication',
+    label: 'navDatabase',
+    href: databasePath,
     requires: 'tenant.configuration.read',
   },
   {

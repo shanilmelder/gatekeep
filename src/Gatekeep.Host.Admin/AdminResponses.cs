@@ -14,8 +14,8 @@ public sealed class ApiProblem
 
     /// <summary>
     /// Only on <c>application_invalid</c> from an Application settings save (Story 3.2) or tokens save (Story 3.4),
-    /// <c>api_invalid</c> (Story 3.6) and <c>email_provider_invalid</c> (Story 4.4): each refused line or field, never its
-    /// value. Absent on every other problem.
+    /// <c>api_invalid</c> (Story 3.6), <c>email_provider_invalid</c> (Story 4.4), and <c>connection_invalid</c> and
+    /// <c>tenant_settings_invalid</c> (Story 4.6): each refused line or field, never its value. Absent on every other problem.
     /// </summary>
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
     public IReadOnlyList<ApiProblemError>? Errors { get; init; }
@@ -54,6 +54,13 @@ public sealed class ApiProblemError
     /// </summary>
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
     public int? Maximum { get; init; }
+
+    /// <summary>
+    /// Only on <c>connection_invalid</c> and <c>tenant_settings_invalid</c> (Story 4.6): the rule's text, for a client to
+    /// show as it is, such as "Minimum is 12 characters.". Never the refused value. Absent otherwise.
+    /// </summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public string? Detail { get; init; }
 }
 
 /// <summary>The responses every Admin API path shares, so equal cases are byte-identical.</summary>
@@ -194,6 +201,20 @@ internal static class AdminResponses
     public const string EmailProviderInvalid = "email_provider_invalid";
 
     /// <summary>
+    /// A database Connection settings or password policy save (Story 4.6) that is malformed: not JSON, over its size cap
+    /// or a member of the wrong type (no errors), or a field that breaks a rule (errors name each, with the rule's text).
+    /// Nothing was written.
+    /// </summary>
+    public const string ConnectionInvalid = "connection_invalid";
+
+    /// <summary>
+    /// A Tenant settings save (Story 4.6) that is malformed (no errors), or a field that breaks a rule: a terms URL that
+    /// isn't https, verification off outside a Dev Tenant, or a default audience that names no API of the Tenant or the
+    /// built-in Management API (errors name each). Nothing was written.
+    /// </summary>
+    public const string TenantSettingsInvalid = "tenant_settings_invalid";
+
+    /// <summary>
     /// A Signing Key rotation on demand (Story 9.2) while the next key was published less than 15 minutes ago,
     /// the JWKS cache limit. The body's <c>retryAfterSeconds</c> and the <c>Retry-After</c> header say how long
     /// remains. Nothing was written.
@@ -277,6 +298,8 @@ internal static class AdminResponses
         SigningKeyNotReady,
         ApplicationNotMachine,
         EmailProviderInvalid,
+        ConnectionInvalid,
+        TenantSettingsInvalid,
     ];
 
     /// <summary>The Session cookie, expired: sent with a sign-out and a 401 for a stale cookie.</summary>

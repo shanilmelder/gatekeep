@@ -94,6 +94,21 @@ export type SetEmailProviderRequest = components['schemas']['SetEmailProviderReq
 /** An email provider's kind (Story 4.4). */
 export type EmailProviderKind = NonNullable<SetEmailProviderRequest['kind']>;
 
+/** A Tenant's database Connection (Story 4.6): its sign-up switch and password policy. */
+export type DatabaseConnectionResponse = components['schemas']['DatabaseConnectionResponse'];
+/** A database Connection's password policy (Story 4.6). */
+export type PasswordPolicyResponse = components['schemas']['PasswordPolicyResponse'];
+/** A database Connection's sign-up save (Story 4.6). */
+export type SetDatabaseConnectionSettingsRequest = components['schemas']['SetDatabaseConnectionSettingsRequest'];
+/** A database Connection's password policy save (Story 4.6): every member. */
+export type SetPasswordPolicyRequest = components['schemas']['SetPasswordPolicyRequest'];
+/** A password strength level (Story 4.6). */
+export type PasswordStrength = NonNullable<SetPasswordPolicyRequest['strength']>;
+/** A Tenant's settings a sign-up reads (Story 4.6). */
+export type TenantSettingsResponse = components['schemas']['TenantSettingsResponse'];
+/** A Tenant settings save (Story 4.6): every member; a null clears a URL or the audience. */
+export type SetTenantSettingsRequest = components['schemas']['SetTenantSettingsRequest'];
+
 /** A path the committed OpenAPI document has, so a removed endpoint fails to compile. */
 export type ApiPath = keyof paths;
 
@@ -184,12 +199,14 @@ export function parseProblem(body: unknown): ApiProblem | null {
   if (typeof code !== 'string' || code === '') return null;
   const problem: ApiProblem = { code: code as ApiProblem['code'], traceId: typeof traceId === 'string' ? traceId : '' };
   if (Array.isArray(errors)) {
-    // A tokens save's above_maximum carries the limit in seconds (Story 3.4); nothing else is kept.
-    problem.errors = errors
-      .filter(isProblemError)
-      .map(({ field, index, reason, maximum }) =>
-        typeof maximum === 'number' && Number.isInteger(maximum) && maximum > 0 ? { field, index, reason, maximum } : { field, index, reason },
-      );
+    // A tokens save's above_maximum carries the limit in seconds (Story 3.4), and a Story 4.6 save the rule's text as
+    // detail; nothing else is kept.
+    problem.errors = errors.filter(isProblemError).map(({ field, index, reason, maximum, detail }) => {
+      const kept: ApiProblemError = { field, index, reason };
+      if (typeof maximum === 'number' && Number.isInteger(maximum) && maximum > 0) kept.maximum = maximum;
+      if (typeof detail === 'string' && detail !== '') kept.detail = detail;
+      return kept;
+    });
   }
   if (typeof retryAfterSeconds === 'number' && Number.isInteger(retryAfterSeconds) && retryAfterSeconds > 0) {
     problem.retryAfterSeconds = retryAfterSeconds;
@@ -561,6 +578,38 @@ export function createApiClient(options: ApiClientOptions = {}) {
     /** Removes the Tenant's email provider and its secret (Story 4.4): a 204, even when it had none. The same access as a save. */
     removeEmailProvider: (tenantId: string) =>
       request(`/api/v1/tenants/${encodeURIComponent(tenantId)}/email-provider` as '/api/v1/tenants/{tenantId}/email-provider', 'delete'),
+    /** The Tenant's database Connection (Story 4.6): any Tenant Role. Its ID goes into the path encoded. */
+    getDatabaseConnection: (tenantId: string) =>
+      request(
+        `/api/v1/tenants/${encodeURIComponent(tenantId)}/connections/database` as '/api/v1/tenants/{tenantId}/connections/database',
+        'get',
+      ),
+    /** Turns sign-up on or off (Story 4.6): Editors and Owners. The answer is the Connection as the read gives it. */
+    setDatabaseConnectionSettings: (tenantId: string, body: SetDatabaseConnectionSettingsRequest) =>
+      request(
+        `/api/v1/tenants/${encodeURIComponent(tenantId)}/connections/database/settings` as '/api/v1/tenants/{tenantId}/connections/database/settings',
+        'put',
+        body,
+      ),
+    /**
+     * Replaces the password policy (Story 4.6): Tenant Owners only. A refused field is 400 connection_invalid with errors
+     * naming it and the rule's text as detail. The answer is the Connection as the read gives it.
+     */
+    setPasswordPolicy: (tenantId: string, body: SetPasswordPolicyRequest) =>
+      request(
+        `/api/v1/tenants/${encodeURIComponent(tenantId)}/connections/database/password-policy` as '/api/v1/tenants/{tenantId}/connections/database/password-policy',
+        'put',
+        body,
+      ),
+    /** The Tenant's settings a sign-up reads (Story 4.6): any Tenant Role. Its ID goes into the path encoded. */
+    getTenantSettings: (tenantId: string) =>
+      request(`/api/v1/tenants/${encodeURIComponent(tenantId)}/settings` as '/api/v1/tenants/{tenantId}/settings', 'get'),
+    /**
+     * Replaces the Tenant's terms URL, default audience and Dev-only verification switch (Story 4.6): Editors and Owners.
+     * A refused field is 400 tenant_settings_invalid with errors naming it.
+     */
+    setTenantSettings: (tenantId: string, body: SetTenantSettingsRequest) =>
+      request(`/api/v1/tenants/${encodeURIComponent(tenantId)}/settings` as '/api/v1/tenants/{tenantId}/settings', 'put', body),
     /** Begins a fresh assertion for a Tenant action, bound to the Tenant `tenantId` names. The Deployment complete finishes it. */
     beginTenantFreshAssertion: (tenantId: string, binding: FreshAssertionBeginRequest) =>
       request(`/api/v1/tenants/${encodeURIComponent(tenantId)}/assertions` as '/api/v1/tenants/{tenantId}/assertions', 'post', binding),

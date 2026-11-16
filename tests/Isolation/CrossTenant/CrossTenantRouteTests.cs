@@ -374,6 +374,7 @@ public sealed class CrossTenantRouteTests(PostgresFixture postgres, OpenBaoFixtu
             $"""
             SELECT 'tenant ' || coalesce((SELECT name || '/' || status || '/' || label FROM tenant WHERE id = '{admin.TenantB}'), 'none')
                    || ' settings ' || coalesce((SELECT row_to_json(s)::text FROM tenant_settings AS s WHERE tenant_id = '{admin.TenantB}'), 'none')
+                   || ' connection ' || coalesce((SELECT row_to_json(c)::text FROM connection AS c WHERE tenant_id = '{admin.TenantB}'), 'none')
                    || ' roles ' || coalesce((SELECT count(*) FROM tenant_role WHERE tenant_id = '{admin.TenantB}'), 0)
                    || ' operations ' || coalesce((SELECT count(*) FROM operation WHERE tenant_id = '{admin.TenantB}'), 0)
                    || ' steps ' || coalesce((SELECT count(*) FROM operation_step WHERE tenant_id = '{admin.TenantB}'), 0)

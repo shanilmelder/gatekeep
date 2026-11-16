@@ -41,7 +41,11 @@ internal static class TenantSeeds
         ("tenant_attempt", (t, _) =>
             "INSERT INTO tenant_attempt (tenant_id, policy, subject_hash, window_start, attempts) " +
             $"VALUES ('{t}', 'authentication.token_request.tenant', sha256(convert_to('{t}', 'UTF8')), now(), 1) ON CONFLICT DO NOTHING"),
+        ("connection", (t, n) =>
+            $"INSERT INTO connection (tenant_id, id, kind) VALUES ('{t}', '{n}', 'database') ON CONFLICT DO NOTHING"),
         ("user", (t, n) => $"INSERT INTO \"user\" (tenant_id, id) VALUES ('{t}', '{n}')"),
+        ("password_history", (t, n) =>
+            $"INSERT INTO password_history (tenant_id, id, user_id, password_hash) VALUES ('{t}', '{n}', '{n}', '$argon2id$seeded')"),
         ("user_session", (t, n) =>
             "INSERT INTO user_session (tenant_id, id, user_id, id_hash, amr, auth_time, idle_expires_at, absolute_expires_at, created_at) " +
             $"VALUES ('{t}', '{n}', '{n}', sha256(convert_to('{t}{n}', 'UTF8')), ARRAY['pwd'], now(), now() + interval '1 hour', now() + interval '8 hours', now())"),
