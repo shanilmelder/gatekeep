@@ -64,11 +64,14 @@ internal static class TenantSettingsRules
         return problems;
     }
 
+    /// <summary>Spelt from the scheme constants: only <c>TenantAddress</c> writes an https literal (an issuer).</summary>
+    private static readonly string HttpsPrefix = Uri.UriSchemeHttps + Uri.SchemeDelimiter;
+
     /// <summary>An absolute https URL with a host, and no userinfo, white space or control character anywhere.</summary>
     public static bool IsTermsUrl(string text) =>
         text.Length is > 0 and <= SecurityLimits.MaxTermsUrlLength
         && !text.Any(static c => char.IsWhiteSpace(c) || char.IsControl(c))
-        && text.StartsWith("https://", StringComparison.Ordinal)
+        && text.StartsWith(HttpsPrefix, StringComparison.Ordinal)
         && Uri.TryCreate(text, UriKind.Absolute, out var uri)
         && uri.Scheme == Uri.UriSchemeHttps
         && uri.UserInfo.Length == 0
@@ -78,7 +81,7 @@ internal static class TenantSettingsRules
     /// <summary>The text between <c>https://</c> and the path, query or fragment: where userinfo would be, however it is spelt.</summary>
     private static string Authority(string text)
     {
-        var rest = text["https://".Length..];
+        var rest = text[HttpsPrefix.Length..];
         var end = rest.IndexOfAny(['/', '?', '#', '\\']);
         return end < 0 ? rest : rest[..end];
     }
