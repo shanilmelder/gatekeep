@@ -115,8 +115,11 @@ isolation_tests() {
 
   log="$(mktemp)"
   status_file="$(mktemp)"
-  { dotnet test tests/Isolation --no-build --filter "$filter" --logger "console;verbosity=detailed"
-    echo "$?" > "$status_file"; } 2>&1 | tee "$log"
+  # `set -e` would end the group at a failing `dotnet test` before the status is written,
+  # so capture it with `||` (exempt from -e) and always write it.
+  { code=0
+    dotnet test tests/Isolation --no-build --filter "$filter" --logger "console;verbosity=detailed" || code=$?
+    echo "$code" > "$status_file"; } 2>&1 | tee "$log"
   status="$(cat "$status_file")"
   if [ "$status" -ne 0 ]; then
     exit "$status"
