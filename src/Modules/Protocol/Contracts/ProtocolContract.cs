@@ -49,6 +49,30 @@ public static class ProtocolContract
     /// <summary>"Keep going" (Story 4.2): slides the sign-in transaction's life, answered with the current step.</summary>
     public const string LoginExtendPath = "/login/api/transaction/extend";
 
+    /// <summary>"Sign up" at Login (Story 4.7): <c>{stepVersion, email}</c>, answered with Signup when sign-up is open.</summary>
+    public const string SignupOpenPath = "/login/api/signup/open";
+
+    /// <summary>"Already have an account? Log in" at Signup (Story 4.7): <c>{stepVersion}</c>, answered with Login, the email kept.</summary>
+    public const string SignupBackPath = "/login/api/signup/back";
+
+    /// <summary>"Create account" (Story 4.7): <c>{stepVersion, email, password}</c>, answered with Email verification required.</summary>
+    public const string SignupPath = "/login/api/signup";
+
+    /// <summary>"Resend email" (Story 4.7): <c>{stepVersion}</c>, answered with Email verification required, resent.</summary>
+    public const string VerificationResendPath = "/login/api/verification/resend";
+
+    /// <summary>"I've verified, continue" (Story 4.7): <c>{stepVersion}</c>, answered with the redirect once the email is verified.</summary>
+    public const string VerificationContinuePath = "/login/api/verification/continue";
+
+    /// <summary>
+    /// The verification link's page (Story 4.7): <c>GET /login/verify-email?token=</c>, Email verified or Link expired. It is
+    /// the email template's <c>login/verify-email</c>, under the Tenant's email link base.
+    /// </summary>
+    public const string VerifyEmailPath = "/login/verify-email";
+
+    /// <summary>"Send a new link" (Story 4.7): <c>{token}</c> with the link-bound CSRF token, always answered with the neutral confirmation.</summary>
+    public const string VerificationNewLinkPath = "/login/api/verification/new-link";
+
     /// <summary>The cookie binding a sign-in transaction to the browser (Story 4.2): host-only, Secure, HttpOnly, SameSite=Lax.</summary>
     public const string TransactionCookie = "__Host-gk_txn";
 
@@ -81,7 +105,9 @@ public static class ProtocolContract
     /// tests do), Authentication's release default otherwise, which offers none.
     /// <paramref name="stepPages"/> builds the host's Hosted Login step pages (AD-21, Story 4.1), which the
     /// authorization endpoint shows Generic error through for a request it can't send back to any client, and
-    /// Hosted Login's <c>/login</c> surface its steps through.
+    /// Hosted Login's <c>/login</c> surface its steps through. Sign-up (Story 4.7) enqueues its verification email through the
+    /// host's <c>IJobEnqueuer</c>, which the host must register, and hashes within <see cref="PasswordHashLimits"/>, the
+    /// defaults unless the host registered its own first.
     /// </summary>
     public static IServiceCollection AddGatekeepProtocol(
         this IServiceCollection services,
@@ -120,9 +146,11 @@ public static class ProtocolContract
 
     /// <summary>
     /// Hosted Login's sign-in surface (Story 4.2), after routing, on the resolved Tenant only: <c>GET /login</c>,
-    /// the step page of the transaction the <c>__Host-gk_txn</c> cookie binds, and the two state-changing API
-    /// requests, <c>POST /login/api/identifier</c> and <c>POST /login/api/transaction/extend</c>, each checked for an
-    /// exact-host <c>Origin</c> and the transaction's CSRF token before anything is read or written.
+    /// the step page of the transaction the <c>__Host-gk_txn</c> cookie binds, and the state-changing API
+    /// requests, <c>POST /login/api/identifier</c>, <c>POST /login/api/transaction/extend</c> and Story 4.7's sign-up and
+    /// verification requests, each checked for an exact-host <c>Origin</c> and the transaction's CSRF token before anything
+    /// is read or written; and Story 4.7's verification link page, <c>GET /login/verify-email</c>, whose "Send a new link"
+    /// is checked for the <c>Origin</c> and a CSRF token bound to the link.
     /// </summary>
     public static IEndpointRouteBuilder MapGatekeepLogin(this IEndpointRouteBuilder endpoints)
     {

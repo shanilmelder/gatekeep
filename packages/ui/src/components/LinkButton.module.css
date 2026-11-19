@@ -1,0 +1,35 @@
+/*
+ * An action drawn as an inline text link (Story 4.7). It inherits the surrounding text's font, is underlined so it never
+ * relies on colour alone, and keeps a 24px tall hit area for inline targets (WCAG 2.2).
+ */
+
+.link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: var(--gk-color-tx);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.link:hover {
+  color: var(--gk-color-ac);
+}
+
+.link:focus-visible {
+  outline: var(--gk-focus-ring-outline-width) var(--gk-focus-ring-outline-style) var(--gk-focus-ring-outline-color);
+  outline-offset: var(--gk-focus-ring-outline-offset);
+  border-radius: 2px;
+}
+
+.link[aria-disabled='true'] {
+  color: var(--gk-color-tx2);
+  text-decoration: none;
+  cursor: not-allowed;
+}

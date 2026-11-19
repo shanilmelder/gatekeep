@@ -7,6 +7,7 @@ using Gatekeep.Kernel.Limits;
 using Gatekeep.Kernel.Persistence;
 using Gatekeep.Kernel.Secrets;
 using Gatekeep.Modules.Authentication.Contracts;
+using Gatekeep.Modules.Identity.Contracts;
 using Gatekeep.Modules.Protocol.Contracts;
 using Gatekeep.Modules.Tenancy.Contracts;
 using Microsoft.AspNetCore.Builder;
@@ -91,13 +92,47 @@ internal static class SignInCsrf
     }
 }
 
-/// <summary>The steps a sign-in transaction stands at, as Hosted Login shows them (Story 4.2).</summary>
+/// <summary>
+/// "Send a new link"'s CSRF token (Story 4.7): <c>base64url(SHA-256("gatekeep-link-csrf\0" || SHA-256(token)))</c>, the
+/// inner hash being what the link is stored as. A link's page has no transaction, so its token is bound to the link:
+/// only someone holding the link can post it. Derived, never stored, and compared in constant time.
+/// </summary>
+internal static class LinkCsrf
+{
+    private static ReadOnlySpan<byte> Label => "gatekeep-link-csrf\0"u8;
+
+    public static string Derive(string token)
+    {
+        var hash = IdentityContract.VerificationLinkHash(token);
+        var input = new byte[Label.Length + hash.Length];
+        try
+        {
+            Label.CopyTo(input);
+            hash.CopyTo(input.AsSpan(Label.Length));
+            return Base64Url.EncodeToString(SHA256.HashData(input));
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(input);
+            CryptographicOperations.ZeroMemory(hash);
+        }
+    }
+
+    public static bool Matches(string token, string? presented) =>
+        !string.IsNullOrEmpty(presented)
+        && CryptographicOperations.FixedTimeEquals(Encoding.ASCII.GetBytes(Derive(token)), Encoding.UTF8.GetBytes(presented));
+}
+
+/// <summary>The steps a sign-in transaction stands at, as Hosted Login shows them (Stories 4.2 and 4.7).</summary>
 internal static class SignInStepResponses
 {
     /// <summary>A transaction that can't be used: none, completed, another Application's or not at the step needed.</summary>
     public const string InvalidTransaction = "invalid_transaction";
 
-    /// <summary>No credential step is available after Login's email (Story 4.2, until Story 4.9).</summary>
+    /// <summary>
+    /// No credential step is available after Login's email (Story 4.2, until Story 4.9), or no hashing slot came free in
+    /// time for a sign-up (Story 4.7).
+    /// </summary>
     public const string TemporarilyUnavailable = "temporarily_unavailable";
 
     public const string OriginMismatch = "origin_mismatch";
@@ -108,12 +143,22 @@ internal static class SignInStepResponses
     public const string InvalidRequest = "invalid_request";
 
     /// <summary>
-    /// The transaction's current step, from the steps it records as passed: Login before its email; once
-    /// authenticated, the redirect that resumes the authorization request; between the two, with no credential
-    /// step available, Generic error <c>temporarily_unavailable</c>.
+    /// The transaction's current step, from the steps it records as passed: once authenticated, the redirect that resumes
+    /// the authorization request; once a sign-up is registered, Email verification required; at Signup, Signup with
+    /// <paramref name="policy"/>; past Login's email with no credential step available, Generic error
+    /// <c>temporarily_unavailable</c>; otherwise Login, its "Sign up" link shown while <paramref name="policy"/> is open.
     /// </summary>
     public static StepResponse Current(
-        ResolvedTenant tenant, SignInTransaction transaction, Secret<string> binding, DateTimeOffset now, string traceId, string? error = null, string? email = null)
+        ResolvedTenant tenant,
+        SignInTransaction transaction,
+        Secret<string> binding,
+        DateTimeOffset now,
+        string traceId,
+        SignupPolicy policy,
+        string? error = null,
+        string? email = null,
+        IReadOnlyList<string>? rules = null,
+        bool resent = false)
     {
         var expiresIn = ExpiresIn(transaction.ExpiresAt, now);
         if (transaction.HasPassed(SignInSteps.Authenticated))
@@ -121,12 +166,31 @@ internal static class SignInStepResponses
             return StepResponse.Redirect(tenant.Name, transaction.StepVersion, expiresIn, ResumeLocation(transaction.Parameters));
         }
 
+        if (transaction.HasPassed(SignInSteps.Registered))
+        {
+            return StepResponse.VerifyEmail(tenant.Name, transaction.StepVersion, expiresIn, SignInCsrf.Derive(binding), transaction.Identifier, resent, error);
+        }
+
+        if (transaction.HasPassed(SignInSteps.Signup))
+        {
+            return StepResponse.Signup(
+                tenant.Name,
+                transaction.StepVersion,
+                expiresIn,
+                SignInCsrf.Derive(binding),
+                email ?? transaction.Identifier,
+                new SignupPolicyData(policy.MinLength, policy.Strength),
+                error,
+                rules);
+        }
+
         if (transaction.HasPassed(SignInSteps.Identifier))
         {
             return StepResponse.GenericError(tenant.Name, TemporarilyUnavailable, traceId);
         }
 
-        return StepResponse.Login(tenant.Name, transaction.StepVersion, expiresIn, SignInCsrf.Derive(binding), email ?? transaction.Identifier, error);
+        return StepResponse.Login(
+            tenant.Name, transaction.StepVersion, expiresIn, SignInCsrf.Derive(binding), email ?? transaction.Identifier, error, policy.Enabled);
     }
 
     /// <summary>The whole seconds left before <paramref name="expiresAt"/>, never below zero.</summary>
@@ -147,6 +211,7 @@ internal static class SignInStepResponses
         return ProtocolContract.AuthorizePath + QueryString.Create(query);
     }
 }
+
 
 /// <summary>
 /// Protocol's sign-in (Story 4.2, AD-12), the one <see cref="IAuthorizationSignIn"/>: a resume completes with its
@@ -225,14 +290,20 @@ internal sealed class HostedAuthorizationSignIn(TokenEndpointServices services) 
     }
 }
 
+
 /// <summary>
-/// Hosted Login's sign-in surface (Story 4.2, FR-47, NFR-4), each request in one Tenant scope as <c>gk_hosted</c>:
+/// Hosted Login's sign-in surface (Stories 4.2 and 4.7, FR-47, NFR-4), each request in one Tenant scope as <c>gk_hosted</c>:
 /// <list type="bullet">
 /// <item><c>GET /login</c>: the step page of the transaction <c>__Host-gk_txn</c> binds, its life slid. An expired,
 /// uncompleted one within an hour restarts at Login with its email kept, under a new cookie.</item>
-/// <item><c>POST /login/api/identifier</c> and <c>POST /login/api/transaction/extend</c>: an exact-host
-/// <c>Origin</c>, then the transaction's CSRF token, are checked before anything is read or written, and each
-/// answers a JSON step. A stale <c>stepVersion</c> gets the current step, writing nothing.</item>
+/// <item><c>POST /login/api/identifier</c>, <c>/login/api/transaction/extend</c>, and Story 4.7's sign-up requests
+/// (<c>/login/api/signup/open</c>, <c>/login/api/signup/back</c>, <c>/login/api/signup</c>,
+/// <c>/login/api/verification/resend</c> and <c>/login/api/verification/continue</c>): an exact-host <c>Origin</c>, then the
+/// transaction's CSRF token, are checked before anything is read or written, and each answers a JSON step. A stale
+/// <c>stepVersion</c>, or a transaction not at the step a request needs, gets the current step, writing nothing.</item>
+/// <item><c>GET /login/verify-email?token=</c> (Story 4.7): the verification link's page, Email verified or Link expired;
+/// and <c>POST /login/api/verification/new-link</c>, its "Send a new link", checked for the exact-host <c>Origin</c> and
+/// the link-bound CSRF token, always answered with the neutral confirmation.</item>
 /// </list>
 /// A transaction that is missing, completed or too long expired is refused: Generic error <c>invalid_transaction</c>,
 /// 400, its cookie cleared, and nothing written but <c>authentication.signin_transaction.refused</c>, as a wrong
@@ -240,7 +311,7 @@ internal sealed class HostedAuthorizationSignIn(TokenEndpointServices services) 
 /// </summary>
 internal static class LoginEndpoints
 {
-    /// <summary>The largest API body read: 4 KiB, ample for a 254-character email.</summary>
+    /// <summary>The largest API body read: 4 KiB, ample for a 254-character email and a 256-code-point password.</summary>
     private const int MaxBodyBytes = 4 * 1024;
 
     public static void Map(IEndpointRouteBuilder endpoints)
@@ -248,6 +319,15 @@ internal static class LoginEndpoints
         endpoints.MapGet(ProtocolContract.LoginPath, (RequestDelegate)PageAsync);
         endpoints.MapPost(ProtocolContract.LoginIdentifierPath, (RequestDelegate)IdentifierAsync);
         endpoints.MapPost(ProtocolContract.LoginExtendPath, (RequestDelegate)ExtendAsync);
+
+        // Story 4.7: sign-up and email verification.
+        endpoints.MapPost(ProtocolContract.SignupOpenPath, (RequestDelegate)SignupOpenAsync);
+        endpoints.MapPost(ProtocolContract.SignupBackPath, (RequestDelegate)SignupBackAsync);
+        endpoints.MapPost(ProtocolContract.SignupPath, (RequestDelegate)SignupAsync);
+        endpoints.MapPost(ProtocolContract.VerificationResendPath, (RequestDelegate)ResendAsync);
+        endpoints.MapPost(ProtocolContract.VerificationContinuePath, (RequestDelegate)ContinueAsync);
+        endpoints.MapGet(ProtocolContract.VerifyEmailPath, (RequestDelegate)VerifyEmailPageAsync);
+        endpoints.MapPost(ProtocolContract.VerificationNewLinkPath, (RequestDelegate)NewLinkAsync);
     }
 
     private static async Task PageAsync(HttpContext http)
@@ -267,6 +347,8 @@ internal static class LoginEndpoints
             return;
         }
 
+        var policy = await login.Services.SignUp.ReadPolicyAsync(context, login.Cancellation);
+
         // Expired before it completed: a new transaction for the same request, with the email kept.
         if (transaction.IsExpiredAt(now))
         {
@@ -278,7 +360,8 @@ internal static class LoginEndpoints
                 1,
                 SignInStepResponses.ExpiresIn(now + SecurityLimits.SignInTransactionLifetime, now),
                 SignInCsrf.Derive(restarted.Binding),
-                transaction.Identifier);
+                transaction.Identifier,
+                signupEnabled: policy.Enabled);
             await login.Pages.WriteAsync(http, StatusCodes.Status200OK, step, login.Cancellation);
             return;
         }
@@ -286,7 +369,7 @@ internal static class LoginEndpoints
         var expiresAt = await login.Services.Authentication.ExtendAsync(context, transaction.Id, login.Cancellation);
         await scope.CommitAsync(login.Cancellation);
 
-        var current = SignInStepResponses.Current(login.Tenant, transaction with { ExpiresAt = expiresAt }, binding, now, login.TraceId);
+        var current = SignInStepResponses.Current(login.Tenant, transaction with { ExpiresAt = expiresAt }, binding, now, login.TraceId, policy);
         await login.Pages.WriteAsync(http, StatusCodes.Status200OK, current, login.Cancellation);
     }
 
@@ -299,18 +382,12 @@ internal static class LoginEndpoints
         }
 
         using var body = await ReadBodyAsync(http, login.Cancellation);
-        if (body is null
-            || !body.RootElement.TryGetProperty("stepVersion", out var versionElement)
-            || versionElement.ValueKind != JsonValueKind.Number
-            || !versionElement.TryGetInt32(out var stepVersion)
-            || !body.RootElement.TryGetProperty("email", out var emailElement)
-            || emailElement.ValueKind != JsonValueKind.String)
+        if (StepVersion(body) is not { } stepVersion || Text(body, "email") is not { } input)
         {
-            await login.AnswerAsync(StatusCodes.Status400BadRequest, StepResponse.GenericError(login.Tenant.Name, SignInStepResponses.InvalidRequest, login.TraceId));
+            await login.InvalidRequestAsync();
             return;
         }
 
-        var input = emailElement.GetString();
         await using var scope = await TenantScope.BeginAsync(login.Services.Database.Source, login.Tenant.TenantId, login.Cancellation);
         var context = scope.CreateCommandContext();
         if (await login.UsableAsync(scope, binding) is not { } transaction)
@@ -318,23 +395,20 @@ internal static class LoginEndpoints
             return;
         }
 
-        var now = login.Services.Time.GetUtcNow();
-
         // A stale step version, or a transaction already past Login: the current step, and nothing written.
         if (stepVersion != transaction.StepVersion || transaction.CompletedSteps.Count != 0)
         {
-            await login.AnswerAsync(StatusCodes.Status200OK, SignInStepResponses.Current(login.Tenant, transaction, binding, now, login.TraceId));
+            await login.AnswerCurrentAsync(context, transaction, binding);
             return;
         }
 
         if (!AuthenticationContract.TryNormalizeEmail(input, out var email))
         {
-            var invalid = SignInStepResponses.Current(
-                login.Tenant, transaction, binding, now, login.TraceId, LoginErrors.EmailInvalid, input?.Trim() ?? string.Empty);
-            await login.AnswerAsync(StatusCodes.Status200OK, invalid);
+            await login.AnswerCurrentAsync(context, transaction, binding, LoginErrors.EmailInvalid, input.Trim());
             return;
         }
 
+        var now = login.Services.Time.GetUtcNow();
         var identified = await login.Services.Authentication.IdentifyAsync(
             context, transaction, email, SignInCookies.Read(http, ProtocolContract.SessionCookie), login.Cancellation);
         await scope.CommitAsync(login.Cancellation);
@@ -372,13 +446,371 @@ internal static class LoginEndpoints
             return;
         }
 
+        var policy = await login.Services.SignUp.ReadPolicyAsync(context, login.Cancellation);
         var expiresAt = await login.Services.Authentication.ExtendAsync(context, transaction.Id, login.Cancellation);
         await scope.CommitAsync(login.Cancellation);
 
         var now = login.Services.Time.GetUtcNow();
         await login.AnswerAsync(
-            StatusCodes.Status200OK, SignInStepResponses.Current(login.Tenant, transaction with { ExpiresAt = expiresAt }, binding, now, login.TraceId));
+            StatusCodes.Status200OK,
+            SignInStepResponses.Current(login.Tenant, transaction with { ExpiresAt = expiresAt }, binding, now, login.TraceId, policy));
     }
+
+    /// <summary>"Sign up" at Login (Story 4.7): Signup while sign-up is open; otherwise the current Login step, unchanged.</summary>
+    private static async Task SignupOpenAsync(HttpContext http)
+    {
+        var login = Login.Of(http);
+        if (await login.CheckAsync() is not { } binding)
+        {
+            return;
+        }
+
+        using var body = await ReadBodyAsync(http, login.Cancellation);
+        if (StepVersion(body) is not { } stepVersion || Text(body, "email") is not { } input)
+        {
+            await login.InvalidRequestAsync();
+            return;
+        }
+
+        await using var scope = await TenantScope.BeginAsync(login.Services.Database.Source, login.Tenant.TenantId, login.Cancellation);
+        var context = scope.CreateCommandContext();
+        if (await login.UsableAsync(scope, binding) is not { } transaction)
+        {
+            return;
+        }
+
+        if (stepVersion != transaction.StepVersion || transaction.CompletedSteps.Count != 0
+            || await login.Services.SignUp.OpenAsync(context, transaction, input, login.Cancellation) is not { } moved)
+        {
+            await login.AnswerCurrentAsync(context, transaction, binding);
+            return;
+        }
+
+        var opened = transaction with
+        {
+            CompletedSteps = [SignInSteps.Signup],
+            StepVersion = moved.StepVersion,
+            ExpiresAt = moved.ExpiresAt,
+            Identifier = AuthenticationContract.TryNormalizeEmail(input, out var email) ? email : transaction.Identifier,
+        };
+        var next = await login.CurrentAsync(context, opened, binding);
+        await scope.CommitAsync(login.Cancellation);
+        await login.AnswerAsync(StatusCodes.Status200OK, next);
+    }
+
+    /// <summary>"Already have an account? Log in" (Story 4.7): back to Login, the email kept.</summary>
+    private static async Task SignupBackAsync(HttpContext http)
+    {
+        var login = Login.Of(http);
+        if (await login.CheckAsync() is not { } binding)
+        {
+            return;
+        }
+
+        using var body = await ReadBodyAsync(http, login.Cancellation);
+        if (StepVersion(body) is not { } stepVersion)
+        {
+            await login.InvalidRequestAsync();
+            return;
+        }
+
+        await using var scope = await TenantScope.BeginAsync(login.Services.Database.Source, login.Tenant.TenantId, login.Cancellation);
+        var context = scope.CreateCommandContext();
+        if (await login.UsableAsync(scope, binding) is not { } transaction)
+        {
+            return;
+        }
+
+        if (stepVersion != transaction.StepVersion || !IsAt(transaction, SignInSteps.Signup))
+        {
+            await login.AnswerCurrentAsync(context, transaction, binding);
+            return;
+        }
+
+        var moved = await login.Services.SignUp.BackAsync(context, transaction, login.Cancellation);
+        var next = await login.CurrentAsync(
+            context, transaction with { CompletedSteps = [], StepVersion = moved.StepVersion, ExpiresAt = moved.ExpiresAt }, binding);
+        await scope.CommitAsync(login.Cancellation);
+        await login.AnswerAsync(StatusCodes.Status200OK, next);
+    }
+
+    /// <summary>
+    /// "Create account" (Story 4.7): Email verification required, alike for every address. A failing password gets Signup
+    /// naming each rule, and a full hashing budget the generic <c>temporarily_unavailable</c>, both writing nothing. Sign-up
+    /// closed meanwhile gets Login. A Dev Tenant with verification off gets the redirect, with its Session.
+    /// </summary>
+    private static async Task SignupAsync(HttpContext http)
+    {
+        var login = Login.Of(http);
+        if (await login.CheckAsync() is not { } binding)
+        {
+            return;
+        }
+
+        using var body = await ReadBodyAsync(http, login.Cancellation);
+        if (StepVersion(body) is not { } stepVersion || Text(body, "email") is not { } input || Text(body, "password") is not { } typed)
+        {
+            await login.InvalidRequestAsync();
+            return;
+        }
+
+        var password = new Secret<string>(typed);
+        await using var scope = await TenantScope.BeginAsync(login.Services.Database.Source, login.Tenant.TenantId, login.Cancellation);
+        var context = scope.CreateCommandContext();
+        if (await login.UsableAsync(scope, binding) is not { } transaction)
+        {
+            return;
+        }
+
+        if (stepVersion != transaction.StepVersion || !IsAt(transaction, SignInSteps.Signup))
+        {
+            await login.AnswerCurrentAsync(context, transaction, binding);
+            return;
+        }
+
+        if (!AuthenticationContract.TryNormalizeEmail(input, out var email))
+        {
+            await login.AnswerCurrentAsync(context, transaction, binding, SignupErrors.EmailInvalid, input.Trim());
+            return;
+        }
+
+        var result = await login.Services.SignUp.SignUpAsync(
+            context, transaction, email, password, SignInCookies.Read(http, ProtocolContract.SessionCookie), login.Cancellation);
+        var now = login.Services.Time.GetUtcNow();
+
+        switch (result.Status)
+        {
+            case SignUpStatus.RuleFailed:
+                // Nothing was written: the scope is undone with the request.
+                await login.AnswerCurrentAsync(context, transaction, binding, SignupErrors.PasswordRule, email, result.FailedRules);
+                return;
+
+            case SignUpStatus.Unavailable:
+                await login.AnswerAsync(
+                    StatusCodes.Status200OK, StepResponse.GenericError(login.Tenant.Name, SignInStepResponses.TemporarilyUnavailable, login.TraceId));
+                return;
+
+            case SignUpStatus.Disabled:
+            {
+                var next = await login.CurrentAsync(
+                    context, transaction with { CompletedSteps = [], StepVersion = result.StepVersion, ExpiresAt = result.ExpiresAt }, binding);
+                await scope.CommitAsync(login.Cancellation);
+                await login.AnswerAsync(StatusCodes.Status200OK, next);
+                return;
+            }
+
+            case SignUpStatus.Authenticated when result.Session is { } session:
+                await scope.CommitAsync(login.Cancellation);
+                SignInCookies.SetSession(http, session.Token, session.AbsoluteExpiresAt, login.Services.Time.GetUtcNow());
+                await login.AnswerAsync(
+                    StatusCodes.Status200OK,
+                    StepResponse.Redirect(
+                        login.Tenant.Name,
+                        result.StepVersion,
+                        SignInStepResponses.ExpiresIn(result.ExpiresAt, now),
+                        SignInStepResponses.ResumeLocation(transaction.Parameters)));
+                return;
+
+            default:
+                await scope.CommitAsync(login.Cancellation);
+                await login.AnswerAsync(
+                    StatusCodes.Status200OK,
+                    StepResponse.VerifyEmail(
+                        login.Tenant.Name, result.StepVersion, SignInStepResponses.ExpiresIn(result.ExpiresAt, now), SignInCsrf.Derive(binding), email));
+                return;
+        }
+    }
+
+    /// <summary>"Resend email" (Story 4.7): Email verification required, resent, whatever was sent.</summary>
+    private static async Task ResendAsync(HttpContext http)
+    {
+        var login = Login.Of(http);
+        if (await login.CheckAsync() is not { } binding)
+        {
+            return;
+        }
+
+        using var body = await ReadBodyAsync(http, login.Cancellation);
+        if (StepVersion(body) is not { } stepVersion)
+        {
+            await login.InvalidRequestAsync();
+            return;
+        }
+
+        await using var scope = await TenantScope.BeginAsync(login.Services.Database.Source, login.Tenant.TenantId, login.Cancellation);
+        var context = scope.CreateCommandContext();
+        if (await login.UsableAsync(scope, binding) is not { } transaction)
+        {
+            return;
+        }
+
+        if (stepVersion != transaction.StepVersion || !IsAt(transaction, SignInSteps.Signup, SignInSteps.Registered))
+        {
+            await login.AnswerCurrentAsync(context, transaction, binding);
+            return;
+        }
+
+        var expiresAt = await login.Services.SignUp.ResendAsync(context, transaction, login.Cancellation);
+        var next = await login.CurrentAsync(context, transaction with { ExpiresAt = expiresAt }, binding, resent: true);
+        await scope.CommitAsync(login.Cancellation);
+        await login.AnswerAsync(StatusCodes.Status200OK, next);
+    }
+
+    /// <summary>"I've verified — continue" (Story 4.7): the redirect, with its Session, once the email is verified; else <c>not_verified_yet</c>.</summary>
+    private static async Task ContinueAsync(HttpContext http)
+    {
+        var login = Login.Of(http);
+        if (await login.CheckAsync() is not { } binding)
+        {
+            return;
+        }
+
+        using var body = await ReadBodyAsync(http, login.Cancellation);
+        if (StepVersion(body) is not { } stepVersion)
+        {
+            await login.InvalidRequestAsync();
+            return;
+        }
+
+        await using var scope = await TenantScope.BeginAsync(login.Services.Database.Source, login.Tenant.TenantId, login.Cancellation);
+        var context = scope.CreateCommandContext();
+        if (await login.UsableAsync(scope, binding) is not { } transaction)
+        {
+            return;
+        }
+
+        if (stepVersion != transaction.StepVersion || !IsAt(transaction, SignInSteps.Signup, SignInSteps.Registered))
+        {
+            await login.AnswerCurrentAsync(context, transaction, binding);
+            return;
+        }
+
+        var continued = await login.Services.SignUp.ContinueAsync(
+            context, transaction, SignInCookies.Read(http, ProtocolContract.SessionCookie), login.Cancellation);
+        if (continued.Session is not { } session)
+        {
+            await login.AnswerCurrentAsync(context, transaction, binding, VerifyEmailErrors.NotVerifiedYet);
+            return;
+        }
+
+        await scope.CommitAsync(login.Cancellation);
+        var now = login.Services.Time.GetUtcNow();
+        SignInCookies.SetSession(http, session.Token, session.AbsoluteExpiresAt, now);
+        await login.AnswerAsync(
+            StatusCodes.Status200OK,
+            StepResponse.Redirect(
+                login.Tenant.Name,
+                continued.StepVersion,
+                SignInStepResponses.ExpiresIn(continued.ExpiresAt, now),
+                SignInStepResponses.ResumeLocation(transaction.Parameters)));
+    }
+
+    /// <summary>
+    /// The verification link's page (Story 4.7): the link is used once. Opened in the browser whose live transaction signed
+    /// up for it, its Session starts and Email verified continues to the Application; anywhere else Email verified says the
+    /// page can be closed. A malformed, foreign, unknown, expired or used link gets Link expired, with nothing changed and
+    /// no transaction touched.
+    /// </summary>
+    private static async Task VerifyEmailPageAsync(HttpContext http)
+    {
+        var login = Login.Of(http);
+        var values = http.Request.Query["token"];
+        var token = values.Count == 1 && !string.IsNullOrEmpty(values[0]) ? values[0]! : null;
+
+        if (token is null)
+        {
+            await login.Pages.WriteAsync(http, StatusCodes.Status200OK, StepResponse.LinkExpired(login.Tenant.Name, null, null), login.Cancellation);
+            return;
+        }
+
+        var binding = SignInCookies.Read(http, ProtocolContract.TransactionCookie);
+        LinkVerification verification;
+        SignInTransaction? transaction;
+        await using (var scope = await TenantScope.BeginAsync(login.Services.Database.Source, login.Tenant.TenantId, login.Cancellation))
+        {
+            var context = scope.CreateCommandContext();
+            transaction = binding is null ? null : await login.Services.Authentication.FindAsync(context, binding, login.Cancellation);
+            verification = await login.Services.SignUp.VerifyLinkAsync(
+                context, new Secret<string>(token), transaction, SignInCookies.Read(http, ProtocolContract.SessionCookie), login.Cancellation);
+            if (verification.Verified)
+            {
+                await scope.CommitAsync(login.Cancellation);
+            }
+        }
+
+        StepResponse step;
+        if (!verification.Verified)
+        {
+            // Only a value with a link's shape is kept for "Send a new link"; it is the page's own link.
+            var kept = IdentityContract.IsVerificationLinkShaped(token) ? token : null;
+            step = StepResponse.LinkExpired(login.Tenant.Name, kept, kept is null ? null : LinkCsrf.Derive(kept));
+        }
+        else if (verification.Session is { } session && transaction is not null)
+        {
+            SignInCookies.SetSession(http, session.Token, session.AbsoluteExpiresAt, login.Services.Time.GetUtcNow());
+            step = StepResponse.EmailVerified(login.Tenant.Name, SignInStepResponses.ResumeLocation(transaction.Parameters));
+        }
+        else
+        {
+            step = StepResponse.EmailVerified(login.Tenant.Name, null);
+        }
+
+        await login.Pages.WriteAsync(http, StatusCodes.Status200OK, step, login.Cancellation);
+    }
+
+    /// <summary>
+    /// "Send a new link" (Story 4.7): the exact-host <c>Origin</c>, then the link-bound CSRF token, are checked before anything
+    /// is looked up. It always answers the neutral confirmation; a new link goes out only when the link's row exists and its
+    /// User is still unverified.
+    /// </summary>
+    private static async Task NewLinkAsync(HttpContext http)
+    {
+        var login = Login.Of(http);
+        if (!await login.CheckOriginAsync())
+        {
+            return;
+        }
+
+        using var body = await ReadBodyAsync(http, login.Cancellation);
+        if (Text(body, "token") is not { } token)
+        {
+            await login.InvalidRequestAsync();
+            return;
+        }
+
+        if (!LinkCsrf.Matches(token, Login.SingleHeader(http, ProtocolContract.CsrfHeader)))
+        {
+            await login.RefuseChecksAsync(SignInStepResponses.CsrfMismatch);
+            return;
+        }
+
+        await using (var scope = await TenantScope.BeginAsync(login.Services.Database.Source, login.Tenant.TenantId, login.Cancellation))
+        {
+            await login.Services.SignUp.SendNewLinkAsync(scope.CreateCommandContext(), new Secret<string>(token), login.Cancellation);
+            await scope.CommitAsync(login.Cancellation);
+        }
+
+        await login.AnswerAsync(StatusCodes.Status200OK, StepResponse.LinkSent(login.Tenant.Name));
+    }
+
+    /// <summary>Whether the transaction has passed exactly <paramref name="steps"/>, in order.</summary>
+    private static bool IsAt(SignInTransaction transaction, params string[] steps) =>
+        transaction.CompletedSteps.SequenceEqual(steps, StringComparer.Ordinal);
+
+    /// <summary>The body's whole-number <c>stepVersion</c>, or null when there is none.</summary>
+    private static int? StepVersion(JsonDocument? body) =>
+        body is not null
+        && body.RootElement.TryGetProperty("stepVersion", out var element)
+        && element.ValueKind == JsonValueKind.Number
+        && element.TryGetInt32(out var version)
+            ? version
+            : null;
+
+    /// <summary>The body's string <paramref name="name"/>, or null when there is none.</summary>
+    private static string? Text(JsonDocument? body, string name) =>
+        body is not null && body.RootElement.TryGetProperty(name, out var element) && element.ValueKind == JsonValueKind.String
+            ? element.GetString()
+            : null;
 
     /// <summary>The request body as JSON, or null when it is missing, too large or not a JSON object.</summary>
     private static async Task<JsonDocument?> ReadBodyAsync(HttpContext http, CancellationToken cancellationToken)
@@ -443,9 +875,8 @@ internal static class LoginEndpoints
         /// </summary>
         public async Task<Secret<string>?> CheckAsync()
         {
-            if (ExpectedOrigin(Tenant) is not { } expected || !string.Equals(SingleHeader(Http, "Origin"), expected, StringComparison.Ordinal))
+            if (!await CheckOriginAsync())
             {
-                await RefuseChecksAsync(SignInStepResponses.OriginMismatch);
                 return null;
             }
 
@@ -457,6 +888,18 @@ internal static class LoginEndpoints
             }
 
             return binding;
+        }
+
+        /// <summary>The exact-host <c>Origin</c> check alone; a request that fails it is refused with 403 <c>origin_mismatch</c>.</summary>
+        public async Task<bool> CheckOriginAsync()
+        {
+            if (ExpectedOrigin(Tenant) is not { } expected || !string.Equals(SingleHeader(Http, "Origin"), expected, StringComparison.Ordinal))
+            {
+                await RefuseChecksAsync(SignInStepResponses.OriginMismatch);
+                return false;
+            }
+
+            return true;
         }
 
         /// <summary>
@@ -482,6 +925,34 @@ internal static class LoginEndpoints
             return transaction;
         }
 
+        /// <summary>The transaction's current step, with the Tenant's sign-up policy read in <paramref name="context"/>.</summary>
+        public async Task<StepResponse> CurrentAsync(
+            CommandContext context,
+            SignInTransaction transaction,
+            Secret<string> binding,
+            string? error = null,
+            string? email = null,
+            IReadOnlyList<string>? rules = null,
+            bool resent = false)
+        {
+            var policy = await Services.SignUp.ReadPolicyAsync(context, Cancellation);
+            return SignInStepResponses.Current(Tenant, transaction, binding, Services.Time.GetUtcNow(), TraceId, policy, error, email, rules, resent);
+        }
+
+        /// <summary>Answers the transaction's current step, writing nothing.</summary>
+        public async Task AnswerCurrentAsync(
+            CommandContext context,
+            SignInTransaction transaction,
+            Secret<string> binding,
+            string? error = null,
+            string? email = null,
+            IReadOnlyList<string>? rules = null) =>
+            await AnswerAsync(StatusCodes.Status200OK, await CurrentAsync(context, transaction, binding, error, email, rules));
+
+        /// <summary>A body Protocol can't read: 400 Generic error <c>invalid_request</c>, nothing read or written.</summary>
+        public Task InvalidRequestAsync() =>
+            AnswerAsync(StatusCodes.Status400BadRequest, StepResponse.GenericError(Tenant.Name, SignInStepResponses.InvalidRequest, TraceId));
+
         /// <summary>
         /// Refuses the transaction: its work undone, the refusal's event kept through a fresh scope, its cookie cleared,
         /// and Generic error with <paramref name="code"/>, as a page or as JSON.
@@ -504,7 +975,7 @@ internal static class LoginEndpoints
         public Task AnswerAsync(int statusCode, StepResponse step) => Pages.WriteJsonAsync(Http, statusCode, step, Cancellation);
 
         /// <summary>A failed Origin or CSRF check: nothing was read, and only the refusal's event is written, through a fresh scope.</summary>
-        private async Task RefuseChecksAsync(string code)
+        public async Task RefuseChecksAsync(string code)
         {
             Services.Logger?.LogInformation("A Hosted Login request was refused: {Code}.", code);
             await using (var scope = await TenantScope.BeginAsync(Services.Database.Source, Tenant.TenantId, Cancellation))
@@ -516,7 +987,7 @@ internal static class LoginEndpoints
         }
 
         /// <summary>The request's one value of header <paramref name="name"/>, or null for none or several.</summary>
-        private static string? SingleHeader(HttpContext http, string name)
+        public static string? SingleHeader(HttpContext http, string name)
         {
             var values = http.Request.Headers[name];
             return values.Count == 1 ? values[0] : null;

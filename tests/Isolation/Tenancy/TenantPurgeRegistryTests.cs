@@ -102,7 +102,11 @@ public sealed class TenantPurgeRegistryTests(PostgresFixture postgres)
             return 0;
         });
 
-        Assert.Equal(["job_payload", "user"], await TenantSeeds.RowsLeftAsync(superuser, TenantA));
+        // Identity's tables (Stories 4.6 and 4.7 added password_history, password_credential and one_time_token), and
+        // Operations' job payload, whose purge runs last.
+        Assert.Equal(
+            ["job_payload", "user", "password_history", "password_credential", "one_time_token"],
+            await TenantSeeds.RowsLeftAsync(superuser, TenantA));
     }
 
     [Fact]

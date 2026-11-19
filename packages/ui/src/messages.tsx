@@ -122,6 +122,58 @@ export interface Messages {
   expiryWarningBody: string;
   /** The expiry warning's one action, which extends the sign-in. */
   keepGoing: string;
+  /** Story 4.7: Login's sign-up prompt, before `signupLink`, shown only while sign-up is open. */
+  signupPrompt: string;
+  /** Login's "Sign up" action. */
+  signupLink: string;
+  /** Signup's heading. */
+  signupTitle: string;
+  /** Signup's subtitle, naming the Tenant, never Gatekeep. Placeholder: {tenant}. */
+  signupSubtitle: string;
+  /** Signup's password field label. */
+  signupPasswordLabel: string;
+  /** Signup's primary action. */
+  signupCreate: string;
+  /** Signup's prompt back to Login, before `signupLogIn`. */
+  signupHaveAccount: string;
+  /** Signup's "Log in" action, back to Login with the email kept. */
+  signupLogIn: string;
+  /** The strength meter's label. Placeholder: {level}, one of the three below. */
+  strengthMeterLabel: string;
+  strengthGood: string;
+  strengthExcellent: string;
+  strengthNotStrongEnough: string;
+  /** The strength meter's rule checklist, as assistive technology names the list. */
+  strengthMeterRules: string;
+  /** A refused password's rules, as the server names them (Story 4.7), each one sentence. Placeholders: {count}, {max}. */
+  passwordErrorLength: string;
+  passwordErrorTooLong: string;
+  passwordErrorClasses: string;
+  passwordErrorRepeats: string;
+  passwordErrorDictionary: string;
+  passwordErrorPersonalData: string;
+  passwordErrorHistory: string;
+  /** Email verification required (Story 4.7): heading, body (placeholder {email}, or none) and its actions. */
+  verifyEmailTitle: string;
+  verifyEmailBody: string;
+  verifyEmailBodyNoAddress: string;
+  verifyEmailContinue: string;
+  /** "I've verified, continue" before the link was used (code not_verified_yet). */
+  verifyEmailNotYet: string;
+  /** The resend action, its countdown (placeholder {seconds}) and the one announcement after a send. */
+  resendEmail: string;
+  resendAvailableIn: string;
+  emailSent: string;
+  /** Email verified (Story 4.7): heading, its Continue, and the text in another browser, which has no action. */
+  emailVerifiedTitle: string;
+  emailVerifiedContinue: string;
+  emailVerifiedClose: string;
+  /** Link expired (Story 4.7): heading and its action. */
+  linkExpiredTitle: string;
+  linkExpiredSendNew: string;
+  /** The neutral link confirmation (Story 4.7): heading and body, the same whatever was sent. */
+  linkSentTitle: string;
+  linkSentBody: string;
   /** The Admin Dashboard's `<title>`, written into its index.html at build. */
   adminDocumentTitle: string;
   /** The product's name, which the Admin pages before a session speak for, as a Tenant's name does on Hosted Login. */
@@ -996,6 +1048,41 @@ export const defaultMessages: Readonly<Messages> = Object.freeze({
   expiryWarningTitle: 'Your session is about to expire.',
   expiryWarningBody: 'Choose Keep going to stay on this page and carry on signing in.',
   keepGoing: 'Keep going',
+  signupPrompt: "Don't have an account?",
+  signupLink: 'Sign up',
+  signupTitle: 'Create your account',
+  signupSubtitle: 'Sign up for {tenant}',
+  signupPasswordLabel: 'Password',
+  signupCreate: 'Create account',
+  signupHaveAccount: 'Already have an account?',
+  signupLogIn: 'Log in',
+  strengthMeterLabel: 'Password strength: {level}',
+  strengthGood: 'Good',
+  strengthExcellent: 'Excellent',
+  strengthNotStrongEnough: 'Not strong enough',
+  strengthMeterRules: 'Password rules',
+  passwordErrorLength: 'Use at least {count} characters.',
+  passwordErrorTooLong: 'Use no more than {max} characters.',
+  passwordErrorClasses: 'Use 3 of: lower case, upper case, number, special character.',
+  passwordErrorRepeats: "Don't repeat a character more than twice in a row.",
+  passwordErrorDictionary: 'This password is too common. Choose another.',
+  passwordErrorPersonalData: "Don't use your email address in your password.",
+  passwordErrorHistory: "You've used this password before. Choose another.",
+  verifyEmailTitle: 'Verify your email to continue',
+  verifyEmailBody: 'We sent a link to {email}. Click it, then come back here.',
+  verifyEmailBodyNoAddress: 'We sent a link to your email address. Click it, then come back here.',
+  verifyEmailContinue: "I've verified — continue",
+  verifyEmailNotYet: "We haven't seen that yet. Check your inbox.",
+  resendEmail: 'Resend email',
+  resendAvailableIn: 'Available in {seconds}s',
+  emailSent: 'Email sent',
+  emailVerifiedTitle: 'Email verified',
+  emailVerifiedContinue: 'Continue',
+  emailVerifiedClose: 'You can close this page.',
+  linkExpiredTitle: 'This link has expired or was already used.',
+  linkExpiredSendNew: 'Send a new link',
+  linkSentTitle: 'Check your email',
+  linkSentBody: "If an account exists for that email, we've sent a link.",
   adminDocumentTitle: 'Gatekeep Admin Dashboard',
   productName: 'Gatekeep',
   bootstrapTitle: 'Claim this Deployment',

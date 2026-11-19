@@ -44,6 +44,21 @@ export { HostedPage, type HostedPageProps, type HostedScheme } from './component
 export { SOCIAL_MAX, SocialButtons, type SocialButtonsProps, type SocialProvider } from './components/SocialButtons';
 export { StatusIcon, type StatusIconProps, type StatusIconStatus } from './components/StatusIcon';
 
+// Sign-up (Story 4.7): the inline link-styled action, the password strength meter, "Resend email" with its countdown,
+// and the password rules a browser can check, which the Admin Dashboard's policy preview lists too.
+export { LinkButton, type LinkButtonProps } from './components/LinkButton';
+export { RESEND_COOLDOWN_SECONDS, ResendAction, type ResendActionProps } from './components/ResendAction';
+export { STRENGTH_ANNOUNCE_MS, StrengthMeter, type StrengthMeterProps } from './components/StrengthMeter';
+export {
+  STRENGTH_SEGMENTS,
+  characterClasses,
+  filledSegments,
+  hasLongRun,
+  passwordRules,
+  type PasswordRule,
+  type PasswordStrengthLevel,
+} from './passwordRules';
+
 export {
   MessagesProvider,
   defaultMessages,

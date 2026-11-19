@@ -1,4 +1,4 @@
-// The Database page (Story 4.6): its path, the password policy's limits and form, the "what users see" preview's rules,
+// The Database page (Story 4.6): its path, the password policy's limits and form, the "what users see" preview's minimum,
 // and the Tenant settings card's form. The limits mirror SecurityLimits; the server holds the same rules and decides
 // every request: this is feedback only. The preview's sample is checked here and never sent.
 //
@@ -142,48 +142,8 @@ export function serverPolicyErrors(
   return found;
 }
 
-/** One rule the preview lists, and whether the sample meets it. */
-export type PreviewRule = { rule: 'length'; count: number; met: boolean } | { rule: 'classes'; met: boolean } | { rule: 'repeats'; met: boolean };
-
-/** How many of the four character classes the text holds: lower case, upper case, number, and anything else (special). */
-export function characterClasses(text: string): number {
-  let lower = false;
-  let upper = false;
-  let number = false;
-  let special = false;
-  for (const character of text) {
-    if (/\p{Ll}/u.test(character)) lower = true;
-    else if (/\p{Lu}/u.test(character)) upper = true;
-    else if (/\p{Nd}/u.test(character)) number = true;
-    else if (!/\p{L}/u.test(character)) special = true;
-  }
-  return [lower, upper, number, special].filter(Boolean).length;
-}
-
-/** Whether the text has 3 or more identical characters in a row, counted by code point. */
-export function hasLongRun(text: string): boolean {
-  const characters = Array.from(text);
-  for (let i = 2; i < characters.length; i++) {
-    if (characters[i] === characters[i - 1] && characters[i] === characters[i - 2]) return true;
-  }
-  return false;
-}
-
-/**
- * The rules a password must meet under this policy, in the order the preview lists them, each met or not for
- * `sample`: the minimum length, 3 of the 4 classes, and for Excellent no more than 2 identical
- * characters in a row. Length is counted by code point. The dictionary, personal-data and history rules are the
- * server's, at submit.
- */
-export function previewRules(minLength: number, strength: PasswordStrength, sample: string): PreviewRule[] {
-  const length = Array.from(sample).length;
-  const rules: PreviewRule[] = [
-    { rule: 'length', count: minLength, met: length >= minLength },
-    { rule: 'classes', met: characterClasses(sample) >= 3 },
-  ];
-  if (strength === 'excellent') rules.push({ rule: 'repeats', met: sample.length > 0 && !hasLongRun(sample) });
-  return rules;
-}
+// The preview's rules themselves (characterClasses, hasLongRun and passwordRules) are @gatekeep/ui's (Story 4.7), shared
+// with Hosted Login's strength meter.
 
 /** The minimum the preview shows while the typed one isn't usable: the floor. */
 export function previewMinLength(draft: PolicyDraft): number {

@@ -261,6 +261,11 @@ public sealed class CrossTenantRouteTests(PostgresFixture postgres, OpenBaoFixtu
             case ProtocolContract.LoginPath:
             case ProtocolContract.LoginIdentifierPath:
             case ProtocolContract.LoginExtendPath:
+            case ProtocolContract.SignupOpenPath:
+            case ProtocolContract.SignupBackPath:
+            case ProtocolContract.SignupPath:
+            case ProtocolContract.VerificationResendPath:
+            case ProtocolContract.VerificationContinuePath:
             {
                 // Tenant A's real sign-in transaction cookie, presented at B's host (Story 4.2): B's lookup, under B's
                 // row-level security, finds nothing, so it is refused as invalid_transaction, the refusal logged in B's
@@ -280,7 +285,7 @@ public sealed class CrossTenantRouteTests(PostgresFixture postgres, OpenBaoFixtu
 
                 using var response = entry.Pattern == ProtocolContract.LoginPath
                     ? await atB.GetAsync(ProtocolContract.LoginPath)
-                    : await atB.PostAsync(entry.Pattern, new { stepVersion = 1, email = "someone@example.com" }, csrf);
+                    : await atB.PostAsync(entry.Pattern, new { stepVersion = 1, email = "someone@example.com", password = "Correct-Horse-7battery" }, csrf);
                 string body;
                 if (entry.Pattern == ProtocolContract.LoginPath)
                 {
@@ -302,6 +307,76 @@ public sealed class CrossTenantRouteTests(PostgresFixture postgres, OpenBaoFixtu
                     $"SELECT count(*) FROM audit_event WHERE tenant_id = '{b.TenantId}' AND type_code = 'authentication.signin_transaction.refused'"));
                 Assert.Equal(eventsA, await database.ScalarAsync<long>($"SELECT count(*) FROM audit_event WHERE tenant_id = '{a.TenantId}'"));
                 Assert.All(atB.SetCookies, c => Assert.DoesNotContain("Domain", c, StringComparison.OrdinalIgnoreCase));
+                break;
+            }
+
+            case ProtocolContract.VerifyEmailPath:
+            case ProtocolContract.VerificationNewLinkPath:
+            {
+                // Tenant A's real verification link, from a sign-up at A (Story 4.7), at B's host: refused by its prefix
+                // before any lookup, as Link expired, or for "Send a new link" the neutral answer with nothing sent. Neither
+                // Tenant changes, B logs nothing of A, and the link still verifies at A.
+                await database.ExecuteAsync(
+                    $"INSERT INTO connection (tenant_id, id, kind) VALUES ('{a.TenantId}', gen_random_uuid(), 'database'), ('{b.TenantId}', gen_random_uuid(), 'database')");
+                var client = await database.CreateWebClientAsync(a.TenantId, [CodeFlowSetup.Callback]);
+                var atA = new HostedBrowser(host, HostA);
+                using (var begun = await atA.GetAsync(CodeFlow.AuthorizeUrl(client.ClientId, CodeFlowSetup.Callback, Pkce.New())))
+                {
+                    Assert.True(HostedBrowser.IsLoginRedirect(begun), "A's request didn't go to Login.");
+                }
+
+                var login = await atA.LoginStepAsync();
+                using (var opened = await atA.PostAsync(ProtocolContract.SignupOpenPath, new { stepVersion = login.StepVersion, email = "a.user@example.com" }, login.Csrf))
+                using (var created = await atA.PostAsync(
+                    ProtocolContract.SignupPath,
+                    new { stepVersion = login.StepVersion + 1, email = "a.user@example.com", password = "Correct-Horse-7battery" },
+                    login.Csrf))
+                {
+                    using var step = await HostedBrowser.StepAsync(created);
+                    Assert.Equal(StepNames.VerifyEmail, step.RootElement.GetProperty("step").GetString());
+                }
+
+                var link = host.Jobs.LastLink();
+                var rowsA = await database.ScalarAsync<string>(
+                    $"SELECT string_agg(to_jsonb(t)::text, ';') FROM one_time_token t WHERE tenant_id = '{a.TenantId}'");
+                var eventsA = await database.ScalarAsync<long>($"SELECT count(*) FROM audit_event WHERE tenant_id = '{a.TenantId}'");
+                var eventsB = await database.ScalarAsync<long>($"SELECT count(*) FROM audit_event WHERE tenant_id = '{b.TenantId}'");
+                var jobs = host.Jobs.Jobs.Count;
+
+                var atB = new HostedBrowser(host, HostB);
+                string body;
+                if (entry.Pattern == ProtocolContract.VerifyEmailPath)
+                {
+                    using var page = await atB.GetAsync($"{ProtocolContract.VerifyEmailPath}?token={Uri.EscapeDataString(link)}");
+                    Assert.Equal(HttpStatusCode.OK, page.StatusCode);
+                    body = await page.Content.ReadAsStringAsync(Cancellation);
+                    using var step = StepPage.Read(body);
+                    Assert.Equal(StepNames.LinkExpired, step.RootElement.GetProperty("step").GetString());
+                }
+                else
+                {
+                    using var response = await atB.PostAsync(ProtocolContract.VerificationNewLinkPath, new { token = link }, Gatekeep.Tests.Isolation.Identity.SignUpFlow.LinkCsrf(link));
+                    Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+                    body = await response.Content.ReadAsStringAsync(Cancellation);
+                    using var step = JsonDocument.Parse(body);
+                    Assert.Equal(StepNames.LinkSent, step.RootElement.GetProperty("step").GetString());
+                }
+
+                Assert.DoesNotContain(HostA, body, StringComparison.OrdinalIgnoreCase);
+                Assert.DoesNotContain(a.TenantId.ToString(), body, StringComparison.OrdinalIgnoreCase);
+                Assert.Equal(jobs, host.Jobs.Jobs.Count);
+                Assert.Equal(rowsA, await database.ScalarAsync<string>(
+                    $"SELECT string_agg(to_jsonb(t)::text, ';') FROM one_time_token t WHERE tenant_id = '{a.TenantId}'"));
+                Assert.Equal(eventsA, await database.ScalarAsync<long>($"SELECT count(*) FROM audit_event WHERE tenant_id = '{a.TenantId}'"));
+                Assert.Equal(eventsB, await database.ScalarAsync<long>($"SELECT count(*) FROM audit_event WHERE tenant_id = '{b.TenantId}'"));
+                Assert.Empty(atB.SetCookies);
+
+                using (var verified = await new HostedBrowser(host, HostA).GetAsync($"{ProtocolContract.VerifyEmailPath}?token={Uri.EscapeDataString(link)}"))
+                using (var step = StepPage.Read(await verified.Content.ReadAsStringAsync(Cancellation)))
+                {
+                    Assert.Equal(StepNames.EmailVerified, step.RootElement.GetProperty("step").GetString());
+                }
+
                 break;
             }
 

@@ -1,13 +1,35 @@
 import { HostedPage, formatMessage, useMessages, type Messages } from '@gatekeep/ui/hosted';
-import { GenericErrorScreen, LoginScreen } from '@gatekeep/hosted-screens';
+import {
+  EmailVerifiedScreen,
+  GenericErrorScreen,
+  LinkExpiredScreen,
+  LinkSentScreen,
+  LoginScreen,
+  SignupScreen,
+  VerifyEmailScreen,
+} from '@gatekeep/hosted-screens';
 import { useEffect, useLayoutEffect, type ReactNode } from 'react';
 import type { Step } from './step';
 
 /** The Tenant theme scope: the server's theme stylesheet sets its tokens under [data-gk-theme]. */
 export const THEME = 'tenant';
 
-/** Login's field error text, by the code the server sends it as. */
+/** The longest password the server accepts: SecurityLimits.PasswordMaximumLength, 256 code points. */
+export const PASSWORD_MAX_LENGTH = 256;
+
+/** Login's and Signup's email field error text, by the code the server sends it as. */
 const FIELD_ERRORS: Readonly<Record<string, keyof Messages>> = { email_invalid: 'emailInvalid' };
+
+/** A refused password's rule sentences (Story 4.7), by the rule codes the server names. */
+const RULE_ERRORS: Readonly<Record<string, keyof Messages>> = {
+  length: 'passwordErrorLength',
+  too_long: 'passwordErrorTooLong',
+  classes: 'passwordErrorClasses',
+  repeats: 'passwordErrorRepeats',
+  dictionary: 'passwordErrorDictionary',
+  personal_data: 'passwordErrorPersonalData',
+  history: 'passwordErrorHistory',
+};
 
 /** Each step's screen heading, for the page title. A redirect shows no screen, and keeps Login's. */
 function heading(step: Step, messages: Readonly<Messages>): string {
@@ -17,36 +39,123 @@ function heading(step: Step, messages: Readonly<Messages>): string {
     case 'login':
     case 'redirect':
       return messages.loginTitle;
+    case 'signup':
+      return messages.signupTitle;
+    case 'verify_email':
+      return messages.verifyEmailTitle;
+    case 'email_verified':
+      return messages.emailVerifiedTitle;
+    case 'link_expired':
+      return messages.linkExpiredTitle;
+    case 'link_sent':
+      return messages.linkSentTitle;
   }
 }
 
-/** What Login's screen needs from the page: the email it carries, and Continue. */
-export interface LoginControls {
+/** What the screens need from the page: the email and password it carries, and each step's actions. */
+export interface StepControls {
   email: string;
   onEmailChange: (email: string) => void;
+  password: string;
+  onPasswordChange: (password: string) => void;
+  /** Login's Continue. */
   onContinue: () => void;
+  /** Login's "Sign up". */
+  onSignUp: () => void;
+  /** Signup's "Log in". */
+  onLogIn: () => void;
+  /** Signup's Create account. */
+  onCreate: () => void;
+  /** Email verification required's "I've verified — continue". */
+  onVerified: () => void;
+  /** Email verification required's "Resend email". */
+  onResend: () => void;
+  /** Link expired's "Send a new link". */
+  onSendNewLink: () => void;
   pending: boolean;
+  resending: boolean;
+  /** How many times the email was sent again on this page. */
+  sends: number;
 }
 
-function screen(step: Step, login: LoginControls, messages: Readonly<Messages>): ReactNode {
+/** The field error's text for a known code; the readers admit only known codes, so nothing else is shown. */
+function fieldError(code: string | null, messages: Readonly<Messages>): string | undefined {
+  return code !== null && Object.hasOwn(FIELD_ERRORS, code) ? messages[FIELD_ERRORS[code]!] : undefined;
+}
+
+function screen(step: Step, controls: StepControls, messages: Readonly<Messages>): ReactNode {
   switch (step.step) {
     case 'generic_error':
       return <GenericErrorScreen tenant={{ name: step.data.tenant }} code={step.data.code} traceId={step.data.traceId} />;
-    case 'login': {
-      const code = step.data.error;
-      // The reader admits only known codes, so an own entry is always found; nothing else is shown.
-      const error = code !== null && Object.hasOwn(FIELD_ERRORS, code) ? messages[FIELD_ERRORS[code]!] : undefined;
+    case 'login':
       return (
         <LoginScreen
           tenant={{ name: step.data.tenant }}
-          email={login.email}
-          onEmailChange={login.onEmailChange}
-          onContinue={login.onContinue}
-          error={error}
-          pending={login.pending}
+          email={controls.email}
+          onEmailChange={controls.onEmailChange}
+          onContinue={controls.onContinue}
+          error={fieldError(step.data.error, messages)}
+          pending={controls.pending}
+          signupEnabled={step.data.signupEnabled}
+          onSignUp={controls.onSignUp}
+        />
+      );
+    case 'signup': {
+      const { policy, rules, error } = step.data;
+      const passwordErrors =
+        error === 'password_rule'
+          ? rules.filter((rule) => Object.hasOwn(RULE_ERRORS, rule)).map((rule) =>
+              formatMessage(messages[RULE_ERRORS[rule]!], { count: policy.minLength, max: PASSWORD_MAX_LENGTH }),
+            )
+          : undefined;
+      return (
+        <SignupScreen
+          tenant={{ name: step.data.tenant }}
+          email={controls.email}
+          onEmailChange={controls.onEmailChange}
+          password={controls.password}
+          onPasswordChange={controls.onPasswordChange}
+          minLength={policy.minLength}
+          strength={policy.strength}
+          onCreate={controls.onCreate}
+          onLogIn={controls.onLogIn}
+          emailError={fieldError(error, messages)}
+          passwordErrors={passwordErrors}
+          pending={controls.pending}
         />
       );
     }
+    case 'verify_email':
+      return (
+        <VerifyEmailScreen
+          tenant={{ name: step.data.tenant }}
+          email={step.data.email}
+          onContinue={controls.onVerified}
+          onResend={controls.onResend}
+          error={step.data.error === 'not_verified_yet' ? messages.verifyEmailNotYet : undefined}
+          resent={step.data.resent}
+          sends={controls.sends}
+          pending={controls.pending}
+          resending={controls.resending}
+        />
+      );
+    case 'email_verified':
+      return (
+        <EmailVerifiedScreen
+          tenant={{ name: step.data.tenant }}
+          continueHref={step.data.continueTo === 'app' && step.data.location !== null ? step.data.location : undefined}
+        />
+      );
+    case 'link_expired':
+      return (
+        <LinkExpiredScreen
+          tenant={{ name: step.data.tenant }}
+          onSendNewLink={step.data.token === null ? undefined : controls.onSendNewLink}
+          pending={controls.pending}
+        />
+      );
+    case 'link_sent':
+      return <LinkSentScreen tenant={{ name: step.data.tenant }} />;
     case 'redirect':
       // The page is leaving by a top-level GET: nothing to show meanwhile.
       return null;
@@ -55,7 +164,7 @@ function screen(step: Step, login: LoginControls, messages: Readonly<Messages>):
 
 /**
  * Where focus goes when a step is shown (EXPERIENCE.md, Focus and titles): the first invalid field, else
- * Login's email field, which its screen marks with data-gk-initial-focus, else the card heading, which
+ * Login's or Signup's email field, which its screen marks with data-gk-initial-focus, else the card heading, which
  * takes focus without joining the tab order.
  */
 function initialFocus(main: HTMLElement): HTMLElement | null {
@@ -68,13 +177,18 @@ function initialFocus(main: HTMLElement): HTMLElement | null {
   return title;
 }
 
+/** Whether the step shows a failed submit: a field error, or "We haven't seen that yet". */
+export function isFailed(step: Step): boolean {
+  return (step.step === 'login' || step.step === 'signup' || step.step === 'verify_email') && step.data.error !== null;
+}
+
 /**
  * One step's page: its screen in the Hosted page frame, following the device's scheme, under the
  * Tenant's theme scope. The title is "{heading} – {Tenant}", or the heading alone with no Tenant, with
  * "Error:" before it after a failed submit. `shown` changes each time the server answers with a step, so
  * focus moves again then: to the invalid field after a failed submit, else as on first load.
  */
-export function StepScreen({ step, login, failed = false, shown = 0 }: { step: Step; login: LoginControls; failed?: boolean; shown?: number }) {
+export function StepScreen({ step, controls, failed = false, shown = 0 }: { step: Step; controls: StepControls; failed?: boolean; shown?: number }) {
   const messages = useMessages();
   const title = heading(step, messages);
   const tenant = step.data.tenant.trim();
@@ -91,7 +205,7 @@ export function StepScreen({ step, login, failed = false, shown = 0 }: { step: S
 
   return (
     <HostedPage scheme="auto" theme={THEME}>
-      {screen(step, login, messages)}
+      {screen(step, controls, messages)}
     </HostedPage>
   );
 }

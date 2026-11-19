@@ -81,7 +81,7 @@ public sealed partial class SignInTransactionTests(PostgresFixture postgres, Ope
         Assert.Equal(1, root.GetProperty("stepVersion").GetInt32());
         Assert.InRange(root.GetProperty("expiresInSeconds").GetInt32(), 1790, 1800);
         Assert.True(root.GetProperty("csrfToken").GetString() == Csrf(browser), "The CSRF token isn't the one derived from the cookie.");
-        Assert.Equal(["tenant", "email", "error"], root.GetProperty("data").EnumerateObject().Select(p => p.Name));
+        Assert.Equal(["tenant", "email", "error", "signupEnabled"], root.GetProperty("data").EnumerateObject().Select(p => p.Name));
         Assert.Equal(ProtocolDatabase.TestTenantName, root.GetProperty("data").GetProperty("tenant").GetString());
         Assert.Equal(JsonValueKind.Null, root.GetProperty("data").GetProperty("email").ValueKind);
         Assert.Equal(1L, await EventsAsync(flow, "authentication.signin_transaction.extended"));

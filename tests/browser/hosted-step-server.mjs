@@ -20,6 +20,17 @@
 //   temporarily_unavailable, as a release build answers.
 // - POST /login/api/transaction/extend: Login with a fresh 30-minute life.
 //
+// Story 4.7: sign-up's fixtures and requests, for hosted-signup.spec.ts: login_signup (Login with "Sign up"), signup
+// and signup_excellent (Signup under a Good or Excellent policy), verify_email, email_verified_app and
+// email_verified_close, link_expired and link_sent. The stubbed requests answer as Host.Hosted does:
+// - POST /login/api/signup/open: Signup with the email typed; /login/api/signup/back: Login with the email kept.
+// - POST /login/api/signup: "aaaaaaaaaaaa" gets Signup naming the classes rule, anything else Email verification
+//   required for the email typed.
+// - POST /login/api/verification/resend: Email verification required, resent; /login/api/verification/continue: the
+//   same step with not_verified_yet.
+// - POST /login/api/verification/new-link: the neutral confirmation, with the link-bound CSRF token in place of the
+//   transaction's.
+//
 //   node hosted-step-server.mjs <port>
 
 import { createHash } from 'node:crypto';
@@ -105,18 +116,64 @@ export const CSRF = 'fixture-csrf-token';
 /** A sign-in transaction's sliding life, as SecurityLimits.SignInTransactionLifetime: 30 minutes. */
 const LIFE = 1800;
 
-const login = (email = null, error = null, expiresInSeconds = LIFE) => ({
+const login = (email = null, error = null, expiresInSeconds = LIFE, signupEnabled = false) => ({
   step: 'login',
   stepVersion: 1,
   expiresInSeconds,
-  data: { tenant: 'Northwind', email, error },
+  data: { tenant: 'Northwind', email, error, signupEnabled },
   csrfToken: CSRF,
 });
+
+/** Story 4.7: the link-bound CSRF token Link expired's "Send a new link" carries. */
+export const LINK_CSRF = 'fixture-link-csrf-token';
+
+/** Story 4.7: the expired link's own value, which Link expired keeps for "Send a new link". */
+export const LINK = 'ten_aaaaaaaaaaaaaaaaaaaaaaaaaa.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
+
+const signup = (email = null, strength = 'good', error = null, rules = []) => ({
+  step: 'signup',
+  stepVersion: 2,
+  expiresInSeconds: LIFE,
+  data: { tenant: 'Northwind', email, policy: { minLength: 12, strength }, error, rules },
+  csrfToken: CSRF,
+});
+
+const verifyEmail = (email = 'new.user@example.com', resent = false, error = null) => ({
+  step: 'verify_email',
+  stepVersion: 3,
+  expiresInSeconds: LIFE,
+  data: { tenant: 'Northwind', email, resent, error },
+  csrfToken: CSRF,
+});
+
+const emailVerified = (location) => ({
+  step: 'email_verified',
+  stepVersion: 1,
+  expiresInSeconds: null,
+  data: { tenant: 'Northwind', continueTo: location === null ? 'close' : 'app', location },
+  csrfToken: null,
+});
+
+const linkSent = { step: 'link_sent', stepVersion: 1, expiresInSeconds: null, data: { tenant: 'Northwind' }, csrfToken: null };
 
 /** Each fixture's data block text, before escaping; null leaves the block out. */
 const fixtures = {
   login: JSON.stringify(login()),
   login_kept: JSON.stringify(login('kept@example.com')),
+  login_signup: JSON.stringify(login(null, null, LIFE, true)),
+  signup: JSON.stringify(signup('new.user@example.com')),
+  signup_excellent: JSON.stringify(signup('new.user@example.com', 'excellent')),
+  verify_email: JSON.stringify(verifyEmail()),
+  email_verified_app: JSON.stringify(emailVerified('/login/?fixture=generic_error')),
+  email_verified_close: JSON.stringify(emailVerified(null)),
+  link_expired: JSON.stringify({
+    step: 'link_expired',
+    stepVersion: 1,
+    expiresInSeconds: null,
+    data: { tenant: 'Northwind', token: LINK },
+    csrfToken: LINK_CSRF,
+  }),
+  link_sent: JSON.stringify(linkSent),
   ...Object.fromEntries(
     Object.entries({
       redirect_protocol_relative: '//evil.example/x',
@@ -160,12 +217,46 @@ function stepPage(fixture) {
 function answer(pathname, body) {
   if (pathname === '/login/api/transaction/extend') return login();
   const email = typeof body.email === 'string' ? body.email.trim() : '';
+  switch (pathname) {
+    case '/login/api/signup/open':
+      return signup(email === '' ? null : email);
+    case '/login/api/signup/back':
+      return login('new.user@example.com', null, LIFE, true);
+    case '/login/api/signup':
+      return body.password === 'aaaaaaaaaaaa' ? signup(email, 'good', 'password_rule', ['classes']) : verifyEmail(email);
+    case '/login/api/verification/resend':
+      return verifyEmail('new.user@example.com', true);
+    case '/login/api/verification/continue':
+      return verifyEmail('new.user@example.com', false, 'not_verified_yet');
+    case '/login/api/verification/new-link':
+      return linkSent;
+    default:
+      break;
+  }
   if (email === 'nope') return login(email, 'email_invalid');
   if (email === 'redirect@example.com') {
     return { step: 'redirect', stepVersion: 3, expiresInSeconds: LIFE, data: { tenant: 'Northwind', location: '/login/?fixture=generic_error' }, csrfToken: null };
   }
   return { ...genericError('Northwind'), data: { ...genericError('Northwind').data, code: 'temporarily_unavailable' } };
 }
+
+/** The stubbed API's paths: Story 4.2's two, and Story 4.7's sign-up and verification requests. */
+const API_PATHS = new Set([
+  '/login/api/identifier',
+  '/login/api/transaction/extend',
+  '/login/api/signup/open',
+  '/login/api/signup/back',
+  '/login/api/signup',
+  '/login/api/verification/resend',
+  '/login/api/verification/continue',
+  '/login/api/verification/new-link',
+]);
+
+/** The fixtures a real step page answers 200 for: every step but Generic error and the unreadable ones. */
+const OK_FIXTURES = new Set([
+  'login', 'login_kept', 'login_signup', 'signup', 'signup_excellent', 'verify_email',
+  'email_verified_app', 'email_verified_close', 'link_expired', 'link_sent',
+]);
 
 const types = { '.js': 'text/javascript', '.css': 'text/css', '.woff2': 'font/woff2', '.svg': 'image/svg+xml' };
 
@@ -177,7 +268,7 @@ const server = createServer((request, response) => {
     response.end(request.method === 'HEAD' ? undefined : body);
   };
 
-  if (request.method === 'POST' && (url.pathname === '/login/api/identifier' || url.pathname === '/login/api/transaction/extend')) {
+  if (request.method === 'POST' && API_PATHS.has(url.pathname)) {
     let raw = '';
     request.setEncoding('utf8');
     request.on('data', (chunk) => (raw += chunk));
@@ -185,7 +276,8 @@ const server = createServer((request, response) => {
       const json = (status, value) => send(status, 'application/json; charset=utf-8', JSON.stringify(value), { 'Cache-Control': 'no-store', Pragma: 'no-cache' });
       const origin = `http://${request.headers.host}`;
       if (request.headers.origin !== origin) return json(403, { ...genericError('Northwind'), data: { ...genericError('Northwind').data, code: 'origin_mismatch' } });
-      if (request.headers['x-gatekeep-csrf'] !== CSRF) return json(403, { ...genericError('Northwind'), data: { ...genericError('Northwind').data, code: 'csrf_mismatch' } });
+      const csrf = url.pathname === '/login/api/verification/new-link' ? LINK_CSRF : CSRF;
+      if (request.headers['x-gatekeep-csrf'] !== csrf) return json(403, { ...genericError('Northwind'), data: { ...genericError('Northwind').data, code: 'csrf_mismatch' } });
       let body;
       try {
         body = JSON.parse(raw);
@@ -213,7 +305,7 @@ const server = createServer((request, response) => {
 
   const fixture = url.searchParams.get('fixture') ?? 'generic_error';
   if (!Object.hasOwn(fixtures, fixture)) return send(404);
-  const status = fixture.startsWith('login') ? 200 : 400;
+  const status = OK_FIXTURES.has(fixture) ? 200 : 400;
   return send(status, 'text/html; charset=utf-8', stepPage(fixture), { 'Cache-Control': 'no-store', Pragma: 'no-cache' });
 });
 

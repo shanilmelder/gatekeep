@@ -2,7 +2,10 @@ using Gatekeep.Adapters.Hosting;
 using Gatekeep.Adapters.Logging;
 using Gatekeep.Host.Hosted;
 using Gatekeep.Kernel.Audit;
+using Gatekeep.Kernel.Jobs;
+using Gatekeep.Kernel.Secrets;
 using Gatekeep.Modules.Audit.Contracts;
+using Gatekeep.Modules.Operations.Contracts;
 using Gatekeep.Modules.Protocol.Contracts;
 using Gatekeep.Modules.Tenancy.Contracts;
 
@@ -35,6 +38,11 @@ builder.AddGatekeepHost(new HostProfile(
 // Tenant's theme linked, under the AD-21 headers. The authorization endpoint shows Generic error
 // through it for a request it can't send back. A refused host never builds it.
 builder.Services.AddSingleton<IAuditAppender>(AuditContract.CreateAppender());
+
+// Story 4.7: sign-up enqueues its verification email as a job in its own transaction. Host.Hosted's custody encrypts the
+// link under the Tenant's payload key (host-hosted.hcl), and the database lets gk_hosted enqueue only notification types.
+builder.Services.AddSingleton<IJobEnqueuer>(provider =>
+    OperationsContract.CreateEnqueuer(OperationsContract.ProductionRegistry, provider.GetService<IKeyCustody>()));
 builder.Services.AddGatekeepProtocol(
     services => services.GetRequiredService<HostDatabases>()["Hosted"],
     _ => new HostedStepPages(stepPage!));
@@ -64,8 +72,8 @@ app.UseRouting();
 // The request's Tenant's theme stylesheet, at its content hash (Story 4.1).
 app.MapThemeStylesheet();
 
-// Hosted Login's sign-in surface (Story 4.2): the /login step page and its two Origin- and
-// CSRF-checked API requests.
+// Hosted Login's sign-in surface (Story 4.2): the /login step page and its Origin- and CSRF-checked API
+// requests, with Story 4.7's sign-up and the verification link's page.
 app.MapGatekeepLogin();
 
 // Any other path on a resolved host gets the same fixed 404 as an unknown host.

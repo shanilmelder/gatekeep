@@ -13,6 +13,7 @@ flowchart TD
   Identity[Identity]
   Sessions[Sessions]
   Tenancy[Tenancy]
+  Operations[Operations]
   AdaptersLogging[Adapters.Logging]
   AdaptersHosting[Adapters.Hosting]
   HostAdmin[Host.Admin]
@@ -20,7 +21,6 @@ flowchart TD
   Admins[Admins]
   AdaptersFido2[Adapters.Fido2]
   HostWorker[Host.Worker]
-  Operations[Operations]
   Cli[Cli]
   Keys[Keys]
   AdaptersOpenBao[Adapters.OpenBao]
@@ -38,6 +38,7 @@ flowchart TD
   HostHosted --> Identity
   HostHosted --> Sessions
   HostHosted --> Tenancy
+  HostHosted --> Operations
   HostHosted --> AdaptersLogging
   HostHosted --> AdaptersHosting
   HostAdmin --> Management

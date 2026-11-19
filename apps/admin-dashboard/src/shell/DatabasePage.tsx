@@ -16,6 +16,8 @@ import {
   formatMessage,
   useMessages,
   useToast,
+  passwordRules,
+  type PasswordRule,
 } from '@gatekeep/ui/admin';
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { api } from '../session';
@@ -32,13 +34,11 @@ import {
   policyDraftOf,
   policyRequestOf,
   previewMinLength,
-  previewRules,
   serverPolicyErrors,
   type FieldError,
   type PolicyDraft,
   type PolicyErrors,
   type PolicyField,
-  type PreviewRule,
 } from './database';
 import styles from './DatabasePage.module.css';
 import { ForbiddenPage } from './ForbiddenPage';
@@ -81,7 +81,7 @@ function policyErrorText(field: PolicyField, error: FieldError | undefined, mess
 }
 
 /** A preview rule's text. */
-function ruleText(rule: PreviewRule, messages: Messages): string {
+function ruleText(rule: PasswordRule, messages: Messages): string {
   switch (rule.rule) {
     case 'length':
       return formatMessage(messages.passwordRuleLength, { count: rule.count });
@@ -414,7 +414,7 @@ interface PolicyTabProps {
 /** The Password policy tab: its fields, read-only but for a Tenant Owner, the preview beside them, and its Save. */
 function PolicyTab(props: PolicyTabProps) {
   const { messages, draft, errors, editable, canManage, saving, refusal, sample, register, onChange, onSample, onSubmit } = props;
-  const rules = previewRules(previewMinLength(draft), draft.strength, sample);
+  const rules = passwordRules(previewMinLength(draft), draft.strength, sample);
   const serverChecks = draft.dictionary || draft.personalData || draft.historyOn;
 
   return (

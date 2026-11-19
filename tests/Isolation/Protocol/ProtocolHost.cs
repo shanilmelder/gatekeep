@@ -34,13 +34,17 @@ internal sealed class ProtocolHost : IAsyncDisposable
 {
     private readonly WebApplication _app;
 
-    private ProtocolHost(WebApplication app, ControlledCustody custody, CapturingLoggerProvider logs)
+    private ProtocolHost(WebApplication app, ControlledCustody custody, CapturingLoggerProvider logs, Gatekeep.Tests.Isolation.Identity.CapturingEnqueuer jobs)
     {
         _app = app;
         Custody = custody;
         Logs = logs;
+        Jobs = jobs;
         Http = app.GetTestClient();
     }
+
+    /// <summary>Every job the host enqueued (Story 4.7), each verification link in the clear, for a test to open.</summary>
+    public Gatekeep.Tests.Isolation.Identity.CapturingEnqueuer Jobs { get; }
 
     public HttpClient Http { get; }
 
@@ -66,7 +70,8 @@ internal sealed class ProtocolHost : IAsyncDisposable
     /// <see cref="TestOnlyCredentialStep"/> (Story 4.2), which authenticates only an identifier of its own form,
     /// so any other email gets the release build's answer; <paramref name="releaseSignIn"/> leaves Authentication's
     /// release default in place instead. <paramref name="configure"/> changes the services once Protocol
-    /// registered its own, for a test that wraps one.
+    /// registered its own, for a test that wraps one. <paramref name="hashLimits"/> replaces the hashing budget (Story 4.7),
+    /// for a test of its overflow.
     /// </summary>
     public static async Task<ProtocolHost> StartAsync(
         string hostedConnection,
@@ -75,7 +80,8 @@ internal sealed class ProtocolHost : IAsyncDisposable
         TokenRequestLimits? limits = null,
         Action<ILoggingBuilder>? logging = null,
         bool releaseSignIn = false,
-        Action<IServiceCollection>? configure = null)
+        Action<IServiceCollection>? configure = null,
+        Gatekeep.Modules.Authentication.Contracts.PasswordHashLimits? hashLimits = null)
     {
         var custody = new ControlledCustody(bao.Custody(OpenBaoFixture.Hosted));
         var logs = new CapturingLoggerProvider();
@@ -105,6 +111,15 @@ internal sealed class ProtocolHost : IAsyncDisposable
 
         builder.Services.AddSingleton<IKeyCustody>(custody);
         builder.Services.AddSingleton(AuditContract.CreateAppender());
+        // Story 4.7: Host.Hosted's enqueuer, through its custody, for the verification email, keeping what it enqueued.
+        var jobs = new Gatekeep.Tests.Isolation.Identity.CapturingEnqueuer(
+            Gatekeep.Modules.Operations.Contracts.OperationsContract.CreateEnqueuer(
+                Gatekeep.Modules.Operations.Contracts.OperationsContract.ProductionRegistry, custody));
+        builder.Services.AddSingleton<Gatekeep.Kernel.Jobs.IJobEnqueuer>(jobs);
+        if (hashLimits is not null)
+        {
+            builder.Services.AddSingleton(hashLimits);
+        }
         // With none, Authentication's release default stands, as on Host.Hosted.
         if (!releaseSignIn)
         {
@@ -137,7 +152,7 @@ internal sealed class ProtocolHost : IAsyncDisposable
         app.MapFallback(TenancyContract.NotFoundAsync);
 
         await app.StartAsync(TestContext.Current.CancellationToken);
-        return new ProtocolHost(app, custody, logs);
+        return new ProtocolHost(app, custody, logs, jobs);
     }
 
     public async ValueTask DisposeAsync()

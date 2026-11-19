@@ -46,6 +46,12 @@ internal static class TenantSeeds
         ("user", (t, n) => $"INSERT INTO \"user\" (tenant_id, id) VALUES ('{t}', '{n}')"),
         ("password_history", (t, n) =>
             $"INSERT INTO password_history (tenant_id, id, user_id, password_hash) VALUES ('{t}', '{n}', '{n}', '$argon2id$seeded')"),
+        ("password_credential", (t, n) =>
+            "INSERT INTO password_credential (tenant_id, id, user_id, connection_id, password_hash, status) " +
+            $"VALUES ('{t}', '{n}', '{n}', '{n}', '$argon2id$seeded', 'pending')"),
+        ("one_time_token", (t, n) =>
+            "INSERT INTO one_time_token (tenant_id, id, user_id, credential_id, purpose, token_hash, expires_at) " +
+            $"VALUES ('{t}', '{n}', '{n}', '{n}', 'email_verification', sha256(convert_to('{t}{n}', 'UTF8')), now() + interval '1 day')"),
         ("user_session", (t, n) =>
             "INSERT INTO user_session (tenant_id, id, user_id, id_hash, amr, auth_time, idle_expires_at, absolute_expires_at, created_at) " +
             $"VALUES ('{t}', '{n}', '{n}', sha256(convert_to('{t}{n}', 'UTF8')), ARRAY['pwd'], now(), now() + interval '1 hour', now() + interval '8 hours', now())"),

@@ -2,7 +2,8 @@
 title: 'Story 4.7: Sign up and verify an email address'
 type: 'feature'
 created: '2026-11-19'
-status: 'ready-for-dev'
+status: 'in-review'
+baseline_revision: 'e23172d70fbf2530b449111efd290f9157f246a2'
 review_loop_iteration: 0
 followup_review_recommended: false
 context:
