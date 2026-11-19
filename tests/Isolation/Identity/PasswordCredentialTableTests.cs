@@ -17,6 +17,8 @@ public sealed class PasswordCredentialTableTests(PostgresFixture postgres)
 
     private const string UniqueViolation = "23505";
 
+    private const string ForeignKeyViolation = "23503";
+
     private static readonly Guid TenantA = Guid.Parse("01900000-0000-7000-8000-0000000047a1");
     private static readonly Guid TenantB = Guid.Parse("01900000-0000-7000-8000-0000000047a2");
     private static readonly Guid UserA = Guid.Parse("01900000-0000-7000-8000-0000000047b1");
@@ -94,7 +96,7 @@ public sealed class PasswordCredentialTableTests(PostgresFixture postgres)
     }
 
     [Fact]
-    public async Task A_User_holds_one_active_password_and_a_credentials_links_go_with_it()
+    public async Task A_User_holds_one_active_password_and_a_credential_goes_only_after_its_links()
     {
         var database = await DatabaseAsync();
         var superuser = postgres.SuperuserConnection(database);
@@ -107,9 +109,14 @@ public sealed class PasswordCredentialTableTests(PostgresFixture postgres)
             $"INSERT INTO password_credential (tenant_id, id, user_id, connection_id, password_hash, status) VALUES ('{TenantA}', gen_random_uuid(), '{UserA}', gen_random_uuid(), '$argon2id$y', 'active')"));
         Assert.Equal(UniqueViolation, second.SqlState);
 
-        // Deleting a pending credential deletes its links, as a winning verification does.
-        await InTenantAsync(database, TableRegistry.Hosted, TenantA, c => ExecuteAsync(c, $"DELETE FROM password_credential WHERE id = '{CredentialA}'"));
-        Assert.Equal(0L, await PostgresFixture.ScalarAsync<long>(superuser, $"SELECT count(*) FROM one_time_token WHERE credential_id = '{CredentialA}'"));
+        // A credential with a link can't be deleted before it (ON DELETE RESTRICT); with its links gone first, it can.
+        var restricted = await Assert.ThrowsAsync<PostgresException>(() => InTenantAsync(
+            database, TableRegistry.Hosted, TenantA, c => ExecuteAsync(c, $"DELETE FROM password_credential WHERE id = '{CredentialA}'")));
+        Assert.Equal(ForeignKeyViolation, restricted.SqlState);
+        await InTenantAsync(database, TableRegistry.Hosted, TenantA, async c =>
+            await ExecuteAsync(c, $"DELETE FROM one_time_token WHERE credential_id = '{CredentialA}'")
+            + await ExecuteAsync(c, $"DELETE FROM password_credential WHERE id = '{CredentialA}'"));
+        Assert.Equal(0L, await PostgresFixture.ScalarAsync<long>(superuser, $"SELECT count(*) FROM password_credential WHERE id = '{CredentialA}'"));
     }
 
     [Fact]

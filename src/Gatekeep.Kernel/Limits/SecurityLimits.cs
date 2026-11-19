@@ -361,7 +361,7 @@ public static class SecurityLimits
     /// How long after its expiry an unused or used one-time token row is kept before the expired-state purge deletes it:
     /// 1 hour (Story 4.7), as a sign-in transaction's restart retention.
     /// </summary>
-    public static readonly TimeSpan OneTimeTokenRetention = TimeSpan.FromHours(1);
+    public static readonly TimeSpan OneTimeTokenPurgeDelay = TimeSpan.FromHours(1);
 
     /// <summary>
     /// A new Argon2id password hash's memory cost: 19456 KiB, 19 MiB (Story 4.7, NFR-2, OWASP's first configuration).

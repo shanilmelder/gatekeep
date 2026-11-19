@@ -39,6 +39,8 @@ internal sealed record SignUpFlow(CodeFlowSetup Flow)
         var flow = await CodeFlowSetup.CreateAsync(postgres, bao, hostA, hostB);
         foreach (var tenant in new[] { flow.A.TenantId, flow.B.TenantId })
         {
+            // The verification link is enqueued as payload ciphertext, under the Tenant's payload key.
+            await ProtocolDatabase.ProvisionSecretClassesAsync(bao, tenant);
             await flow.Database.ExecuteAsync(
                 $"INSERT INTO connection (tenant_id, id, kind, signup_enabled) VALUES ('{tenant}', gen_random_uuid(), 'database', {(signupEnabled ? "true" : "false")})");
         }
@@ -81,8 +83,14 @@ internal sealed record SignUpFlow(CodeFlowSetup Flow)
     public Task<long> CountAsync(string sql) => Database.ScalarAsync<long>(sql);
 
     /// <summary>How many rows of the Tenant's <paramref name="table"/> there are, optionally filtered further.</summary>
+    /// <remarks>
+    /// For <c>"user"</c> only Users with an email count: the code-flow fixture's own User has none, and no sign-up made it.
+    /// </remarks>
     public Task<long> RowsAsync(string table, string? where = null) =>
-        Database.ScalarAsync<long>($"SELECT count(*) FROM \"{table}\" WHERE tenant_id = '{TenantA}'{(where is null ? string.Empty : " AND " + where)}");
+        Database.ScalarAsync<long>(
+            $"SELECT count(*) FROM \"{table}\" WHERE tenant_id = '{TenantA}'"
+            + (table == "user" ? " AND email IS NOT NULL" : string.Empty)
+            + (where is null ? string.Empty : " AND " + where));
 
     /// <summary>How many audit events of <paramref name="code"/> Tenant A's Log holds.</summary>
     public Task<long> EventsAsync(string code) =>

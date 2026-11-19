@@ -657,14 +657,15 @@ public sealed class TenantTablesTests(PostgresFixture postgres)
     /// Story 1.29: a purge reads only the Tenant ID its <c>WHERE</c> names. Story 3.5: a deleted Application's
     /// purge also reads the Application and family references it deletes by, and never any content. Story 4.3: the
     /// expired-state purge also reads the expiries and references it deletes by, and whether a Session ended. Story 4.5:
-    /// the email send job also reads a User's ID and email, to resolve a recipient.
+    /// the email send job also reads a User's ID and email, to resolve a recipient. Story 4.7: the expired-state purge also
+    /// reads whether a User is verified and which User a sign-up's transaction names, to remove an abandoned sign-up.
     /// </summary>
     [Theory]
-    [InlineData("user", "email,id,tenant_id")]
+    [InlineData("user", "email,email_verified_at,id,tenant_id")]
     [InlineData("user_session", "absolute_expires_at,ended_at,id,idle_expires_at,tenant_id")]
     [InlineData("authorization", "application_id,id,tenant_id,user_session_id")]
     [InlineData("token", "application_id,authorization_id,expiration_date,tenant_id")]
-    [InlineData("signin_transaction", "application_id,expires_at,tenant_id")]
+    [InlineData("signin_transaction", "application_id,expires_at,signup_user_id,tenant_id")]
     public async Task Worker_may_delete_and_read_only_the_references_of_a_purged_table(string table, string columns)
     {
         var database = await postgres.NewMigratedDatabaseAsync();

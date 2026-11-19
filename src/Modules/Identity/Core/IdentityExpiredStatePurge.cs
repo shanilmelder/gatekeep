@@ -5,7 +5,7 @@ namespace Gatekeep.Modules.Identity.Core;
 
 /// <summary>
 /// Identity's purge of expired state (Story 4.7, AD-12): the verification links more than
-/// <see cref="SecurityLimits.OneTimeTokenRetention"/> past their expiry, used or not; then the pending credentials left
+/// <see cref="SecurityLimits.OneTimeTokenPurgeDelay"/> past their expiry, used or not; then the pending credentials left
 /// with no link, an abandoned sign-up's; then the unverified Users a sign-up made that hold no credential and that no sign-in
 /// transaction names. Each statement names the scope's Tenant, and row-level security holds it there too; it deletes nothing
 /// of any other module (AD-1) and reads no hash. A second run with the same clock deletes nothing.
@@ -52,7 +52,7 @@ internal static class IdentityExpiredStatePurge
             {
                 var cutoff = command.CreateParameter();
                 cutoff.ParameterName = "cutoff";
-                cutoff.Value = (now - SecurityLimits.OneTimeTokenRetention).ToUniversalTime();
+                cutoff.Value = (now - SecurityLimits.OneTimeTokenPurgeDelay).ToUniversalTime();
                 command.Parameters.Add(cutoff);
             }
 

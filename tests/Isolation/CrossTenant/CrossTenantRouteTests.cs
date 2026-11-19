@@ -318,6 +318,7 @@ public sealed class CrossTenantRouteTests(PostgresFixture postgres, OpenBaoFixtu
                 // Tenant changes, B logs nothing of A, and the link still verifies at A.
                 await database.ExecuteAsync(
                     $"INSERT INTO connection (tenant_id, id, kind) VALUES ('{a.TenantId}', gen_random_uuid(), 'database'), ('{b.TenantId}', gen_random_uuid(), 'database')");
+                await ProtocolDatabase.ProvisionSecretClassesAsync(bao, a.TenantId);
                 var client = await database.CreateWebClientAsync(a.TenantId, [CodeFlowSetup.Callback]);
                 var atA = new HostedBrowser(host, HostA);
                 using (var begun = await atA.GetAsync(CodeFlow.AuthorizeUrl(client.ClientId, CodeFlowSetup.Callback, Pkce.New())))

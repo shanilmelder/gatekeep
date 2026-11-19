@@ -13,7 +13,8 @@ namespace Gatekeep.Adapters.Postgres.Migrations;
 /// (<c>password_credential_one_active</c>). It names the database Connection it was made under with no reference:
 /// Directory is purged before Identity.</item>
 /// <item>Identity's <c>one_time_token</c>: an email verification link's SHA-256 only, unique per Tenant, for the pending
-/// credential it activates (deleted with it), with its expiry and when it was used. A link works once.</item>
+/// credential it activates (Identity deletes a credential's links before the credential), with its expiry and when it was
+/// used. A link works once.</item>
 /// <item><c>signin_transaction</c> gains <c>signup_user_id</c>, the User a sign-up in it registered, and
 /// <c>signup_credential_id</c>, the pending credential it made, which has no reference: a credential another link's
 /// verification deleted leaves the transaction naming none, so it can never sign in.</item>
@@ -68,7 +69,7 @@ public sealed class Migration20261128000000SignUp : Migration
               created_at timestamptz NOT NULL DEFAULT now(),
               PRIMARY KEY (tenant_id, id),
               FOREIGN KEY (tenant_id, user_id) REFERENCES "user" (tenant_id, id) ON DELETE RESTRICT,
-              FOREIGN KEY (tenant_id, credential_id) REFERENCES password_credential (tenant_id, id) ON DELETE CASCADE
+              FOREIGN KEY (tenant_id, credential_id) REFERENCES password_credential (tenant_id, id) ON DELETE RESTRICT
             );
 
             CREATE UNIQUE INDEX one_time_token_hash_unique ON one_time_token (tenant_id, token_hash);

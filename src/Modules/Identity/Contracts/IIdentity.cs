@@ -100,7 +100,7 @@ public interface IIdentity
     /// <summary>
     /// Uses the verification link <paramref name="token"/> (Story 4.7), in one command: it is marked used, and when its
     /// User's email isn't verified yet, the email is marked verified, the link's credential activated, the User's every
-    /// other pending credential deleted (their links with them) and the new hash kept in the User's password history, with
+    /// other pending credential deleted with its links and the new hash kept in the User's password history, with
     /// <see cref="IdentityEvents.UserEmailVerified"/>. For a User already verified the link only marks itself used. A
     /// malformed, foreign, unknown, expired or used link changes nothing.
     /// </summary>

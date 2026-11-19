@@ -124,7 +124,8 @@ public sealed class SessionTablesTests(PostgresFixture postgres)
     public static TheoryData<string> HostedRefusals =>
     [
         .. Tables.Select(t => $"DELETE FROM \"{t}\""),
-        $"""INSERT INTO "user" (tenant_id, id) VALUES ('{TenantA}', gen_random_uuid())""",
+        // Story 4.7: a sign-up inserts a User's ID, email and creation time only, never one already verified.
+        $"""INSERT INTO "user" (tenant_id, id, email_verified_at) VALUES ('{TenantA}', gen_random_uuid(), now())""",
         """UPDATE "user" SET created_at = now()""",
     ];
 

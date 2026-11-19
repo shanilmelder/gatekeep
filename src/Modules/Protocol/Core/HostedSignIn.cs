@@ -721,8 +721,7 @@ internal static class LoginEndpoints
     private static async Task VerifyEmailPageAsync(HttpContext http)
     {
         var login = Login.Of(http);
-        var values = http.Request.Query["token"];
-        var token = values.Count == 1 && !string.IsNullOrEmpty(values[0]) ? values[0]! : null;
+        var token = QueryToken(http);
 
         if (token is null)
         {
@@ -798,6 +797,16 @@ internal static class LoginEndpoints
         }
 
         await login.AnswerAsync(StatusCodes.Status200OK, StepResponse.LinkSent(login.Tenant.Name));
+    }
+
+    /// <summary>
+    /// The request's one non-empty <c>token</c> query value, or null. A method of its own, so no <c>StringValues</c> is held
+    /// across an await: an async method's state machine would keep it as a field.
+    /// </summary>
+    private static string? QueryToken(HttpContext http)
+    {
+        var values = http.Request.Query["token"];
+        return values.Count == 1 && !string.IsNullOrEmpty(values[0]) ? values[0] : null;
     }
 
     /// <summary>Whether the transaction has passed exactly <paramref name="steps"/>, in order.</summary>

@@ -44,7 +44,17 @@ internal sealed class IdentityService(IAuditAppender audit, TimeProvider time) :
         VALUES (@tenant_id, @id, @user_id, @connection_id, @password_hash, @status, @now, @now)
         """;
 
-    // Their links go with them (ON DELETE CASCADE).
+    // A credential's links go first: the reference is ON DELETE RESTRICT, as every one is.
+    private const string DeleteOtherPendingLinks =
+        """
+        DELETE FROM one_time_token
+        WHERE tenant_id = @tenant_id AND user_id = @user_id AND credential_id <> @keep
+          AND credential_id IN (SELECT id FROM password_credential WHERE tenant_id = @tenant_id AND user_id = @user_id AND status = 'pending')
+        """;
+
+    private const string DeleteOtherLinks =
+        "DELETE FROM one_time_token WHERE tenant_id = @tenant_id AND user_id = @user_id AND credential_id <> @keep";
+
     private const string DeleteOtherPendingCredentials =
         """
         DELETE FROM password_credential
@@ -198,6 +208,7 @@ internal sealed class IdentityService(IAuditAppender audit, TimeProvider time) :
 
         if (activate)
         {
+            await ExecuteAsync(context, DeleteOtherPendingLinks, cancellationToken, ("tenant_id", tenantId), ("user_id", userId), ("keep", credentialId));
             await ExecuteAsync(context, DeleteOtherPendingCredentials, cancellationToken, ("tenant_id", tenantId), ("user_id", userId), ("keep", credentialId));
             await InsertHistoryAsync(context, tenantId, userId, passwordHash, now, cancellationToken);
         }
@@ -317,6 +328,8 @@ internal sealed class IdentityService(IAuditAppender audit, TimeProvider time) :
         }
 
         await ExecuteAsync(context, MarkVerified, cancellationToken, ("tenant_id", tenantId), ("id", link.UserId), ("now", now));
+        await ExecuteAsync(
+            context, DeleteOtherLinks, cancellationToken, ("tenant_id", tenantId), ("user_id", link.UserId), ("keep", link.CredentialId));
         await ExecuteAsync(
             context, DeleteOtherCredentials, cancellationToken, ("tenant_id", tenantId), ("user_id", link.UserId), ("keep", link.CredentialId));
 

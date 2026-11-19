@@ -193,7 +193,8 @@ for (const scheme of ['light', 'dark'] as const) {
       // A click while it counts down does nothing, and focus stays.
       const seen = fetches(page);
       await resend.focus();
-      await resend.click();
+      // Playwright treats aria-disabled as disabled and would wait for it: the click is forced, as a user's would land.
+      await resend.click({ force: true });
       await expect(resend).toBeFocused();
       expect(seen).toEqual([]);
 

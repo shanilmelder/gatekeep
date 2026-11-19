@@ -282,6 +282,16 @@ internal sealed class ProtocolDatabase(PostgresFixture postgres, string name)
     }
 
     /// <summary>
+    /// Creates the Tenant's six secret class keys through the Worker's custody login, as Tenant creation's first stage does
+    /// (Story 1.27): sign-up (Story 4.7) encrypts its verification link under the <c>payload</c> one.
+    /// </summary>
+    public static async Task ProvisionSecretClassesAsync(OpenBaoFixture bao, Guid tenantId)
+    {
+        using var worker = bao.Custody(OpenBaoFixture.Worker);
+        await KeysContract.CreateSecretClassKeysAsync(worker, tenantId, TestContext.Current.CancellationToken);
+    }
+
+    /// <summary>
     /// Runs one Tenant's rotation as <c>gk_worker</c>, as the daily job does for each Tenant, with the
     /// production destroy job type and enqueuer, and commits it when anything changed.
     /// </summary>
