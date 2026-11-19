@@ -608,6 +608,25 @@ public sealed partial class SignInTransactionTests(PostgresFixture postgres, Ope
     }
 
     [Fact]
+    public async Task A_restarted_Login_keeps_Sign_up_while_the_database_Connection_lets_users_sign_up()
+    {
+        var flow = await CodeFlowSetup.CreateAsync(postgres, bao, HostA, HostB);
+        await flow.Database.ExecuteAsync($"INSERT INTO connection (tenant_id, id, kind) VALUES ('{flow.A.TenantId}', gen_random_uuid(), 'database')");
+        await using var host = await flow.StartHostAsync();
+        var browser = await BeginAsync(host, flow, state: "state-restart-signup");
+        await flow.Database.BackdateAsync(
+            "UPDATE signin_transaction SET created_at = now() - interval '40 minutes', expires_at = now() - interval '10 minutes'");
+
+        using var page = await browser.GetAsync(ProtocolContract.LoginPath);
+
+        Assert.Equal(HttpStatusCode.OK, page.StatusCode);
+        Assert.Single(SetCookie.Of(page));
+        using var restarted = StepPage.Read(await page.Content.ReadAsStringAsync(Cancellation));
+        Assert.Equal("login", restarted.RootElement.GetProperty("step").GetString());
+        Assert.True(restarted.RootElement.GetProperty("data").GetProperty("signupEnabled").GetBoolean());
+    }
+
+    [Fact]
     public async Task A_transaction_expired_past_the_restart_retention_is_refused()
     {
         var flow = await CodeFlowSetup.CreateAsync(postgres, bao, HostA, HostB);

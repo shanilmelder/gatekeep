@@ -20,6 +20,9 @@ internal static class PasswordRules
     /// <summary>The first domain label a personal-data rule refuses: at least 4 characters, so "co" or "io" never count.</summary>
     private const int MinDomainLabelLength = 4;
 
+    /// <summary>The shortest local part a personal-data rule refuses: 3 characters, so "a@example.com" doesn't refuse every "a".</summary>
+    private const int MinLocalPartLength = 3;
+
     /// <summary>
     /// The rules <paramref name="password"/> fails under <paramref name="policy"/> but history's: the length, the maximum
     /// length, the classes, for Excellent the repeats, and when on, the dictionary and the personal data of
@@ -30,6 +33,7 @@ internal static class PasswordRules
         ArgumentNullException.ThrowIfNull(password);
         ArgumentNullException.ThrowIfNull(policy);
 
+        password = Normalize(password);
         var failed = new List<string>();
         var length = CodePoints(password);
         if (length < policy.MinLength)
@@ -83,6 +87,22 @@ internal static class PasswordRules
         }
 
         return false;
+    }
+
+    /// <summary>
+    /// A password as the rules and the hasher see it (Story 4.7): Unicode NFKC, so the same password typed as composed or
+    /// decomposed characters is one password. Text that isn't valid Unicode, such as an unpaired surrogate, is left as it is.
+    /// </summary>
+    public static string Normalize(string password)
+    {
+        try
+        {
+            return password.Normalize(NormalizationForm.FormKC);
+        }
+        catch (ArgumentException)
+        {
+            return password;
+        }
     }
 
     /// <summary>How many code points <paramref name="text"/> holds; an unpaired surrogate counts as one.</summary>
@@ -147,8 +167,8 @@ internal static class PasswordRules
     }
 
     /// <summary>
-    /// Whether <paramref name="password"/> holds the email's local part, or its domain's first label of 4 or more
-    /// characters, ignoring case.
+    /// Whether <paramref name="password"/> holds the email's local part of 3 or more characters, or its domain's first
+    /// label of 4 or more characters, ignoring case.
     /// </summary>
     public static bool ContainsPersonalData(string password, string? email)
     {
@@ -162,7 +182,7 @@ internal static class PasswordRules
         var domain = at >= 0 ? email[(at + 1)..] : string.Empty;
         var label = domain.Split('.')[0];
 
-        return Contains(password, local)
+        return (CodePoints(local) >= MinLocalPartLength && Contains(password, local))
             || (CodePoints(label) >= MinDomainLabelLength && Contains(password, label));
     }
 

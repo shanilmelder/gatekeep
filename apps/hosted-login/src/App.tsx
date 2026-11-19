@@ -44,6 +44,10 @@ export function App({ initial }: { initial: Step }) {
   // Each new life restarts the countdown, even when it is the same number of seconds.
   const [life, setLife] = useState(0);
   const extending = useRef(false);
+  // One step request at a time, whichever control started it (Resend and "I've verified" included), and the count of
+  // steps shown, so an answer to a request made on a step since replaced is dropped rather than shown over the newer one.
+  const inFlight = useRef(false);
+  const shownCount = useRef(0);
 
   const counted = LIVE_STEPS.has(step.step) ? step.expiresInSeconds : null;
   useExpiry(
@@ -64,6 +68,7 @@ export function App({ initial }: { initial: Step }) {
 
   /** A step the server answered with: shown, its life counted afresh, and focus moved to it. */
   function show(next: Step) {
+    shownCount.current += 1;
     setStep(next);
     setFailed(isFailed(next));
     setWarning(false);
@@ -75,12 +80,17 @@ export function App({ initial }: { initial: Step }) {
   }
 
   /** Sends one request for the step on screen, at most one at a time, and shows its answer. */
-  async function send(request: () => Promise<Step>) {
-    if (pending) return;
-    setPending(true);
+  async function send(request: () => Promise<Step>, busy: (on: boolean) => void = setPending): Promise<Step | null> {
+    if (inFlight.current) return null;
+    inFlight.current = true;
+    const sentOn = shownCount.current;
+    busy(true);
     const next = await request();
-    setPending(false);
+    busy(false);
+    inFlight.current = false;
+    if (shownCount.current !== sentOn) return null;
     show(next);
+    return next;
   }
 
   function onContinue() {
@@ -114,12 +124,10 @@ export function App({ initial }: { initial: Step }) {
   }
 
   async function onResend() {
-    if (step.step !== 'verify_email' || step.csrfToken === null || resending) return;
-    setResending(true);
-    const next = await postResend(step.stepVersion, step.csrfToken, step.data.tenant);
-    setResending(false);
-    if (next.step === 'verify_email' && next.data.resent) setSends((n) => n + 1);
-    show(next);
+    if (step.step !== 'verify_email' || step.csrfToken === null) return;
+    const { stepVersion, csrfToken } = step;
+    const next = await send(() => postResend(stepVersion, csrfToken, step.data.tenant), setResending);
+    if (next?.step === 'verify_email' && next.data.resent) setSends((n) => n + 1);
   }
 
   function onSendNewLink() {

@@ -50,6 +50,7 @@ export { LinkButton, type LinkButtonProps } from './components/LinkButton';
 export { RESEND_COOLDOWN_SECONDS, ResendAction, type ResendActionProps } from './components/ResendAction';
 export { STRENGTH_ANNOUNCE_MS, StrengthMeter, type StrengthMeterProps } from './components/StrengthMeter';
 export {
+  PASSWORD_MAX_LENGTH,
   STRENGTH_SEGMENTS,
   characterClasses,
   filledSegments,

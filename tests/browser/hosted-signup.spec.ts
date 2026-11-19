@@ -40,6 +40,8 @@ const text = {
 
 /** The harness's tokens (hosted-step-server.mjs). */
 const CSRF = 'fixture-csrf-token';
+const SIGNUP_CSRF = 'fixture-csrf-signup';
+const VERIFY_CSRF = 'fixture-csrf-verify';
 const LINK_CSRF = 'fixture-link-csrf-token';
 const LINK = 'ten_aaaaaaaaaaaaaaaaaaaaaaaaaa.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
 const TENANT = 'Northwind';
@@ -151,7 +153,7 @@ for (const scheme of ['light', 'dark'] as const) {
       await card(page).getByRole('button', { name: text.create }).click();
       const request = await posted;
 
-      expect(request.headers()['x-gatekeep-csrf']).toBe(CSRF);
+      expect(request.headers()['x-gatekeep-csrf']).toBe(SIGNUP_CSRF);
       expect(request.postDataJSON()).toEqual({ stepVersion: 2, email: 'new.user@example.com', password: 'aaaaaaaaaaaa' });
       await expect(card(page)).toContainText(text.classesError);
       await expect(password).toHaveAttribute('aria-invalid', 'true');
@@ -205,7 +207,7 @@ for (const scheme of ['light', 'dark'] as const) {
       await expect(countdown).toHaveCount(0);
       const resent = apiPost(page, '/login/api/verification/resend');
       await resend.click();
-      expect((await resent).headers()['x-gatekeep-csrf']).toBe(CSRF);
+      expect((await resent).headers()['x-gatekeep-csrf']).toBe(VERIFY_CSRF);
       await expect(resend).toHaveAttribute('aria-disabled', 'true');
       // "Email sent" is written into its status region a moment after the answer, so it is announced.
       await page.clock.runFor(200);
@@ -214,8 +216,31 @@ for (const scheme of ['light', 'dark'] as const) {
       await expectAxe(page);
     });
 
+    test('Signup: the expiry warning shows, and Keep going keeps the step and the typed password', async ({ page }) => {
+      await page.clock.install();
+      await open(page, 'signup');
+      const password = page.getByLabel(text.passwordLabel, { exact: true });
+      await password.fill('Correct-Horse-7battery');
+
+      await page.clock.runFor(1800_000 - 120_000);
+      const warning = page.getByRole('alertdialog');
+      await expect(warning).toBeVisible();
+      await expectAxe(page);
+
+      const posted = apiPost(page, '/login/api/transaction/extend');
+      await warning.getByRole('button', { name: 'Keep going' }).click();
+      expect((await posted).headers()['x-gatekeep-csrf']).toBe(SIGNUP_CSRF);
+
+      await expect(warning).toHaveCount(0);
+      await expect(heading(page)).toHaveText(text.signupTitle);
+      await expect(password).toHaveValue('Correct-Horse-7battery');
+      await expect(meter(page)).toHaveAttribute('data-filled', '4');
+    });
+
     test('Email verified in the browser that signed up: Continue is a top-level GET back to the request', async ({ page }) => {
       await open(page, 'email_verified_app');
+      // The link's token leaves the address bar once the page has it.
+      await expect.poll(() => new URL(page.url()).search).toBe('');
 
       await expect(heading(page)).toHaveText(text.verifiedTitle);
       await expect(card(page).locator('[data-status="success"]')).toHaveText('✓');
@@ -226,6 +251,7 @@ for (const scheme of ['light', 'dark'] as const) {
 
     test('Email verified in another browser: "You can close this page." with no action', async ({ page }) => {
       await open(page, 'email_verified_close');
+      await expect.poll(() => new URL(page.url()).search).toBe('');
 
       await expect(heading(page)).toHaveText(text.verifiedTitle);
       await expect(card(page)).toContainText(text.verifiedClose);
@@ -236,6 +262,7 @@ for (const scheme of ['light', 'dark'] as const) {
 
     test('Link expired: Send a new link posts the link with its own CSRF token and shows the neutral confirmation', async ({ page }) => {
       await open(page, 'link_expired');
+      await expect.poll(() => new URL(page.url()).search).toBe('');
 
       await expect(heading(page)).toHaveText(text.expiredTitle);
       await expectAxe(page);

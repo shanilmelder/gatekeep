@@ -325,6 +325,118 @@ public sealed class SignUpTests(PostgresFixture postgres, OpenBaoFixture bao)
         Assert.Equal(0L, await flow.RowsAsync("user"));
     }
 
+    [Fact]
+    public void The_verification_emails_link_opens_Hosted_Logins_verification_page()
+    {
+        var template = Gatekeep.Modules.Notifications.Contracts.NotificationsContract.VerificationTemplate;
+        var render = Gatekeep.Modules.Notifications.Contracts.NotificationsContract.RenderEmail(
+            template,
+            Gatekeep.Modules.Notifications.Contracts.NotificationsContract.DefaultEmailTemplate(template)!,
+            ProtocolDatabase.TestTenantName,
+            $"https://{HostA}/",
+            "ten_aaaaaaaaaaaaaaaaaaaaaaaaaa.token");
+
+        Assert.Contains($"https://{HostA}{ProtocolContract.VerifyEmailPath}?token=ten_aaaaaaaaaaaaaaaaaaaaaaaaaa.token", render.Body, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Keep_going_at_Signup_and_at_Email_verification_required_keeps_the_step_with_a_new_life()
+    {
+        var flow = await SignUpFlow.CreateAsync(postgres, bao, HostA, HostB);
+        await using var host = await flow.StartHostAsync();
+        var browser = await flow.BeginAsync(host, HostA);
+        using var signup = await browser.OpenAsync(Email);
+        await flow.Database.BackdateAsync($"UPDATE signin_transaction SET expires_at = now() + interval '3 minutes' WHERE tenant_id = '{flow.TenantA}'");
+
+        using (var extended = await browser.PostAsync(ProtocolContract.LoginExtendPath, new { }, SignUpBrowser.Csrf(signup)))
+        {
+            Assert.Equal(StepNames.Signup, SignUpFlow.Name(extended));
+            Assert.Equal(SignUpBrowser.Version(signup), SignUpBrowser.Version(extended));
+            Assert.InRange(extended.RootElement.GetProperty("expiresInSeconds").GetInt32(), 1790, 1800);
+            Assert.Equal(Email, SignUpFlow.Data(extended).GetProperty("email").GetString());
+        }
+
+        using var verify = await browser.CreateAsync(signup, Email, SignUpFlow.Password);
+        await flow.Database.BackdateAsync($"UPDATE signin_transaction SET expires_at = now() + interval '3 minutes' WHERE tenant_id = '{flow.TenantA}'");
+
+        using var again = await browser.PostAsync(ProtocolContract.LoginExtendPath, new { }, SignUpBrowser.Csrf(verify));
+        Assert.Equal(StepNames.VerifyEmail, SignUpFlow.Name(again));
+        Assert.Equal(SignUpBrowser.Version(verify), SignUpBrowser.Version(again));
+        Assert.InRange(again.RootElement.GetProperty("expiresInSeconds").GetInt32(), 1790, 1800);
+    }
+
+    [Fact]
+    public async Task A_non_default_policy_reaches_the_Signup_step_and_its_repeats_rule_is_enforced()
+    {
+        var flow = await SignUpFlow.CreateAsync(postgres, bao, HostA, HostB);
+        await flow.Database.ExecuteAsync(
+            $"UPDATE connection SET password_min_length = 14, password_strength = 'excellent' WHERE tenant_id = '{flow.TenantA}'");
+        await using var host = await flow.StartHostAsync();
+        var browser = await flow.BeginAsync(host, HostA);
+
+        using var signup = await browser.OpenAsync(Email);
+        Assert.Equal(14, SignUpFlow.Data(signup).GetProperty("policy").GetProperty("minLength").GetInt32());
+        Assert.Equal("excellent", SignUpFlow.Data(signup).GetProperty("policy").GetProperty("strength").GetString());
+
+        using var refused = await browser.CreateAsync(signup, Email, "Correct-Hooorse-7battery");
+        Assert.Equal([PasswordRuleCodes.Repeats], SignUpFlow.Data(refused).GetProperty("rules").EnumerateArray().Select(r => r.GetString()));
+
+        using var tooShort = await browser.CreateAsync(signup, Email, "Correct-Hors7");
+        Assert.Equal([PasswordRuleCodes.Length], SignUpFlow.Data(tooShort).GetProperty("rules").EnumerateArray().Select(r => r.GetString()));
+        Assert.Equal(0L, await flow.RowsAsync("user"));
+    }
+
+    [Fact]
+    public async Task A_Connection_disabled_after_sign_up_verifies_the_email_but_starts_no_Session()
+    {
+        var flow = await SignUpFlow.CreateAsync(postgres, bao, HostA, HostB);
+        await using var host = await flow.StartHostAsync();
+        var (browser, verifyStep) = await flow.SignUpAsync(host, HostA, Email);
+        using var verify = verifyStep;
+        var link = Assert.Single(host.Jobs.LinksFor(await flow.UserAsync(Email)));
+        await flow.Database.ExecuteAsync($"UPDATE connection SET enabled = false WHERE tenant_id = '{flow.TenantA}'");
+
+        using var verified = await browser.OpenLinkAsync(link);
+        Assert.Equal(StepNames.EmailVerified, SignUpFlow.Name(verified));
+        Assert.Equal(EmailVerifiedContinuations.Close, SignUpFlow.Data(verified).GetProperty("continueTo").GetString());
+        Assert.Equal(1L, await flow.RowsAsync("user", "email_verified_at IS NOT NULL"));
+
+        using var continued = await browser.ContinueAsync(verify);
+        Assert.Equal(StepNames.VerifyEmail, SignUpFlow.Name(continued));
+        Assert.Equal(VerifyEmailErrors.NotVerifiedYet, SignUpFlow.Data(continued).GetProperty("error").GetString());
+        Assert.Equal(0L, await flow.RowsAsync("user_session"));
+        Assert.DoesNotContain(browser.Http.SetCookies, c => c.StartsWith(ProtocolContract.SessionCookie + "=", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task A_too_long_password_written_in_escapes_past_4_KiB_is_named_too_long()
+    {
+        var flow = await SignUpFlow.CreateAsync(postgres, bao, HostA, HostB);
+        await using var host = await flow.StartHostAsync();
+        var browser = await flow.BeginAsync(host, HostA);
+        var email = Email;
+        using var signup = await browser.OpenAsync(email);
+
+        // 404 code points, the emoji each written as two escaped UTF-16 units: over 4 KiB of JSON, inside the sign-up body limit.
+        var password = "Aa1-" + string.Concat(Enumerable.Repeat("😀", 400));
+        var escaped = "{\"stepVersion\":" + SignUpBrowser.Version(signup) + ",\"email\":\"" + email + "\",\"password\":\""
+            + string.Concat(password.Select(c => $"\\u{(int)c:x4}")) + "\"}";
+        Assert.True(System.Text.Encoding.UTF8.GetByteCount(escaped) > 4 * 1024);
+        using var request = new HttpRequestMessage(HttpMethod.Post, new Uri($"http://{HostA}{ProtocolContract.SignupPath}"))
+        {
+            Content = new StringContent(escaped, System.Text.Encoding.UTF8, "application/json"),
+        };
+        request.Headers.TryAddWithoutValidation(ProtocolContract.CsrfHeader, SignUpBrowser.Csrf(signup));
+        request.Headers.TryAddWithoutValidation("Origin", browser.Http.Origin);
+        request.Headers.TryAddWithoutValidation("Cookie", string.Join("; ", browser.Http.Cookies.Select(c => $"{c.Key}={c.Value}")));
+        using var response = await host.Http.SendAsync(request, Cancellation);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using var step = await HostedBrowser.StepAsync(response);
+        Assert.Equal(StepNames.Signup, SignUpFlow.Name(step));
+        Assert.Contains(PasswordRuleCodes.TooLong, SignUpFlow.Data(step).GetProperty("rules").EnumerateArray().Select(r => r.GetString()));
+    }
+
     /// <summary>No account state, no job and no event since <paramref name="events"/>; the transaction still at Signup.</summary>
     private static async Task AssertNothingWrittenAsync(SignUpFlow flow, long events)
     {

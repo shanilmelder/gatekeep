@@ -322,7 +322,8 @@ public static class TableRegistry
                 new ColumnGrant(Insert, ["tenant_id", "id", "email", "created_at"]),
                 new ColumnGrant(Update, ["email_verified_at"]),
             ],
-            [Worker] = [new ColumnGrant(Select, ["tenant_id", "id", "email"])],
+            // Story 4.7: the expired-state purge also finds an abandoned, unverified sign-up's User.
+            [Worker] = [new ColumnGrant(Select, ["tenant_id", "id", "email", "email_verified_at"])],
         }, RowGuard),
         // Story 4.6: a User's earlier password hashes, created empty. Host.Hosted keeps and reads them (Stories 4.7 and
         // 4.11); a Tenant's deletion purges them before the Users they reference, reading only the tenant_id its WHERE
@@ -336,7 +337,7 @@ public static class TableRegistry
             [Worker] = [new ColumnGrant(Select, ["tenant_id"])],
         }, RowGuard),
         // Story 4.7: a User's password, pending until a verification link activates it. Host.Hosted keeps it, changing only
-        // its status, hash and update time; a Tenant's deletion purges it, reading only the tenant_id its WHERE names.
+        // its status, hash and update time; a Tenant's deletion and the expired-state purge delete it, never reading a hash.
         new("password_credential", TableClass.Tenant, "Identity", TableUse.Runtime, new Dictionary<string, IReadOnlyList<string>>
         {
             [Hosted] = [Select, Insert, Delete],
@@ -344,10 +345,10 @@ public static class TableRegistry
         }, new Dictionary<string, IReadOnlyList<ColumnGrant>>
         {
             [Hosted] = [new ColumnGrant(Update, ["status", "password_hash", "updated_at"])],
-            [Worker] = [new ColumnGrant(Select, ["tenant_id"])],
+            [Worker] = [new ColumnGrant(Select, ["tenant_id", "id", "user_id", "status"])],
         }, RowGuard),
         // Story 4.7: an email verification link's SHA-256, used once. Host.Hosted issues and redeems it, setting only when it
-        // was used; Host.Worker purges it with its Tenant and an hour after its expiry, reading only those columns.
+        // was used; Host.Worker purges it with its Tenant and an hour after its expiry, never reading its hash.
         new("one_time_token", TableClass.Tenant, "Identity", TableUse.Runtime, new Dictionary<string, IReadOnlyList<string>>
         {
             [Hosted] = [Select, Insert, Delete],
@@ -355,7 +356,7 @@ public static class TableRegistry
         }, new Dictionary<string, IReadOnlyList<ColumnGrant>>
         {
             [Hosted] = [new ColumnGrant(Update, ["used_at"])],
-            [Worker] = [new ColumnGrant(Select, ["tenant_id", "expires_at"])],
+            [Worker] = [new ColumnGrant(Select, ["tenant_id", "credential_id", "expires_at"])],
         }, RowGuard),
         // Story 9.3: a Signing Key revocation, as gk_admin, may also end every Session of its Tenant by the
         // one revocation path, reading only the columns its WHERE names and setting only the end. Story 4.3:
@@ -419,7 +420,8 @@ public static class TableRegistry
         {
             // Story 3.5: a deleted Application's purge deletes its transactions by their Application.
             // Story 4.3: the expired-state purge deletes them by their expiry.
-            [Worker] = [new ColumnGrant(Select, ["tenant_id", "application_id", "expires_at"])],
+            // Story 4.7: and finds whether an abandoned sign-up's User is still named by one.
+            [Worker] = [new ColumnGrant(Select, ["tenant_id", "application_id", "expires_at", "signup_user_id"])],
         }, RowGuard),
         new(
             "admin_attempt",

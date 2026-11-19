@@ -473,3 +473,6 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-2-11-offer-userinfo-and-revocation.md`
   summary: Add the profile and email claims to userinfo, by scope, when Epics 5 and 6 store them.
   evidence: Story 2.11 answers `{"sub": …}` only; OpenIddict's `AttachClaims` is removed in favour of `AttachUserinfoSubject`.
+- source_spec: `_bmad-output/implementation-artifacts/spec-4-7-sign-up-and-verify-an-email-address.md`
+  summary: Email verified in another browser shows "You can close this page." instead of "Log in" starting a new request for the Application stored with the link.
+  evidence: Story 4.7 planning. Applications have no login-initiation URI to start a fresh authorization request from (EXPERIENCE.md Email verified row).

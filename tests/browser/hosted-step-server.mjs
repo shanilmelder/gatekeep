@@ -30,6 +30,7 @@
 //   same step with not_verified_yet.
 // - POST /login/api/verification/new-link: the neutral confirmation, with the link-bound CSRF token in place of the
 //   transaction's.
+// - POST /login/api/transaction/extend from Signup or Email verification required: that same step with a fresh life.
 //
 //   node hosted-step-server.mjs <port>
 
@@ -124,6 +125,14 @@ const login = (email = null, error = null, expiresInSeconds = LIFE, signupEnable
   csrfToken: CSRF,
 });
 
+/**
+ * Story 4.7: Signup's and Email verification required's CSRF tokens. A real transaction has one token for every step;
+ * the harness gives each its own, so "Keep going" (POST /login/api/transaction/extend, whose body is empty) answers the
+ * step it was posted from, as Host.Hosted does.
+ */
+export const SIGNUP_CSRF = 'fixture-csrf-signup';
+export const VERIFY_CSRF = 'fixture-csrf-verify';
+
 /** Story 4.7: the link-bound CSRF token Link expired's "Send a new link" carries. */
 export const LINK_CSRF = 'fixture-link-csrf-token';
 
@@ -135,7 +144,7 @@ const signup = (email = null, strength = 'good', error = null, rules = []) => ({
   stepVersion: 2,
   expiresInSeconds: LIFE,
   data: { tenant: 'Northwind', email, policy: { minLength: 12, strength }, error, rules },
-  csrfToken: CSRF,
+  csrfToken: SIGNUP_CSRF,
 });
 
 const verifyEmail = (email = 'new.user@example.com', resent = false, error = null) => ({
@@ -143,7 +152,7 @@ const verifyEmail = (email = 'new.user@example.com', resent = false, error = nul
   stepVersion: 3,
   expiresInSeconds: LIFE,
   data: { tenant: 'Northwind', email, resent, error },
-  csrfToken: CSRF,
+  csrfToken: VERIFY_CSRF,
 });
 
 const emailVerified = (location) => ({
@@ -214,8 +223,12 @@ function stepPage(fixture) {
 }
 
 /** The stubbed API's answer to one request, as Host.Hosted's /login/api endpoints answer. */
-function answer(pathname, body) {
-  if (pathname === '/login/api/transaction/extend') return login();
+function answer(pathname, body, csrf) {
+  if (pathname === '/login/api/transaction/extend') {
+    if (csrf === SIGNUP_CSRF) return signup('new.user@example.com');
+    if (csrf === VERIFY_CSRF) return verifyEmail();
+    return login();
+  }
   const email = typeof body.email === 'string' ? body.email.trim() : '';
   switch (pathname) {
     case '/login/api/signup/open':
@@ -276,15 +289,16 @@ const server = createServer((request, response) => {
       const json = (status, value) => send(status, 'application/json; charset=utf-8', JSON.stringify(value), { 'Cache-Control': 'no-store', Pragma: 'no-cache' });
       const origin = `http://${request.headers.host}`;
       if (request.headers.origin !== origin) return json(403, { ...genericError('Northwind'), data: { ...genericError('Northwind').data, code: 'origin_mismatch' } });
-      const csrf = url.pathname === '/login/api/verification/new-link' ? LINK_CSRF : CSRF;
-      if (request.headers['x-gatekeep-csrf'] !== csrf) return json(403, { ...genericError('Northwind'), data: { ...genericError('Northwind').data, code: 'csrf_mismatch' } });
+      const presented = request.headers['x-gatekeep-csrf'];
+      const allowed = url.pathname === '/login/api/verification/new-link' ? [LINK_CSRF] : [CSRF, SIGNUP_CSRF, VERIFY_CSRF];
+      if (!allowed.includes(presented)) return json(403, { ...genericError('Northwind'), data: { ...genericError('Northwind').data, code: 'csrf_mismatch' } });
       let body;
       try {
         body = JSON.parse(raw);
       } catch {
         body = {};
       }
-      return json(200, answer(url.pathname, body ?? {}));
+      return json(200, answer(url.pathname, body ?? {}, presented));
     });
     return;
   }

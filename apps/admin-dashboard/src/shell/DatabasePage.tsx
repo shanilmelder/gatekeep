@@ -87,6 +87,8 @@ function ruleText(rule: PasswordRule, messages: Messages): string {
       return formatMessage(messages.passwordRuleLength, { count: rule.count });
     case 'classes':
       return messages.passwordRuleClasses;
+    case 'too_long':
+      return formatMessage(messages.passwordRuleTooLong, { max: rule.max });
     default:
       return messages.passwordRuleRepeats;
   }

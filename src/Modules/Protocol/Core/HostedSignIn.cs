@@ -311,8 +311,15 @@ internal sealed class HostedAuthorizationSignIn(TokenEndpointServices services) 
 /// </summary>
 internal static class LoginEndpoints
 {
-    /// <summary>The largest API body read: 4 KiB, ample for a 254-character email and a 256-code-point password.</summary>
+    /// <summary>The largest API body read: 4 KiB, ample for a 254-character email.</summary>
     private const int MaxBodyBytes = 4 * 1024;
+
+    /// <summary>
+    /// The largest Create account body read (Story 4.7): 16 KiB, room for a 254-character email and a password past the
+    /// 256-code-point limit written entirely in <c>\uXXXX</c> escapes (12 bytes a code point, as a surrogate pair), so a
+    /// too-long password is named by its rule rather than refused as an unreadable body.
+    /// </summary>
+    private const int MaxSignupBodyBytes = 16 * 1024;
 
     public static void Map(IEndpointRouteBuilder endpoints)
     {
@@ -547,7 +554,7 @@ internal static class LoginEndpoints
             return;
         }
 
-        using var body = await ReadBodyAsync(http, login.Cancellation);
+        using var body = await ReadBodyAsync(http, login.Cancellation, MaxSignupBodyBytes);
         if (StepVersion(body) is not { } stepVersion || Text(body, "email") is not { } input || Text(body, "password") is not { } typed)
         {
             await login.InvalidRequestAsync();
@@ -813,14 +820,14 @@ internal static class LoginEndpoints
             : null;
 
     /// <summary>The request body as JSON, or null when it is missing, too large or not a JSON object.</summary>
-    private static async Task<JsonDocument?> ReadBodyAsync(HttpContext http, CancellationToken cancellationToken)
+    private static async Task<JsonDocument?> ReadBodyAsync(HttpContext http, CancellationToken cancellationToken, int maxBytes = MaxBodyBytes)
     {
-        if (http.Request.ContentLength is > MaxBodyBytes)
+        if (http.Request.ContentLength > maxBytes)
         {
             return null;
         }
 
-        var buffer = new byte[MaxBodyBytes + 1];
+        var buffer = new byte[maxBytes + 1];
         var read = 0;
         while (read < buffer.Length)
         {
@@ -833,7 +840,7 @@ internal static class LoginEndpoints
             read += count;
         }
 
-        if (read == 0 || read > MaxBodyBytes)
+        if (read == 0 || read > maxBytes)
         {
             return null;
         }

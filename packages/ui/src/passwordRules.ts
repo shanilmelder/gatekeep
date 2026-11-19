@@ -9,8 +9,15 @@
 /** A database Connection's strength levels (Story 4.6). */
 export type PasswordStrengthLevel = 'good' | 'excellent';
 
+/** The longest password the server accepts: SecurityLimits.PasswordMaximumLength, 256 code points. */
+export const PASSWORD_MAX_LENGTH = 256;
+
 /** One rule a password must meet, and whether the text meets it. */
-export type PasswordRule = { rule: 'length'; count: number; met: boolean } | { rule: 'classes'; met: boolean } | { rule: 'repeats'; met: boolean };
+export type PasswordRule =
+  | { rule: 'length'; count: number; met: boolean }
+  | { rule: 'classes'; met: boolean }
+  | { rule: 'repeats'; met: boolean }
+  | { rule: 'too_long'; max: number; met: boolean };
 
 /** How many of the four character classes the text holds: lower case, upper case, number, and anything else that isn't a letter (special). */
 export function characterClasses(text: string): number {
@@ -38,8 +45,8 @@ export function hasLongRun(text: string): boolean {
 
 /**
  * The rules a password must meet under this policy, in the order they are listed, each met or not for `text`: the
- * minimum length, 3 of the 4 classes, and for Excellent no more than 2 identical characters in a row. Length is
- * counted by code point. An empty text meets none.
+ * minimum length, 3 of the 4 classes, for Excellent no more than 2 identical characters in a row, and, only while the
+ * text is longer than PASSWORD_MAX_LENGTH, that maximum, unmet. Length is counted by code point. An empty text meets none.
  */
 export function passwordRules(minLength: number, strength: PasswordStrengthLevel, text: string): PasswordRule[] {
   const length = Array.from(text).length;
@@ -48,6 +55,8 @@ export function passwordRules(minLength: number, strength: PasswordStrengthLevel
     { rule: 'classes', met: characterClasses(text) >= 3 },
   ];
   if (strength === 'excellent') rules.push({ rule: 'repeats', met: text.length > 0 && !hasLongRun(text) });
+  // Listed only once the text is longer than the server accepts, so a pasted password is never cut short unseen.
+  if (length > PASSWORD_MAX_LENGTH) rules.push({ rule: 'too_long', max: PASSWORD_MAX_LENGTH, met: false });
   return rules;
 }
 

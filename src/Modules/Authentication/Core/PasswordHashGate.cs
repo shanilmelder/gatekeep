@@ -9,9 +9,11 @@ namespace Gatekeep.Modules.Authentication.Core;
 /// Tenant's, and waits for a slot only until <see cref="PasswordHashLimits.Wait"/> has passed. A request that gets no slot
 /// is refused, and nothing is hashed.
 /// </summary>
-internal sealed class PasswordHashGate(PasswordHashLimits limits)
+internal sealed class PasswordHashGate(PasswordHashLimits limits, TimeProvider? time = null) : IPasswordHashGate
 {
     private readonly PasswordHashLimits _limits = limits ?? throw new ArgumentNullException(nameof(limits));
+
+    private readonly TimeProvider _time = time ?? TimeProvider.System;
 
     private readonly SemaphoreSlim _deployment = new(limits.Concurrency, Math.Max(1, limits.Concurrency));
 
@@ -21,7 +23,7 @@ internal sealed class PasswordHashGate(PasswordHashLimits limits)
     public async Task<IDisposable?> EnterAsync(Guid tenantId, CancellationToken cancellationToken)
     {
         var tenant = _tenants.GetOrAdd(tenantId, _ => new SemaphoreSlim(_limits.TenantShare, Math.Max(1, _limits.TenantShare)));
-        var deadline = DateTime.UtcNow + _limits.Wait;
+        var deadline = _time.GetUtcNow() + _limits.Wait;
 
         if (!await tenant.WaitAsync(Remaining(deadline), cancellationToken))
         {
@@ -45,9 +47,9 @@ internal sealed class PasswordHashGate(PasswordHashLimits limits)
         return new Lease(tenant, _deployment);
     }
 
-    private static TimeSpan Remaining(DateTime deadline)
+    private TimeSpan Remaining(DateTimeOffset deadline)
     {
-        var left = deadline - DateTime.UtcNow;
+        var left = deadline - _time.GetUtcNow();
         return left > TimeSpan.Zero ? left : TimeSpan.Zero;
     }
 

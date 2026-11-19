@@ -19,7 +19,8 @@ namespace Gatekeep.Adapters.Postgres.Migrations;
 /// verification deleted leaves the transaction naming none, so it can never sign in.</item>
 /// <item><c>gk_hosted</c> reads, inserts and deletes credentials and tokens, and updates only a credential's status, hash and
 /// <c>updated_at</c>, and a token's <c>used_at</c>. <c>gk_worker</c> reads only what its purges' WHEREs name and deletes
-/// them: a Tenant's purge, and the expired-state purge of tokens an hour past their expiry.</item>
+/// them: a Tenant's purge, and the expired-state purge of tokens an hour past their expiry, then of pending credentials
+/// with no link left and unverified Users with no credential and no transaction naming them.</item>
 /// </list>
 /// It changes no earlier migration.
 /// </summary>
@@ -128,11 +129,16 @@ public sealed class Migration20261128000000SignUp : Migration
             -- its WHEREs name, never a hash.
             GRANT SELECT, INSERT, DELETE ON password_credential TO gk_hosted;
             GRANT UPDATE (status, password_hash, updated_at) ON password_credential TO gk_hosted;
-            GRANT SELECT (tenant_id), DELETE ON password_credential TO gk_worker;
+            GRANT SELECT (tenant_id, id, user_id, status), DELETE ON password_credential TO gk_worker;
 
             GRANT SELECT, INSERT, DELETE ON one_time_token TO gk_hosted;
             GRANT UPDATE (used_at) ON one_time_token TO gk_hosted;
-            GRANT SELECT (tenant_id, expires_at), DELETE ON one_time_token TO gk_worker;
+            GRANT SELECT (tenant_id, credential_id, expires_at), DELETE ON one_time_token TO gk_worker;
+
+            -- Host.Worker's expired-state purge also removes an abandoned sign-up: a pending credential with no link left,
+            -- then an unverified User with no credential and no sign-in transaction naming it. It reads no hash or email value.
+            GRANT SELECT (email_verified_at) ON "user" TO gk_worker;
+            GRANT SELECT (signup_user_id) ON signin_transaction TO gk_worker;
             """;
 
         migrationBuilder.Sql(sql);

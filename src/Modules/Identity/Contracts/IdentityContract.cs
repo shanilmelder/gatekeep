@@ -44,9 +44,10 @@ public static class IdentityContract
     /// <summary>
     /// Identity's purge of expired state (Story 4.7, AD-12): deletes the context Tenant's verification links whose
     /// <c>expires_at</c> is at least <see cref="Gatekeep.Kernel.Limits.SecurityLimits.OneTimeTokenRetention"/> before
-    /// <paramref name="now"/>, used or not. A second run deletes nothing.
+    /// <paramref name="now"/>, used or not, then pending credentials with no link left and the unverified Users a sign-up
+    /// made with no credential and no sign-in transaction naming them. A second run deletes nothing.
     /// </summary>
-    /// <returns>How many links it deleted.</returns>
+    /// <returns>How many rows it deleted.</returns>
     /// <exception cref="InvalidOperationException">The context has no Tenant.</exception>
     public static Task<int> PurgeExpiredStateAsync(CommandContext context, DateTimeOffset now, CancellationToken cancellationToken) =>
         IdentityExpiredStatePurge.PurgeAsync(context, now, cancellationToken);

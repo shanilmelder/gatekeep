@@ -78,7 +78,13 @@ public static class AuthenticationContract
             DirectoryContract.CreateDirectory(audit, time),
             TenancyContract.CreateTenants(audit),
             enqueuer,
-            new PasswordHashGate(hashLimits ?? PasswordHashLimits.Default));
+            new PasswordHashGate(hashLimits ?? PasswordHashLimits.Default, time));
+
+    /// <summary>
+    /// A hashing gate sized by <paramref name="limits"/>, timing its waits by <paramref name="time"/> (Story 4.7): the one each
+    /// <see cref="CreateSignUp"/> holds. A host never needs its own; tests check the budget through it.
+    /// </summary>
+    public static IPasswordHashGate CreatePasswordHashGate(PasswordHashLimits limits, TimeProvider? time = null) => new PasswordHashGate(limits, time);
 
     /// <summary>
     /// The rules <paramref name="password"/> fails under <paramref name="policy"/> for a User with <paramref name="email"/>

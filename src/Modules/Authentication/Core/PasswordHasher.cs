@@ -72,7 +72,8 @@ internal static class PasswordHasher
 
     private static async Task<byte[]> ComputeAsync(Secret<string> password, byte[] salt, Parameters parameters, int length)
     {
-        var bytes = password.Use(static value => Encoding.UTF8.GetBytes(value));
+        // NFKC first (PasswordRules.Normalize), so composed and decomposed forms of one password hash alike.
+        var bytes = password.Use(static value => Encoding.UTF8.GetBytes(PasswordRules.Normalize(value)));
         try
         {
             using var argon = new Argon2id(bytes)

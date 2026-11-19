@@ -3,7 +3,7 @@
 
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { STRENGTH_SEGMENTS, characterClasses, filledSegments, hasLongRun, passwordRules } from '../src/passwordRules.ts';
+import { PASSWORD_MAX_LENGTH, STRENGTH_SEGMENTS, characterClasses, filledSegments, hasLongRun, passwordRules } from '../src/passwordRules.ts';
 
 describe('the password rules', () => {
   it('counts the four character classes', () => {
@@ -39,6 +39,18 @@ describe('the password rules', () => {
       { rule: 'repeats', met: false },
     ]);
     assert.equal(passwordRules(12, 'excellent', '').at(-1)?.met, false);
+  });
+
+  it('lists the maximum length, unmet, only once the text is longer than the server accepts', () => {
+    assert.equal(PASSWORD_MAX_LENGTH, 256);
+    const longest = 'Aa1-' + 'x'.repeat(PASSWORD_MAX_LENGTH - 4);
+    assert.equal(passwordRules(12, 'good', longest).some((rule) => rule.rule === 'too_long'), false);
+    assert.deepEqual(passwordRules(12, 'good', longest + 'y').at(-1), { rule: 'too_long', max: 256, met: false });
+    // Counted by code point: 256 emoji are not too long, 257 are.
+    assert.equal(passwordRules(12, 'good', '😀'.repeat(256)).some((rule) => rule.rule === 'too_long'), false);
+    assert.equal(passwordRules(12, 'good', '😀'.repeat(257)).at(-1)?.rule, 'too_long');
+    // So the meter never fills for it.
+    assert.equal(filledSegments(passwordRules(12, 'good', longest + 'y')), 3);
   });
 
   it('counts length by code point', () => {

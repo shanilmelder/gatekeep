@@ -1,4 +1,4 @@
-import { HostedPage, formatMessage, useMessages, type Messages } from '@gatekeep/ui/hosted';
+import { HostedPage, PASSWORD_MAX_LENGTH, formatMessage, useMessages, type Messages } from '@gatekeep/ui/hosted';
 import {
   EmailVerifiedScreen,
   GenericErrorScreen,
@@ -13,9 +13,6 @@ import type { Step } from './step';
 
 /** The Tenant theme scope: the server's theme stylesheet sets its tokens under [data-gk-theme]. */
 export const THEME = 'tenant';
-
-/** The longest password the server accepts: SecurityLimits.PasswordMaximumLength, 256 code points. */
-export const PASSWORD_MAX_LENGTH = 256;
 
 /** Login's and Signup's email field error text, by the code the server sends it as. */
 const FIELD_ERRORS: Readonly<Record<string, keyof Messages>> = { email_invalid: 'emailInvalid' };

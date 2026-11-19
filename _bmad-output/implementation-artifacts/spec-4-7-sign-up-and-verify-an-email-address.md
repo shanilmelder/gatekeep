@@ -2,10 +2,10 @@
 title: 'Story 4.7: Sign up and verify an email address'
 type: 'feature'
 created: '2026-11-19'
-status: 'in-review'
+status: 'done'
 baseline_revision: 'e23172d70fbf2530b449111efd290f9157f246a2'
 review_loop_iteration: 0
-followup_review_recommended: false
+followup_review_recommended: true
 context:
   - '{project-root}/_bmad-output/implementation-artifacts/epic-4-context.md'
   - '{project-root}/_bmad-output/implementation-artifacts/spec-4-6-configure-the-database-connection.md'
@@ -250,6 +250,50 @@ deferred:
 
 ## Review Triage Log
 
+### 2026-11-19 — Review pass
+- verdicts: 40 findings — high 0, medium 4, low 30, false 5, maybe-false 1
+- findings:
+  - `low` `reject` (Intent) Server tests run through the test `ProtocolHost`, not `Host.Hosted/Program.cs` — `Program.cs` registers the same `OperationsContract.CreateEnqueuer` with its custody that the test host wraps; a real-host sign-up test is more than a direct correction.
+  - `low` `patch` (Intent) The server is exercised only with the default policy — a non-default policy case (minimum 14, Excellent, `repeats` named) was added to `SignUpTests`.
+  - `low` `reject` (Intent) Most rules are refused only in unit tests, not over HTTP — the HTTP path calls the same `PasswordRules.Check`, and the unit tests cover every rule.
+  - `low` `reject` (Intent) "Refused before any lookup" is shown only indirectly — the test proves nothing in B is read or written; observing the absence of a query adds instrumentation for no user-visible gain.
+  - `false` `reject` (Intent) After a second sign-up's link wins, the first browser's Continue says `not_verified_yet` — that credential was deleted, so refusing it is the account-takeover guard; signing that browser in would be the defect.
+  - `low` `reject` (Blind) The GET link page uses the link, so mail scanners can spend it — common practice (verification on GET) and only a "Send a new link" away from recovery; a confirm page plus a POST route is new surface. Worth noting for production.
+  - `false` `reject` (Blind) The server doesn't limit resends or sign-ups — the intent puts those limits in Story 4.8 ("repeated sign-ups or resends … rate limited"), and the 4.5 per-recipient email limit (5 per 15 min) already caps the inbox.
+  - `low` `reject` (Blind) An existing verified address answers faster (no link, no enqueue) — equal timing within tolerance is Story 4.8's acceptance criterion by the intent.
+  - `low` `reject` (Blind) The owner of a verified address gets no email — the existing-address notice is Story 4.8's by the intent.
+  - `medium` `patch` (Blind) Pre-account takeover: an attacker signs up with a victim's address and their own password, and the victim's click activates it — the threat model now records it, its mitigations (only this transaction's credential signs it in; one active credential) and the residual risk, with 4.11 reset as recovery.
+  - `low` `reject` (Blind) The 30-minute transaction vs the 24-hour link leaves a late verifier with "You can close this page." and no way to sign in — Story 4.9 adds password sign-in, which closes it; carrying sign-up state through restarts is more than a direct correction.
+  - `low` `patch` (Blind) personal_data matches a 1–2 character local part — the local part is checked only at 3+ code points.
+  - `medium` `patch` (Blind) No Unicode normalization before rules and hashing — NFKC applied once before both; NFC/NFD test added.
+  - `low` `reject` (Blind) The hash gate is bypassed by public contract methods; 1 GiB parameter cap; per-Tenant semaphores never shrink — the public methods have test callers only (4.9 must gate its verify), stored hashes are written only by this code, and the semaphore map is bounded by the Tenant count. The `DateTime.UtcNow` part is fixed with the gate test below.
+  - `medium` `patch` (Blind) Abandoned unverified Users and pending credentials are kept forever — the expired-state purge now deletes pending credentials with no remaining link, then unverified Users with no credential and no transaction.
+  - `low` `patch` (Blind) The meter doesn't know the 256-code-point maximum — a client `too_long` rule mirrors the limit, shown only when exceeded.
+  - `low` `patch` (Blind) The 4 KiB body limit can turn a long escaped password into a Generic error — the sign-up route's limit is sized for the worst-case escaped body.
+  - `low` `reject` (Blind) Refused sign-ups and a full gate write no audit or log — anonymous refusal events would multiply audit volume before 4.8's limits; Epic 10 adds monitoring.
+  - `low` `reject` (Blind) No concurrency tests for the same address or two links at once — the `ON CONFLICT` and `FOR UPDATE` guards are straightforward, and the gate tests below cover the budget.
+  - `low` `reject` (Edge) The link opened after the transaction expired leaves no sign-in path — same as the Blind row above; 4.9 closes it.
+  - `low` `reject` (Edge) Mail scanners spend the GET link — same as the Blind row above.
+  - `false` `reject` (Edge) Unlimited resends — Story 4.8 by the intent; the per-recipient email limit applies.
+  - `false` `reject` (Edge) Unlimited "Send a new link" — same as above.
+  - `low` `reject` (Edge) Repeated unverified sign-ups pile up pending credentials — bounded by 4.8's limits, and the purge above removes them once their links are gone.
+  - `medium` `patch` (Edge) Orphaned pending credentials and unverified Users are kept forever — same root cause as the Blind row, fixed by it.
+  - `low` `patch` (Edge) A short local part refuses nearly every password — fixed with the Blind row.
+  - `low` `patch` (Edge) The body limit replaces the `too_long` rule — fixed with the Blind row.
+  - `low` `patch` (Edge) The meter has no maximum — fixed with the Blind row.
+  - `low` `patch` (Edge) Resend and Continue can race, so a late answer overwrites a newer step — each is refused while the other is in flight, and superseded answers are dropped.
+  - `low` `patch` (Edge) A Session starts under a Connection disabled after sign-up — Continue and the link page now need an enabled Connection to start one; the link still verifies.
+  - `low` `patch` (Edge) Authentication near expiry doesn't slide the transaction, so Continue can hit an expired resume — `RecordAuthenticated` slides `expires_at`.
+  - `false` `reject` (Edge) The history rule is skipped at sign-up — no history can exist at sign-up: an unverified User has none, and a verified address changes nothing. The rule is covered by unit tests for 4.11.
+  - `maybe-false` `reject` (Edge) The gate is per process, so several hosts exceed the budget — the architecture describes a Deployment-wide gate, and v1 runs one Hosted instance; if true it would be low.
+  - `low` `patch` (Verification Gap) The purge job's Identity step is never run — `ExpiredStatePurgeTests` now seeds links and asserts them through the job.
+  - `low` `patch` (Verification Gap) The one-hour retention boundary is untested — a link 30 minutes past expiry is asserted to survive.
+  - `low` `patch` (Verification Gap) The gate's share, limit and release are untested — gate tests added, with an injected `TimeProvider`.
+  - `low` `patch` (Verification Gap) Nothing ties the template's link path to the route — an equality test was added.
+  - `low` `patch` (Verification Gap) Extend on Signup and Email verification required is untested, and the stub answers Login — server and browser tests were added, and the stub answers the posted step.
+  - `low` `patch` (Verification Gap) Removing the token from the address bar is untested — assertions added on both link fixtures.
+  - `low` `patch` (Verification Gap) A restarted Login's `signupEnabled` is untested — restart case added.
+
 ## Design Notes
 
 - **The verification-link lifetime of 24 h** follows the PRD's credential enrolment link (§5.2, A-18). No lifetime is set for verification itself.
@@ -264,3 +308,60 @@ deferred:
 - **.NET build:** with `MSYS_NO_PATHCONV=1`, run `docker run --rm -v "D:/Projects/Personal/gatekeep:/src" -v gk-nuget:/root/.nuget -w /src mcr.microsoft.com/dotnet/sdk:10.0.403-noble sh -c 'dotnet build Gatekeep.slnx -p:NuGetAudit=false -v q'`. Expected: 0 warnings and 0 errors. If Docker isn't available, use a local SDK.
 - **Front end:** `pnpm -r build`, `pnpm --filter @gatekeep/ui check`, `pnpm --filter @gatekeep/hosted-login budget`, and the package unit tests. Expected: green.
 - **Isolation, Architecture and browser suites:** CI on the PR. Don't run the full suites locally.
+
+## Auto Run Result
+
+Status: done
+
+**Summary:**
+- Hosted Login gains Sign up, Email verification required, Email verified, Link expired and Link sent.
+- **Sign-up:**
+  - The server checks the database Connection's password policy and names each failing rule: length, too_long, classes, repeats, dictionary (SecLists top 10,000) and personal_data. History is unit-tested for 4.11.
+  - Passwords are NFKC-normalized and hashed with Argon2id as PHC strings, through a Deployment-wide gate with per-Tenant shares.
+  - Sign-up creates an unverified User with a pending credential, plus a single-use, SHA-256-stored, Tenant-prefixed link, and enqueues the 4.5 verification email.
+- **Verifying:** using the link verifies the email, activates that credential, and deletes the User's other pending credentials and links.
+- **Sessions:** a Session starts only after verification, or straight away on a Dev Tenant with verification off. It goes through `StartOrRotateAsync` with `amr ["pwd"]` and the Connection.
+- **Strength meter:** it evaluates the policy in the browser from step data and sends nothing before submit.
+- **Cross-Tenant:** the "verification link" case runs and is `Covered` in `ArtifactRegistry`.
+
+**Files changed (main ones):**
+- `Migration20261128000000SignUp.cs` and `TableRegistry.cs`: `password_credential`, `one_time_token`, `user.email_verified_at`, and `signin_transaction.signup_user_id` / `signup_credential_id`, with grants, RLS and guards.
+- `src/Modules/Identity/{Contracts/IIdentity.cs, Contracts/IdentityEvents.cs, Core/IdentityService.cs, Core/VerificationLinks.cs, Core/IdentityExpiredStatePurge.cs}`: Users, credentials, links, verification, events and purges.
+- `src/Modules/Authentication/{Contracts/ISignUp.cs, Core/SignUpService.cs, Core/PasswordRules.cs, Core/PasswordHasher.cs, Core/PasswordHashGate.cs, Core/Resources/common-passwords.txt}`: sign-up, rules, hashing and the gate.
+- `src/Modules/Protocol/{Contracts/StepResponse.cs, Contracts/ProtocolContract.cs, Core/HostedSignIn.cs}`: steps, the seven routes and the link page.
+- `src/Gatekeep.Host.Hosted/Program.cs`: the job enqueuer, plus a new Host.Hosted → Operations module edge.
+- `packages/ui/src/{passwordRules.ts, components/StrengthMeter.tsx, components/ResendAction.tsx, components/LinkButton.tsx, messages.tsx}`: shared rules, meter, resend countdown and copy. The dashboard now uses the shared rules.
+- `packages/hosted-screens/src/*Screen.tsx` and `apps/hosted-login/src/{App.tsx, StepScreen.tsx, step.ts, api.ts, navigate.ts}`: screens and client.
+- `deploy/docker/run-tests.sh`: an Isolation shard now fails when its tests fail (this was broken since `b14f960`). Committed separately.
+- Tests: `SignUpTests`, `EmailVerificationTests`, `PasswordCredentialTableTests`, `PasswordRuleTests`, `PasswordHashGateTests`, `hosted-signup.spec.ts`, the canary flow, the purge job, routes and touched suites. Docs: the threat model (T-62 among others), `THIRD-PARTY-NOTICES.md`, and regenerated audit and module docs.
+
+**Review findings:** 40 in total.
+- **18 patched:**
+  - personal data now needs a local part of at least 3 characters;
+  - NFKC normalization;
+  - purging abandoned sign-ups;
+  - a client `too_long` rule;
+  - a 16 KiB body limit on sign-up;
+  - client request races;
+  - no Session under a disabled Connection;
+  - sliding expiry on authentication;
+  - the pre-account-takeover threat row;
+  - and nine test gaps (purge job, retention boundary, gate, template path, extend on the new steps, the token removed from the URL, restart, non-default policy).
+- **1 deferred** at planning: the other-browser "Log in".
+- **The rest rejected**, each with a reason in the triage log. Mainly:
+  - rate limits, timing and the existing-account notice belong to Story 4.8;
+  - GET consuming the link (mail scanners);
+  - the late verifier with no sign-in until 4.9;
+  - the ungated public hash methods, which have test callers only.
+
+**Follow-up review recommended:** true. Three `medium` entries were patched (NFKC, the abandoned-sign-up purge, the threat row). The purge deletes unverified Users and widened `gk_worker`'s column reads, and NFKC changes what gets hashed; both landed after review and deserve a second look. Patched counts: high 0, medium 3, low 15.
+
+**Verification:**
+- **.NET:** builds with 0 warnings and 0 errors (local SDK 10.0.204, `global.json` changed for the build only and restored).
+- **Front end:** `pnpm -r build`, the `@gatekeep/ui` check, and the ui, admin-dashboard and hosted-login unit tests (68, 150 and 4) are green. The bundle is 94.5 kB of the 150 kB budget.
+- **Not run locally:** Docker isn't running here, so the Isolation, Architecture and browser suites run on CI (PR #75), which is the source of truth.
+
+**Residual risks:**
+- **CI:** with the `run-tests.sh` fix, CI may go red on `EmailSendTests.Transient_failure_retries…`, which already fails on `main`.
+- **Mail scanners** can spend a link on GET; the user recovers with "Send a new link".
+- **Late verifiers:** a User who verifies after their 30-minute transaction can't sign in until Story 4.9.

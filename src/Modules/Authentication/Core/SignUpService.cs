@@ -63,12 +63,13 @@ internal sealed class SignUpService(
         RETURNING step_version
         """;
 
-    // Only the transaction whose sign-up made the credential records its authentication, and only once.
+    // Only the transaction whose sign-up made the credential records its authentication, and only once. Its life slides, so
+    // the resume that follows isn't refused for an expiry the User didn't cause.
     private const string RecordAuthenticated =
         """
         UPDATE signin_transaction
         SET completed_steps = array_append(completed_steps, @step), authenticated_session_id = @session_id,
-            step_version = step_version + 1
+            step_version = step_version + 1, expires_at = @expires_at
         WHERE tenant_id = @tenant_id AND id = @id AND completed_at IS NULL
           AND @registered = ANY (completed_steps) AND NOT (@step = ANY (completed_steps))
           AND signup_user_id = @user_id AND signup_credential_id = @credential_id
@@ -225,9 +226,9 @@ internal sealed class SignUpService(
             return new SignUpResult(SignUpStatus.Registered, [], stepVersion, expiresAt);
         }
 
-        var (session, authenticatedVersion) = await AuthenticateAsync(
+        var (session, authenticatedVersion, authenticatedUntil) = await AuthenticateAsync(
             context, tenantId, transaction.Id, registered.UserId, registered.CredentialId, connection.Id, presentedSession, cancellationToken);
-        return new SignUpResult(SignUpStatus.Authenticated, [], authenticatedVersion, expiresAt, session);
+        return new SignUpResult(SignUpStatus.Authenticated, [], authenticatedVersion, authenticatedUntil, session);
     }
 
     public async Task<DateTimeOffset> ResendAsync(CommandContext context, SignInTransaction transaction, CancellationToken cancellationToken)
@@ -256,15 +257,16 @@ internal sealed class SignUpService(
         var tenantId = TenantOf(context);
         RequireRegistered(transaction);
 
-        // Only the credential this sign-up made, once active, signs it in: another sign-up's verification deleted it.
+        // Only the credential this sign-up made, once active, signs it in: another sign-up's verification deleted it. A
+        // database Connection disabled since signs nobody in.
         if (transaction is { SignupUserId: { } userId, SignupCredentialId: { } credentialId }
             && await _identity.FindCredentialAsync(context, credentialId, cancellationToken) is { Active: true } credential
             && credential.UserId == userId
-            && await _directory.FindDatabaseConnectionAsync(context, cancellationToken) is { } connection)
+            && await _directory.FindDatabaseConnectionAsync(context, cancellationToken) is { Enabled: true } connection)
         {
-            var (session, stepVersion) = await AuthenticateAsync(
+            var (session, stepVersion, expiresAt) = await AuthenticateAsync(
                 context, tenantId, transaction.Id, userId, credentialId, connection.Id, presentedSession, cancellationToken);
-            return new ContinuedSignUp(stepVersion, transaction.ExpiresAt, session);
+            return new ContinuedSignUp(stepVersion, expiresAt, session);
         }
 
         return new ContinuedSignUp(transaction.StepVersion, transaction.ExpiresAt, null);
@@ -287,7 +289,8 @@ internal sealed class SignUpService(
             return new LinkVerification(false, null);
         }
 
-        // The same browser: the live transaction whose sign-up made the very credential this link activated.
+        // The same browser: the live transaction whose sign-up made the very credential this link activated. The email is
+        // verified either way; with the database Connection disabled since, no Session starts.
         var now = _time.GetUtcNow();
         if (verification is { Status: EmailVerificationStatus.Verified, UserId: { } userId, CredentialId: { } credentialId }
             && transaction is { CompletedAt: null } live
@@ -295,9 +298,9 @@ internal sealed class SignUpService(
             && IsAt(live, SignInSteps.Signup, SignInSteps.Registered)
             && live.SignupUserId == userId
             && live.SignupCredentialId == credentialId
-            && await _directory.FindDatabaseConnectionAsync(context, cancellationToken) is { } connection)
+            && await _directory.FindDatabaseConnectionAsync(context, cancellationToken) is { Enabled: true } connection)
         {
-            var (session, stepVersion) = await AuthenticateAsync(
+            var (session, stepVersion, _) = await AuthenticateAsync(
                 context, tenantId, live.Id, userId, credentialId, connection.Id, presentedSession, cancellationToken);
             return new LinkVerification(true, session, stepVersion);
         }
@@ -329,7 +332,7 @@ internal sealed class SignUpService(
     /// A Session for the User, through Sessions with <c>amr: ["pwd"]</c> and the database Connection, and the transaction's
     /// <see cref="SignInSteps.Authenticated"/>, in one command.
     /// </summary>
-    private async Task<(StartedSession Session, int StepVersion)> AuthenticateAsync(
+    private async Task<(StartedSession Session, int StepVersion, DateTimeOffset ExpiresAt)> AuthenticateAsync(
         CommandContext context,
         Guid tenantId,
         Guid transactionId,
@@ -341,6 +344,7 @@ internal sealed class SignUpService(
     {
         var session = await _sessions.StartOrRotateAsync(
             context, new NewSession(userId, PasswordAmr, _time.GetUtcNow(), connectionId), presentedSession, cancellationToken);
+        var expiresAt = _time.GetUtcNow() + SecurityLimits.SignInTransactionLifetime;
 
         var stepVersion = await StepAsync(
             context,
@@ -353,8 +357,9 @@ internal sealed class SignUpService(
             ("registered", SignInSteps.Registered),
             ("session_id", session.SessionId),
             ("user_id", userId),
-            ("credential_id", credentialId));
-        return (session, stepVersion);
+            ("credential_id", credentialId),
+            ("expires_at", expiresAt));
+        return (session, stepVersion, expiresAt);
     }
 
     /// <summary>The verification email, enqueued in the caller's command, with the link as the job's Transit-encrypted credential.</summary>

@@ -86,6 +86,31 @@ public sealed class PasswordRuleTests
     }
 
     [Fact]
+    public async Task A_local_part_under_three_characters_isnt_personal_data()
+    {
+        // "a@example.com" would otherwise refuse every password holding an "a".
+        Assert.Empty(await CheckAsync("Correct-Horse-7battery", Good, "a@example.com"));
+        Assert.Empty(await CheckAsync("Correct-Horse-7battery", Good, "ab@x.io"));
+        Assert.Equal([PasswordRuleCodes.PersonalData], await CheckAsync("Correct-Horse-7bat", Good, "bat@x.io"));
+    }
+
+    [Fact]
+    public async Task Composed_and_decomposed_forms_of_one_password_are_one_password()
+    {
+        const string Composed = "Caf\u00e9-Horse-7battery";
+        const string Decomposed = "Cafe\u0301-Horse-7battery";
+        Assert.NotEqual(Composed, Decomposed);
+
+        var hash = await AuthenticationContract.HashPasswordAsync(new Secret<string>(Composed));
+
+        Assert.True(await AuthenticationContract.VerifyPasswordAsync(new Secret<string>(Decomposed), hash));
+        var fromDecomposed = await AuthenticationContract.HashPasswordAsync(new Secret<string>(Decomposed));
+        Assert.True(await AuthenticationContract.VerifyPasswordAsync(new Secret<string>(Composed), fromDecomposed));
+        // The rules see one password too: 19 code points either way, under a minimum of 20.
+        Assert.Equal(await CheckAsync(Composed, Good with { MinLength = 20 }), await CheckAsync(Decomposed, Good with { MinLength = 20 }));
+    }
+
+    [Fact]
     public async Task History_refuses_one_of_the_newest_earlier_passwords()
     {
         var earlier = await AuthenticationContract.HashPasswordAsync(new Secret<string>(Strong));

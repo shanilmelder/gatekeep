@@ -60,6 +60,15 @@ public sealed record PasswordHashLimits
 }
 
 /// <summary>
+/// The hashing budget's gate (Story 4.7, AD-14): a slot for one Argon2id hash for a Tenant, released when disposed, or null
+/// when none came free within <see cref="PasswordHashLimits.Wait"/>: the Deployment-wide limit or the Tenant's share is full.
+/// </summary>
+public interface IPasswordHashGate
+{
+    Task<IDisposable?> EnterAsync(Guid tenantId, CancellationToken cancellationToken);
+}
+
+/// <summary>
 /// What Hosted Login shows of the Tenant's sign-up (Story 4.7): whether it is open, which needs the database Connection
 /// enabled with sign-up on, and the password policy's minimum length and strength, the rules the strength meter checks in
 /// the browser. A Tenant with no database Connection shows sign-up closed, with the policy defaults.

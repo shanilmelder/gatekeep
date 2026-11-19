@@ -965,6 +965,8 @@ export interface Messages {
   passwordRuleLength: string;
   passwordRuleClasses: string;
   passwordRuleRepeats: string;
+  /** Story 4.7: shown only while a password is longer than the server accepts. Placeholder: {max}. */
+  passwordRuleTooLong: string;
   passwordRuleMet: string;
   passwordRuleNotMet: string;
   passwordPreviewServerChecks: string;
@@ -1639,6 +1641,7 @@ export const defaultMessages: Readonly<Messages> = Object.freeze({
   passwordRuleLength: 'At least {count} characters',
   passwordRuleClasses: '3 of: lower case, upper case, number, special character',
   passwordRuleRepeats: 'No more than 2 identical characters in a row',
+  passwordRuleTooLong: 'No more than {max} characters',
   passwordRuleMet: 'Met',
   passwordRuleNotMet: 'Not met',
   passwordPreviewServerChecks: 'Dictionary words, personal data and reused passwords are checked when the user submits.',
