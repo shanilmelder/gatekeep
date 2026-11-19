@@ -9,18 +9,15 @@ import {
   PASSWORD_MIN_LENGTH_CEILING,
   PASSWORD_MIN_LENGTH_FLOOR,
   TERMS_URL_MAX_LENGTH,
-  characterClasses,
   checkPolicyDraft,
   checkSettingsDraft,
   databasePath,
-  hasLongRun,
   isPolicyDirty,
   isSettingsDirty,
   isTermsUrl,
   policyDraftOf,
   policyRequestOf,
   previewMinLength,
-  previewRules,
   serverPolicyErrors,
   serverSettingsErrors,
   settingsDraftOf,
@@ -98,44 +95,7 @@ describe('the password policy form', () => {
 });
 
 describe('the preview', () => {
-  it('counts the four character classes', () => {
-    assert.equal(characterClasses(''), 0);
-    assert.equal(characterClasses('abc'), 1);
-    assert.equal(characterClasses('abcABC'), 2);
-    assert.equal(characterClasses('aB3'), 3);
-    assert.equal(characterClasses('aB3!'), 4);
-    assert.equal(characterClasses('éÉ٣ '), 4);
-  });
-
-  it('finds three identical characters in a row by code point', () => {
-    assert.equal(hasLongRun('aab'), false);
-    assert.equal(hasLongRun('aaab'), true);
-    assert.equal(hasLongRun('😀😀😀'), true);
-    assert.equal(hasLongRun('😀😀a😀'), false);
-  });
-
-  it('lists the length and classes for Good, and the repeats rule for Excellent too', () => {
-    assert.deepEqual(previewRules(12, 'good', ''), [
-      { rule: 'length', count: 12, met: false },
-      { rule: 'classes', met: false },
-    ]);
-    assert.deepEqual(previewRules(12, 'good', 'correct-Horse1'), [
-      { rule: 'length', count: 12, met: true },
-      { rule: 'classes', met: true },
-    ]);
-    assert.deepEqual(previewRules(12, 'excellent', 'Passsword-123'), [
-      { rule: 'length', count: 12, met: true },
-      { rule: 'classes', met: true },
-      { rule: 'repeats', met: false },
-    ]);
-    assert.equal(previewRules(12, 'excellent', '').at(-1)?.met, false);
-  });
-
-  it('counts length by code point', () => {
-    assert.equal(previewRules(12, 'good', '😀'.repeat(11))[0].met, false);
-    assert.equal(previewRules(12, 'good', '😀'.repeat(12))[0].met, true);
-  });
-
+  // The rules themselves are @gatekeep/ui's, tested in packages/ui/scripts/password-rules.test.mjs (Story 4.7).
   it('previews the floor while the typed minimum is unusable, and clamps it', () => {
     const base = policyDraftOf(DEFAULTS);
     assert.equal(previewMinLength({ ...base, minLength: 'x' }), 12);

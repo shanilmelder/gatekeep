@@ -101,7 +101,7 @@ development_status:
   4-4-configure-a-tenant-s-email-provider: done
   4-5-send-email-through-the-job-pipeline: done
   4-6-configure-the-database-connection: done
-  4-7-sign-up-and-verify-an-email-address: backlog
+  4-7-sign-up-and-verify-an-email-address: done
   4-8-keep-sign-up-neutral-and-limited: backlog
   4-9-sign-in-with-a-password: backlog
   4-10-revoke-access-through-one-path: backlog

@@ -195,8 +195,10 @@ internal static class ProductionJobs
                 "Takes no parameter. In its Tenant's scope and one transaction, against one clock, it deletes token rows "
                 + "whose expiration_date has passed, then authorization rows no token references, then user_session rows "
                 + "that are ended or idle- or absolute-expired and that no authorization references, then signin_transaction "
-                + "rows more than one hour past expires_at. It reads only those columns, the IDs and references that join "
-                + "them and tenant_id, and writes one ID-free audit event when it deleted anything.")),
+                + "rows more than one hour past expires_at, then (Story 4.7) one_time_token rows more than one hour past "
+                + "expires_at, pending password_credential rows with no one_time_token left, and unverified users with an "
+                + "email, no password_credential and no signin_transaction naming them. It reads only those columns, the IDs and references that join them and tenant_id, and writes one "
+                + "ID-free audit event when it deleted anything.")),
         // Story 4.5: Host.Hosted queues verification, reset and notices (Stories 4.7, 4.8 and 4.11); only it can encrypt
         // a link token or code, so a Worker enqueue carries none. Five attempts, then dead, as any other job.
         new JobDefinition(

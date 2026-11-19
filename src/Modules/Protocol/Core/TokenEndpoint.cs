@@ -39,9 +39,13 @@ internal sealed class TokenEndpointServices(
     IAuthentication authentication,
     Gatekeep.Modules.Sessions.Contracts.ISessions sessions,
     TimeProvider time,
+    ISignUp signUp,
     ILoggerFactory? loggers = null)
 {
     public IAuthentication Authentication { get; } = authentication;
+
+    /// <summary>Sign-up and email verification (Story 4.7).</summary>
+    public ISignUp SignUp { get; } = signUp;
 
     public Gatekeep.Modules.Sessions.Contracts.ISessions Sessions { get; } = sessions;
 

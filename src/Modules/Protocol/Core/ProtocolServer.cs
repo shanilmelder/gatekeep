@@ -1,5 +1,6 @@
 using System.Globalization;
 using Gatekeep.Kernel.Audit;
+using Gatekeep.Kernel.Jobs;
 using Gatekeep.Kernel.Limits;
 using Gatekeep.Modules.Authentication.Contracts;
 using Gatekeep.Modules.Directory.Contracts;
@@ -42,6 +43,7 @@ internal static class ProtocolServer
         services.AddSingleton(provider => new HostedDataSource(() => hostedConnectionString(provider)));
         services.TryAddSingleton(new TokenRequestLimits(
             AuthenticationContract.TokenRequestTenantPolicy, AuthenticationContract.TokenRequestSourcePolicy));
+        services.TryAddSingleton(PasswordHashLimits.Default);
         services.AddSingleton(provider => new TokenEndpointServices(
             provider.GetRequiredService<HostedDataSource>(),
             AuthenticationContract.CreateAttemptLimiter(),
@@ -53,6 +55,13 @@ internal static class ProtocolServer
                 provider.GetRequiredService<IAuditAppender>(), provider.GetRequiredService<TimeProvider>(), provider.GetService<ICredentialStep>()),
             SessionsContract.CreateSessions(provider.GetRequiredService<IAuditAppender>(), provider.GetRequiredService<TimeProvider>()),
             provider.GetRequiredService<TimeProvider>(),
+            // Story 4.7: sign-up enqueues its verification email through the host's enqueuer, whose custody encrypts the
+            // link, and hashes through the one gate this instance holds.
+            AuthenticationContract.CreateSignUp(
+                provider.GetRequiredService<IAuditAppender>(),
+                provider.GetRequiredService<TimeProvider>(),
+                provider.GetRequiredService<IJobEnqueuer>(),
+                provider.GetRequiredService<PasswordHashLimits>()),
             provider.GetService<ILoggerFactory>()));
         services.AddScoped<TokenRequestTransaction>();
 

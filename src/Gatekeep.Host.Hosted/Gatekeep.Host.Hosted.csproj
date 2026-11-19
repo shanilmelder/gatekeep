@@ -19,6 +19,7 @@
     <ProjectReference Include="../Modules/Identity/Gatekeep.Modules.Identity.csproj" />
     <ProjectReference Include="../Modules/Sessions/Gatekeep.Modules.Sessions.csproj" />
     <ProjectReference Include="../Modules/Tenancy/Gatekeep.Modules.Tenancy.csproj" />
+    <ProjectReference Include="../Modules/Operations/Gatekeep.Modules.Operations.csproj" />
   </ItemGroup>
 
 </Project>

@@ -29,6 +29,7 @@
 // Story 4.1: the built Hosted Login bundle is served as Host.Hosted serves it, step JSON and theme
 // injected under the AD-21 headers, by hosted-step-server.mjs (hosted-step.spec.ts), and the
 // hosted-login surface tests run against that same server rather than `vite preview`.
+// Story 4.7: sign-up, the strength meter and email verification's steps (hosted-signup.spec.ts), on that same server.
 
 import { existsSync } from 'node:fs';
 import path from 'node:path';
@@ -69,11 +70,13 @@ export default defineConfig({
       name,
       // Every spec that isn't another project's own, so a new spec runs by default.
       testMatch: '*.spec.ts',
-      testIgnore: ['hosted-step.spec.ts', 'admin-csp.spec.ts', 'bootstrap.spec.ts', 'credential-setup.spec.ts', 'signin.spec.ts', 'controls.spec.ts', 'data.spec.ts', 'overlay.spec.ts', 'drawer.spec.ts', 'hosted.spec.ts', 'shell.spec.ts', 'admin-shell.spec.ts', 'admin-credentials.spec.ts', 'admin-recovery.spec.ts', 'admin-tenants.spec.ts', 'admin-tenant-switcher.spec.ts', 'admin-tenant-delete.spec.ts', 'admin-logs.spec.ts', 'admin-signing-keys.spec.ts', 'admin-applications.spec.ts', 'admin-apis.spec.ts', 'admin-email-provider.spec.ts', 'admin-database.spec.ts'],
+      testIgnore: ['hosted-step.spec.ts', 'admin-csp.spec.ts', 'bootstrap.spec.ts', 'credential-setup.spec.ts', 'signin.spec.ts', 'controls.spec.ts', 'data.spec.ts', 'overlay.spec.ts', 'drawer.spec.ts', 'hosted.spec.ts', 'shell.spec.ts', 'admin-shell.spec.ts', 'admin-credentials.spec.ts', 'admin-recovery.spec.ts', 'admin-tenants.spec.ts', 'admin-tenant-switcher.spec.ts', 'admin-tenant-delete.spec.ts', 'admin-logs.spec.ts', 'admin-signing-keys.spec.ts', 'admin-applications.spec.ts', 'admin-apis.spec.ts', 'admin-email-provider.spec.ts', 'admin-database.spec.ts', 'hosted-signup.spec.ts'],
       use: { baseURL: `http://127.0.0.1:${port}` },
     })),
     // Hosted Login's step pages (Story 4.1), on the built bundle as Host.Hosted serves it.
     { name: 'hosted-step', testMatch: 'hosted-step.spec.ts', use: { baseURL: `http://127.0.0.1:${hostedStep.port}` } },
+    // Sign-up and email verification (Story 4.7), on the same harness.
+    { name: 'hosted-signup', testMatch: 'hosted-signup.spec.ts', use: { baseURL: `http://127.0.0.1:${hostedStep.port}` } },
     { name: fixture.name, testMatch: 'controls.spec.ts', use: { baseURL: `http://127.0.0.1:${fixture.port}` } },
     // The data display (Story 1.15), on the same fixture build at ?page=data.
     { name: 'data', testMatch: 'data.spec.ts', use: { baseURL: `http://127.0.0.1:${fixture.port}` } },

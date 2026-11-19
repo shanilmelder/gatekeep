@@ -31,6 +31,8 @@ public sealed class ExpiredStatePurgeTests(PostgresFixture postgres)
         ["authorization"] = ["live-family", "shared-live"],
         ["user_session"] = ["idle-expired-with-live-family", "over-with-live-family", "live-no-family", "live-dead-family"],
         ["signin_transaction"] = ["in-retention", "live"],
+        // Story 4.7: a verification link goes an hour past its expiry, not before.
+        ["one_time_token"] = ["link-in-retention", "link-live"],
     };
 
     [Fact]
@@ -273,6 +275,9 @@ public sealed class ExpiredStatePurgeTests(PostgresFixture postgres)
             "in-retention@example.test,live@example.test",
             await database.ScalarAsync<string>($"SELECT string_agg(identifier, ',' ORDER BY identifier) FROM signin_transaction WHERE tenant_id = '{tenant}'"));
 
+        // The links' credential still has a link, so it stays.
+        Assert.Equal(1L, await database.ScalarAsync<long>($"SELECT count(*) FROM password_credential WHERE tenant_id = '{tenant}'"));
+
         Assert.Equal(1L, await EventsAsync(database, tenant));
         Assert.Equal(1L, await database.ScalarAsync<long>(
             $"SELECT count(*) FROM audit_event WHERE tenant_id = '{tenant}' AND type_code = '{Purged}' AND actor_kind = 'system' AND target_kind IS NULL AND target_id IS NULL"));
@@ -307,6 +312,14 @@ public sealed class ExpiredStatePurgeTests(PostgresFixture postgres)
             INSERT INTO token (tenant_id, id, application_id, authorization_id, subject, type, status, expiration_date, concurrency_token)
             VALUES ('{tenant}', '{Id(label)}', '{Application}', {(family is null ? "NULL" : $"'{Id(family)}'")}, '{label}', '{type}', 'valid',
                     {(expires is null ? "NULL" : $"now() + interval '{expires}'")}, gen_random_uuid());
+            """;
+
+        var credential = Guid.CreateVersion7();
+        string Link(string label, string expires) =>
+            $"""
+            INSERT INTO one_time_token (tenant_id, id, user_id, credential_id, purpose, token_hash, expires_at, created_at)
+            VALUES ('{tenant}', '{Id(label)}', '{user}', '{credential}', 'email_verification', sha256(convert_to('{Id(label)}', 'UTF8')),
+                    now() + interval '{expires}', now() + interval '{expires}' - interval '24 hours');
             """;
 
         string Transaction(string label, string expires, bool completed = false) =>
@@ -360,7 +373,14 @@ public sealed class ExpiredStatePurgeTests(PostgresFixture postgres)
             Transaction("in-retention", "-30 minutes"),
             Transaction("live", "10 minutes"),
             Transaction("past-retention", "-61 minutes"),
-            Transaction("past-retention-completed", "-2 hours", completed: true));
+            Transaction("past-retention-completed", "-2 hours", completed: true),
+
+            // Story 4.7: verification links of one pending credential. Past the hour's retention goes; inside it and live
+            // stay, and so does their credential, which still has a link.
+            $"INSERT INTO password_credential (tenant_id, id, user_id, connection_id, password_hash, status) VALUES ('{tenant}', '{credential}', '{user}', gen_random_uuid(), '$argon2id$seeded', 'pending');",
+            Link("link-past-retention", "-61 minutes"),
+            Link("link-in-retention", "-30 minutes"),
+            Link("link-live", "1 day"));
 
         await database.SuperuserAsync(sql);
         return ids;
@@ -373,7 +393,7 @@ public sealed class ExpiredStatePurgeTests(PostgresFixture postgres)
         return [.. text.Split(',', StringSplitOptions.RemoveEmptyEntries).Select(Guid.Parse).Order()];
     }
 
-    /// <summary>Every row of the Tenant in the four purged tables and its purge events, as text.</summary>
+    /// <summary>Every row of the Tenant in the purged tables and its purge events, as text.</summary>
     private static Task<string> SnapshotAsync(JobDatabase database, Guid tenant) =>
         database.ScalarAsync<string>(
             "SELECT concat_ws('|', " +

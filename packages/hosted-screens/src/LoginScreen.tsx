@@ -1,4 +1,4 @@
-import { Button, Field, HostedCard, Input, formatMessage, useMessages, type HostedTenant } from '@gatekeep/ui/hosted';
+import { Button, Field, HostedCard, Input, LinkButton, formatMessage, useMessages, type HostedTenant } from '@gatekeep/ui/hosted';
 import { useId } from 'react';
 
 export interface LoginScreenProps {
@@ -14,6 +14,13 @@ export interface LoginScreenProps {
   error?: string;
   /** Continue is under way: the button shows it and ignores another submit. */
   pending?: boolean;
+  /**
+   * "Sign up" (Story 4.7): the caller moves to Signup, carrying the email. Shown only while the Tenant's database
+   * Connection is enabled with sign-up on, which `signupEnabled` says; never a deferred control.
+   */
+  onSignUp?: () => void;
+  /** Whether sign-up is open, so "Don't have an account? Sign up" shows. */
+  signupEnabled?: boolean;
   /** The heading level: 2 inside another page, such as the theme preview. 1 otherwise. */
   headingLevel?: 1 | 2;
   className?: string;
@@ -22,9 +29,9 @@ export interface LoginScreenProps {
 
 /**
  * Login's identifier step (Story 4.2, EXPERIENCE.md, Hosted Login): the Tenant's monogram, "Welcome back",
- * "Log in to {tenant} to continue", the "Email address" field and Continue. Its content depends only on the
- * Connections enabled, never on the identifier; Story 4.2 has no Connection controls, so there is no social,
- * passkey, SSO, sign-up or recovery-code control (FR-33: no deferred controls). The email field is type email,
+ * "Log in to {tenant} to continue", the "Email address" field and Continue, then from Story 4.7 "Don't have an account?
+ * Sign up" while sign-up is open. Its content depends only on the Connections enabled, never on the identifier; there is
+ * no social, passkey, SSO or recovery-code control yet (FR-33: no deferred controls). The email field is type email,
  * `autocomplete="username webauthn"` so password managers and passkeys find it, and carries
  * `data-gk-initial-focus`, so first load focuses it unless a field is invalid.
  */
@@ -35,6 +42,8 @@ export function LoginScreen({
   onContinue,
   error,
   pending = false,
+  onSignUp,
+  signupEnabled = false,
   headingLevel,
   className,
   'data-testid': testId,
@@ -51,6 +60,16 @@ export function LoginScreen({
         <Button type="submit" form={formId} variant="primary" pending={pending}>
           {messages.continue}
         </Button>
+      }
+      link={
+        signupEnabled && onSignUp ? (
+          <>
+            {messages.signupPrompt}{' '}
+            <LinkButton onClick={onSignUp} data-testid="login-signup">
+              {messages.signupLink}
+            </LinkButton>
+          </>
+        ) : undefined
       }
       className={className}
       data-testid={testId}

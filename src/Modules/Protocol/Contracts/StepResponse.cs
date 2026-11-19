@@ -33,8 +33,58 @@ public sealed record StepResponse(string Step, int StepVersion, int? ExpiresInSe
     /// transaction's CSRF token. <paramref name="email"/> is the email kept from an earlier attempt, if any, and
     /// <paramref name="error"/> a field error's code, such as <see cref="LoginErrors.EmailInvalid"/>.
     /// </summary>
-    public static StepResponse Login(string tenant, int stepVersion, int expiresInSeconds, string csrfToken, string? email, string? error = null) =>
-        new(StepNames.Login, stepVersion, expiresInSeconds, new LoginData(tenant, email, error), csrfToken);
+    public static StepResponse Login(
+        string tenant, int stepVersion, int expiresInSeconds, string csrfToken, string? email, string? error = null, bool signupEnabled = false) =>
+        new(StepNames.Login, stepVersion, expiresInSeconds, new LoginData(tenant, email, error, signupEnabled), csrfToken);
+
+    /// <summary>
+    /// Signup (Story 4.7): the email carried from Login, the password policy the strength meter checks in the browser, and a
+    /// field error: <see cref="SignupErrors.EmailInvalid"/>, or <see cref="SignupErrors.PasswordRule"/> with each failing
+    /// rule's code in <paramref name="rules"/>.
+    /// </summary>
+    public static StepResponse Signup(
+        string tenant,
+        int stepVersion,
+        int expiresInSeconds,
+        string csrfToken,
+        string? email,
+        SignupPolicyData policy,
+        string? error = null,
+        IReadOnlyList<string>? rules = null) =>
+        new(StepNames.Signup, stepVersion, expiresInSeconds, new SignupData(tenant, email, policy, error, rules ?? []), csrfToken);
+
+    /// <summary>
+    /// Email verification required (Story 4.7): the address the link went to, whether this answers "Resend email", and the
+    /// error <see cref="VerifyEmailErrors.NotVerifiedYet"/> for "I've verified, continue" before the link was used.
+    /// </summary>
+    public static StepResponse VerifyEmail(
+        string tenant, int stepVersion, int expiresInSeconds, string csrfToken, string? email, bool resent = false, string? error = null) =>
+        new(StepNames.VerifyEmail, stepVersion, expiresInSeconds, new VerifyEmailData(tenant, email, resent, error), csrfToken);
+
+    /// <summary>
+    /// Email verified (Story 4.7): <see cref="EmailVerifiedContinuations.App"/> with the resume <paramref name="location"/>
+    /// when the link was opened in the browser that signed up and its Session started, else
+    /// <see cref="EmailVerifiedContinuations.Close"/> with none. It needs no CSRF token.
+    /// </summary>
+    public static StepResponse EmailVerified(string tenant, string? location) =>
+        new(
+            StepNames.EmailVerified,
+            1,
+            null,
+            new EmailVerifiedData(tenant, location is null ? EmailVerifiedContinuations.Close : EmailVerifiedContinuations.App, location),
+            null);
+
+    /// <summary>
+    /// Link expired (Story 4.7): "This link has expired or was already used.", for a malformed, foreign, unknown, expired or
+    /// used link. <paramref name="token"/> is the link's own value, kept only when it has a link's shape, which "Send a new
+    /// link" posts back with <paramref name="csrfToken"/>, the link-bound token; without one there is nothing to send.
+    /// </summary>
+    public static StepResponse LinkExpired(string tenant, string? token, string? csrfToken) =>
+        new(StepNames.LinkExpired, 1, null, new LinkExpiredData(tenant, token), token is null ? null : csrfToken);
+
+    /// <summary>The neutral "If an account exists for that email, we've sent a link." (Story 4.7), the same whatever was sent.</summary>
+    public static StepResponse LinkSent(string tenant) =>
+        new(StepNames.LinkSent, 1, null, new LinkSentData(tenant), null);
 
     /// <summary>
     /// A redirect (Story 4.2): the client follows <paramref name="location"/>, a same-origin path, with a top-level
@@ -57,6 +107,21 @@ public static class StepNames
 
     /// <summary>A step that leaves Hosted Login by a top-level GET (Story 4.2).</summary>
     public const string Redirect = "redirect";
+
+    /// <summary>Signup: email, password and the strength meter (Story 4.7).</summary>
+    public const string Signup = "signup";
+
+    /// <summary>Email verification required, after a sign-up (Story 4.7).</summary>
+    public const string VerifyEmail = "verify_email";
+
+    /// <summary>A verification link was used (Story 4.7).</summary>
+    public const string EmailVerified = "email_verified";
+
+    /// <summary>A verification link that can't be used (Story 4.7).</summary>
+    public const string LinkExpired = "link_expired";
+
+    /// <summary>The neutral confirmation after "Send a new link" (Story 4.7).</summary>
+    public const string LinkSent = "link_sent";
 }
 
 /// <summary>The codes a Login field error is sent as; the client shows the catalogue's text for each.</summary>
@@ -66,8 +131,56 @@ public static class LoginErrors
     public const string EmailInvalid = "email_invalid";
 }
 
-/// <summary>Login's props (Story 4.2): the Tenant's display name, the email to fill in, if kept, and a field error's code.</summary>
-public sealed record LoginData(string Tenant, string? Email, string? Error);
+/// <summary>The codes a Signup field error is sent as (Story 4.7); the client shows the catalogue's text for each.</summary>
+public static class SignupErrors
+{
+    /// <summary>"Enter a valid email address."</summary>
+    public const string EmailInvalid = LoginErrors.EmailInvalid;
+
+    /// <summary>The password failed the policy: the step's <c>rules</c> name each failing rule.</summary>
+    public const string PasswordRule = "password_rule";
+}
+
+/// <summary>The code Email verification required's error is sent as (Story 4.7).</summary>
+public static class VerifyEmailErrors
+{
+    /// <summary>"We haven't seen that yet. Check your inbox."</summary>
+    public const string NotVerifiedYet = "not_verified_yet";
+}
+
+/// <summary>Where Email verified's page goes on (Story 4.7).</summary>
+public static class EmailVerifiedContinuations
+{
+    /// <summary>Continue, a top-level GET back to the authorization request: the link was opened in the browser that signed up.</summary>
+    public const string App = "app";
+
+    /// <summary>"You can close this page.", with no action: any other browser.</summary>
+    public const string Close = "close";
+}
+
+/// <summary>
+/// Login's props (Story 4.2): the Tenant's display name, the email to fill in, if kept, a field error's code, and whether
+/// the "Sign up" link shows (Story 4.7): only while the database Connection is enabled with sign-up on.
+/// </summary>
+public sealed record LoginData(string Tenant, string? Email, string? Error, bool SignupEnabled = false);
+
+/// <summary>The password policy the strength meter checks in the browser (Story 4.7): the minimum length and the strength.</summary>
+public sealed record SignupPolicyData(int MinLength, string Strength);
+
+/// <summary>Signup's props (Story 4.7): the email carried from Login, the policy, a field error's code and the failing rules' codes.</summary>
+public sealed record SignupData(string Tenant, string? Email, SignupPolicyData Policy, string? Error, IReadOnlyList<string> Rules);
+
+/// <summary>Email verification required's props (Story 4.7): the address, whether the email was just sent again, and an error's code.</summary>
+public sealed record VerifyEmailData(string Tenant, string? Email, bool Resent, string? Error);
+
+/// <summary>Email verified's props (Story 4.7): <c>app</c> with the resume location, or <c>close</c> with none.</summary>
+public sealed record EmailVerifiedData(string Tenant, string ContinueTo, string? Location);
+
+/// <summary>Link expired's props (Story 4.7): the link's own value, for "Send a new link", when it had a link's shape.</summary>
+public sealed record LinkExpiredData(string Tenant, string? Token);
+
+/// <summary>The neutral link confirmation's props (Story 4.7).</summary>
+public sealed record LinkSentData(string Tenant);
 
 /// <summary>A redirect's props (Story 4.2): the Tenant's display name and the same-origin path the client goes to.</summary>
 public sealed record RedirectData(string Tenant, string Location);

@@ -13,11 +13,21 @@ public sealed record SignInRequest(Guid ApplicationId, IReadOnlyDictionary<strin
 /// </summary>
 public sealed record StartedSignIn(Guid TransactionId, Secret<string> Binding);
 
-/// <summary>The steps a sign-in transaction records as passed, in order, in <c>completed_steps</c> (Story 4.2).</summary>
+/// <summary>
+/// The steps a sign-in transaction records as passed, in order, in <c>completed_steps</c> (Story 4.2): Login's
+/// <see cref="Identifier"/>, or a sign-up's <see cref="Signup"/> then <see cref="Registered"/> (Story 4.7), then
+/// <see cref="Authenticated"/>.
+/// </summary>
 public static class SignInSteps
 {
     /// <summary>Login's email was entered and recorded.</summary>
     public const string Identifier = "identifier";
+
+    /// <summary>"Sign up" was chosen at Login (Story 4.7): the transaction stands at Signup. Back removes it.</summary>
+    public const string Signup = "signup";
+
+    /// <summary>A sign-up was submitted and recorded (Story 4.7): the transaction stands at Email verification required.</summary>
+    public const string Registered = "registered";
 
     /// <summary>A credential step authenticated the User, and a Session was issued.</summary>
     public const string Authenticated = "authenticated";
@@ -30,6 +40,8 @@ public static class SignInSteps
 /// <param name="Identifier">The email entered at Login, trimmed, or null before it.</param>
 /// <param name="AuthenticatedSessionId">The Session its authentication issued, once <see cref="SignInSteps.Authenticated"/> has passed.</param>
 /// <param name="CompletedAt">When the authorization request it was for completed; a completed transaction is never used again.</param>
+/// <param name="SignupUserId">The User its sign-up registered (Story 4.7); null for an address already verified, which gets nothing.</param>
+/// <param name="SignupCredentialId">The pending credential its sign-up made (Story 4.7). Only that credential's activation signs this transaction in.</param>
 public sealed record SignInTransaction(
     Guid Id,
     Guid ApplicationId,
@@ -39,7 +51,9 @@ public sealed record SignInTransaction(
     string? Identifier,
     Guid? AuthenticatedSessionId,
     DateTimeOffset ExpiresAt,
-    DateTimeOffset? CompletedAt)
+    DateTimeOffset? CompletedAt,
+    Guid? SignupUserId = null,
+    Guid? SignupCredentialId = null)
 {
     /// <summary>Whether <paramref name="step"/> has passed.</summary>
     public bool HasPassed(string step) => CompletedSteps.Contains(step, StringComparer.Ordinal);

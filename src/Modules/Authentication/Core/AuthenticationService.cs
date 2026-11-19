@@ -30,7 +30,7 @@ internal sealed class AuthenticationService(IAuditAppender audit, TimeProvider t
     private const string SelectByBinding =
         """
         SELECT id, application_id, parameters::text, completed_steps, step_version, identifier,
-               authenticated_session_id, expires_at, completed_at
+               authenticated_session_id, expires_at, completed_at, signup_user_id, signup_credential_id
         FROM signin_transaction
         WHERE tenant_id = @tenant_id AND binding_hash = @binding_hash
         FOR UPDATE
@@ -129,7 +129,9 @@ internal sealed class AuthenticationService(IAuditAppender audit, TimeProvider t
             reader.IsDBNull(5) ? null : reader.GetString(5),
             reader.IsDBNull(6) ? null : reader.GetGuid(6),
             reader.GetFieldValue<DateTimeOffset>(7),
-            reader.IsDBNull(8) ? null : reader.GetFieldValue<DateTimeOffset>(8));
+            reader.IsDBNull(8) ? null : reader.GetFieldValue<DateTimeOffset>(8),
+            reader.IsDBNull(9) ? null : reader.GetGuid(9),
+            reader.IsDBNull(10) ? null : reader.GetGuid(10));
     }
 
     public async Task<StartedSignIn> RestartAsync(CommandContext context, SignInTransaction expired, CancellationToken cancellationToken)

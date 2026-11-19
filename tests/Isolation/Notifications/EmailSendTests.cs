@@ -205,7 +205,8 @@ public sealed class EmailSendTests(PostgresFixture postgres)
 
     /// <summary>
     /// Each transient attempt rolls back, count and all, and is retried; after the last one the job goes dead, as any
-    /// other, with no event written, and the credential goes with the payload.
+    /// other, with only the runner's <c>operations.job.dead</c> written and no email event, and the credential goes with the
+    /// payload.
     /// </summary>
     [Fact]
     public async Task Transient_failure_retries_with_its_count_rolled_back_then_goes_dead_after_the_last_attempt()
@@ -224,7 +225,9 @@ public sealed class EmailSendTests(PostgresFixture postgres)
                 Assert.True(await runner.RunOnceAsync(Cancellation));
                 Assert.Equal(attempt < 5 ? "pending" : "dead", await database.StatusAsync(job));
                 Assert.Equal(0L, await database.ScalarAsync<long>($"SELECT count(*) FROM tenant_attempt WHERE tenant_id = '{TenantA}'"));
-                Assert.Equal(0L, await EventsAsync(database, null, null));
+                // A retry writes nothing; the last attempt writes only the runner's operations.job.dead, as any dead job does.
+                Assert.Equal(attempt < 5 ? 0L : 1L, await EventsAsync(database, null, null));
+                Assert.Equal(attempt < 5 ? 0L : 1L, await EventsAsync(database, Gatekeep.Modules.Operations.Contracts.OperationsEvents.JobDead.Code.Value, null));
             }
         }
 
