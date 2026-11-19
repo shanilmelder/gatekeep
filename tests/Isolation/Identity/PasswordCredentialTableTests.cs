@@ -17,7 +17,7 @@ public sealed class PasswordCredentialTableTests(PostgresFixture postgres)
 
     private const string UniqueViolation = "23505";
 
-    private const string ForeignKeyViolation = "23503";
+    private const string RestrictViolation = "23001";
 
     private static readonly Guid TenantA = Guid.Parse("01900000-0000-7000-8000-0000000047a1");
     private static readonly Guid TenantB = Guid.Parse("01900000-0000-7000-8000-0000000047a2");
@@ -112,7 +112,7 @@ public sealed class PasswordCredentialTableTests(PostgresFixture postgres)
         // A credential with a link can't be deleted before it (ON DELETE RESTRICT); with its links gone first, it can.
         var restricted = await Assert.ThrowsAsync<PostgresException>(() => InTenantAsync(
             database, TableRegistry.Hosted, TenantA, c => ExecuteAsync(c, $"DELETE FROM password_credential WHERE id = '{CredentialA}'")));
-        Assert.Equal(ForeignKeyViolation, restricted.SqlState);
+        Assert.Equal(RestrictViolation, restricted.SqlState);
         await InTenantAsync(database, TableRegistry.Hosted, TenantA, async c =>
             await ExecuteAsync(c, $"DELETE FROM one_time_token WHERE credential_id = '{CredentialA}'")
             + await ExecuteAsync(c, $"DELETE FROM password_credential WHERE id = '{CredentialA}'"));
