@@ -25,11 +25,53 @@ export interface GenericErrorData {
   traceId: string;
 }
 
-/** Login's props (Story 4.2): the email to fill in, if kept, and a field error's code. */
+/** Login's props (Story 4.2): the email to fill in, if kept, a field error's code, and whether "Sign up" shows (Story 4.7). */
 export interface LoginData {
   tenant: string;
   email: string | null;
   error: string | null;
+  signupEnabled: boolean;
+}
+
+/** The password policy the strength meter checks (Story 4.7). */
+export interface SignupPolicy {
+  minLength: number;
+  strength: 'good' | 'excellent';
+}
+
+/** Signup's props (Story 4.7): the email carried from Login, the policy, a field error's code and the failing rules. */
+export interface SignupData {
+  tenant: string;
+  email: string | null;
+  policy: SignupPolicy;
+  error: string | null;
+  rules: string[];
+}
+
+/** Email verification required's props (Story 4.7). */
+export interface VerifyEmailData {
+  tenant: string;
+  email: string | null;
+  resent: boolean;
+  error: string | null;
+}
+
+/** Email verified's props (Story 4.7): back to the Application by `location`, or "You can close this page.". */
+export interface EmailVerifiedData {
+  tenant: string;
+  continueTo: 'app' | 'close';
+  location: string | null;
+}
+
+/** Link expired's props (Story 4.7): the link's own value for "Send a new link", when it had a link's shape. */
+export interface LinkExpiredData {
+  tenant: string;
+  token: string | null;
+}
+
+/** The neutral link confirmation's props (Story 4.7). */
+export interface LinkSentData {
+  tenant: string;
 }
 
 /** A redirect's props (Story 4.2): the same-origin path the client opens with a top-level GET. */
@@ -51,6 +93,11 @@ export type Step = StepMeta &
     | { step: 'generic_error'; data: GenericErrorData }
     | { step: 'login'; data: LoginData }
     | { step: 'redirect'; data: RedirectData }
+    | { step: 'signup'; data: SignupData }
+    | { step: 'verify_email'; data: VerifyEmailData }
+    | { step: 'email_verified'; data: EmailVerifiedData }
+    | { step: 'link_expired'; data: LinkExpiredData }
+    | { step: 'link_sent'; data: LinkSentData }
   );
 
 type StepName = Step['step'];
@@ -87,6 +134,24 @@ export function isSameOriginPath(path: string): boolean {
 /** The Login field error codes the server sends, each shown as its catalogue text. */
 export const LOGIN_ERRORS: readonly string[] = Object.freeze(['email_invalid']);
 
+/** Signup's error codes (Story 4.7): the email field's, or the password's, whose rules the step names. */
+export const SIGNUP_ERRORS: readonly string[] = Object.freeze(['email_invalid', 'password_rule']);
+
+/** The password rule codes the server names (Story 4.7), each shown as its catalogue sentence. */
+export const PASSWORD_RULES: readonly string[] = Object.freeze(['length', 'too_long', 'classes', 'repeats', 'dictionary', 'personal_data', 'history']);
+
+/** Email verification required's error codes (Story 4.7). */
+export const VERIFY_EMAIL_ERRORS: readonly string[] = Object.freeze(['not_verified_yet']);
+
+/** A code, or null; undefined when it is neither or isn't one of `known`, so an unknown code never shows as another. */
+const knownCode = (value: unknown, known: readonly string[]): string | null | undefined => {
+  const code = optionalText(value);
+  return code === null || (code !== undefined && known.includes(code)) ? code : undefined;
+};
+
+/** A step that needs its transaction's CSRF token and remaining life. */
+const live = (meta: StepMeta): boolean => meta.csrfToken !== null && meta.expiresInSeconds !== null;
+
 /** Each step's props reader: undefined when the data, or the step's meta, doesn't fit the screen. */
 const readers: { [name in StepName]: (data: Record<string, unknown>, meta: StepMeta) => Extract<Step, { step: name }>['data'] | undefined } = {
   generic_error: (data) => {
@@ -101,14 +166,51 @@ const readers: { [name in StepName]: (data: Record<string, unknown>, meta: StepM
     const error = optionalText(data.error);
     // An unknown field error code is an unreadable step, never shown as some other error.
     const known = error === null || (error !== undefined && LOGIN_ERRORS.includes(error));
+    const signupEnabled = data.signupEnabled === true;
     return tenant === undefined || email === undefined || error === undefined || !known || meta.csrfToken === null || meta.expiresInSeconds === null
       ? undefined
-      : { tenant, email, error };
+      : { tenant, email, error, signupEnabled };
   },
   redirect: (data) => {
     const tenant = text(data.tenant);
     const location = text(data.location);
     return tenant === undefined || location === undefined || !isSameOriginPath(location) ? undefined : { tenant, location };
+  },
+  signup: (data, meta) => {
+    const tenant = text(data.tenant);
+    const email = optionalText(data.email);
+    const error = knownCode(data.error, SIGNUP_ERRORS);
+    const policy = isRecord(data.policy) ? data.policy : {};
+    const minLength = typeof policy.minLength === 'number' && Number.isInteger(policy.minLength) && policy.minLength > 0 ? policy.minLength : undefined;
+    const strength = policy.strength === 'good' || policy.strength === 'excellent' ? policy.strength : undefined;
+    const rules = Array.isArray(data.rules) && data.rules.every((rule) => typeof rule === 'string' && PASSWORD_RULES.includes(rule)) ? (data.rules as string[]) : undefined;
+    return tenant === undefined || email === undefined || error === undefined || minLength === undefined || strength === undefined || rules === undefined || !live(meta)
+      ? undefined
+      : { tenant, email, policy: { minLength, strength }, error, rules };
+  },
+  verify_email: (data, meta) => {
+    const tenant = text(data.tenant);
+    const email = optionalText(data.email);
+    const error = knownCode(data.error, VERIFY_EMAIL_ERRORS);
+    const resent = data.resent === true;
+    return tenant === undefined || email === undefined || error === undefined || !live(meta) ? undefined : { tenant, email, resent, error };
+  },
+  email_verified: (data) => {
+    const tenant = text(data.tenant);
+    const location = optionalText(data.location);
+    if (tenant === undefined || location === undefined) return undefined;
+    if (data.continueTo === 'app') return location !== null && isSameOriginPath(location) ? { tenant, continueTo: 'app', location } : undefined;
+    return data.continueTo === 'close' ? { tenant, continueTo: 'close', location: null } : undefined;
+  },
+  link_expired: (data, meta) => {
+    const tenant = text(data.tenant);
+    const token = optionalText(data.token);
+    // A link to send again needs its link-bound CSRF token.
+    return tenant === undefined || token === undefined || (token !== null && meta.csrfToken === null) ? undefined : { tenant, token };
+  },
+  link_sent: (data) => {
+    const tenant = text(data.tenant);
+    return tenant === undefined ? undefined : { tenant };
   },
 };
 

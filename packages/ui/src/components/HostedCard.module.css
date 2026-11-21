@@ -76,6 +76,14 @@
   min-width: 0;
 }
 
+/* A screen's form lays out its fields the way the content does (Story 4.7's Signup has several). */
+:where(.content) > :where(form) {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gk-space-16);
+  min-width: 0;
+}
+
 /* The one primary action, at full width. */
 .action {
   display: flex;

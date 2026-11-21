@@ -22,3 +22,12 @@ export function go(path: string): void {
   }
   if (target.origin === origin) window.location.assign(target.href);
 }
+
+/**
+ * Drops the page's query from the address bar and its history entry, without a request (Story 4.7): a verification link's
+ * token is in its URL, and once its page is shown the token has no further use there.
+ */
+export function forgetQuery(): void {
+  if (window.location.search === '') return;
+  window.history.replaceState(null, '', window.location.pathname);
+}

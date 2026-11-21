@@ -344,4 +344,55 @@ public static class SecurityLimits
 
     /// <summary>The longest terms URL a Tenant's sign-up links to: 2048 characters (Story 4.6), as the table checks.</summary>
     public const int MaxTermsUrlLength = 2048;
+
+    /// <summary>
+    /// The longest password a sign-up accepts: 256 code points (Story 4.7). A longer one is refused with the rule
+    /// <c>too_long</c> before it is hashed.
+    /// </summary>
+    public const int PasswordMaximumLength = 256;
+
+    /// <summary>
+    /// How long an email verification link works: 24 hours (Story 4.7), as the PRD's credential enrolment link (§5.2,
+    /// A-18). It works once, and only its SHA-256 is stored.
+    /// </summary>
+    public static readonly TimeSpan EmailVerificationLinkLifetime = TimeSpan.FromHours(24);
+
+    /// <summary>
+    /// How long after its expiry an unused or used one-time token row is kept before the expired-state purge deletes it:
+    /// 1 hour (Story 4.7), as a sign-in transaction's restart retention.
+    /// </summary>
+    public static readonly TimeSpan OneTimeTokenPurgeDelay = TimeSpan.FromHours(1);
+
+    /// <summary>
+    /// A new Argon2id password hash's memory cost: 19456 KiB, 19 MiB (Story 4.7, NFR-2, OWASP's first configuration).
+    /// A stored hash keeps its own parameters, so this can be raised later.
+    /// </summary>
+    public const int Argon2MemoryKiB = 19456;
+
+    /// <summary>A new Argon2id password hash's iterations: 2 (Story 4.7, NFR-2).</summary>
+    public const int Argon2Iterations = 2;
+
+    /// <summary>A new Argon2id password hash's parallelism: 1 (Story 4.7, NFR-2).</summary>
+    public const int Argon2Parallelism = 1;
+
+    /// <summary>A new Argon2id password hash's random salt: 16 bytes (Story 4.7).</summary>
+    public const int Argon2SaltBytes = 16;
+
+    /// <summary>An Argon2id password hash's output: 32 bytes (Story 4.7).</summary>
+    public const int Argon2HashBytes = 32;
+
+    /// <summary>
+    /// The most Argon2id hashes one host computes at once, Deployment-wide (Story 4.7, AD-14's hashing budget): 8, so at
+    /// most 8 × 19 MiB of hashing memory.
+    /// </summary>
+    public const int PasswordHashConcurrency = 8;
+
+    /// <summary>The most of <see cref="PasswordHashConcurrency"/> one Tenant may hold at once: 4 (Story 4.7), so one Tenant can't starve the others.</summary>
+    public const int PasswordHashTenantShare = 4;
+
+    /// <summary>
+    /// How long a request waits for a hashing slot before it is refused with the generic <c>temporarily_unavailable</c>
+    /// step: 2 seconds (Story 4.7).
+    /// </summary>
+    public static readonly TimeSpan PasswordHashWait = TimeSpan.FromSeconds(2);
 }

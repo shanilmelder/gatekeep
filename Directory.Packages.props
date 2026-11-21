@@ -8,6 +8,8 @@
   <ItemGroup>
     <!-- Story 1.22: WebAuthn verification behind the Kernel IWebAuthnVerifier port, in src/Adapters/Fido2 only. -->
     <PackageVersion Include="Fido2" Version="4.3.2" />
+    <!-- Story 4.7 (NFR-2): Argon2id password hashing, in src/Modules/Authentication only. -->
+    <PackageVersion Include="Konscious.Security.Cryptography.Argon2" Version="1.3.1" />
     <!-- Story 4.5: SMTP email, over a stream Adapters.Egress opened, in src/Adapters/Email only. -->
     <PackageVersion Include="MailKit" Version="4.18.2" />
     <PackageVersion Include="MimeKit" Version="4.18.2" />

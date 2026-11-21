@@ -86,5 +86,7 @@ public static class TenantKeyedTypes
     {
         // AD-10 and AD-11's named exceptions: each Tenant's runtime, keyed by its Tenant ID.
         ["Gatekeep.Modules.Protocol.Core.TenantRuntimes._entries"] = KeyScope.Tenant,
+        // Story 4.7 (AD-14): each Tenant's share of the hashing budget, a semaphore keyed by its Tenant ID.
+        ["Gatekeep.Modules.Authentication.Core.PasswordHashGate._tenants"] = KeyScope.Tenant,
     };
 }

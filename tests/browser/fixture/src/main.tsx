@@ -91,6 +91,18 @@ const HOSTED = [
   'useFieldControl',
   'useMessages',
   'useToast',
+  // Story 4.7: sign-up's inline action, strength meter, resend countdown and the browser-checkable password rules.
+  'LinkButton',
+  'PASSWORD_MAX_LENGTH',
+  'RESEND_COOLDOWN_SECONDS',
+  'ResendAction',
+  'STRENGTH_ANNOUNCE_MS',
+  'STRENGTH_SEGMENTS',
+  'StrengthMeter',
+  'characterClasses',
+  'filledSegments',
+  'hasLongRun',
+  'passwordRules',
 ];
 // The admin entry's own exports, exactly: anything else it gains fails the check.
 const ADMIN_ONLY = [

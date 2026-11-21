@@ -3,6 +3,7 @@ using Gatekeep.Kernel.Jobs;
 using Gatekeep.Kernel.Persistence;
 using Gatekeep.Modules.Audit.Contracts;
 using Gatekeep.Modules.Authentication.Contracts;
+using Gatekeep.Modules.Identity.Contracts;
 using Gatekeep.Modules.Operations.Contracts;
 using Gatekeep.Modules.Sessions.Contracts;
 
@@ -14,8 +15,8 @@ namespace Gatekeep.Modules.Operations.Core;
 /// Tenants' IDs and the job table, and enqueues one <c>sessions.expired_state.purge</c> in each Tenant's own scope
 /// unless one is already waiting there. It deletes nothing. The purge, as <c>gk_worker</c> in its Tenant's scope and its
 /// one transaction, calls each owning module's purge, children before parents (AD-1): Sessions' expired tokens, dead
-/// Token Families and over, unanchored Sessions, then Authentication's transactions past their restart retention, all
-/// against one clock read once. A run that deleted anything writes one <see cref="SessionsEvents.ExpiredStatePurged"/>
+/// Token Families and over, unanchored Sessions, then Authentication's transactions past their restart retention, then
+/// Identity's verification links an hour past their expiry (Story 4.7), all against one clock read once. A run that deleted anything writes one <see cref="SessionsEvents.ExpiredStatePurged"/>
 /// with actor System; one that deleted nothing writes nothing. A failure rolls the whole run back for a retry.
 /// </summary>
 internal static class ExpiredStatePurgeJobs
@@ -100,6 +101,7 @@ internal static class ExpiredStatePurgeJobs
 
         var deleted = await SessionsContract.PurgeExpiredStateAsync(context, now, cancellationToken);
         deleted += await AuthenticationContract.PurgeExpiredStateAsync(context, now, cancellationToken);
+        deleted += await IdentityContract.PurgeExpiredStateAsync(context, now, cancellationToken);
 
         if (deleted > 0)
         {

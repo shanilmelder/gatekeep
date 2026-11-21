@@ -39,7 +39,7 @@ public static class ArtifactRegistry
     {
         ["authorization code"] = ArtifactCoverage.Covered("AuthorizationCodeTests.Tenant_As_code_presented_at_Tenant_B_is_invalid_grant_and_refused_before_any_lookup"),
         ["refresh token"] = ArtifactCoverage.Covered("RefreshTokenTests.Tenant_As_refresh_token_presented_at_Tenant_B_is_invalid_grant_and_refused_before_any_lookup"),
-        ["verification link"] = ArtifactCoverage.Pending("4-7"),
+        ["verification link"] = ArtifactCoverage.Covered("EmailVerificationTests.Tenant_As_verification_link_presented_at_Tenant_B_is_link_expired_and_refused_before_any_lookup"),
         ["reset link"] = ArtifactCoverage.Pending("4-11"),
         ["Passkey"] = ArtifactCoverage.Pending("6-3"),
         ["Recovery Code"] = ArtifactCoverage.Pending("6-8"),

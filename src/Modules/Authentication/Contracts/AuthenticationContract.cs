@@ -1,9 +1,14 @@
 using Gatekeep.Kernel.Audit;
+using Gatekeep.Kernel.Jobs;
 using Gatekeep.Kernel.Limits;
 using Gatekeep.Kernel.Persistence;
 using Gatekeep.Kernel.RateLimiting;
+using Gatekeep.Kernel.Secrets;
 using Gatekeep.Modules.Authentication.Core;
+using Gatekeep.Modules.Directory.Contracts;
+using Gatekeep.Modules.Identity.Contracts;
 using Gatekeep.Modules.Sessions.Contracts;
+using Gatekeep.Modules.Tenancy.Contracts;
 
 namespace Gatekeep.Modules.Authentication.Contracts;
 
@@ -56,6 +61,65 @@ public static class AuthenticationContract
     /// </summary>
     public static IAuthentication CreateAuthentication(IAuditAppender audit, TimeProvider time, ICredentialStep? credentialStep = null) =>
         new AuthenticationService(audit, time, SessionsContract.CreateSessions(audit, time), credentialStep ?? NoCredentialStep);
+
+    /// <summary>
+    /// Sign-up and email verification through Hosted Login (Story 4.7) over the Kernel audit port. <paramref name="time"/>
+    /// sets every expiry. The verification email is enqueued through <paramref name="enqueuer"/>, the host's, whose custody
+    /// encrypts the link under the Tenant's <c>payload</c> key. Every Argon2id hash passes one gate per returned instance,
+    /// sized by <paramref name="hashLimits"/> (<see cref="PasswordHashLimits.Default"/> unless given), so a host keeps one.
+    /// Sessions are issued through Sessions' own <c>ISessions</c>.
+    /// </summary>
+    public static ISignUp CreateSignUp(IAuditAppender audit, TimeProvider time, IJobEnqueuer enqueuer, PasswordHashLimits? hashLimits = null) =>
+        new SignUpService(
+            audit,
+            time,
+            SessionsContract.CreateSessions(audit, time),
+            IdentityContract.CreateIdentity(audit, time),
+            DirectoryContract.CreateDirectory(audit, time),
+            TenancyContract.CreateTenants(audit),
+            enqueuer,
+            new PasswordHashGate(hashLimits ?? PasswordHashLimits.Default, time));
+
+    /// <summary>
+    /// A hashing gate sized by <paramref name="limits"/>, timing its waits by <paramref name="time"/> (Story 4.7): the one each
+    /// <see cref="CreateSignUp"/> holds. A host never needs its own; tests check the budget through it.
+    /// </summary>
+    public static IPasswordHashGate CreatePasswordHashGate(PasswordHashLimits limits, TimeProvider? time = null) => new PasswordHashGate(limits, time);
+
+    /// <summary>
+    /// The rules <paramref name="password"/> fails under <paramref name="policy"/> for a User with <paramref name="email"/>
+    /// (Story 4.7, FR-18), each by its <see cref="PasswordRuleCodes"/> code, in that order; empty when it passes. The history
+    /// rule compares it with <paramref name="history"/>, the User's newest earlier Argon2id hashes, as many as the policy's
+    /// history count, each by a full verification; with none it never fails.
+    /// </summary>
+    public static async Task<IReadOnlyList<string>> CheckPasswordAsync(
+        Secret<string> password, PasswordPolicy policy, string? email, IReadOnlyList<string>? history = null)
+    {
+        ArgumentNullException.ThrowIfNull(password);
+        ArgumentNullException.ThrowIfNull(policy);
+
+        var failed = password.Use(value => PasswordRules.Check(value, policy, email));
+        var compared = (history ?? []).Take(policy.HistoryCount).ToList();
+        if (compared.Count != 0 && await PasswordRules.IsReusedAsync(password, compared))
+        {
+            failed.Add(PasswordRuleCodes.History);
+        }
+
+        return failed;
+    }
+
+    /// <summary>
+    /// A new Argon2id PHC string for <paramref name="password"/> (Story 4.7, NFR-2):
+    /// <c>$argon2id$v=19$m=…,t=…,p=…$salt$hash</c>, with a fresh salt and <see cref="SecurityLimits"/>' parameters.
+    /// </summary>
+    public static Task<string> HashPasswordAsync(Secret<string> password) => PasswordHasher.HashAsync(password);
+
+    /// <summary>Whether <paramref name="password"/> matches <paramref name="phc"/>, verified with the parameters the string holds.</summary>
+    public static Task<bool> VerifyPasswordAsync(Secret<string> password, string phc) => PasswordHasher.VerifyAsync(password, phc);
+
+    /// <summary>The Argon2id memory (KiB), iterations and parallelism <paramref name="phc"/> holds, or null when it isn't one this reads.</summary>
+    public static (int MemoryKiB, int Iterations, int Parallelism)? PasswordHashParameters(string phc) =>
+        PasswordHasher.ParametersOf(phc) is { } parameters ? (parameters.MemoryKiB, parameters.Iterations, parameters.Parallelism) : null;
 
     /// <summary>
     /// The release build's credential step (Story 4.2): it offers none, so a sign-in past Login's email can't

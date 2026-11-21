@@ -153,6 +153,16 @@ public static class RouteRegistry
         new("POST", "/login/api/identifier", CaseKind.HostResolved),
         new("POST", "/login/api/transaction/extend", CaseKind.HostResolved),
 
+        // Story 4.7: sign-up and email verification, each on the resolved Tenant's sign-in transaction, or, for the
+        // verification link's page and its "Send a new link", on a link whose Tenant prefix is checked before any lookup.
+        new("POST", "/login/api/signup/open", CaseKind.HostResolved),
+        new("POST", "/login/api/signup/back", CaseKind.HostResolved),
+        new("POST", "/login/api/signup", CaseKind.HostResolved),
+        new("POST", "/login/api/verification/resend", CaseKind.HostResolved),
+        new("POST", "/login/api/verification/continue", CaseKind.HostResolved),
+        new("GET", "/login/verify-email", CaseKind.HostResolved),
+        new("POST", "/login/api/verification/new-link", CaseKind.HostResolved),
+
         new("*", "{*path:nonfile}", CaseKind.NotTenantBound, Reason: "the one fixed 404, the same as an unknown host's (AD-6)"),
     ];
 }

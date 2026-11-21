@@ -8,3 +8,9 @@
 
 export { GenericErrorScreen, type GenericErrorScreenProps } from './GenericErrorScreen';
 export { LoginScreen, type LoginScreenProps } from './LoginScreen';
+// Story 4.7: sign-up and email verification.
+export { EmailVerifiedScreen, type EmailVerifiedScreenProps } from './EmailVerifiedScreen';
+export { LinkExpiredScreen, type LinkExpiredScreenProps } from './LinkExpiredScreen';
+export { LinkSentScreen, type LinkSentScreenProps } from './LinkSentScreen';
+export { SignupScreen, type SignupScreenProps } from './SignupScreen';
+export { VerifyEmailScreen, type VerifyEmailScreenProps } from './VerifyEmailScreen';

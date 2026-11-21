@@ -24,8 +24,8 @@ const BANNED = [
   ['window.', /\bwindow\s*\./],
 ];
 /**
- * Story 4.2: what one Hosted Login client file may use, by file name: api.ts makes the two API posts,
- * and navigate.ts the one top-level GET.
+ * Story 4.2: what one Hosted Login client file may use, by file name: api.ts makes the API posts,
+ * and navigate.ts the one top-level GET and (Story 4.7) drops a verification link's token from the address bar.
  */
 const HOSTED_LOGIN_ALLOWED = Object.freeze({ 'api.ts': ['fetch('], 'navigate.ts': ['location.', 'window.'] });
 
@@ -75,11 +75,21 @@ describe('Props-only screens', () => {
     }
   });
 
-  it('lets api.ts fetch only the two Hosted Login API paths, once', async () => {
+  // Story 4.7 adds sign-up's and the verification link's requests, each a fixed path.
+  it('lets api.ts fetch only the Hosted Login API paths, once', async () => {
     const code = stripComments(await readFile(path.join(repository, 'apps/hosted-login/src/api.ts'), 'utf8'));
     assert.equal(code.match(/\bfetch\s*\(/g)?.length, 1);
     const paths = [...code.matchAll(/'(\/[^']*)'/g)].map((match) => match[1]).sort();
-    assert.deepEqual(paths, ['/login/api/identifier', '/login/api/transaction/extend']);
+    assert.deepEqual(paths, [
+      '/login/api/identifier',
+      '/login/api/signup',
+      '/login/api/signup/back',
+      '/login/api/signup/open',
+      '/login/api/transaction/extend',
+      '/login/api/verification/continue',
+      '/login/api/verification/new-link',
+      '/login/api/verification/resend',
+    ]);
   });
 
   it('catches each banned use, and ignores comments and look-alikes', () => {

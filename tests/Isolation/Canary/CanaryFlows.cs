@@ -304,6 +304,8 @@ internal static class CanaryFlows
         new("protocol.authorization_code", [], AuthorizationCodeAsync),
         new("protocol.refresh_token", [], RefreshTokenAsync),
         new("protocol.userinfo_and_revocation", [], UserinfoAndRevocationAsync),
+        // Story 4.7: sign-up and its verification link, through Hosted Login's own routes.
+        new("protocol.sign_up", [], SignUpAsync),
     ];
 
     private static readonly DateOnly Reviewed = new(2026, 11, 2);
@@ -1978,6 +1980,74 @@ internal static class CanaryFlows
         run.Capture("Hosted log", captured.Text);
         Assert.Contains("connect/authorize", captured.Text, StringComparison.Ordinal);
         Assert.Contains("connect/token", captured.Text, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Story 4.7: a sign-up through Hosted Login, through the real Protocol registration and the hosts' scrubbing logging,
+    /// with the real Transit, then its verification link opened in the browser that signed up and the code it resumes to.
+    /// The password and the link, and the link's random part, are canaries: the password reaches only the hasher, and the
+    /// link travels only as job payload ciphertext and is stored only as its SHA-256, so neither may reach a table, an
+    /// event or a log line. Failing, a password the policy refuses is submitted first, and the used link is opened again.
+    /// </summary>
+    private static async Task SignUpAsync(CanaryFlowContext context, FlowRun run, bool failing)
+    {
+        const string hostA = "canary-a.signup.test";
+        const string hostB = "canary-b.signup.test";
+        const string email = "canary.signup@example.test";
+
+        var flow = await Identity.SignUpFlow.CreateAsync(context.Postgres, context.Bao, hostA, hostB);
+        run.Database = flow.Database.Name;
+        run.Plant("role-password", PostgresFixture.Password);
+        // Lower case, numbers and hyphens: three classes, at least 12 characters, and nothing of the email.
+        var password = run.Plant("signup-password");
+
+        var captured = new CapturedConsole();
+        await using (var host = await Protocol.ProtocolHost.StartAsync(flow.Database.Hosted, context.Bao, logging: logging =>
+        {
+            logging.AddGatekeepLogging().SetMinimumLevel(LogLevel.Trace);
+            logging.Services.AddSingleton<Microsoft.Extensions.Logging.Console.ConsoleFormatter>(captured);
+            logging.Services.Configure<Microsoft.Extensions.Logging.Console.ConsoleLoggerOptions>(options => options.FormatterName = captured.Name);
+        }))
+        {
+            var browser = await flow.BeginAsync(host, hostA);
+            using var signup = await browser.OpenAsync(email);
+
+            if (failing)
+            {
+                // Lower case and numbers only: refused for its classes, with nothing written.
+                var weak = run.Plant("signup-weak-password", $"cnryweak{Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(8))}");
+                using var refused = await browser.CreateAsync(signup, email, weak.Value);
+                run.Capture("refused sign-up response", refused.RootElement.GetRawText());
+                Assert.Equal("signup", refused.RootElement.GetProperty("step").GetString());
+            }
+
+            using var verify = await browser.CreateAsync(signup, email, password.Value);
+            run.Capture("sign-up response", verify.RootElement.GetRawText());
+            Assert.Equal("verify_email", verify.RootElement.GetProperty("step").GetString());
+
+            var link = host.Jobs.LastLink();
+            run.Plant("verification-link", link);
+            run.Plant("verification-link-random", link[(link.IndexOf('.', StringComparison.Ordinal) + 1)..]);
+
+            using (var verified = await browser.OpenLinkAsync(link))
+            {
+                run.Capture("verified page step", verified.RootElement.GetRawText());
+                Assert.Equal("email_verified", verified.RootElement.GetProperty("step").GetString());
+                using var resumed = await browser.FollowAsync(verified.RootElement.GetProperty("data").GetProperty("location").GetString()!);
+                Assert.Equal(HttpStatusCode.Found, resumed.StatusCode);
+            }
+
+            if (failing)
+            {
+                // The used link's page keeps its own link by design, so only its step name is captured.
+                using var again = await browser.OpenLinkAsync(link);
+                run.Capture("used link page", again.RootElement.GetProperty("step").GetString()!);
+                Assert.Equal("link_expired", again.RootElement.GetProperty("step").GetString());
+            }
+        }
+
+        run.Capture("Hosted log", captured.Text);
+        Assert.Contains("login/api/signup", captured.Text, StringComparison.Ordinal);
     }
 
     /// <summary>

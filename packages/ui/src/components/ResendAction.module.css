@@ -1,0 +1,15 @@
+/* "Resend email" and its countdown (Story 4.7): on one line where they fit, the countdown in tx2. */
+
+.resend {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: var(--gk-space-8);
+}
+
+.countdown {
+  font: var(--gk-font-small);
+  color: var(--gk-color-tx2);
+  font-variant-numeric: tabular-nums;
+}
