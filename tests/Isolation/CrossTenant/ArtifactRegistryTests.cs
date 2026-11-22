@@ -11,7 +11,7 @@ namespace Gatekeep.Tests.Isolation.CrossTenant;
 /// </summary>
 public sealed partial class ArtifactRegistryTests
 {
-    private static readonly string SprintStatus = Path.Combine(
+    internal static readonly string SprintStatus = Path.Combine(
         BuildOutput.RepositoryRoot(), "_bmad-output", "implementation-artifacts", "sprint-status.yaml");
 
     /// <summary>The PRD's FR-8 word for a type, where it differs from the registry's.</summary>
@@ -131,18 +131,22 @@ public sealed partial class ArtifactRegistryTests
         ];
     }
 
-    /// <summary>Every <c>Class.Method</c> carrying <c>[Fact]</c> or <c>[Theory]</c> in this assembly and the Architecture tests' build output.</summary>
-    private static readonly Lazy<HashSet<string>> TestMethods = new(() =>
+    /// <summary>This assembly and the Architecture tests' build output.</summary>
+    internal static readonly Lazy<Assembly[]> TestAssemblies = new(() =>
     {
         var output = Path.GetRelativePath(
             Path.Combine(BuildOutput.RepositoryRoot(), "tests/Isolation"),
             AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
         var architecture = Path.Combine(BuildOutput.RepositoryRoot(), "tests", "Architecture", output, "Gatekeep.Tests.Architecture.dll");
-        Assembly[] assemblies = [typeof(ArtifactRegistryTests).Assembly, System.Runtime.Loader.AssemblyLoadContext.Default.LoadFromAssemblyPath(architecture)];
+        return [typeof(ArtifactRegistryTests).Assembly, System.Runtime.Loader.AssemblyLoadContext.Default.LoadFromAssemblyPath(architecture)];
+    });
 
+    /// <summary>Every <c>Class.Method</c> carrying <c>[Fact]</c> or <c>[Theory]</c> in <see cref="TestAssemblies"/>.</summary>
+    internal static readonly Lazy<HashSet<string>> TestMethods = new(() =>
+    {
         return
         [
-            .. assemblies.SelectMany(a => a.GetTypes())
+            .. TestAssemblies.Value.SelectMany(a => a.GetTypes())
                 .SelectMany(t => t.GetMethods(BindingFlags.Public | BindingFlags.Instance | BindingFlags.Static | BindingFlags.DeclaredOnly)
                     .Where(m => m.GetCustomAttributesData().Any(d => d.AttributeType.Name is "FactAttribute" or "TheoryAttribute"))
                     .Select(m => $"{t.Name}.{m.Name}")),
@@ -203,7 +207,7 @@ public sealed partial class ArtifactRegistryTests
     }
 
     /// <summary>Each story key under <c>development_status</c> and its status: keys that start with an epic and story number.</summary>
-    private static Dictionary<string, string> Stories(string yaml) =>
+    internal static Dictionary<string, string> Stories(string yaml) =>
         StoryLine().Matches(yaml).ToDictionary(m => m.Groups["key"].Value, m => m.Groups["status"].Value, StringComparer.Ordinal);
 
     [GeneratedRegex(@"^\s+(?<key>\d+-\d+-[a-z0-9-]+):\s*(?<status>[a-z-]+)\s*$", RegexOptions.Multiline)]

@@ -89,6 +89,46 @@ public sealed class RevokeAccessTests(PostgresFixture postgres)
         Assert.Equal("valid", after["A:F4"].Status);
     }
 
+    /// <summary>
+    /// Story 4.10 (FR-48 "at once"): a User-scope revocation ends every other Session, family and token
+    /// of the User in the caller's one transaction, sparing the acting Session. Read through that
+    /// transaction they have all ended; once it rolls back, every one is live again and no event is kept.
+    /// </summary>
+    [Fact]
+    public async Task User_scope_spares_the_acting_Session_and_is_all_or_nothing_in_the_callers_transaction()
+    {
+        var database = await SeededDatabaseAsync();
+        var before = await RowsAsync(database);
+        var beforeA = before.Where(r => r.Key.StartsWith("A:", StringComparison.Ordinal)).ToDictionary();
+        await using var hosted = Source(database);
+
+        RevocationOutcome outcome;
+        Dictionary<string, Row> inside;
+        await using (var scope = await TenantScope.BeginAsync(hosted, TenantA, Cancellation))
+        {
+            var context = scope.CreateCommandContext();
+            outcome = await _sessions.RevokeAccessAsync(
+                context, new RevocationScope.User(UserU), S1, RevocationReason.CredentialChange, Actor.User(UserU), Cancellation);
+
+            // The same transaction, as gk_hosted in Tenant A's scope: only Tenant A's rows are visible.
+            await using var command = context.CreateCommand();
+            inside = await ReadRowsAsync(command);
+
+            // Disposed without a commit: the transaction rolls back.
+        }
+
+        Assert.Equal(new RevocationOutcome(2, 3, 6), outcome);
+        AssertChanged(
+            beforeA,
+            inside,
+            RevocationReason.CredentialChange,
+            ["A:S2", "A:S3", "A:F2", "A:F2b", "A:F3", "A:F2r", "A:F2a", "A:F2br", "A:F2ba", "A:F3r", "A:F3a"]);
+
+        Assert.Equal(before, await RowsAsync(database));
+        Assert.All(before.Where(r => r.Key.StartsWith("A:S", StringComparison.Ordinal)), r => Assert.Null(r.Value.EndedAt));
+        Assert.Empty(await AuditEventsAsync(database));
+    }
+
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
@@ -547,15 +587,21 @@ public sealed class RevokeAccessTests(PostgresFixture postgres)
     {
         await using var connection = new NpgsqlConnection(postgres.SuperuserConnection(database));
         await connection.OpenAsync(Cancellation);
-        await using var command = new NpgsqlCommand(
+        await using var command = connection.CreateCommand();
+        return await ReadRowsAsync(command);
+    }
+
+    /// <summary>Every Session, family and token <paramref name="command"/>'s connection can see, keyed <c>{Tenant}:{name}</c>.</summary>
+    private static async Task<Dictionary<string, Row>> ReadRowsAsync(System.Data.Common.DbCommand command)
+    {
+        command.CommandText =
             """
             SELECT tenant_id, id, ended_at, end_reason, NULL::text, NULL::uuid FROM user_session
             UNION ALL
             SELECT tenant_id, id, NULL::timestamptz, NULL::text, status, concurrency_token FROM "authorization"
             UNION ALL
             SELECT tenant_id, id, NULL::timestamptz, NULL::text, status, concurrency_token FROM token
-            """,
-            connection);
+            """;
 
         var rows = new Dictionary<string, Row>();
         await using var reader = await command.ExecuteReaderAsync(Cancellation);

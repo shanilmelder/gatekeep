@@ -2,7 +2,8 @@
 title: 'Story 4.10: Revoke access through one path'
 type: 'feature'
 created: '2026-11-22'
-status: 'ready-for-dev'
+status: 'done'
+baseline_revision: 'd48eecb8c064839a61ab7bd668c4d0c2d2c1cdfb'
 review_loop_iteration: 0
 followup_review_recommended: false
 context:
@@ -101,6 +102,37 @@ deferred: []
 
 ## Review Triage Log
 
+### 2026-11-22 — Review pass
+- verdicts: 27 findings — high 0, medium 2, low 18, false 3, maybe-false 4
+- findings:
+  - `low` `patch` (Edge) The PRD regex takes the first `- Triggers:` bullet anywhere — the parse is now sliced to the `#### FR-48:` section.
+  - `low` `patch` (Edge) A Pending id matching several stories reports "no story has" — reports "matches N stories: use a unique id".
+  - `low` `patch` (Edge) A duplicate in `Required` passes — duplicates are refused.
+  - `low` `reject` (Edge) A story set to done without flipping its entry turns main red after the merge — the same contract as `ArtifactRegistry` (Story 1.31); the story loop finalizes sprint-status in the story's own PR, so the PR itself goes red.
+  - `medium` `patch` (Edge) A sub-trigger can be dropped from the mapping, `Required` and `Triggers` in one edit — each PRD phrase must map to 2^(its " or " count) entries, 13 in all.
+  - `medium` `patch` (Edge) Any existing test counts as coverage — a Covered test must carry `[Trait("FR-48", "<trigger>")]` for its trigger and not be skipped.
+  - `low` `patch` (Verification Gap, other) A skipped test counts as coverage, and the doc comment overstates it — fixed with the trait rule; the `ISessions` doc line is reworded.
+  - `medium` `patch` (Blind) The list can still shrink without failing — same root cause as the Edge row, fixed by it.
+  - `low` `patch` (Blind) The PRD regex isn't tied to FR-48 — fixed with the Edge row.
+  - `medium` `patch` (Blind) A Covered entry only has to name a test that exists — fixed with the trait rule.
+  - `low` `patch` (Blind) Story 18.1's "nothing pending" gate isn't enforced — once `18-1` is done, any Pending entry fails.
+  - `low` `reject` (Blind) A trigger can ship before its entry flips, until its story is marked done — the sprint-status contract shared with `ArtifactRegistry`; detecting built triggers from the code is beyond this story.
+  - `low` `patch` (Blind) T-12 reads as in force though every trigger is pending — the residual column now says all 13 are pending on their stories.
+  - `low` `patch` (Blind) T-12 omits the acting-Session test — now cites `User_scope_spares_the_acting_Session_and_its_families`.
+  - `low` `patch` (Blind) The `ISessions` comment misdescribes the walk — reworded: each trigger is covered by a test tagged with it, or pending on its story.
+  - `low` `patch` (Blind) The rollback test's name overclaims and never looks inside the open transaction — renamed; it reads the rows through the same scope before the rollback, then shows they're back.
+  - `low` `reject` (Blind) The walk is a near copy of `ArtifactRegistryTests` — the shared reading is reused (made internal); a generic registry is a refactor of Story 1.31's code beyond a direct correction.
+  - `low` `patch` (Blind) The wrong message for several matches — fixed with the Edge row.
+  - `false` `reject` (Blind) The spec doesn't record the cross-Tenant test decision — this triage log records it (next row) and the spec made the test conditional.
+  - `low` `patch` (Blind) `Fr48Trigger` can be subclassed outside — the base has a private constructor.
+  - `low` `reject` (Blind) `Covered` and `Pending` accept blank strings — a blank story id matches no story and a blank test name matches no method, so the walk already fails on both.
+  - `maybe-false` `reject` (Intent) "At once" under concurrency isn't exercised — the revocation runs as one set of statements in the caller's transaction; if a partial window existed it would be low.
+  - `maybe-false` `reject` (Intent) "Generated" could mean derived from code call paths — the architecture (AR-23) describes a walk of the FR-48 list; if a code-derived walk were meant it would be low here, since no trigger exists yet.
+  - `maybe-false` `reject` (Intent) "Built so far" is inferred from sprint-status, not the code — same as the Blind reject row; if true it would be low.
+  - `false` `reject` (Intent) Sign-up's credential activation counts as an FR-48 trigger — FR-48 lists the triggers, and sign-up activation isn't among them; its carve-out only says the acting Session continues for such changes.
+  - `false` `reject` (Intent) No new two-Tenant test — `Another_Tenants_rows_with_the_same_IDs_are_untouched` already revokes at User scope and checks Tenant B's rows and audit events, which is the spec's condition for not adding one.
+  - `maybe-false` `reject` (Intent) The user-facing eviction isn't shown end to end — no trigger exists yet; Story 4.11 shows it for reset. If true it would be low.
+
 ## Design Notes
 
 - **Why the PRD is parsed:** "so the list can't shrink silently" needs a source outside the registry itself. Parsing FR-48's "Triggers:" line ties the list to the requirement, and a fixed phrase-to-entry mapping keeps the parse simple.
@@ -111,3 +143,40 @@ deferred: []
 **Commands:**
 - With `MSYS_NO_PATHCONV=1`, run `docker run --rm -v "D:/Projects/Personal/gatekeep:/src" -v gk-nuget:/root/.nuget -w /src mcr.microsoft.com/dotnet/sdk:10.0.403-noble sh -c 'dotnet build Gatekeep.slnx -p:NuGetAudit=false -v q'`. Expected: 0 warnings and 0 errors.
 - The Isolation suite runs on CI on the PR. Don't run it locally.
+
+## Auto Run Result
+
+Status: done
+
+**Summary:**
+- **FR-48 walk:** `Fr48WalkTests` walks the FR-48 trigger list. `Fr48TriggerRegistry` holds all 13 triggers, split from the PRD's "Triggers:" line, each pending on the backlog story that builds it.
+- **What the walk fails on:**
+  - the PRD's FR-48 section and the registry disagree, or a phrase maps to fewer triggers than its actions;
+  - a trigger is missing or duplicated;
+  - a pending story is unknown, ambiguous or already done;
+  - Story 18.1 is done while anything is pending;
+  - a covered test is missing, untagged (`[Trait("FR-48", "<trigger>")]`) or skipped.
+- **The other two criteria** stand on Story 2.7's tests, plus a new all-or-nothing test.
+
+**Files changed:**
+- `tests/Isolation/Revocation/Fr48TriggerRegistry.cs`: the trigger list, the phrase mapping and the entries.
+- `tests/Isolation/Revocation/Fr48WalkTests.cs`: the walk and its rule tests.
+- `tests/Isolation/CrossTenant/ArtifactRegistryTests.cs`: the sprint-status reading and test index, made internal for reuse.
+- `tests/Isolation/Sessions/RevokeAccessTests.cs`: `User_scope_spares_the_acting_Session_and_is_all_or_nothing_in_the_callers_transaction`.
+- `src/Modules/Sessions/Contracts/ISessions.cs`: one doc line.
+- `docs/threat-model.md`: T-12.
+
+**Review findings:** 27.
+- **16 patched:** the phrase-count rule, the FR-48 section slice, the trait-bound coverage, the Story 18.1 gate, the ambiguous-id message, duplicates and subclassing, the rollback test, the doc comment, and T-12.
+- **None deferred.**
+- **The rest rejected** with reasons in the triage log.
+
+**Follow-up review recommended:** false. One `medium` root cause was patched twice over (the list could shrink, and any test counted as coverage), and both are covered by new rule tests. Patched entries: high 0, medium 2, low 9. That is below a second pass's threshold for test-only code, and no production behaviour changed.
+
+**Verification:**
+- .NET build in the SDK 10.0.403 Docker image: 0 warnings, 0 errors.
+- The Isolation suite runs on CI.
+
+**Residual risks:**
+- The PRD parse expects the current "Triggers:" line shape, and fails loudly if it changes.
+- A trigger built before its story is marked done isn't detected until then.
