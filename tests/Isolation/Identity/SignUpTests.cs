@@ -242,11 +242,14 @@ public sealed class SignUpTests(PostgresFixture postgres, OpenBaoFixture bao)
             SignUpFlow.Data(known).EnumerateObject().Select(p => p.Name));
         Assert.Equal("known@example.com", SignUpFlow.Data(known).GetProperty("email").GetString());
 
-        // Nothing of the existing account changed, and nothing was sent to it.
+        // Nothing of the existing account changed; its owner got only the security notice (Story 4.8), with no link.
         Assert.Equal(before, (await flow.Database.ScalarAsync<string>(userRow), await flow.Database.ScalarAsync<string>(credentialRow)));
         Assert.Equal(1L, await flow.RowsAsync("password_credential", $"user_id = '{existing}'"));
         Assert.Equal(0L, await flow.RowsAsync("one_time_token", $"user_id = '{existing}'"));
-        Assert.DoesNotContain(host.Jobs.Jobs, j => j.UserId == existing);
+        var notice = Assert.Single(host.Jobs.Jobs, j => j.UserId == existing);
+        Assert.Equal(Gatekeep.Modules.Notifications.Contracts.NotificationsContract.SecurityNotificationTemplate, notice.TemplateId);
+        Assert.Null(notice.Credential);
+        Assert.Equal(2L, await flow.EmailJobsAsync());
         Assert.Equal(0L, await flow.CountAsync($"SELECT count(*) FROM audit_event WHERE tenant_id = '{flow.TenantA}' AND target_id = '{existing}'"));
 
         // Its transaction names no User, so "I've verified" can never sign it in.

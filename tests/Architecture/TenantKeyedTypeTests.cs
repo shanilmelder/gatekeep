@@ -182,6 +182,8 @@ public sealed class TenantKeyedTypeTests
     [
         "Gatekeep.Modules.Authentication.Contracts.AuthenticationContract",
         "Gatekeep.Modules.Protocol.Contracts.TokenRequestLimits",
+        // Story 4.8: Hosted Login counts sign-ups and verification sends through Authentication's Tenant limiter.
+        "Gatekeep.Modules.Protocol.Contracts.SignUpLimits",
         "Gatekeep.Modules.Notifications.Contracts.NotificationsContract",
     ];
 

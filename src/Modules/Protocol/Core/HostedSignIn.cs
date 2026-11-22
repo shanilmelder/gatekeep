@@ -5,6 +5,7 @@ using System.Text;
 using System.Text.Json;
 using Gatekeep.Kernel.Limits;
 using Gatekeep.Kernel.Persistence;
+using Gatekeep.Kernel.RateLimiting;
 using Gatekeep.Kernel.Secrets;
 using Gatekeep.Modules.Authentication.Contracts;
 using Gatekeep.Modules.Identity.Contracts;
@@ -130,8 +131,8 @@ internal static class SignInStepResponses
     public const string InvalidTransaction = "invalid_transaction";
 
     /// <summary>
-    /// No credential step is available after Login's email (Story 4.2, until Story 4.9), or no hashing slot came free in
-    /// time for a sign-up (Story 4.7).
+    /// No credential step is available after Login's email (Story 4.2, until Story 4.9), no hashing slot came free in
+    /// time for a sign-up (Story 4.7), or a sign-up or resend was rate limited (Story 4.8, with 429).
     /// </summary>
     public const string TemporarilyUnavailable = "temporarily_unavailable";
 
@@ -181,7 +182,8 @@ internal static class SignInStepResponses
                 email ?? transaction.Identifier,
                 new SignupPolicyData(policy.MinLength, policy.Strength),
                 error,
-                rules);
+                rules,
+                policy.TermsUrl);
         }
 
         if (transaction.HasPassed(SignInSteps.Identifier))
@@ -561,6 +563,9 @@ internal static class LoginEndpoints
             return;
         }
 
+        // Story 4.8: a missing or non-boolean acceptTerms is not acceptance.
+        var acceptTerms = Flag(body, "acceptTerms");
+
         var password = new Secret<string>(typed);
         await using var scope = await TenantScope.BeginAsync(login.Services.Database.Source, login.Tenant.TenantId, login.Cancellation);
         var context = scope.CreateCommandContext();
@@ -575,6 +580,13 @@ internal static class LoginEndpoints
             return;
         }
 
+        // Story 4.8: counted per Tenant and per source, never by address, before any hash or lookup.
+        if (await login.LimitAsync(login.Services.SignUpLimits.SignUpTenant, login.Services.SignUpLimits.SignUpSource) is { } retryAfter)
+        {
+            await login.AnswerLimitedAsync(retryAfter);
+            return;
+        }
+
         if (!AuthenticationContract.TryNormalizeEmail(input, out var email))
         {
             await login.AnswerCurrentAsync(context, transaction, binding, SignupErrors.EmailInvalid, input.Trim());
@@ -582,7 +594,7 @@ internal static class LoginEndpoints
         }
 
         var result = await login.Services.SignUp.SignUpAsync(
-            context, transaction, email, password, SignInCookies.Read(http, ProtocolContract.SessionCookie), login.Cancellation);
+            context, transaction, email, password, acceptTerms, SignInCookies.Read(http, ProtocolContract.SessionCookie), login.Cancellation);
         var now = login.Services.Time.GetUtcNow();
 
         switch (result.Status)
@@ -590,6 +602,11 @@ internal static class LoginEndpoints
             case SignUpStatus.RuleFailed:
                 // Nothing was written: the scope is undone with the request.
                 await login.AnswerCurrentAsync(context, transaction, binding, SignupErrors.PasswordRule, email, result.FailedRules);
+                return;
+
+            case SignUpStatus.TermsRequired:
+                // Story 4.8: refused before the rules and the hash; nothing was written.
+                await login.AnswerCurrentAsync(context, transaction, binding, SignupErrors.TermsRequired, email);
                 return;
 
             case SignUpStatus.Unavailable:
@@ -654,6 +671,13 @@ internal static class LoginEndpoints
         if (stepVersion != transaction.StepVersion || !IsAt(transaction, SignInSteps.Signup, SignInSteps.Registered))
         {
             await login.AnswerCurrentAsync(context, transaction, binding);
+            return;
+        }
+
+        // Story 4.8: counted per Tenant and per source with "Send a new link", before any lookup.
+        if (await login.LimitAsync(login.Services.SignUpLimits.SendTenant, login.Services.SignUpLimits.SendSource) is { } retryAfter)
+        {
+            await login.AnswerLimitedAsync(retryAfter);
             return;
         }
 
@@ -790,6 +814,14 @@ internal static class LoginEndpoints
             return;
         }
 
+        // Story 4.8: counted with "Resend email", before any lookup. Past a limit nothing is sent, and the answer stays the
+        // neutral confirmation.
+        if (await login.LimitAsync(login.Services.SignUpLimits.SendTenant, login.Services.SignUpLimits.SendSource) is not null)
+        {
+            await login.AnswerAsync(StatusCodes.Status200OK, StepResponse.LinkSent(login.Tenant.Name));
+            return;
+        }
+
         await using (var scope = await TenantScope.BeginAsync(login.Services.Database.Source, login.Tenant.TenantId, login.Cancellation))
         {
             await login.Services.SignUp.SendNewLinkAsync(scope.CreateCommandContext(), new Secret<string>(token), login.Cancellation);
@@ -821,6 +853,10 @@ internal static class LoginEndpoints
         && element.TryGetInt32(out var version)
             ? version
             : null;
+
+    /// <summary>Whether the body's <paramref name="name"/> is the JSON <c>true</c>; anything else, or nothing, is false.</summary>
+    private static bool Flag(JsonDocument? body, string name) =>
+        body is not null && body.RootElement.TryGetProperty(name, out var element) && element.ValueKind == JsonValueKind.True;
 
     /// <summary>The body's string <paramref name="name"/>, or null when there is none.</summary>
     private static string? Text(JsonDocument? body, string name) =>
@@ -964,6 +1000,51 @@ internal static class LoginEndpoints
             string? email = null,
             IReadOnlyList<string>? rules = null) =>
             await AnswerAsync(StatusCodes.Status200OK, await CurrentAsync(context, transaction, binding, error, email, rules));
+
+        /// <summary>
+        /// Counts this request under <paramref name="perSource"/> (the request's source), then, only when the source is
+        /// allowed, under <paramref name="perTenant"/> (subject <see cref="AuthenticationContract.TenantSubject"/>), in their
+        /// own short committed scope (Story 4.8, AD-14). Null when both allow it; otherwise how long until both would, the
+        /// larger wait. No subject ever involves an email address.
+        /// </summary>
+        public async Task<TimeSpan?> LimitAsync(RateLimitPolicy perTenant, RateLimitPolicy perSource)
+        {
+            var source = TokenEndpoint.Source(Http);
+            RateLimitDecision tenantDecision;
+            RateLimitDecision sourceDecision;
+            await using (var scope = await TenantScope.BeginAsync(Services.Database.Source, Tenant.TenantId, Cancellation))
+            {
+                var count = scope.CreateCommandContext();
+
+                // The source first: a source already past its limit isn't counted against the Tenant, so one source alone
+                // can't use up the Tenant's limit for everyone else.
+                sourceDecision = await Services.Limiter.AttemptAsync(count, perSource, source, Cancellation);
+                tenantDecision = sourceDecision.Allowed
+                    ? await Services.Limiter.AttemptAsync(count, perTenant, AuthenticationContract.TenantSubject, Cancellation)
+                    : RateLimitDecision.Allow;
+                await scope.CommitAsync(Cancellation);
+            }
+
+            if (tenantDecision.Allowed && sourceDecision.Allowed)
+            {
+                return null;
+            }
+
+            var policy = tenantDecision.Allowed ? perSource : perTenant;
+            Services.Logger?.LogInformation("A Hosted Login request was refused under {Policy}.", policy.Code);
+            return TimeSpan.FromTicks(Math.Max(tenantDecision.RetryAfter.Ticks, sourceDecision.RetryAfter.Ticks));
+        }
+
+        /// <summary>
+        /// A rate-limited sign-up or resend (Story 4.8): 429 with <c>Retry-After</c> in whole seconds, at least 1, and Generic
+        /// error <c>temporarily_unavailable</c>, the same for every address.
+        /// </summary>
+        public Task AnswerLimitedAsync(TimeSpan retryAfter)
+        {
+            Http.Response.Headers.RetryAfter = Math.Max(1, (long)Math.Ceiling(retryAfter.TotalSeconds)).ToString(CultureInfo.InvariantCulture);
+            return AnswerAsync(
+                StatusCodes.Status429TooManyRequests, StepResponse.GenericError(Tenant.Name, SignInStepResponses.TemporarilyUnavailable, TraceId));
+        }
 
         /// <summary>A body Protocol can't read: 400 Generic error <c>invalid_request</c>, nothing read or written.</summary>
         public Task InvalidRequestAsync() =>

@@ -311,6 +311,8 @@ public static class TableRegistry
         // Story 4.5: the email send job, as gk_worker, resolves a recipient from a User's ID: the ID and email only.
         // Story 4.7: a sign-up, as gk_hosted, creates its User (its ID, email and creation time only), and a verification
         // link sets when its email was verified.
+        // Story 4.8: a sign-up records the terms URL its User accepted and when, on the new User or on an unverified one's
+        // re-sign-up.
         new("user", TableClass.Tenant, "Identity", TableUse.Runtime, new Dictionary<string, IReadOnlyList<string>>
         {
             [Hosted] = [Select],
@@ -319,8 +321,8 @@ public static class TableRegistry
         {
             [Hosted] =
             [
-                new ColumnGrant(Insert, ["tenant_id", "id", "email", "created_at"]),
-                new ColumnGrant(Update, ["email_verified_at"]),
+                new ColumnGrant(Insert, ["tenant_id", "id", "email", "created_at", "terms_accepted_url", "terms_accepted_at"]),
+                new ColumnGrant(Update, ["email_verified_at", "terms_accepted_url", "terms_accepted_at"]),
             ],
             // Story 4.7: the expired-state purge also finds an abandoned, unverified sign-up's User.
             [Worker] = [new ColumnGrant(Select, ["tenant_id", "id", "email", "email_verified_at"])],

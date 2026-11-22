@@ -73,6 +73,15 @@ public static class TenantKeyedTypes
         ["Gatekeep.Modules.Notifications.Contracts.NotificationsContract.EmailRecipientPolicy"] = KeyScope.Tenant,
         ["Gatekeep.Modules.Protocol.Contracts.TokenRequestLimits.Tenant"] = KeyScope.Tenant,
         ["Gatekeep.Modules.Protocol.Contracts.TokenRequestLimits.Source"] = KeyScope.Tenant,
+        // Story 4.8: sign-up and verification sends, counted in each Tenant's own tenant_attempt rows, never by address.
+        ["Gatekeep.Modules.Protocol.Contracts.SignUpLimits.SignUpTenant"] = KeyScope.Tenant,
+        ["Gatekeep.Modules.Protocol.Contracts.SignUpLimits.SignUpSource"] = KeyScope.Tenant,
+        ["Gatekeep.Modules.Protocol.Contracts.SignUpLimits.SendTenant"] = KeyScope.Tenant,
+        ["Gatekeep.Modules.Protocol.Contracts.SignUpLimits.SendSource"] = KeyScope.Tenant,
+        ["Gatekeep.Modules.Protocol.Contracts.SignUpLimits.SignUpTenantPolicy"] = KeyScope.Tenant,
+        ["Gatekeep.Modules.Protocol.Contracts.SignUpLimits.SignUpSourcePolicy"] = KeyScope.Tenant,
+        ["Gatekeep.Modules.Protocol.Contracts.SignUpLimits.SendTenantPolicy"] = KeyScope.Tenant,
+        ["Gatekeep.Modules.Protocol.Contracts.SignUpLimits.SendSourcePolicy"] = KeyScope.Tenant,
         ["Gatekeep.Modules.Admins.Contracts.AdminsContract.EnrolmentPolicy"] = KeyScope.DeploymentWide("recover-admin enrolment use per client (Story 1.32); Admins are Deployment-scoped."),
         ["Gatekeep.Modules.Admins.Contracts.AdminsContract.EnrolmentDeploymentPolicy"] = KeyScope.DeploymentWide("One Deployment-wide cap on recover-admin enrolment use (Story 1.32)."),
     };

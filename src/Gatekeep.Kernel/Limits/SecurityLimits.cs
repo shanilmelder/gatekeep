@@ -352,6 +352,34 @@ public static class SecurityLimits
     public const int PasswordMaximumLength = 256;
 
     /// <summary>
+    /// Sign-ups one Tenant's Hosted Login takes in <see cref="SignUpWindow"/>: 600, from every source together (Story 4.8,
+    /// NFR-6), high enough for a launch spike and below the token endpoint's. Each is counted before any hash or lookup,
+    /// so past it every sign-up is a 429 until the window ends, whatever its address.
+    /// </summary>
+    public const int SignUpTenantAttempts = 600;
+
+    /// <summary>
+    /// Sign-ups one source (an IPv4 address, or an IPv6 /64) may send one Tenant's Hosted Login in
+    /// <see cref="SignUpWindow"/>: 10 (Story 4.8, NFR-6), counted like the Tenant's.
+    /// </summary>
+    public const int SignUpSourceAttempts = 10;
+
+    /// <summary>
+    /// Verification emails asked for ("Resend email" and "Send a new link" together) at one Tenant's Hosted Login in
+    /// <see cref="SignUpWindow"/>: 600, from every source together (Story 4.8, NFR-6).
+    /// </summary>
+    public const int VerificationSendTenantAttempts = 600;
+
+    /// <summary>
+    /// Verification emails one source may ask one Tenant's Hosted Login for in <see cref="SignUpWindow"/>: 10 (Story 4.8,
+    /// NFR-6), counted like the Tenant's.
+    /// </summary>
+    public const int VerificationSendSourceAttempts = 10;
+
+    /// <summary>The fixed window sign-ups and verification sends are counted in: 15 minutes (Story 4.8).</summary>
+    public static readonly TimeSpan SignUpWindow = TimeSpan.FromMinutes(15);
+
+    /// <summary>
     /// How long an email verification link works: 24 hours (Story 4.7), as the PRD's credential enrolment link (§5.2,
     /// A-18). It works once, and only its SHA-256 is stored.
     /// </summary>

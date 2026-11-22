@@ -39,8 +39,9 @@ public sealed record StepResponse(string Step, int StepVersion, int? ExpiresInSe
 
     /// <summary>
     /// Signup (Story 4.7): the email carried from Login, the password policy the strength meter checks in the browser, and a
-    /// field error: <see cref="SignupErrors.EmailInvalid"/>, or <see cref="SignupErrors.PasswordRule"/> with each failing
-    /// rule's code in <paramref name="rules"/>.
+    /// field error: <see cref="SignupErrors.EmailInvalid"/>, <see cref="SignupErrors.TermsRequired"/> (Story 4.8), or
+    /// <see cref="SignupErrors.PasswordRule"/> with each failing rule's code in <paramref name="rules"/>. From Story 4.8,
+    /// <paramref name="termsUrl"/> is the Tenant's terms URL, or null; with one, Signup asks the User to accept it.
     /// </summary>
     public static StepResponse Signup(
         string tenant,
@@ -50,8 +51,9 @@ public sealed record StepResponse(string Step, int StepVersion, int? ExpiresInSe
         string? email,
         SignupPolicyData policy,
         string? error = null,
-        IReadOnlyList<string>? rules = null) =>
-        new(StepNames.Signup, stepVersion, expiresInSeconds, new SignupData(tenant, email, policy, error, rules ?? []), csrfToken);
+        IReadOnlyList<string>? rules = null,
+        string? termsUrl = null) =>
+        new(StepNames.Signup, stepVersion, expiresInSeconds, new SignupData(tenant, email, policy, error, rules ?? [], termsUrl), csrfToken);
 
     /// <summary>
     /// Email verification required (Story 4.7): the address the link went to, whether this answers "Resend email", and the
@@ -139,6 +141,9 @@ public static class SignupErrors
 
     /// <summary>The password failed the policy: the step's <c>rules</c> name each failing rule.</summary>
     public const string PasswordRule = "password_rule";
+
+    /// <summary>"Accept the terms to continue." (Story 4.8): the Tenant set terms and the sign-up didn't accept them.</summary>
+    public const string TermsRequired = "terms_required";
 }
 
 /// <summary>The code Email verification required's error is sent as (Story 4.7).</summary>
@@ -167,8 +172,11 @@ public sealed record LoginData(string Tenant, string? Email, string? Error, bool
 /// <summary>The password policy the strength meter checks in the browser (Story 4.7): the minimum length and the strength.</summary>
 public sealed record SignupPolicyData(int MinLength, string Strength);
 
-/// <summary>Signup's props (Story 4.7): the email carried from Login, the policy, a field error's code and the failing rules' codes.</summary>
-public sealed record SignupData(string Tenant, string? Email, SignupPolicyData Policy, string? Error, IReadOnlyList<string> Rules);
+/// <summary>
+/// Signup's props (Story 4.7): the email carried from Login, the policy, a field error's code and the failing rules' codes;
+/// from Story 4.8 the Tenant's terms URL, or null, which shows the terms row.
+/// </summary>
+public sealed record SignupData(string Tenant, string? Email, SignupPolicyData Policy, string? Error, IReadOnlyList<string> Rules, string? TermsUrl = null);
 
 /// <summary>Email verification required's props (Story 4.7): the address, whether the email was just sent again, and an error's code.</summary>
 public sealed record VerifyEmailData(string Tenant, string? Email, bool Resent, string? Error);

@@ -1,0 +1,53 @@
+/*
+ * The terms agreement row (Story 4.8): the checkbox and its label, then the link to the terms, wrapping at narrow widths,
+ * and the error under them, as a Field's helper.
+ */
+
+.terms {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gk-space-4);
+  min-width: 0;
+}
+
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: var(--gk-space-4);
+  font: var(--gk-ui-control-font);
+  color: var(--gk-ui-text);
+}
+
+/* Underlined, so the link never relies on colour, with a 24px tall inline hit area (WCAG 2.2). */
+.link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  color: var(--gk-color-tx);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.link:hover {
+  color: var(--gk-color-ac);
+}
+
+.link:focus-visible {
+  outline: var(--gk-focus-ring-outline-width) var(--gk-focus-ring-outline-style) var(--gk-focus-ring-outline-color);
+  outline-offset: var(--gk-focus-ring-outline-offset);
+  border-radius: 2px;
+}
+
+.helper {
+  font: var(--gk-font-helper);
+  color: var(--gk-color-tx2);
+}
+
+.helper:empty {
+  display: none;
+}
+
+.error {
+  color: var(--gk-ui-input-error-helper);
+}

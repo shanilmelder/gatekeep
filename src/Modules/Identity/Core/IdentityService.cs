@@ -33,9 +33,16 @@ internal sealed class IdentityService(IAuditAppender audit, TimeProvider time) :
     // A concurrent sign-up for the same address waits here, then finds the row it inserted.
     private const string InsertUser =
         """
-        INSERT INTO "user" (tenant_id, id, email, created_at)
-        VALUES (@tenant_id, @id, @email, @now)
+        INSERT INTO "user" (tenant_id, id, email, created_at, terms_accepted_url, terms_accepted_at)
+        VALUES (@tenant_id, @id, @email, @now, @terms_url, @terms_at)
         ON CONFLICT (tenant_id, lower(email)) WHERE email IS NOT NULL DO NOTHING
+        """;
+
+    // Story 4.8: an unverified User signing up again records the terms this sign-up accepted, with its new credential.
+    private const string RecordTerms =
+        """
+        UPDATE "user" SET terms_accepted_url = @terms_url, terms_accepted_at = @now
+        WHERE tenant_id = @tenant_id AND id = @id AND email_verified_at IS NULL
         """;
 
     private const string InsertCredential =
@@ -142,12 +149,13 @@ internal sealed class IdentityService(IAuditAppender audit, TimeProvider time) :
     private readonly IAuditAppender _audit = audit ?? throw new ArgumentNullException(nameof(audit));
     private readonly TimeProvider _time = time ?? throw new ArgumentNullException(nameof(time));
 
-    public async Task<RegisteredUser?> RegisterAsync(
+    public async Task<Registration> RegisterAsync(
         CommandContext context,
         string email,
         Guid connectionId,
         string passwordHash,
         bool activate,
+        string? acceptedTermsUrl,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(context);
@@ -167,8 +175,14 @@ internal sealed class IdentityService(IAuditAppender audit, TimeProvider time) :
             throw new ArgumentException("A credential names its Connection.", nameof(connectionId));
         }
 
+        if (acceptedTermsUrl is not null && (acceptedTermsUrl.Length == 0 || acceptedTermsUrl.Length > SecurityLimits.MaxTermsUrlLength))
+        {
+            throw new ArgumentException("An accepted terms URL is 1 to 2048 characters.", nameof(acceptedTermsUrl));
+        }
+
         var now = _time.GetUtcNow();
         var user = await FindUserAsync(context, tenantId, email, cancellationToken);
+        var created = false;
         if (user is null)
         {
             await using (var command = context.CreateCommand())
@@ -178,20 +192,28 @@ internal sealed class IdentityService(IAuditAppender audit, TimeProvider time) :
                 Add(command, "id", Guid.CreateVersion7(now));
                 Add(command, "email", email);
                 Add(command, "now", now);
-                await command.ExecuteNonQueryAsync(cancellationToken);
+                Add(command, "terms_url", acceptedTermsUrl);
+                Add(command, "terms_at", acceptedTermsUrl is null ? null : now);
+                created = await command.ExecuteNonQueryAsync(cancellationToken) == 1;
             }
 
             user = await FindUserAsync(context, tenantId, email, cancellationToken)
                 ?? throw new InvalidOperationException("The User a sign-up created can't be read back.");
         }
 
-        // A sign-up never changes an account someone already holds.
+        // A sign-up never changes an account someone already holds: the caller only notifies its owner.
         if (user.Value.Verified || user.Value.HasActive)
         {
-            return null;
+            return Registration.Existing(user.Value.Id);
         }
 
         var userId = user.Value.Id;
+        if (!created && acceptedTermsUrl is not null)
+        {
+            await ExecuteAsync(
+                context, RecordTerms, cancellationToken, ("tenant_id", tenantId), ("id", userId), ("terms_url", acceptedTermsUrl), ("now", now));
+        }
+
         var credentialId = Guid.CreateVersion7(now);
         await using (var command = context.CreateCommand())
         {
@@ -215,7 +237,7 @@ internal sealed class IdentityService(IAuditAppender audit, TimeProvider time) :
 
         await _audit.AppendAsync(
             context, new AuditEvent(IdentityEvents.UserSignedUp.Code, Actor.Anonymous, AuditTargetKind.User, userId), detail: null, cancellationToken);
-        return new RegisteredUser(userId, credentialId);
+        return Registration.New(new RegisteredUser(userId, credentialId));
     }
 
     public async Task<Secret<string>> IssueVerificationLinkAsync(

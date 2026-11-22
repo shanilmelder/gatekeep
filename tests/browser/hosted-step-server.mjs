@@ -32,6 +32,12 @@
 //   transaction's.
 // - POST /login/api/transaction/extend from Signup or Email verification required: that same step with a fresh life.
 //
+// Story 4.8: signup_terms is Signup with the Tenant's terms URL. POST /login/api/signup for terms@example.com answers
+// Signup with terms_required unless acceptTerms is true, as Host.Hosted does with a terms URL set; the password
+// "rate-limited" gets a 429 Generic error temporarily_unavailable, as a rate-limited sign-up does. signup_terms_late is
+// Signup for terms@example.com with no terms URL yet, so the client sends acceptTerms false and the server's
+// terms_required, with the URL, is what shows the row; signup_terms_hostile has a terms URL that isn't https.
+//
 //   node hosted-step-server.mjs <port>
 
 import { createHash } from 'node:crypto';
@@ -139,11 +145,14 @@ export const LINK_CSRF = 'fixture-link-csrf-token';
 /** Story 4.7: the expired link's own value, which Link expired keeps for "Send a new link". */
 export const LINK = 'ten_aaaaaaaaaaaaaaaaaaaaaaaaaa.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
 
-const signup = (email = null, strength = 'good', error = null, rules = []) => ({
+/** Story 4.8: the Tenant's terms URL the signup_terms fixture links to. */
+export const TERMS_URL = 'https://northwind.example/terms';
+
+const signup = (email = null, strength = 'good', error = null, rules = [], termsUrl = null) => ({
   step: 'signup',
   stepVersion: 2,
   expiresInSeconds: LIFE,
-  data: { tenant: 'Northwind', email, policy: { minLength: 12, strength }, error, rules },
+  data: { tenant: 'Northwind', email, policy: { minLength: 12, strength }, error, rules, termsUrl },
   csrfToken: SIGNUP_CSRF,
 });
 
@@ -172,6 +181,9 @@ const fixtures = {
   login_signup: JSON.stringify(login(null, null, LIFE, true)),
   signup: JSON.stringify(signup('new.user@example.com')),
   signup_excellent: JSON.stringify(signup('new.user@example.com', 'excellent')),
+  signup_terms: JSON.stringify(signup('terms@example.com', 'good', null, [], TERMS_URL)),
+  signup_terms_late: JSON.stringify(signup('terms@example.com')),
+  signup_terms_hostile: JSON.stringify(signup('terms@example.com', 'good', null, [], 'javascript:alert(1)')),
   verify_email: JSON.stringify(verifyEmail()),
   email_verified_app: JSON.stringify(emailVerified('/login/?fixture=generic_error')),
   email_verified_close: JSON.stringify(emailVerified(null)),
@@ -236,6 +248,7 @@ function answer(pathname, body, csrf) {
     case '/login/api/signup/back':
       return login('new.user@example.com', null, LIFE, true);
     case '/login/api/signup':
+      if (email === 'terms@example.com' && body.acceptTerms !== true) return signup(email, 'good', 'terms_required', [], TERMS_URL);
       return body.password === 'aaaaaaaaaaaa' ? signup(email, 'good', 'password_rule', ['classes']) : verifyEmail(email);
     case '/login/api/verification/resend':
       return verifyEmail('new.user@example.com', true);
@@ -267,7 +280,7 @@ const API_PATHS = new Set([
 
 /** The fixtures a real step page answers 200 for: every step but Generic error and the unreadable ones. */
 const OK_FIXTURES = new Set([
-  'login', 'login_kept', 'login_signup', 'signup', 'signup_excellent', 'verify_email',
+  'login', 'login_kept', 'login_signup', 'signup', 'signup_excellent', 'signup_terms', 'signup_terms_late', 'verify_email',
   'email_verified_app', 'email_verified_close', 'link_expired', 'link_sent',
 ]);
 
@@ -297,6 +310,10 @@ const server = createServer((request, response) => {
         body = JSON.parse(raw);
       } catch {
         body = {};
+      }
+      if (url.pathname === '/login/api/signup' && body?.password === 'rate-limited') {
+        const limited = { ...genericError('Northwind'), data: { ...genericError('Northwind').data, code: 'temporarily_unavailable' } };
+        return send(429, 'application/json; charset=utf-8', JSON.stringify(limited), { 'Cache-Control': 'no-store', Pragma: 'no-cache', 'Retry-After': '900' });
       }
       return json(200, answer(url.pathname, body ?? {}, presented));
     });

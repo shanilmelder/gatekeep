@@ -39,13 +39,17 @@ export interface SignupPolicy {
   strength: 'good' | 'excellent';
 }
 
-/** Signup's props (Story 4.7): the email carried from Login, the policy, a field error's code and the failing rules. */
+/**
+ * Signup's props (Story 4.7): the email carried from Login, the policy, a field error's code and the failing rules; from
+ * Story 4.8 the Tenant's terms URL, or null, which shows the terms row.
+ */
 export interface SignupData {
   tenant: string;
   email: string | null;
   policy: SignupPolicy;
   error: string | null;
   rules: string[];
+  termsUrl: string | null;
 }
 
 /** Email verification required's props (Story 4.7). */
@@ -131,11 +135,21 @@ export function isSameOriginPath(path: string): boolean {
   }
 }
 
+/** An absolute https URL with no userinfo, as a Tenant's terms URL is saved (Story 4.8); anything else is never linked. */
+export function isHttpsUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return url.protocol === 'https:' && url.username === '' && url.password === '';
+  } catch {
+    return false;
+  }
+}
+
 /** The Login field error codes the server sends, each shown as its catalogue text. */
 export const LOGIN_ERRORS: readonly string[] = Object.freeze(['email_invalid']);
 
-/** Signup's error codes (Story 4.7): the email field's, or the password's, whose rules the step names. */
-export const SIGNUP_ERRORS: readonly string[] = Object.freeze(['email_invalid', 'password_rule']);
+/** Signup's error codes (Story 4.7): the email field's, the password's, whose rules the step names, or (Story 4.8) the terms'. */
+export const SIGNUP_ERRORS: readonly string[] = Object.freeze(['email_invalid', 'password_rule', 'terms_required']);
 
 /** The password rule codes the server names (Story 4.7), each shown as its catalogue sentence. */
 export const PASSWORD_RULES: readonly string[] = Object.freeze(['length', 'too_long', 'classes', 'repeats', 'dictionary', 'personal_data', 'history']);
@@ -184,9 +198,12 @@ const readers: { [name in StepName]: (data: Record<string, unknown>, meta: StepM
     const minLength = typeof policy.minLength === 'number' && Number.isInteger(policy.minLength) && policy.minLength > 0 ? policy.minLength : undefined;
     const strength = policy.strength === 'good' || policy.strength === 'excellent' ? policy.strength : undefined;
     const rules = Array.isArray(data.rules) && data.rules.every((rule) => typeof rule === 'string' && PASSWORD_RULES.includes(rule)) ? (data.rules as string[]) : undefined;
-    return tenant === undefined || email === undefined || error === undefined || minLength === undefined || strength === undefined || rules === undefined || !live(meta)
+    // Story 4.8: only an https URL is linked; a missing field is no terms.
+    const terms = data.termsUrl === undefined ? null : optionalText(data.termsUrl);
+    const termsUrl = terms === null || (terms !== undefined && isHttpsUrl(terms)) ? terms : undefined;
+    return tenant === undefined || email === undefined || error === undefined || minLength === undefined || strength === undefined || rules === undefined || termsUrl === undefined || !live(meta)
       ? undefined
-      : { tenant, email, policy: { minLength, strength }, error, rules };
+      : { tenant, email, policy: { minLength, strength }, error, rules, termsUrl };
   },
   verify_email: (data, meta) => {
     const tenant = text(data.tenant);

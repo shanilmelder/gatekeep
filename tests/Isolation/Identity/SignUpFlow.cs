@@ -55,15 +55,33 @@ internal sealed record SignUpFlow(CodeFlowSetup Flow)
         return new SignUpFlow(flow);
     }
 
-    public Task<ProtocolHost> StartHostAsync(Gatekeep.Modules.Authentication.Contracts.PasswordHashLimits? hashLimits = null) =>
-        ProtocolHost.StartAsync(Flow.Database.Hosted, Flow.Bao, hashLimits: hashLimits);
+    /// <summary>The host, with <paramref name="hashLimits"/> and (Story 4.8) <paramref name="signUpLimits"/> in place of the defaults when given.</summary>
+    public Task<ProtocolHost> StartHostAsync(
+        Gatekeep.Modules.Authentication.Contracts.PasswordHashLimits? hashLimits = null, SignUpLimits? signUpLimits = null) =>
+        ProtocolHost.StartAsync(Flow.Database.Hosted, Flow.Bao, hashLimits: hashLimits, signUpLimits: signUpLimits);
 
-    /// <summary>A browser at Tenant A's Login for a new authorization request of A's web client.</summary>
-    public async Task<SignUpBrowser> BeginAsync(ProtocolHost host, string tenantHost)
+    /// <summary>Limits no test reaches by accident (Story 4.8), for one that sends many sign-ups or resends.</summary>
+    public static SignUpLimits Generous { get; } = new(
+        new("signup.attempt.tenant", 10_000, TimeSpan.FromMinutes(15)),
+        new("signup.attempt.source", 10_000, TimeSpan.FromMinutes(15)),
+        new("verification.send.tenant", 10_000, TimeSpan.FromMinutes(15)),
+        new("verification.send.source", 10_000, TimeSpan.FromMinutes(15)));
+
+    /// <summary>Stores <paramref name="termsUrl"/> as <paramref name="tenantId"/>'s terms URL (Story 4.8).</summary>
+    public Task SetTermsAsync(Guid tenantId, string termsUrl) =>
+        Database.ExecuteAsync(
+            $"INSERT INTO tenant_settings (tenant_id, terms_url) VALUES ('{tenantId}', '{termsUrl}') "
+            + $"ON CONFLICT (tenant_id) DO UPDATE SET terms_url = '{termsUrl}'");
+
+    /// <summary>
+    /// A browser at <paramref name="tenantHost"/>'s Login for a new authorization request of the web client
+    /// <paramref name="clientId"/>, by default Tenant A's, naming <paramref name="source"/> as its address when given (Story 4.8).
+    /// </summary>
+    public async Task<SignUpBrowser> BeginAsync(ProtocolHost host, string tenantHost, string? source = null, string? clientId = null)
     {
-        var browser = new HostedBrowser(host, tenantHost);
+        var browser = new HostedBrowser(host, tenantHost) { Source = source };
         var pkce = Pkce.New();
-        using (var begun = await browser.GetAsync(CodeFlow.AuthorizeUrl(Flow.ClientA.ClientId, CodeFlowSetup.Callback, pkce)))
+        using (var begun = await browser.GetAsync(CodeFlow.AuthorizeUrl(clientId ?? Flow.ClientA.ClientId, CodeFlowSetup.Callback, pkce)))
         {
             Assert.True(HostedBrowser.IsLoginRedirect(begun), $"The authorization request answered {(int)begun.StatusCode}.");
         }
@@ -71,13 +89,23 @@ internal sealed record SignUpFlow(CodeFlowSetup Flow)
         return new SignUpBrowser(browser, pkce);
     }
 
-    /// <summary>A browser at Tenant A, moved to Signup and through Create account with <paramref name="email"/> and <paramref name="password"/>.</summary>
-    public async Task<(SignUpBrowser Browser, JsonDocument Step)> SignUpAsync(ProtocolHost host, string tenantHost, string email, string password = Password)
+    /// <summary>
+    /// A browser at <paramref name="tenantHost"/> (by default for Tenant A's web client), moved to Signup and through Create
+    /// account with <paramref name="email"/> and <paramref name="password"/>, and <c>acceptTerms</c> when given.
+    /// </summary>
+    public async Task<(SignUpBrowser Browser, JsonDocument Step)> SignUpAsync(
+        ProtocolHost host,
+        string tenantHost,
+        string email,
+        string password = Password,
+        bool? acceptTerms = null,
+        string? source = null,
+        string? clientId = null)
     {
-        var browser = await BeginAsync(host, tenantHost);
+        var browser = await BeginAsync(host, tenantHost, source, clientId);
         using var signup = await browser.OpenAsync(email);
         Assert.Equal(StepNames.Signup, Name(signup));
-        return (browser, await browser.CreateAsync(signup, email, password));
+        return (browser, await browser.CreateAsync(signup, email, password, acceptTerms));
     }
 
     public Task<long> CountAsync(string sql) => Database.ScalarAsync<long>(sql);
@@ -153,9 +181,15 @@ internal sealed class SignUpBrowser(HostedBrowser browser, Pkce pkce)
         return await PostAsync(ProtocolContract.SignupOpenPath, new { stepVersion = login.StepVersion, email }, login.Csrf);
     }
 
-    /// <summary>Create account from <paramref name="signup"/>'s step.</summary>
-    public Task<JsonDocument> CreateAsync(JsonDocument signup, string email, string password) =>
-        PostAsync(ProtocolContract.SignupPath, new { stepVersion = Version(signup), email, password }, Csrf(signup));
+    /// <summary>Create account from <paramref name="signup"/>'s step, with <c>acceptTerms</c> (Story 4.8) when given.</summary>
+    public Task<JsonDocument> CreateAsync(JsonDocument signup, string email, string password, bool? acceptTerms = null) =>
+        PostAsync(ProtocolContract.SignupPath, CreateBody(signup, email, password, acceptTerms), Csrf(signup));
+
+    /// <summary>Create account's body, without <c>acceptTerms</c> when <paramref name="acceptTerms"/> is null.</summary>
+    public static object CreateBody(JsonDocument signup, string email, string password, bool? acceptTerms = null) =>
+        acceptTerms is { } accept
+            ? new { stepVersion = Version(signup), email, password, acceptTerms = accept }
+            : new { stepVersion = Version(signup), email, password };
 
     /// <summary>"Resend email" from <paramref name="verify"/>'s step.</summary>
     public Task<JsonDocument> ResendAsync(JsonDocument verify) =>

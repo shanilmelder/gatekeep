@@ -36,6 +36,11 @@ const text = {
   expiredTitle: 'This link has expired or was already used.',
   sendNew: 'Send a new link',
   sentBody: "If an account exists for that email, we've sent a link.",
+  termsAgree: 'I agree to the',
+  termsLink: 'Terms of Service',
+  termsName: 'I agree to the Terms of Service',
+  termsRequired: 'Accept the terms to continue.',
+  genericErrorTitle: 'Something went wrong',
 };
 
 /** The harness's tokens (hosted-step-server.mjs). */
@@ -45,6 +50,7 @@ const VERIFY_CSRF = 'fixture-csrf-verify';
 const LINK_CSRF = 'fixture-link-csrf-token';
 const LINK = 'ten_aaaaaaaaaaaaaaaaaaaaaaaaaa.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
 const TENANT = 'Northwind';
+const TERMS_URL = 'https://northwind.example/terms';
 
 const card = (page: Page) => page.locator('[data-hosted-card]');
 const heading = (page: Page) => page.getByRole('heading', { level: 1 });
@@ -154,7 +160,7 @@ for (const scheme of ['light', 'dark'] as const) {
       const request = await posted;
 
       expect(request.headers()['x-gatekeep-csrf']).toBe(SIGNUP_CSRF);
-      expect(request.postDataJSON()).toEqual({ stepVersion: 2, email: 'new.user@example.com', password: 'aaaaaaaaaaaa' });
+      expect(request.postDataJSON()).toEqual({ stepVersion: 2, email: 'new.user@example.com', password: 'aaaaaaaaaaaa', acceptTerms: false });
       await expect(card(page)).toContainText(text.classesError);
       await expect(password).toHaveAttribute('aria-invalid', 'true');
       await expect(password).toBeFocused();
@@ -275,6 +281,105 @@ for (const scheme of ['light', 'dark'] as const) {
       expect(request.postDataJSON()).toEqual({ token: LINK });
       await expect(card(page)).toContainText(text.sentBody);
       await expectAxe(page);
+    });
+
+    test('Signup with a terms URL: the terms row follows the meter, its link outside the label opens a new tab, and axe passes', async ({ page }) => {
+      await open(page, 'signup_terms');
+
+      const terms = card(page).getByRole('checkbox', { name: text.termsName });
+      await expect(terms).toBeVisible();
+      await expect(terms).not.toBeChecked();
+      const link = card(page).getByRole('link', { name: text.termsLink });
+      await expect(link).toHaveAttribute('href', TERMS_URL);
+      await expect(link).toHaveAttribute('target', '_blank');
+      await expect(link).toHaveAttribute('rel', 'noopener noreferrer');
+      await expect(link).toHaveCSS('text-decoration-line', 'underline');
+      await expect(card(page).locator('label a')).toHaveCount(0);
+
+      // Between the meter and Create account, with a hit area of at least 24px.
+      const meterBox = (await meter(page).boundingBox())!;
+      const termsBox = (await terms.boundingBox())!;
+      const createBox = (await card(page).getByRole('button', { name: text.create }).boundingBox())!;
+      expect(termsBox.y).toBeGreaterThan(meterBox.y);
+      expect(createBox.y).toBeGreaterThan(termsBox.y);
+      expect(termsBox.width).toBeGreaterThanOrEqual(24);
+      expect(termsBox.height).toBeGreaterThanOrEqual(24);
+
+      await page.setViewportSize({ width: 320, height: 720 });
+      expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(320);
+      await expectAxe(page);
+    });
+
+    test('Signup with a terms URL: Create account unticked shows the error under the box, focused, and sends nothing', async ({ page }) => {
+      await open(page, 'signup_terms');
+      const seen = fetches(page);
+      await page.getByLabel(text.passwordLabel, { exact: true }).fill('Correct-Horse-7battery');
+
+      await card(page).getByRole('button', { name: text.create }).click();
+
+      const terms = card(page).getByRole('checkbox', { name: text.termsName });
+      await expect(card(page)).toContainText(text.termsRequired);
+      await expect(terms).toHaveAttribute('aria-invalid', 'true');
+      await expect(terms).toBeFocused();
+      await expect(terms).toHaveAccessibleDescription(text.termsRequired);
+      await expect(page).toHaveTitle(`Error: ${text.signupTitle} – ${TENANT}`);
+      expect(seen.filter((request) => new URL(request.url()).pathname === '/login/api/signup')).toHaveLength(0);
+      await expectAxe(page);
+    });
+
+    test('Signup with a terms URL: ticked, Create account sends acceptTerms and goes on', async ({ page }) => {
+      await open(page, 'signup_terms');
+      await page.getByLabel(text.passwordLabel, { exact: true }).fill('Correct-Horse-7battery');
+      await card(page).getByRole('checkbox', { name: text.termsName }).check();
+
+      const posted = apiPost(page, '/login/api/signup');
+      await card(page).getByRole('button', { name: text.create }).click();
+      const request = await posted;
+
+      expect(request.postDataJSON()).toEqual({ stepVersion: 2, email: 'terms@example.com', password: 'Correct-Horse-7battery', acceptTerms: true });
+      await expect(heading(page)).toHaveText(text.verifyTitle);
+    });
+
+    test('Create account answered 429 shows the Generic error screen', async ({ page }) => {
+      await open(page, 'signup');
+      await page.getByLabel(text.passwordLabel, { exact: true }).fill('rate-limited');
+
+      await card(page).getByRole('button', { name: text.create }).click();
+
+      await expect(heading(page)).toHaveText(text.genericErrorTitle);
+      await expectAxe(page);
+    });
+
+    test("The server's terms_required shows the terms row with its error, invalid and focused", async ({ page }) => {
+      await open(page, 'signup_terms_late');
+      await expect(card(page).getByRole('checkbox')).toHaveCount(0);
+      await page.getByLabel(text.passwordLabel, { exact: true }).fill('Correct-Horse-7battery');
+
+      const posted = apiPost(page, '/login/api/signup');
+      await card(page).getByRole('button', { name: text.create }).click();
+      expect((await posted).postDataJSON()).toMatchObject({ email: 'terms@example.com', acceptTerms: false });
+
+      const terms = card(page).getByRole('checkbox', { name: text.termsName });
+      await expect(heading(page)).toHaveText(text.signupTitle);
+      await expect(card(page)).toContainText(text.termsRequired);
+      await expect(terms).toHaveAttribute('aria-invalid', 'true');
+      await expect(terms).toBeFocused();
+      await expect(card(page).getByRole('link', { name: text.termsLink })).toHaveAttribute('href', TERMS_URL);
+
+      // Ticking the box clears the error.
+      await terms.check();
+      await expect(card(page)).not.toContainText(text.termsRequired);
+      await expect(terms).not.toHaveAttribute('aria-invalid', 'true');
+      await expectAxe(page);
+    });
+
+    test('A Signup whose terms URL is not https is unreadable: Generic error, with no terms link', async ({ page }) => {
+      await open(page, 'signup_terms_hostile');
+
+      await expect(heading(page)).toHaveText(text.genericErrorTitle);
+      await expect(card(page).getByRole('checkbox')).toHaveCount(0);
+      await expect(page.locator('a[href^="javascript:"]')).toHaveCount(0);
+      await expect(card(page).getByRole('link', { name: text.termsLink })).toHaveCount(0);
     });
   });
 }

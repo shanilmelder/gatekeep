@@ -25,6 +25,12 @@ internal sealed class HostedBrowser(ProtocolHost host, string tenantHost, string
 
     public string TenantHost => tenantHost;
 
+    /// <summary>
+    /// The source address every request names in <see cref="ProtocolHost.SourceHeader"/>, as Caddy's forwarding would
+    /// (Story 4.8's per-source limits), or null for none: TestServer then has no remote address.
+    /// </summary>
+    public string? Source { get; set; }
+
     /// <summary>The Tenant's issuer origin, which a same-origin request sends as its <c>Origin</c>.</summary>
     public string Origin => origin ?? new UriBuilder(Uri.UriSchemeHttps, tenantHost).Uri.GetLeftPart(UriPartial.Authority);
 
@@ -119,6 +125,11 @@ internal sealed class HostedBrowser(ProtocolHost host, string tenantHost, string
         if (Cookies.Count > 0)
         {
             request.Headers.TryAddWithoutValidation("Cookie", string.Join("; ", Cookies.Select(c => $"{c.Key}={c.Value}")));
+        }
+
+        if (Source is not null)
+        {
+            request.Headers.TryAddWithoutValidation(ProtocolHost.SourceHeader, Source);
         }
 
         var response = await host.Http.SendAsync(request, Cancellation);

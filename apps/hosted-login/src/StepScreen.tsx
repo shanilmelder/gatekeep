@@ -63,6 +63,9 @@ export interface StepControls {
   onLogIn: () => void;
   /** Signup's Create account. */
   onCreate: () => void;
+  /** Story 4.8: whether Signup's terms checkbox is ticked, and its change. */
+  termsAccepted: boolean;
+  onTermsChange: (accepted: boolean) => void;
   /** Email verification required's "I've verified — continue". */
   onVerified: () => void;
   /** Email verification required's "Resend email". */
@@ -118,6 +121,10 @@ function screen(step: Step, controls: StepControls, messages: Readonly<Messages>
           onLogIn={controls.onLogIn}
           emailError={fieldError(error, messages)}
           passwordErrors={passwordErrors}
+          termsUrl={step.data.termsUrl}
+          termsAccepted={controls.termsAccepted}
+          onTermsChange={controls.onTermsChange}
+          termsError={error === 'terms_required' ? messages.signupTermsRequired : undefined}
           pending={controls.pending}
         />
       );

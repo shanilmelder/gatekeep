@@ -95,8 +95,10 @@ internal sealed class SignUpService(
     public async Task<SignupPolicy> ReadPolicyAsync(CommandContext context, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(context);
-        TenantOf(context);
-        return Policy(await _directory.FindDatabaseConnectionAsync(context, cancellationToken));
+        var tenantId = TenantOf(context);
+        var policy = Policy(await _directory.FindDatabaseConnectionAsync(context, cancellationToken));
+        var settings = await _tenants.GetSignupSettingsAsync(context, tenantId, cancellationToken);
+        return policy with { TermsUrl = settings?.TermsUrl };
     }
 
     public async Task<MovedSignIn?> OpenAsync(CommandContext context, SignInTransaction transaction, string? email, CancellationToken cancellationToken)
@@ -151,6 +153,7 @@ internal sealed class SignUpService(
         SignInTransaction transaction,
         string email,
         Secret<string> password,
+        bool acceptTerms,
         Secret<string>? presentedSession,
         CancellationToken cancellationToken)
     {
@@ -175,6 +178,15 @@ internal sealed class SignUpService(
             return new SignUpResult(SignUpStatus.Disabled, [], back.StepVersion, back.ExpiresAt);
         }
 
+        // Story 4.8: where the Tenant set terms, they must be accepted, before the rules and the hash, writing nothing. The
+        // Tenant's terms URL at submit time is the terms' version recorded as accepted.
+        var settings = await _tenants.GetSignupSettingsAsync(context, tenantId, cancellationToken);
+        var termsUrl = settings?.TermsUrl;
+        if (termsUrl is not null && !acceptTerms)
+        {
+            return new SignUpResult(SignUpStatus.TermsRequired, [], transaction.StepVersion, transaction.ExpiresAt);
+        }
+
         // The policy first, so a refused password is never hashed. A sign-up has no earlier password to compare with.
         var failed = password.Use(value => PasswordRules.Check(value, connection.Policy, address));
         if (failed.Count != 0)
@@ -194,15 +206,27 @@ internal sealed class SignUpService(
             hash = await PasswordHasher.HashAsync(password);
         }
 
-        var settings = await _tenants.GetSignupSettingsAsync(context, tenantId, cancellationToken);
         var verificationOff = settings?.EmailVerificationOff == true;
-        var registered = await _identity.RegisterAsync(context, address, connection.Id, hash, activate: verificationOff, cancellationToken);
+        var registration = await _identity.RegisterAsync(
+            context, address, connection.Id, hash, activate: verificationOff, acceptedTermsUrl: termsUrl, cancellationToken);
+        var registered = registration.Registered;
 
         if (registered is not null && !verificationOff)
         {
             var link = await _identity.IssueVerificationLinkAsync(
                 context, registered.UserId, registered.CredentialId, transaction.ApplicationId, cancellationToken);
             await EnqueueVerificationAsync(context, registered.UserId, link, cancellationToken);
+        }
+        else if (registration.ExistingUserId is { } existing)
+        {
+            // Story 4.8: an address someone already holds changes nothing, and its owner is told, through the same one
+            // enqueue a new address costs. The per-recipient email limit still caps their inbox.
+            await _enqueuer.EnqueueAsync(
+                context,
+                NotificationsContract.SendEmailJob,
+                NotificationsContract.EmailPayload(existing, NotificationsContract.SecurityNotificationTemplate),
+                runAfter: null,
+                cancellationToken);
         }
 
         var expiresAt = _time.GetUtcNow() + SecurityLimits.SignInTransactionLifetime;

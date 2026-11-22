@@ -71,9 +71,10 @@ public interface IPasswordHashGate
 /// <summary>
 /// What Hosted Login shows of the Tenant's sign-up (Story 4.7): whether it is open, which needs the database Connection
 /// enabled with sign-up on, and the password policy's minimum length and strength, the rules the strength meter checks in
-/// the browser. A Tenant with no database Connection shows sign-up closed, with the policy defaults.
+/// the browser. A Tenant with no database Connection shows sign-up closed, with the policy defaults. From Story 4.8 it
+/// also carries the Tenant's terms URL, or null, which Signup asks the User to accept.
 /// </summary>
-public sealed record SignupPolicy(bool Enabled, int MinLength, string Strength);
+public sealed record SignupPolicy(bool Enabled, int MinLength, string Strength, string? TermsUrl = null);
 
 /// <summary>A sign-in transaction moved on (Story 4.7): its new step version and expiry.</summary>
 public sealed record MovedSignIn(int StepVersion, DateTimeOffset ExpiresAt);
@@ -87,12 +88,15 @@ public enum SignUpStatus
     /// <summary>The password failed the policy: <see cref="SignUpResult.FailedRules"/> names each rule. Nothing written.</summary>
     RuleFailed,
 
+    /// <summary>The Tenant set terms and the sign-up didn't accept them (Story 4.8): checked before the rules and the hash. Nothing written.</summary>
+    TermsRequired,
+
     /// <summary>No hashing slot came free in time: the generic <c>temporarily_unavailable</c>. Nothing written.</summary>
     Unavailable,
 
     /// <summary>
     /// The sign-up was recorded and the User must verify their email: a new or unverified User got a pending credential,
-    /// a link and its email, and an address already verified got nothing, identically.
+    /// a link and its email, and an address already verified got nothing but its owner's security notice, identically.
     /// </summary>
     Registered,
 
@@ -141,12 +145,15 @@ public interface ISignUp
     Task<MovedSignIn> BackAsync(CommandContext context, SignInTransaction transaction, CancellationToken cancellationToken);
 
     /// <summary>
-    /// Signs up <paramref name="email"/> with <paramref name="password"/> in a transaction at Signup (Story 4.7). The
-    /// password is checked against the database Connection's policy first, and refused with every failing rule named and
+    /// Signs up <paramref name="email"/> with <paramref name="password"/> in a transaction at Signup (Story 4.7). Where the
+    /// Tenant set a terms URL, <paramref name="acceptTerms"/> must be true, or the sign-up is refused as
+    /// <see cref="SignUpStatus.TermsRequired"/> before anything else, writing nothing (Story 4.8); the URL accepted is
+    /// recorded on the User. The password is checked against the database Connection's policy first, and refused with every failing rule named and
     /// nothing written; then it is hashed once through the hashing budget, whatever the address, and refused as
     /// unavailable, writing nothing, when no slot comes free. Identity then registers the sign-up: a new or unverified User
     /// gets a pending credential, a link and a verification email in the same command; an address already verified gets
-    /// nothing, and the transaction moves on identically. A Dev Tenant with verification off gets an active credential and
+    /// nothing but one <c>security_notification</c> email to its owner (Story 4.8), and the transaction moves on
+    /// identically. A Dev Tenant with verification off gets an active credential and
     /// a Session instead, rotating the live one <paramref name="presentedSession"/> names for the same User.
     /// </summary>
     /// <exception cref="InvalidOperationException">The context has no Tenant, or the transaction isn't at Signup. Nothing is kept.</exception>
@@ -157,6 +164,7 @@ public interface ISignUp
         SignInTransaction transaction,
         string email,
         Secret<string> password,
+        bool acceptTerms,
         Secret<string>? presentedSession,
         CancellationToken cancellationToken);
 

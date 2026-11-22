@@ -233,3 +233,34 @@ public interface ITenantServerOptions
 /// policies, from the §5.2 limits; a host registers its own only to test them.
 /// </summary>
 public sealed record TokenRequestLimits(Gatekeep.Kernel.RateLimiting.RateLimitPolicy Tenant, Gatekeep.Kernel.RateLimiting.RateLimitPolicy Source);
+
+/// <summary>
+/// The limits Hosted Login's sign-up counts under (Story 4.8, NFR-6): Create account per Tenant and per source, and the
+/// verification emails asked for ("Resend email" and "Send a new link" together) per Tenant and per source. None is keyed
+/// by an email address, so a limit can't reveal an account. The defaults are <see cref="Default"/>, from
+/// <c>SecurityLimits</c>; a host registers its own only to test them.
+/// </summary>
+public sealed record SignUpLimits(
+    Gatekeep.Kernel.RateLimiting.RateLimitPolicy SignUpTenant,
+    Gatekeep.Kernel.RateLimiting.RateLimitPolicy SignUpSource,
+    Gatekeep.Kernel.RateLimiting.RateLimitPolicy SendTenant,
+    Gatekeep.Kernel.RateLimiting.RateLimitPolicy SendSource)
+{
+    /// <summary>Create account per Tenant: <c>signup.attempt.tenant</c>, 600 per 15 minutes.</summary>
+    public static readonly Gatekeep.Kernel.RateLimiting.RateLimitPolicy SignUpTenantPolicy = new(
+        "signup.attempt.tenant", Gatekeep.Kernel.Limits.SecurityLimits.SignUpTenantAttempts, Gatekeep.Kernel.Limits.SecurityLimits.SignUpWindow);
+
+    /// <summary>Create account per source: <c>signup.attempt.source</c>, 10 per 15 minutes.</summary>
+    public static readonly Gatekeep.Kernel.RateLimiting.RateLimitPolicy SignUpSourcePolicy = new(
+        "signup.attempt.source", Gatekeep.Kernel.Limits.SecurityLimits.SignUpSourceAttempts, Gatekeep.Kernel.Limits.SecurityLimits.SignUpWindow);
+
+    /// <summary>Resend and "Send a new link" per Tenant: <c>verification.send.tenant</c>, 600 per 15 minutes.</summary>
+    public static readonly Gatekeep.Kernel.RateLimiting.RateLimitPolicy SendTenantPolicy = new(
+        "verification.send.tenant", Gatekeep.Kernel.Limits.SecurityLimits.VerificationSendTenantAttempts, Gatekeep.Kernel.Limits.SecurityLimits.SignUpWindow);
+
+    /// <summary>Resend and "Send a new link" per source: <c>verification.send.source</c>, 10 per 15 minutes.</summary>
+    public static readonly Gatekeep.Kernel.RateLimiting.RateLimitPolicy SendSourcePolicy = new(
+        "verification.send.source", Gatekeep.Kernel.Limits.SecurityLimits.VerificationSendSourceAttempts, Gatekeep.Kernel.Limits.SecurityLimits.SignUpWindow);
+
+    public static SignUpLimits Default { get; } = new(SignUpTenantPolicy, SignUpSourcePolicy, SendTenantPolicy, SendSourcePolicy);
+}
