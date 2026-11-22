@@ -467,6 +467,24 @@ internal static class CanaryFlows
             "Story 4.6 build review",
             new DateOnly(2026, 11, 16)),
         new(
+            new(SurfaceKind.Route, "/api/v1/tenants/{tenantId}/connections/database/applications"),
+            "A read with no body: it returns the IDs, names and types of the path Tenant's visible Applications the database "
+            + "Connection is enabled for, and writes nothing. No credential, secret or password is held or returned.",
+            "Story 4.12 build review",
+            new DateOnly(2026, 11, 22)),
+        new(
+            new(SurfaceKind.Route, "/api/v1/tenants/{tenantId}/applications/{applicationId}/connections"),
+            "A read with no body: it returns each Connection's kind, fixed name and two switches for the path Application, and "
+            + "writes nothing. No credential, secret or password is held or returned.",
+            "Story 4.12 build review",
+            new DateOnly(2026, 11, 22)),
+        new(
+            new(SurfaceKind.Route, "/api/v1/tenants/{tenantId}/applications/{applicationId}/connections/{connectionId}"),
+            "A write whose body is one boolean: it sets the Application's switch for the Connection and writes an ID-only event, "
+            + "returning the row as the read does. Refusals are logged by fixed code only.",
+            "Story 4.12 build review",
+            new DateOnly(2026, 11, 22)),
+        new(
             new(SurfaceKind.Route, "/api/v1/tenants/{tenantId}/connections/database/password-policy"),
             "A write whose body is policy numbers, a fixed strength and switches: no password is taken, held or checked. It writes "
             + "an ID-only event and returns the Connection; a refused field is named with its fixed rule text, never its value, "

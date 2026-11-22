@@ -140,7 +140,7 @@ public sealed partial class SignInTransactionTests(PostgresFixture postgres, Ope
 
     /// <summary>Story 4.9: the Tenant A database Connection Login's email needs to lead to the Password step.</summary>
     private static Task AddDatabaseConnectionAsync(CodeFlowSetup flow) =>
-        flow.Database.ExecuteAsync($"INSERT INTO connection (tenant_id, id, kind) VALUES ('{flow.A.TenantId}', gen_random_uuid(), 'database')");
+        flow.Database.ExecuteAsync(TestTenants.DatabaseConnectionSql(flow.A.TenantId));
 
     [Theory]
     [InlineData("nope")]
@@ -624,7 +624,7 @@ public sealed partial class SignInTransactionTests(PostgresFixture postgres, Ope
     public async Task A_restarted_Login_keeps_Sign_up_while_the_database_Connection_lets_users_sign_up()
     {
         var flow = await CodeFlowSetup.CreateAsync(postgres, bao, HostA, HostB);
-        await flow.Database.ExecuteAsync($"INSERT INTO connection (tenant_id, id, kind) VALUES ('{flow.A.TenantId}', gen_random_uuid(), 'database')");
+        await flow.Database.ExecuteAsync(TestTenants.DatabaseConnectionSql(flow.A.TenantId));
         await using var host = await flow.StartHostAsync();
         var browser = await BeginAsync(host, flow, state: "state-restart-signup");
         await flow.Database.BackdateAsync(

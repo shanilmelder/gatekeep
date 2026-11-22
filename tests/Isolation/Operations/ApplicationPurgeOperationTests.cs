@@ -21,7 +21,7 @@ public sealed class ApplicationPurgeOperationTests(PostgresFixture postgres)
     private static readonly Guid Kept = Guid.Parse("01900000-0000-7000-8000-0000000035c1");
     private static readonly Guid System = Guid.Parse("01900000-0000-7000-8000-0000000035f1");
 
-    private static readonly string[] Tables = ["token", "authorization", "signin_transaction", "client_secret", "application", "user_session", "user"];
+    private static readonly string[] Tables = ["token", "authorization", "signin_transaction", "client_secret", "application_connection", "application", "user_session", "user"];
 
     [Fact]
     public async Task Operation_purges_every_deleted_Application_of_the_Tenant_and_nothing_else()
@@ -40,7 +40,7 @@ public sealed class ApplicationPurgeOperationTests(PostgresFixture postgres)
 
         foreach (var application in new[] { Deleted, AlsoDeleted })
         {
-            Assert.Equal("0/0/0/0/0", await CountsAsync(database, TenantA, application));
+            Assert.Equal("0/0/0/0/0/0", await CountsAsync(database, TenantA, application));
         }
 
         Assert.Equal(keptRows, await RowsAsync(database, TenantA, Kept));
@@ -49,7 +49,7 @@ public sealed class ApplicationPurgeOperationTests(PostgresFixture postgres)
         Assert.Equal(tenantB, await TenantRowsAsync(database, TenantB));
 
         // Tenant B's own deleted Application is left for its own purge.
-        Assert.Equal("2/1/1/1/1", await CountsAsync(database, TenantB, Deleted));
+        Assert.Equal("2/1/1/1/1/1", await CountsAsync(database, TenantB, Deleted));
     }
 
     [Fact]
@@ -118,8 +118,8 @@ public sealed class ApplicationPurgeOperationTests(PostgresFixture postgres)
         await DrainAsync(database);
 
         Assert.Equal("succeeded", await database.ScalarAsync<string>($"SELECT status FROM operation WHERE id = '{operation}'"));
-        Assert.Equal("0/0/0/0/0", await CountsAsync(database, TenantA, Deleted));
-        Assert.Equal("0/0/0/0/0", await CountsAsync(database, TenantA, AlsoDeleted));
+        Assert.Equal("0/0/0/0/0/0", await CountsAsync(database, TenantA, Deleted));
+        Assert.Equal("0/0/0/0/0/0", await CountsAsync(database, TenantA, AlsoDeleted));
     }
 
     /// <summary>
@@ -135,13 +135,13 @@ public sealed class ApplicationPurgeOperationTests(PostgresFixture postgres)
         Assert.Equal("succeeded", await StepsAsync(database, first));
 
         await database.SuperuserAsync($"UPDATE application SET deleted_at = now() WHERE tenant_id = '{TenantA}' AND id = '{Kept}'");
-        Assert.Equal("3/1/1/1/1", await CountsAsync(database, TenantA, Kept, withLoose: true));
+        Assert.Equal("3/1/1/1/1/1", await CountsAsync(database, TenantA, Kept, withLoose: true));
 
         var next = await StartAsync(database, OperationsContract.ApplicationPurgeStages);
         await DrainAsync(database);
 
         Assert.Equal("succeeded", await StepsAsync(database, next));
-        Assert.Equal("0/0/0/0/0", await CountsAsync(database, TenantA, Kept, withLoose: true));
+        Assert.Equal("0/0/0/0/0/0", await CountsAsync(database, TenantA, Kept, withLoose: true));
         Assert.Equal(1L, await database.ScalarAsync<long>($"SELECT count(*) FROM application WHERE tenant_id = '{TenantA}'"));
     }
 
@@ -167,7 +167,8 @@ public sealed class ApplicationPurgeOperationTests(PostgresFixture postgres)
         var database = await CreateAsync(postgres, registry: null);
         foreach (var tenant in new[] { TenantA, TenantB })
         {
-            var sql = $"INSERT INTO application (tenant_id, id, name, kind, created_at) VALUES ('{tenant}', '{System}', 'Account Portal', 'system', now());";
+            var sql = $"INSERT INTO application (tenant_id, id, name, kind, created_at) VALUES ('{tenant}', '{System}', 'Account Portal', 'system', now());"
+                + $"INSERT INTO connection (tenant_id, id, kind) VALUES ('{tenant}', gen_random_uuid(), 'database');";
             foreach (var application in tenant == TenantA ? new[] { Deleted, AlsoDeleted, Kept } : [Deleted, Kept])
             {
                 var user = Guid.CreateVersion7();
@@ -179,6 +180,8 @@ public sealed class ApplicationPurgeOperationTests(PostgresFixture postgres)
                     VALUES ('{tenant}', '{application}', 'App', 'web', ARRAY['authorization_code'], now(), {(application == Kept ? "NULL" : "now()")});
                     INSERT INTO client_secret (tenant_id, id, application_id, secret_hash, created_at)
                     VALUES ('{tenant}', gen_random_uuid(), '{application}', sha256(convert_to(gen_random_uuid()::text, 'UTF8')), now());
+                    INSERT INTO application_connection (tenant_id, application_id, connection_id, enabled)
+                    SELECT '{tenant}', '{application}', id, true FROM connection WHERE tenant_id = '{tenant}';
                     INSERT INTO "user" (tenant_id, id) VALUES ('{tenant}', '{user}');
                     INSERT INTO user_session (tenant_id, id, user_id, id_hash, amr, auth_time, idle_expires_at, absolute_expires_at, created_at)
                     VALUES ('{tenant}', '{session}', '{user}', sha256(convert_to('{session}', 'UTF8')), ARRAY['pwd'], now(), now() + interval '3 days', now() + interval '7 days', now());
@@ -225,7 +228,7 @@ public sealed class ApplicationPurgeOperationTests(PostgresFixture postgres)
             "SELECT string_agg(status" + (withCodes ? " || CASE WHEN status = 'failed' THEN ':' || coalesce(result_code, '') ELSE '' END" : string.Empty) +
             $", '/' ORDER BY position) FROM operation_step WHERE operation_id = '{operation}'");
 
-    /// <summary>The Application's tokens, families, transactions, secrets and its own row, counted, as <c>t/a/s/c/1</c>.</summary>
+    /// <summary>The Application's tokens, families, transactions, secrets, Connections (Story 4.12) and its own row, counted, as <c>t/a/s/c/n/1</c>.</summary>
     private static Task<string> CountsAsync(JobDatabase database, Guid tenant, Guid application, bool withLoose = false) =>
         database.ScalarAsync<string>($"""
             SELECT concat_ws('/',
@@ -233,6 +236,7 @@ public sealed class ApplicationPurgeOperationTests(PostgresFixture postgres)
               (SELECT count(*) FROM "authorization" WHERE tenant_id = '{tenant}' AND application_id = '{application}'),
               (SELECT count(*) FROM signin_transaction WHERE tenant_id = '{tenant}' AND application_id = '{application}'),
               (SELECT count(*) FROM client_secret WHERE tenant_id = '{tenant}' AND application_id = '{application}'),
+              (SELECT count(*) FROM application_connection WHERE tenant_id = '{tenant}' AND application_id = '{application}'),
               (SELECT count(*) FROM application WHERE tenant_id = '{tenant}' AND id = '{application}'))
             """);
 
@@ -244,6 +248,7 @@ public sealed class ApplicationPurgeOperationTests(PostgresFixture postgres)
               (SELECT string_agg(to_jsonb(a)::text, ',' ORDER BY id) FROM "authorization" a WHERE tenant_id = '{tenant}' AND application_id = '{application}'),
               (SELECT string_agg(to_jsonb(s)::text, ',' ORDER BY id) FROM signin_transaction s WHERE tenant_id = '{tenant}' AND application_id = '{application}'),
               (SELECT string_agg(to_jsonb(c)::text, ',' ORDER BY id) FROM client_secret c WHERE tenant_id = '{tenant}' AND application_id = '{application}'),
+              (SELECT string_agg(to_jsonb(n)::text, ',' ORDER BY connection_id) FROM application_connection n WHERE tenant_id = '{tenant}' AND application_id = '{application}'),
               (SELECT to_jsonb(p)::text FROM application p WHERE tenant_id = '{tenant}' AND id = '{application}'))
             """);
 
@@ -251,6 +256,6 @@ public sealed class ApplicationPurgeOperationTests(PostgresFixture postgres)
     private static Task<string> TenantRowsAsync(JobDatabase database, Guid tenant) =>
         database.ScalarAsync<string>(
             "SELECT concat_ws('|', " +
-            string.Join(", ", Tables.Select(t => $"(SELECT string_agg(to_jsonb(r)::text, ',' ORDER BY r.id) FROM \"{t}\" r WHERE r.tenant_id = '{tenant}')")) +
+            string.Join(", ", Tables.Select(t => $"(SELECT string_agg(to_jsonb(r)::text, ',' ORDER BY to_jsonb(r)::text) FROM \"{t}\" r WHERE r.tenant_id = '{tenant}')")) +
             ")");
 }

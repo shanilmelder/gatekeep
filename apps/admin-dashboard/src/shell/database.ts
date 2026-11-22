@@ -57,6 +57,25 @@ export interface FieldError {
 
 export type PolicyErrors = Partial<Record<PolicyField, FieldError>>;
 
+/** One Connection as an Application sees it (Story 4.12), as far as the no-Connection banner needs it. */
+export interface ApplicationConnectionState {
+  enabled: boolean;
+  tenantEnabled: boolean;
+}
+
+/**
+ * Whether Users can sign in to the Application through any Connection (Story 4.12): one both on for it and enabled in the
+ * Tenant. False with none, which Application · Connections warns of.
+ */
+export function anyUsable(connections: readonly ApplicationConnectionState[]): boolean {
+  return connections.some((connection) => connection.enabled && connection.tenantEnabled);
+}
+
+/** An Application's Connections tab (Story 4.12), which Database · Applications links each Application to. */
+export function applicationConnectionsPath(tenantId: string, applicationId: string): string {
+  return `/tenants/${encodeURIComponent(tenantId)}/applications/${encodeURIComponent(applicationId)}?tab=connections`;
+}
+
 /** The Database page's path for a Tenant. */
 export function databasePath(tenantId: string): string {
   return `/tenants/${encodeURIComponent(tenantId)}/database`;

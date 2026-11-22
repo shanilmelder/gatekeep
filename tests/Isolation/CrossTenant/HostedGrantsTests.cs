@@ -83,10 +83,10 @@ public sealed class HostedGrantsTests(PostgresFixture postgres)
     public void Configuration_tables_are_AD_2_s_list()
     {
         // The spec's classification (Story 1.31): every other table is runtime state. Story 4.4 adds email_provider, Story 4.5
-        // email_template, Story 4.6 connection.
+        // email_template, Story 4.6 connection, Story 4.12 application_connection.
         Assert.Equal(
             [
-                "admin", "admin_credential", "admin_enrolment", "admin_recovery_code", "api", "api_grant", "application", "bootstrap_state", "client_secret",
+                "admin", "admin_credential", "admin_enrolment", "admin_recovery_code", "api", "api_grant", "application", "application_connection", "bootstrap_state", "client_secret",
                 "connection", "email_provider", "email_template", "migration_history", "permission", "protection_key_wrap", "signing_key", "tenant", "tenant_host", "tenant_role", "tenant_settings",
             ],
             TableRegistry.Tables.Where(t => t.Use == TableUse.Configuration).Select(t => t.Name).Order(StringComparer.Ordinal));

@@ -72,7 +72,7 @@ export default defineConfig({
       name,
       // Every spec that isn't another project's own, so a new spec runs by default.
       testMatch: '*.spec.ts',
-      testIgnore: ['hosted-step.spec.ts', 'admin-csp.spec.ts', 'bootstrap.spec.ts', 'credential-setup.spec.ts', 'signin.spec.ts', 'controls.spec.ts', 'data.spec.ts', 'overlay.spec.ts', 'drawer.spec.ts', 'hosted.spec.ts', 'shell.spec.ts', 'admin-shell.spec.ts', 'admin-credentials.spec.ts', 'admin-recovery.spec.ts', 'admin-tenants.spec.ts', 'admin-tenant-switcher.spec.ts', 'admin-tenant-delete.spec.ts', 'admin-logs.spec.ts', 'admin-signing-keys.spec.ts', 'admin-applications.spec.ts', 'admin-apis.spec.ts', 'admin-email-provider.spec.ts', 'admin-database.spec.ts', 'hosted-signup.spec.ts', 'hosted-signin.spec.ts', 'hosted-reset.spec.ts'],
+      testIgnore: ['hosted-step.spec.ts', 'admin-csp.spec.ts', 'bootstrap.spec.ts', 'credential-setup.spec.ts', 'signin.spec.ts', 'controls.spec.ts', 'data.spec.ts', 'overlay.spec.ts', 'drawer.spec.ts', 'hosted.spec.ts', 'shell.spec.ts', 'admin-shell.spec.ts', 'admin-credentials.spec.ts', 'admin-recovery.spec.ts', 'admin-tenants.spec.ts', 'admin-tenant-switcher.spec.ts', 'admin-tenant-delete.spec.ts', 'admin-logs.spec.ts', 'admin-signing-keys.spec.ts', 'admin-applications.spec.ts', 'admin-apis.spec.ts', 'admin-email-provider.spec.ts', 'admin-database.spec.ts', 'admin-connections.spec.ts', 'hosted-signup.spec.ts', 'hosted-signin.spec.ts', 'hosted-reset.spec.ts'],
       use: { baseURL: `http://127.0.0.1:${port}` },
     })),
     // Hosted Login's step pages (Story 4.1), on the built bundle as Host.Hosted serves it.
@@ -195,6 +195,12 @@ export default defineConfig({
     {
       name: 'admin-database',
       testMatch: 'admin-database.spec.ts',
+      use: { baseURL: `http://localhost:${adminHost.port}` },
+    },
+    // An Application's Connections and the database Connection's Applications (Story 4.12), from localhost, with the API intercepted.
+    {
+      name: 'admin-connections',
+      testMatch: 'admin-connections.spec.ts',
       use: { baseURL: `http://localhost:${adminHost.port}` },
     },
   ],

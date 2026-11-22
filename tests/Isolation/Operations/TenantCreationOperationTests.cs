@@ -70,6 +70,9 @@ public sealed class TenantCreationOperationTests(PostgresFixture postgres)
         Assert.Equal(1L, await database.ScalarAsync<long>($"SELECT count(*) FROM connection WHERE tenant_id = '{tenant}'"));
         Assert.Equal(0L, await database.ScalarAsync<long>(
             $"SELECT count(*) FROM audit_event WHERE tenant_id = '{tenant}' AND type_code LIKE 'directory.connection.%'"));
+
+        // Story 4.12: the system Application follows every Connection its Tenant enables, with no row of its own.
+        Assert.Equal(0L, await database.ScalarAsync<long>($"SELECT count(*) FROM application_connection WHERE tenant_id = '{tenant}'"));
     }
 
     /// <summary>Story 3.6: the Tenant's one built-in Management API, with exactly Directory's Management Permissions and no event.</summary>

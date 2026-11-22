@@ -1,0 +1,64 @@
+/*
+ * An Application's Connections tab (Story 4.12): its banners, then one card on the sf surface, as the Tokens tab's,
+ * holding a settings row per Connection with its badge, name, kind and state beside its switch. Tokens only.
+ */
+
+.tab {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--gk-space-16);
+  min-width: 0;
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  background: var(--gk-color-sf);
+  border: 1px solid var(--gk-color-bd);
+  border-radius: var(--gk-radius-card);
+}
+
+.cardHeader {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gk-space-4);
+  padding: var(--gk-space-12) var(--gk-space-16);
+  border-bottom: 1px solid var(--gk-color-bd);
+  overflow-wrap: anywhere;
+}
+
+.cardHeader > h2 {
+  margin: 0;
+  font: var(--gk-font-section);
+  font-weight: var(--gk-font-section-weight);
+}
+
+.cardHeader > p {
+  margin: 0;
+  font: var(--gk-font-small);
+  color: var(--gk-color-tx2);
+}
+
+.rows {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: 0 var(--gk-space-16);
+}
+
+.connection {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--gk-space-8);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.meta {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: var(--gk-space-4);
+}

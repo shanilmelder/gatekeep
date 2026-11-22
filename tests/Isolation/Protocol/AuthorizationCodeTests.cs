@@ -412,7 +412,7 @@ public sealed class AuthorizationCodeTests(PostgresFixture postgres, OpenBaoFixt
     public async Task The_release_credential_step_authenticates_no_one_so_Continue_is_the_Password_step_and_no_code_is_issued()
     {
         var flow = await CodeFlowSetup.CreateAsync(postgres, bao, HostA, HostB);
-        await flow.Database.ExecuteAsync($"INSERT INTO connection (tenant_id, id, kind) VALUES ('{flow.A.TenantId}', gen_random_uuid(), 'database')");
+        await flow.Database.ExecuteAsync(TestTenants.DatabaseConnectionSql(flow.A.TenantId));
         await using var host = await ProtocolHost.StartAsync(flow.Database.Hosted, bao, releaseSignIn: true);
         var browser = new HostedBrowser(host, HostA);
 

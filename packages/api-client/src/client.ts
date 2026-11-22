@@ -104,6 +104,16 @@ export type SetDatabaseConnectionSettingsRequest = components['schemas']['SetDat
 export type SetPasswordPolicyRequest = components['schemas']['SetPasswordPolicyRequest'];
 /** A password strength level (Story 4.6). */
 export type PasswordStrength = NonNullable<SetPasswordPolicyRequest['strength']>;
+/** An Application's Connections (Story 4.12): each Connection, whether it is on for the Application and in the Tenant. */
+export type ApplicationConnectionsResponse = components['schemas']['ApplicationConnectionsResponse'];
+/** One Connection as an Application sees it (Story 4.12). */
+export type ApplicationConnectionResponse = components['schemas']['ApplicationConnectionResponse'];
+/** An Application's Connection toggle (Story 4.12). */
+export type SetApplicationConnectionRequest = components['schemas']['SetApplicationConnectionRequest'];
+/** The Applications a Connection is enabled for (Story 4.12), ordered by name. */
+export type ConnectionApplicationsResponse = components['schemas']['ConnectionApplicationsResponse'];
+/** One Application a Connection is enabled for (Story 4.12). */
+export type ConnectionApplicationResponse = components['schemas']['ConnectionApplicationResponse'];
 /** A Tenant's settings a sign-up reads (Story 4.6). */
 export type TenantSettingsResponse = components['schemas']['TenantSettingsResponse'];
 /** A Tenant settings save (Story 4.6): every member; a null clears a URL or the audience. */
@@ -598,6 +608,31 @@ export function createApiClient(options: ApiClientOptions = {}) {
     setPasswordPolicy: (tenantId: string, body: SetPasswordPolicyRequest) =>
       request(
         `/api/v1/tenants/${encodeURIComponent(tenantId)}/connections/database/password-policy` as '/api/v1/tenants/{tenantId}/connections/database/password-policy',
+        'put',
+        body,
+      ),
+    /**
+     * The Applications the database Connection is enabled for (Story 4.12), ordered by name: never the hidden system
+     * Application. Any Tenant Role. Its ID goes into the path encoded.
+     */
+    listDatabaseConnectionApplications: (tenantId: string) =>
+      request(
+        `/api/v1/tenants/${encodeURIComponent(tenantId)}/connections/database/applications` as '/api/v1/tenants/{tenantId}/connections/database/applications',
+        'get',
+      ),
+    /** An Application's Connections (Story 4.12): any Tenant Role. Both IDs go into the path encoded. */
+    listApplicationConnections: (tenantId: string, applicationId: string) =>
+      request(
+        `/api/v1/tenants/${encodeURIComponent(tenantId)}/applications/${encodeURIComponent(applicationId)}/connections` as '/api/v1/tenants/{tenantId}/applications/{applicationId}/connections',
+        'get',
+      ),
+    /**
+     * Turns a Connection on or off for one Application (Story 4.12): Editors and Owners. The answer is the Connection as
+     * the list gives it. Every ID goes into the path encoded.
+     */
+    setApplicationConnection: (tenantId: string, applicationId: string, connectionId: string, body: SetApplicationConnectionRequest) =>
+      request(
+        `/api/v1/tenants/${encodeURIComponent(tenantId)}/applications/${encodeURIComponent(applicationId)}/connections/${encodeURIComponent(connectionId)}` as '/api/v1/tenants/{tenantId}/applications/{applicationId}/connections/{connectionId}',
         'put',
         body,
       ),

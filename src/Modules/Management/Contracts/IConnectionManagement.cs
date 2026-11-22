@@ -42,6 +42,24 @@ public sealed record DatabaseConnectionResult(
 public sealed record PasswordPolicySaveInput(int? MinLength, string? Strength, int? HistoryCount, bool? Dictionary, bool? PersonalData);
 
 /// <summary>
+/// One Connection as an Application sees it (Story 4.12): its ID, which in v1 is its kind (<c>database</c>), its fixed name,
+/// its kind, whether it is enabled for the Application, and whether the Tenant enables it at all.
+/// </summary>
+public sealed record ManagedApplicationConnection(string ConnectionId, string Name, string Kind, bool Enabled, bool TenantEnabled);
+
+/// <summary>An Application's Connections request's outcome (Story 4.12): every Connection as the Application sees it, and whether a toggle changed one.</summary>
+public sealed record ApplicationConnectionsResult(
+    ConnectionStatus Status,
+    IReadOnlyList<ManagedApplicationConnection> Connections,
+    bool Changed);
+
+/// <summary>An Application a Connection is enabled for (Story 4.12): its <c>app_</c> ID, its name and its type.</summary>
+public sealed record ManagedConnectionApplication(string Id, string Name, string Type);
+
+/// <summary>A Connection's Applications request's outcome (Story 4.12): the visible Applications it is enabled for, ordered by name.</summary>
+public sealed record ConnectionApplicationsResult(ConnectionStatus Status, IReadOnlyList<ManagedConnectionApplication> Applications);
+
+/// <summary>
 /// A Tenant's database Connection (Story 4.6, FR-17, FR-18), in the path Tenant's own context: read with
 /// <c>tenant.configuration.read</c>, sign-up toggled with <c>tenant.connections.toggle</c> and the password policy saved
 /// with <c>tenant.password_policy.manage</c>, each decided again here (AD-5). Each save is one command writing its state and
@@ -63,6 +81,40 @@ public interface IDatabaseConnectionManagement
     /// <exception cref="InvalidOperationException">The context isn't <paramref name="tenantId"/>'s.</exception>
     Task<DatabaseConnectionResult> SetPasswordPolicyAsync(
         CommandContext tenantContext, Principal principal, TenantRoleGrant? grant, Guid tenantId, PasswordPolicySaveInput input, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Application <paramref name="applicationId"/>'s Connections (Story 4.12), read with <c>tenant.configuration.read</c>.
+    /// <see cref="ConnectionStatus.NotFound"/> for an unknown, deleted or <c>system</c> Application.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The context isn't <paramref name="tenantId"/>'s.</exception>
+    Task<ApplicationConnectionsResult> GetApplicationConnectionsAsync(
+        CommandContext tenantContext, Principal principal, TenantRoleGrant? grant, Guid tenantId, Guid applicationId, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Turns the Connection <paramref name="connectionId"/> on or off for Application <paramref name="applicationId"/> (Story
+    /// 4.12), with <c>tenant.connections.toggle</c>, in an active Tenant: one command writing the row and
+    /// <c>directory.application_connection.updated</c>, and only when it changes. A null <paramref name="enabled"/> is
+    /// <see cref="ConnectionStatus.Invalid"/>; an unknown, deleted or <c>system</c> Application, or an unknown Connection, is
+    /// <see cref="ConnectionStatus.NotFound"/>. The caller commits only on <see cref="ConnectionStatus.Done"/>.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The context isn't <paramref name="tenantId"/>'s.</exception>
+    Task<ApplicationConnectionsResult> SetApplicationConnectionAsync(
+        CommandContext tenantContext,
+        Principal principal,
+        TenantRoleGrant? grant,
+        Guid tenantId,
+        Guid applicationId,
+        string connectionId,
+        bool? enabled,
+        CancellationToken cancellationToken);
+
+    /// <summary>
+    /// The visible Applications the database Connection is enabled for (Story 4.12), ordered by name, read with
+    /// <c>tenant.configuration.read</c>. <see cref="ConnectionStatus.NotFound"/> when the Tenant has no database Connection.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The context isn't <paramref name="tenantId"/>'s.</exception>
+    Task<ConnectionApplicationsResult> GetConnectionApplicationsAsync(
+        CommandContext tenantContext, Principal principal, TenantRoleGrant? grant, Guid tenantId, CancellationToken cancellationToken);
 }
 
 /// <summary>

@@ -85,7 +85,9 @@ internal static class ProtocolServer
                 provider.GetRequiredService<TimeProvider>(),
                 provider.GetRequiredService<IJobEnqueuer>(),
                 provider.GetRequiredService<IPasswordHashGate>()),
-            provider.GetRequiredService<PasswordResetLimits>()));
+            provider.GetRequiredService<PasswordResetLimits>(),
+            // Story 4.12: a host's own credential step signs Users in at Login with no Connection, so Login stays.
+            provider.GetService<ICredentialStep>() is not null));
         services.AddScoped<TokenRequestTransaction>();
 
         var inert = new InertCredentials();

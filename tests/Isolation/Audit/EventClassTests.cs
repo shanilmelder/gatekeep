@@ -283,9 +283,12 @@ public sealed class EventClassTests(PostgresFixture postgres)
     {
         var database = await postgres.NewMigratedDatabaseAsync();
         var tenantId = Guid.CreateVersion7();
+        var applicationId = Guid.CreateVersion7();
+
+        // Story 4.12: the Connection enabled for the transaction's Application.
         await PostgresFixture.ExecuteAsync(
             postgres.SuperuserConnection(database),
-            TestTenants.InsertSql(tenantId) + $"; INSERT INTO connection (tenant_id, id, kind) VALUES ('{tenantId}', gen_random_uuid(), 'database')");
+            TestTenants.InsertSql(tenantId) + "; " + TestTenants.ApplicationSql(tenantId, applicationId) + "; " + TestTenants.DatabaseConnectionSql(tenantId));
 
         var audit = AuditContract.CreateAppender();
         var signIn = Gatekeep.Modules.Authentication.Contracts.AuthenticationContract.CreateSignIn(
@@ -295,7 +298,7 @@ public sealed class EventClassTests(PostgresFixture postgres)
             Gatekeep.Modules.Authentication.Contracts.AuthenticationContract.CreatePasswordHashGate(Gatekeep.Modules.Authentication.Contracts.PasswordHashLimits.Default));
         var transaction = new Gatekeep.Modules.Authentication.Contracts.SignInTransaction(
             Guid.CreateVersion7(),
-            Guid.CreateVersion7(),
+            applicationId,
             new Dictionary<string, string>(),
             [Gatekeep.Modules.Authentication.Contracts.SignInSteps.Identifier],
             2,

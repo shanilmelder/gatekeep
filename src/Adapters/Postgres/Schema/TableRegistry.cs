@@ -809,6 +809,28 @@ public static class TableRegistry
                 ],
             },
             RowGuard),
+        // Story 4.12 (FR-14): which Connections each Application allows; a missing row means off, and the system Application
+        // has none, following every Connection its Tenant enables. Host.Admin writes a new Application's defaults and
+        // toggles a row; Host.Worker writes them for a Connection its backfill ensures late; Host.Hosted reads them to offer
+        // and accept only an Application's Connections; a Tenant's purge and
+        // a deleted Application's delete them, reading only what each WHERE names.
+        new(
+            "application_connection",
+            TableClass.Tenant,
+            "Directory",
+            TableUse.Configuration,
+            new Dictionary<string, IReadOnlyList<string>>
+            {
+                [Hosted] = [Select],
+                [Admin] = [Select, Insert],
+                [Worker] = [Insert, Delete],
+            },
+            new Dictionary<string, IReadOnlyList<ColumnGrant>>
+            {
+                [Admin] = [new ColumnGrant(Update, ["enabled", "updated_at"])],
+                [Worker] = [new ColumnGrant(Select, ["tenant_id", "application_id"])],
+            },
+            RowGuard),
 
         // Story 4.4 (FR-36, AD-10): each Tenant's email provider, its secret only as Transit ciphertext under the Tenant's
         // email key. Host.Admin, which may encrypt under that key but never decrypt, saves and removes it and reads every

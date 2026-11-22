@@ -187,8 +187,9 @@ internal sealed class PasswordResetService(
         ArgumentNullException.ThrowIfNull(token);
         TenantOf(context);
 
-        var (enabled, policy) = await ConnectionAsync(context, cancellationToken);
+        // Story 4.12: the database Connection as the Application the link's request was for sees it.
         var link = await _identity.FindResetLinkAsync(context, token, lockRows: false, cancellationToken);
+        var (enabled, policy) = await ConnectionAsync(context, link?.ApplicationId, cancellationToken);
         var usable = enabled && link is not null && link.IsUsableAt(_time.GetUtcNow());
         return new ResetLinkState(usable, policy.MinLength, policy.Strength, usable ? link!.Email : null);
     }
@@ -207,11 +208,16 @@ internal sealed class PasswordResetService(
         ArgumentNullException.ThrowIfNull(confirm);
         var tenantId = TenantOf(context);
 
-        // 1. A stale link, or a database Connection no longer enabled: read with no lock, so nothing waits on the hashing.
-        var (enabled, policy) = await ConnectionAsync(context, cancellationToken);
-        if (!enabled
-            || await _identity.FindResetLinkAsync(context, token, lockRows: false, cancellationToken) is not { } read
+        // 1. A stale link, or a database Connection no longer enabled (from Story 4.12, for the Application the link's request
+        // was for): read with no lock, so nothing waits on the hashing.
+        if (await _identity.FindResetLinkAsync(context, token, lockRows: false, cancellationToken) is not { } read
             || !read.IsUsableAt(_time.GetUtcNow()))
+        {
+            return new PasswordResetResult(PasswordResetStatus.Unusable, []);
+        }
+
+        var (enabled, policy) = await ConnectionAsync(context, read.ApplicationId, cancellationToken);
+        if (!enabled)
         {
             return new PasswordResetResult(PasswordResetStatus.Unusable, []);
         }
@@ -281,9 +287,9 @@ internal sealed class PasswordResetService(
 
         // Only an unused link (expired or not) of a User still holding an active password, under an enabled Connection,
         // and only while its recipient is under the limit a request counts.
-        if ((await ConnectionAsync(context, cancellationToken)).Enabled
-            && await _identity.FindResetLinkAsync(context, token, lockRows: false, cancellationToken) is
+        if (await _identity.FindResetLinkAsync(context, token, lockRows: false, cancellationToken) is
                 { UsedAt: null, ActiveCredentialId: { } credentialId, Email: { } email } link
+            && (await ConnectionAsync(context, link.ApplicationId, cancellationToken)).Enabled
             && await recipientAllowed(email.ToLowerInvariant())
             && await _identity.IssueResetLinkAsync(context, link.UserId, credentialId, link.ApplicationId, cancellationToken) is { } fresh)
         {
@@ -328,11 +334,12 @@ internal sealed class PasswordResetService(
     }
 
     /// <summary>
-    /// Whether the database Connection is enabled, without which no link is used or sent, and its password policy, or the
-    /// defaults when the Tenant has none.
+    /// Whether the database Connection is enabled for <paramref name="applicationId"/> (Story 4.12; a null one is the Tenant's
+    /// own view), without which no link is used or sent, and its password policy, or the defaults when the Tenant has none.
     /// </summary>
-    private async Task<(bool Enabled, PasswordPolicy Policy)> ConnectionAsync(CommandContext context, CancellationToken cancellationToken) =>
-        await _directory.FindDatabaseConnectionAsync(context, cancellationToken) is { } connection
+    private async Task<(bool Enabled, PasswordPolicy Policy)> ConnectionAsync(
+        CommandContext context, Guid? applicationId, CancellationToken cancellationToken) =>
+        await _directory.FindDatabaseConnectionForApplicationAsync(context, applicationId, cancellationToken) is { } connection
             ? (connection.Enabled, connection.Policy)
             : (false, DirectoryContract.DefaultPasswordPolicy);
 

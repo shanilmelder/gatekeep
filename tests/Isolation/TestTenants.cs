@@ -51,6 +51,25 @@ internal static class TestTenants
         "INSERT INTO application (tenant_id, id, name, kind, grant_types, created_at) VALUES "
         + string.Join(", ", ids.Select(id => $"('{tenant}', '{id}', 'Test Application', 'machine', ARRAY['client_credentials'], now())"));
 
+    /// <summary>
+    /// SQL inserting <paramref name="tenant"/>'s database Connection (Story 4.6), sign-up on unless
+    /// <paramref name="signupEnabled"/> is false, then (Story 4.12) enabling it for every Application the Tenant already
+    /// has, as the migration's backfill does: an Application created before its Connection has no row, and a missing row
+    /// means off. No trailing semicolon.
+    /// </summary>
+    public static string DatabaseConnectionSql(Guid tenant, bool signupEnabled = true) =>
+        $"INSERT INTO connection (tenant_id, id, kind, signup_enabled) VALUES ('{tenant}', gen_random_uuid(), 'database', {(signupEnabled ? "true" : "false")}); "
+        + EnableConnectionsSql(tenant);
+
+    /// <summary>
+    /// SQL enabling each of <paramref name="tenant"/>'s Connections for each of its non-system Applications (Story 4.12),
+    /// as the migration's backfill does, adding nothing that is there already. No trailing semicolon.
+    /// </summary>
+    public static string EnableConnectionsSql(Guid tenant) =>
+        "INSERT INTO application_connection (tenant_id, application_id, connection_id, enabled) "
+        + "SELECT a.tenant_id, a.id, c.id, true FROM application a JOIN connection c ON c.tenant_id = a.tenant_id "
+        + $"WHERE a.tenant_id = '{tenant}' AND a.kind <> 'system' ON CONFLICT DO NOTHING";
+
     private const string Replica = "SET session_replication_role = replica";
 
     private const string Origin = "SET session_replication_role = DEFAULT";

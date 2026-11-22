@@ -91,6 +91,87 @@ internal sealed class DatabaseConnectionManagement(IAuditAppender appender) : ID
         return Written(write);
     }
 
+    public async Task<ApplicationConnectionsResult> GetApplicationConnectionsAsync(
+        CommandContext tenantContext, Principal principal, TenantRoleGrant? grant, Guid tenantId, Guid applicationId, CancellationToken cancellationToken)
+    {
+        Scope.RequireOwnContext(tenantContext, tenantId);
+        ArgumentNullException.ThrowIfNull(principal);
+
+        if (!AdminCapabilities.Allows(AdminCapabilities.TenantConfigurationRead, principal, grant, tenantId))
+        {
+            return new ApplicationConnectionsResult(ConnectionStatus.Forbidden, [], Changed: false);
+        }
+
+        return await _directory.ListApplicationConnectionsAsync(tenantContext, applicationId, cancellationToken) is { } connections
+            ? new ApplicationConnectionsResult(ConnectionStatus.Done, [.. connections.Select(Managed)], Changed: false)
+            : new ApplicationConnectionsResult(ConnectionStatus.NotFound, [], Changed: false);
+    }
+
+    public async Task<ApplicationConnectionsResult> SetApplicationConnectionAsync(
+        CommandContext tenantContext,
+        Principal principal,
+        TenantRoleGrant? grant,
+        Guid tenantId,
+        Guid applicationId,
+        string connectionId,
+        bool? enabled,
+        CancellationToken cancellationToken)
+    {
+        Scope.RequireOwnContext(tenantContext, tenantId);
+        ArgumentNullException.ThrowIfNull(principal);
+
+        if (!AdminCapabilities.Allows(AdminCapabilities.TenantConnectionsToggle, principal, grant, tenantId))
+        {
+            return new ApplicationConnectionsResult(ConnectionStatus.Forbidden, [], Changed: false);
+        }
+
+        // In v1 a Connection's ID is its kind, and the one kind is database.
+        if (!string.Equals(connectionId, DirectoryContract.DatabaseConnectionKind, StringComparison.Ordinal))
+        {
+            return new ApplicationConnectionsResult(ConnectionStatus.NotFound, [], Changed: false);
+        }
+
+        if (enabled is not { } value)
+        {
+            return new ApplicationConnectionsResult(ConnectionStatus.Invalid, [], Changed: false);
+        }
+
+        if (!await ActiveAsync(tenantContext, tenantId, cancellationToken))
+        {
+            return new ApplicationConnectionsResult(ConnectionStatus.NotActive, [], Changed: false);
+        }
+
+        var write = await _directory.SetApplicationConnectionAsync(
+            tenantContext, Scope.ActorOf(principal), applicationId, connectionId, value, cancellationToken);
+        return write.Status switch
+        {
+            ApplicationConnectionWriteStatus.Saved => new ApplicationConnectionsResult(ConnectionStatus.Done, [Managed(write.Connection!)], Changed: true),
+            ApplicationConnectionWriteStatus.Unchanged => new ApplicationConnectionsResult(ConnectionStatus.Done, [Managed(write.Connection!)], Changed: false),
+            ApplicationConnectionWriteStatus.NotFound => new ApplicationConnectionsResult(ConnectionStatus.NotFound, [], Changed: false),
+            _ => throw new InvalidOperationException("Unknown Application Connection write status."),
+        };
+    }
+
+    public async Task<ConnectionApplicationsResult> GetConnectionApplicationsAsync(
+        CommandContext tenantContext, Principal principal, TenantRoleGrant? grant, Guid tenantId, CancellationToken cancellationToken)
+    {
+        Scope.RequireOwnContext(tenantContext, tenantId);
+        ArgumentNullException.ThrowIfNull(principal);
+
+        if (!AdminCapabilities.Allows(AdminCapabilities.TenantConfigurationRead, principal, grant, tenantId))
+        {
+            return new ConnectionApplicationsResult(ConnectionStatus.Forbidden, []);
+        }
+
+        return await _directory.ListConnectionApplicationsAsync(tenantContext, DirectoryContract.DatabaseConnectionKind, cancellationToken) is { } applications
+            ? new ConnectionApplicationsResult(
+                ConnectionStatus.Done, [.. applications.Select(a => new ManagedConnectionApplication(a.ClientId, a.Name, a.Kind))])
+            : new ConnectionApplicationsResult(ConnectionStatus.NotFound, []);
+    }
+
+    private static ManagedApplicationConnection Managed(ApplicationConnection connection) =>
+        new(connection.Kind, connection.Name, connection.Kind, connection.Enabled, connection.TenantEnabled);
+
     /// <summary>Whether the Tenant is active, under its row's lock, which a deletion's start waits for.</summary>
     private async Task<bool> ActiveAsync(CommandContext tenantContext, Guid tenantId, CancellationToken cancellationToken) =>
         await _tenants.LockLabelAsync(tenantContext, tenantId, cancellationToken) is { Status: TenantStatus.Active };

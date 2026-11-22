@@ -326,8 +326,8 @@ public sealed partial class HostedStepTests(PostgresFixture postgres, OpenBaoFix
 
     /// <summary>
     /// Starts Host.Hosted on the built bundle, with one Tenant on <see cref="Host"/>, named
-    /// <paramref name="name"/>, its keys provisioned and a web client registered for <see cref="Callback"/>,
-    /// and waits until it's healthy. Returns its public port and the client's ID.
+    /// <paramref name="name"/>, its keys provisioned, a web client registered for <see cref="Callback"/> and its database
+    /// Connection enabled for it, and waits until it's healthy. Returns its public port and the client's ID.
     /// </summary>
     private async Task<(int Port, string ClientId)> StartAsync(string name = ProtocolDatabase.TestTenantName)
     {
@@ -342,6 +342,9 @@ public sealed partial class HostedStepTests(PostgresFixture postgres, OpenBaoFix
 
         Assert.True(await database.ProvisionAsync(bao, tenant.TenantId));
         var client = await database.CreateWebClientAsync(tenant.TenantId, [Callback]);
+
+        // Story 4.12: on the release build, Login is shown only while a Connection is enabled for the Application.
+        await database.ExecuteAsync(TestTenants.DatabaseConnectionSql(tenant.TenantId));
 
         var socket = new OpenBaoSocketProxy(bao.Address);
         _sockets.Add(socket);

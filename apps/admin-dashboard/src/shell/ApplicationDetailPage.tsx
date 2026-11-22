@@ -16,6 +16,7 @@ import {
 import { useCallback, useEffect, useRef, useState, type MouseEvent } from 'react';
 import { navigate } from '../navigation';
 import { api } from '../session';
+import { ApplicationConnections } from './ApplicationConnections';
 import { ApplicationCredentials } from './ApplicationCredentials';
 import { applicationsPath } from './applications';
 import { ApplicationSettings } from './ApplicationSettings';
@@ -54,7 +55,8 @@ export interface ApplicationDetailPageProps {
  * name with its type badge, the client ID in the code type with Copy, then the tabs. Settings, the
  * default (Story 3.2), holds the URLs and grants; Credentials (Story 3.3) the client secrets a regular
  * web or machine-to-machine Application needs, which only a Tenant Owner creates, rotates and revokes;
- * single-page and native need none; Tokens (Story 3.4) the token lifetimes. Under the tabs, a caller with
+ * single-page and native need none; Tokens (Story 3.4) the token lifetimes; Connections (Story 4.12) the Connections
+ * Users can sign in to it through, each switched at once. Under the tabs, a caller with
  * tenant.applications.manage gets the danger zone (Story 3.5): Delete opens the confirming modal, and a deletion
  * goes back to the list with a toast. A 404 says the Tenant has no such Application, a 403 is the
  * forbidden page, and any other failure a banner with Retry.
@@ -238,6 +240,18 @@ export function ApplicationDetailPage({ request, fresh, tenantId, tenant, applic
                   canManage={has('tenant.applications.manage')}
                   onSaved={(application) => setLoad({ kind: 'ready', application })}
                   onDirtyChange={onTokensDirtyChange}
+                />
+              ),
+            },
+            {
+              id: 'connections',
+              label: messages.applicationTabConnections,
+              panel: (
+                <ApplicationConnections
+                  request={request}
+                  tenantId={tenantId}
+                  application={ready}
+                  canToggle={has('tenant.connections.toggle')}
                 />
               ),
             },

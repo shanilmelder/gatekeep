@@ -92,11 +92,11 @@ internal sealed class SignUpService(
     private readonly IJobEnqueuer _enqueuer = enqueuer ?? throw new ArgumentNullException(nameof(enqueuer));
     private readonly IPasswordHashGate _gate = gate ?? throw new ArgumentNullException(nameof(gate));
 
-    public async Task<SignupPolicy> ReadPolicyAsync(CommandContext context, CancellationToken cancellationToken)
+    public async Task<SignupPolicy> ReadPolicyAsync(CommandContext context, Guid? applicationId, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(context);
         var tenantId = TenantOf(context);
-        var policy = Policy(await _directory.FindDatabaseConnectionAsync(context, cancellationToken));
+        var policy = Policy(await _directory.FindDatabaseConnectionForApplicationAsync(context, applicationId, cancellationToken));
         var settings = await _tenants.GetSignupSettingsAsync(context, tenantId, cancellationToken);
         return policy with { TermsUrl = settings?.TermsUrl };
     }
@@ -107,7 +107,8 @@ internal sealed class SignUpService(
         ArgumentNullException.ThrowIfNull(transaction);
         var tenantId = TenantOf(context);
 
-        if (!Policy(await _directory.FindDatabaseConnectionAsync(context, cancellationToken)).Enabled)
+        // Story 4.12: only while the database Connection is enabled for the transaction's Application.
+        if (!Policy(await _directory.FindDatabaseConnectionForApplicationAsync(context, transaction.ApplicationId, cancellationToken)).Enabled)
         {
             return null;
         }
@@ -171,7 +172,7 @@ internal sealed class SignUpService(
             throw new InvalidOperationException("The sign-in transaction isn't at Signup.");
         }
 
-        var connection = await _directory.FindDatabaseConnectionAsync(context, cancellationToken);
+        var connection = await _directory.FindDatabaseConnectionForApplicationAsync(context, transaction.ApplicationId, cancellationToken);
         if (connection is null || !Policy(connection).Enabled)
         {
             var back = await BackAsync(context, transaction, cancellationToken);
@@ -262,6 +263,12 @@ internal sealed class SignUpService(
         var tenantId = TenantOf(context);
         RequireRegistered(transaction);
 
+        // Story 4.12: with the database Connection off for the transaction's Application, nothing is sent or written.
+        if (!await EnabledForAsync(context, transaction.ApplicationId, cancellationToken))
+        {
+            return transaction.ExpiresAt;
+        }
+
         // Story 4.9: an unverified User's active credential, after a sign-in with the correct password, gets a link too.
         if (transaction is { SignupUserId: { } userId, SignupCredentialId: { } credentialId }
             && await _identity.FindCredentialAsync(context, credentialId, cancellationToken) is { UserVerified: false } credential
@@ -290,7 +297,7 @@ internal sealed class SignUpService(
             && credential.UserId == userId
             && (credential.UserVerified
                 || (await _tenants.GetSignupSettingsAsync(context, tenantId, cancellationToken))?.EmailVerificationOff == true)
-            && await _directory.FindDatabaseConnectionAsync(context, cancellationToken) is { Enabled: true } connection)
+            && await _directory.FindDatabaseConnectionForApplicationAsync(context, transaction.ApplicationId, cancellationToken) is { Enabled: true } connection)
         {
             var (session, stepVersion, expiresAt) = await AuthenticateAsync(
                 context, tenantId, transaction.Id, userId, credentialId, connection.Id, presentedSession, cancellationToken);
@@ -326,7 +333,7 @@ internal sealed class SignUpService(
             && IsRegistered(live)
             && live.SignupUserId == userId
             && live.SignupCredentialId == credentialId
-            && await _directory.FindDatabaseConnectionAsync(context, cancellationToken) is { Enabled: true } connection)
+            && await _directory.FindDatabaseConnectionForApplicationAsync(context, live.ApplicationId, cancellationToken) is { Enabled: true } connection)
         {
             var (session, stepVersion, _) = await AuthenticateAsync(
                 context, tenantId, live.Id, userId, credentialId, connection.Id, presentedSession, cancellationToken);
@@ -342,13 +349,19 @@ internal sealed class SignUpService(
         ArgumentNullException.ThrowIfNull(token);
         TenantOf(context);
 
+        // Story 4.12: only while the database Connection is enabled for the Application the link's sign-up was for.
         if (await _identity.FindVerificationLinkAsync(context, token, cancellationToken) is { UserVerified: false } link
+            && await EnabledForAsync(context, link.ApplicationId, cancellationToken)
             && await _identity.FindCredentialAsync(context, link.CredentialId, cancellationToken) is { UserVerified: false })
         {
             var fresh = await _identity.IssueVerificationLinkAsync(context, link.UserId, link.CredentialId, link.ApplicationId, cancellationToken);
             await EnqueueVerificationAsync(context, link.UserId, fresh, cancellationToken);
         }
     }
+
+    /// <summary>Whether the database Connection is enabled for <paramref name="applicationId"/> (Story 4.12); a null one is the Tenant's own view.</summary>
+    private async Task<bool> EnabledForAsync(CommandContext context, Guid? applicationId, CancellationToken cancellationToken) =>
+        await _directory.FindDatabaseConnectionForApplicationAsync(context, applicationId, cancellationToken) is { Enabled: true };
 
     /// <summary>
     /// The Connection as Hosted Login shows it: sign-up open only while it is enabled with sign-up on, and (Story 4.9) the

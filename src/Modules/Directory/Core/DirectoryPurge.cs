@@ -14,6 +14,9 @@ internal sealed class DirectoryPurge : ITenantPurge
     [
         // Story 3.7: grants reference both an Application and a Permission, so they go before either.
         "DELETE FROM api_grant WHERE tenant_id = @tenant_id",
+
+        // Story 4.12: an Application's Connections reference both an Application and a Connection, so they go before either.
+        "DELETE FROM application_connection WHERE tenant_id = @tenant_id",
         "DELETE FROM client_secret WHERE tenant_id = @tenant_id",
         "DELETE FROM application WHERE tenant_id = @tenant_id",
 
@@ -21,7 +24,7 @@ internal sealed class DirectoryPurge : ITenantPurge
         "DELETE FROM permission WHERE tenant_id = @tenant_id",
         "DELETE FROM api WHERE tenant_id = @tenant_id",
 
-        // Story 4.6: the database Connection, which nothing references.
+        // Story 4.6: the database Connection, which from Story 4.12 only application_connection references.
         "DELETE FROM connection WHERE tenant_id = @tenant_id",
     ];
 
@@ -43,7 +46,7 @@ internal sealed class DirectoryPurge : ITenantPurge
 
 /// <summary>
 /// Directory's side of deleted Applications' purge (Story 3.5, AD-30): it names the context Tenant's deleted
-/// Applications for Sessions' and Authentication's purges, which run first, and then deletes the grants (Story 3.7), client secrets and
+/// Applications for Sessions' and Authentication's purges, which run first, and then deletes the grants (Story 3.7), Connections (Story 4.12), client secrets and
 /// the rows of exactly the Applications it is given, children before parents, and of those only the ones whose
 /// <c>deleted_at</c> is set: never a visible or <c>system</c> Application. It runs in the Tenant's own scope. A second
 /// run deletes nothing.
@@ -57,6 +60,13 @@ internal static class DirectoryApplicationPurge
         // Story 3.7: their grants first, which reference them.
         """
         DELETE FROM api_grant
+        WHERE tenant_id = @tenant_id
+          AND application_id IN (
+            SELECT id FROM application WHERE tenant_id = @tenant_id AND id = ANY (@application_ids) AND deleted_at IS NOT NULL)
+        """,
+        // Story 4.12: their Connections, which reference them.
+        """
+        DELETE FROM application_connection
         WHERE tenant_id = @tenant_id
           AND application_id IN (
             SELECT id FROM application WHERE tenant_id = @tenant_id AND id = ANY (@application_ids) AND deleted_at IS NOT NULL)

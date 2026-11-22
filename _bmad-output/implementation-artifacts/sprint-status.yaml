@@ -106,7 +106,7 @@ development_status:
   4-9-sign-in-with-a-password: done
   4-10-revoke-access-through-one-path: done
   4-11-reset-a-forgotten-password: done
-  4-12-choose-connections-per-application: backlog
+  4-12-choose-connections-per-application: done
   4-13-log-out: backlog
   4-14-run-openid-conformance-on-real-sign-in: backlog
   epic-4-retrospective: optional

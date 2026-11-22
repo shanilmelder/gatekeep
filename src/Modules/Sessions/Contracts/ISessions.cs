@@ -24,7 +24,9 @@ public sealed record StartedSession(
     DateTimeOffset AbsoluteExpiresAt);
 
 /// <summary>
-/// A live User Session (Story 4.2): not ended, and within both its idle and absolute expiry. Times are in UTC.
+/// A live User Session (Story 4.2): not ended, and within both its idle and absolute expiry. Times are in UTC. From Story
+/// 4.12 it carries the Connection it was started through, or null for one started without one (the test-only step, and
+/// Sessions from before Story 4.7).
 /// </summary>
 public sealed record LiveSession(
     Guid SessionId,
@@ -32,7 +34,8 @@ public sealed record LiveSession(
     IReadOnlyList<string> Amr,
     DateTimeOffset AuthTime,
     DateTimeOffset IdleExpiresAt,
-    DateTimeOffset AbsoluteExpiresAt);
+    DateTimeOffset AbsoluteExpiresAt,
+    Guid? ConnectionId = null);
 
 /// <summary>
 /// A Token Family (AD-13) as a refresh reads it (Story 2.10): its authorization's status and creation, from

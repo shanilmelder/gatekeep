@@ -342,6 +342,11 @@ public class CapabilityRuleTests
         ("put /api/v1/tenants/{tenantId}/connections/database/password-policy", "tenant.password_policy.manage", true),
         ("get /api/v1/tenants/{tenantId}/settings", "tenant.configuration.read", true),
         ("put /api/v1/tenants/{tenantId}/settings", "tenant.settings.manage", true),
+
+        // Story 4.12: an Application's Connections, toggled by Editors with the Connection toggle, and a Connection's Applications.
+        ("get /api/v1/tenants/{tenantId}/applications/{applicationId}/connections", "tenant.configuration.read", true),
+        ("put /api/v1/tenants/{tenantId}/applications/{applicationId}/connections/{connectionId}", "tenant.connections.toggle", true),
+        ("get /api/v1/tenants/{tenantId}/connections/database/applications", "tenant.configuration.read", true),
     ];
 
     private static readonly (string Route, string Capability)[] ApiRoutes =

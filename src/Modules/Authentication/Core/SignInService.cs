@@ -98,7 +98,8 @@ internal sealed class SignInService(
         RequireAtPassword(transaction);
 
         var unavailable = new SignInResult(SignInStatus.Unavailable, transaction.StepVersion, transaction.ExpiresAt);
-        if (await _directory.FindDatabaseConnectionAsync(context, cancellationToken) is not { Enabled: true } connection)
+        // Story 4.12: only while the database Connection is enabled for the transaction's Application.
+        if (await _directory.FindDatabaseConnectionForApplicationAsync(context, transaction.ApplicationId, cancellationToken) is not { Enabled: true } connection)
         {
             return unavailable;
         }

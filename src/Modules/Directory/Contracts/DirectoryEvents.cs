@@ -121,4 +121,13 @@ public static class DirectoryEvents
         new AuditTypeCode("directory.connection.password_policy_updated"),
         "The password policy of the Tenant's database Connection was changed. Records no value. A save that changes nothing writes no event.",
         AuditOutcome.Success);
+
+    /// <summary>
+    /// Written when an Editor, Owner or machine client turns a Connection on or off for one Application (Story 4.12, FR-14).
+    /// A toggle that changes nothing writes no event. The target is the Application.
+    /// </summary>
+    public static readonly AuditEventDefinition ApplicationConnectionUpdated = new(
+        new AuditTypeCode("directory.application_connection.updated"),
+        "A Connection was turned on or off for an Application. Names the Application only and records no value. A toggle that changes nothing writes no event.",
+        AuditOutcome.Success);
 }

@@ -139,3 +139,33 @@
   align-items: center;
   gap: var(--gk-space-8);
 }
+
+/* Story 4.12: the Applications tab's list, one row per Application with its type beside its link. */
+.applications {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0 var(--gk-space-16);
+  list-style: none;
+}
+
+.application {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--gk-space-8);
+  min-height: 44px;
+  padding: var(--gk-space-8) 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.application + .application {
+  border-top: 1px solid var(--gk-color-bd);
+}
+
+.applicationType {
+  font: var(--gk-font-small);
+  color: var(--gk-color-tx2);
+}

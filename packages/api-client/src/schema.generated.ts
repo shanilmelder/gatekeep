@@ -728,6 +728,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/tenants/{tenantId}/connections/database/applications": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The path Tenant's Applications its database Connection is enabled for, ordered by name.
+         * @description Any Tenant Role in the path Tenant. Read only, in the Tenant's own scope. Each Application the database Connection is enabled for, while the Tenant enables the Connection: its ID, name and type. Neither a deleted Application nor the Tenant's hidden system Application, which follows every Connection its Tenant enables, is ever listed. A Tenant with no Connection yet is 404 not_found. It writes nothing. A malformed, unknown or role-less Tenant is 403 access_denied, audited as every Tenant capability refusal is.
+         */
+        get: operations["ListDatabaseConnectionApplications"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/tenants/{tenantId}/settings": {
         parameters: {
             query?: never;
@@ -833,6 +853,46 @@ export interface paths {
          * @description Tenant Editors and Owners, and machine principals that hold tenant.applications.manage; no fresh assertion. The body is all four lifetimes, in whole seconds, and replaces what is stored: accessTokenLifetime and idTokenLifetime 1 to 3600 (1 hour), refreshTokenAbsoluteLifetime 1 to 7776000 (90 days) from the refresh token family's authorization, and refreshTokenInactivityLifetime 1 to 2592000 (30 days) from each refresh token's issue. The defaults are 900, 900, 2592000 and 604800. A value over its limit is 400 application_invalid with errors naming each field, reason above_maximum and the limit as maximum; under 1 is below_minimum. A body that isn't JSON, is over 4096 bytes, misses a lifetime, or holds one that isn't a JSON whole number or is a whole number outside the 32-bit signed integer range (such as 99999999999) is 400 application_invalid with no errors. Tokens issued after the save use the new lifetimes; a shortened absolute lifetime also ends older refresh token families at their next refresh. A save that changes something writes directory.application.updated; a save that changes nothing writes nothing and is 200. An applicationId that isn't an app_ ID, names no Application of this Tenant, another Tenant's or the hidden system Application is the same 404 not_found.
          */
         put: operations["UpdateApplicationTokens"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tenants/{tenantId}/applications/{applicationId}/connections": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The Connections Users can sign in to an Application through.
+         * @description Any Tenant Role in the path Tenant. Read only, in the Tenant's own scope. Each of the Tenant's Connections, in v1 the one database Connection, whose connectionId is database: its name, its kind, whether it is enabled for this Application, and whether the Tenant enables it at all (tenantEnabled). Users sign in to the Application through a Connection only when both are true; a new Application starts with every Connection its Tenant enables on. An applicationId that isn't an app_ ID, names no Application of this Tenant, another Tenant's, a deleted one or the hidden system Application is the same 404 not_found. It writes nothing. A malformed, unknown or role-less Tenant is 403 access_denied, audited as every Tenant capability refusal is.
+         */
+        get: operations["ListApplicationConnections"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tenants/{tenantId}/applications/{applicationId}/connections/{connectionId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Turn a Connection on or off for one Application.
+         * @description Editors and Owners, and machine principals allowed tenant.connections.toggle, in an active Tenant. When enabled is false, Hosted Login no longer offers the Connection to this Application and refuses its requests through it, and a Session started through it no longer skips Login for this Application; nothing is revoked, and tokens already issued run to expiry. A change writes directory.application_connection.updated on the Tenant's own Log, targeting the Application and recording no value; an unchanged toggle writes nothing and is 200. The answer is the Connection as the list gives it. A body that isn't JSON, is over 4096 bytes or has no boolean enabled is 400 connection_invalid with no errors. An applicationId that isn't an app_ ID, names no Application of this Tenant, another Tenant's, a deleted one or the hidden system Application, and a connectionId other than database, is the same 404 not_found, with nothing written. A Tenant that isn't active is 409 tenant_not_active. A malformed, unknown or role-less Tenant, and a Viewer, is 403 access_denied, audited as every Tenant capability refusal is.
+         */
+        put: operations["SetApplicationConnection"];
         post?: never;
         delete?: never;
         options?: never;
@@ -1178,6 +1238,18 @@ export interface components {
             /** Format: int32 */
             refreshTokenInactivityLifetime: number;
         };
+        ApplicationConnectionResponse: {
+            /** @enum {string} */
+            connectionId: "database";
+            name: string;
+            /** @enum {string} */
+            kind: "database";
+            enabled: boolean;
+            tenantEnabled: boolean;
+        };
+        ApplicationConnectionsResponse: {
+            connections: components["schemas"]["ApplicationConnectionResponse"][];
+        };
         ApplicationListResponse: {
             applications: components["schemas"]["ApplicationResponse"][];
             nextCursor: null | string;
@@ -1243,6 +1315,15 @@ export interface components {
         };
         CapabilitiesResponse: {
             capabilities: ("tenant.configuration.read" | "tenant.users.read" | "tenant.logs.read" | "tenant.log_detail.read" | "tenant.applications.manage" | "tenant.application_callbacks.manage" | "tenant.apis.manage" | "tenant.roles.manage" | "tenant.users.manage" | "tenant.theme.manage" | "tenant.templates.manage" | "tenant.settings.manage" | "tenant.connections.toggle" | "tenant.configuration.export" | "tenant.client_secrets.manage" | "tenant.password_policy.manage" | "tenant.mfa_policy.manage" | "tenant.connection_credentials.manage" | "tenant.email_provider.manage" | "tenant.label.manage" | "tenant.signing_keys.rotate" | "tenant.signing_keys.revoke" | "tenant.management_access.grant" | "tenant.user_data.export" | "tenant.user_data.erase" | "tenant.incident_response.run" | "deployment.tenants.read" | "deployment.tenants.create" | "deployment.tenants.delete" | "deployment.admins.read" | "deployment.admins.manage" | "deployment.email_provider.manage" | "deployment.incident_response.run" | "deployment.log.read")[];
+        };
+        ConnectionApplicationResponse: {
+            id: string;
+            name: string;
+            /** @enum {string} */
+            type: "spa" | "web" | "native" | "machine";
+        };
+        ConnectionApplicationsResponse: {
+            applications: components["schemas"]["ConnectionApplicationResponse"][];
         };
         CreateApiRequest: {
             name: string;
@@ -1419,6 +1500,9 @@ export interface components {
         };
         SetApiGrantRequest: {
             permissions: string[];
+        };
+        SetApplicationConnectionRequest: {
+            enabled?: null | boolean;
         };
         SetDatabaseConnectionSettingsRequest: {
             signupEnabled?: null | boolean;
@@ -3986,6 +4070,61 @@ export interface operations {
             };
         };
     };
+    ListDatabaseConnectionApplications: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The Tenant's public ID: ten_ and the UUID's 16 bytes in lowercase RFC 4648 base32 with no padding, whose last character carries two zero bits. Only this canonical spelling, after URL decoding, names a Tenant, and the empty UUID's never does; anything else is refused like a Tenant the Admin holds no role in. */
+                tenantId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConnectionApplicationsResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description access_denied, with the problem body, when the capability is refused. No body when an earlier check refuses first: a Session restricted to setup, or on a state-changing call a wrong Origin or CSRF token. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     GetTenantSettings: {
         parameters: {
             query?: never;
@@ -4460,6 +4599,141 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ApplicationResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description access_denied, with the problem body, when the capability is refused. No body when an earlier check refuses first: a Session restricted to setup, or on a state-changing call a wrong Origin or CSRF token. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description tenant_mismatch, with the problem body, when X-Gatekeep-Tenant is missing, sent twice or isn't {tenantId}, and nothing ran; or another conflict the operation's description names. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    ListApplicationConnections: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The Tenant's public ID: ten_ and the UUID's 16 bytes in lowercase RFC 4648 base32 with no padding, whose last character carries two zero bits. Only this canonical spelling, after URL decoding, names a Tenant, and the empty UUID's never does; anything else is refused like a Tenant the Admin holds no role in. */
+                tenantId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApplicationConnectionsResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description access_denied, with the problem body, when the capability is refused. No body when an earlier check refuses first: a Session restricted to setup, or on a state-changing call a wrong Origin or CSRF token. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    SetApplicationConnection: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description The Tenant the page shows, its ten_ ID: it must equal {tenantId}, or 409 tenant_mismatch. It never selects a Tenant. */
+                "X-Gatekeep-Tenant": string;
+            };
+            path: {
+                /** @description The Tenant's public ID: ten_ and the UUID's 16 bytes in lowercase RFC 4648 base32 with no padding, whose last character carries two zero bits. Only this canonical spelling, after URL decoding, names a Tenant, and the empty UUID's never does; anything else is refused like a Tenant the Admin holds no role in. */
+                tenantId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetApplicationConnectionRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApplicationConnectionResponse"];
                 };
             };
             /** @description Bad Request */
