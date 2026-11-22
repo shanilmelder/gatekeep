@@ -141,7 +141,8 @@ public interface ISessions
     /// don't change, so a repeated call returns zeros. Every call writes one <c>sessions.access.revoked</c> audit
     /// event by <paramref name="actor"/>, whose target is the User for User scope and absent otherwise. Access tokens
     /// are not revocable beyond their row's status. The method can run as the effect that a refused request keeps
-    /// once the rest of its work is undone.
+    /// once the rest of its work is undone. In the Isolation tests' <c>Fr48TriggerRegistry</c>, each FR-48 trigger
+    /// is covered by a test tagged with its trigger, or pending on the story that builds it.
     /// </summary>
     /// <exception cref="InvalidOperationException">The context has no Tenant. Nothing is written.</exception>
     /// <exception cref="ArgumentException"><paramref name="exceptSessionId"/> is given with a scope other than User, or is empty.</exception>
