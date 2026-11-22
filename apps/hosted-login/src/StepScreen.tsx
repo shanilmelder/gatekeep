@@ -1,15 +1,19 @@
 import { HostedPage, PASSWORD_MAX_LENGTH, formatMessage, useMessages, type Messages } from '@gatekeep/ui/hosted';
 import {
   EmailVerifiedScreen,
+  ForgotPasswordScreen,
   GenericErrorScreen,
   LinkExpiredScreen,
   LinkSentScreen,
   LoginScreen,
+  PasswordChangedScreen,
   PasswordScreen,
+  ResetPasswordScreen,
   SignupScreen,
   VerifyEmailScreen,
 } from '@gatekeep/hosted-screens';
 import { useEffect, useLayoutEffect, type ReactNode } from 'react';
+import { LOGIN_PATH } from './navigate';
 import type { Step } from './step';
 
 /** The Tenant theme scope: the server's theme stylesheet sets its tokens under [data-gk-theme]. */
@@ -49,6 +53,12 @@ function heading(step: Step, messages: Readonly<Messages>): string {
       return messages.linkExpiredTitle;
     case 'link_sent':
       return messages.linkSentTitle;
+    case 'forgot_password':
+      return messages.forgotPasswordTitle;
+    case 'reset_password':
+      return messages.resetPasswordTitle;
+    case 'password_changed':
+      return messages.passwordChangedTitle;
   }
 }
 
@@ -70,6 +80,17 @@ export interface StepControls {
   onPasswordLogIn: () => void;
   /** The Password step's identifier chip "Edit". */
   onEditIdentifier: () => void;
+  /** Story 4.11: Reset password's confirmation, and its change. */
+  confirm: string;
+  onConfirmChange: (confirm: string) => void;
+  /** The Password step's "Forgot password?". */
+  onForgotPassword: () => void;
+  /** Forgot password's "Send reset link". */
+  onSendReset: () => void;
+  /** "Back to login" from Forgot password or its confirmation. */
+  onResetBack: () => void;
+  /** Reset password's submit. */
+  onResetSubmit: () => void;
   /** Story 4.8: whether Signup's terms checkbox is ticked, and its change. */
   termsAccepted: boolean;
   onTermsChange: (accepted: boolean) => void;
@@ -88,6 +109,15 @@ export interface StepControls {
 /** The field error's text for a known code; the readers admit only known codes, so nothing else is shown. */
 function fieldError(code: string | null, messages: Readonly<Messages>): string | undefined {
   return code !== null && Object.hasOwn(FIELD_ERRORS, code) ? messages[FIELD_ERRORS[code]!] : undefined;
+}
+
+/** A refused password's rule sentences (Stories 4.7 and 4.11), or undefined when the error isn't a rule refusal. */
+function ruleErrors(error: string | null, rules: readonly string[], minLength: number, messages: Readonly<Messages>): string[] | undefined {
+  return error === 'password_rule'
+    ? rules.filter((rule) => Object.hasOwn(RULE_ERRORS, rule)).map((rule) =>
+        formatMessage(messages[RULE_ERRORS[rule]!], { count: minLength, max: PASSWORD_MAX_LENGTH }),
+      )
+    : undefined;
 }
 
 function screen(step: Step, controls: StepControls, messages: Readonly<Messages>): ReactNode {
@@ -109,12 +139,7 @@ function screen(step: Step, controls: StepControls, messages: Readonly<Messages>
       );
     case 'signup': {
       const { policy, rules, error } = step.data;
-      const passwordErrors =
-        error === 'password_rule'
-          ? rules.filter((rule) => Object.hasOwn(RULE_ERRORS, rule)).map((rule) =>
-              formatMessage(messages[RULE_ERRORS[rule]!], { count: policy.minLength, max: PASSWORD_MAX_LENGTH }),
-            )
-          : undefined;
+      const passwordErrors = ruleErrors(error, rules, policy.minLength, messages);
       return (
         <SignupScreen
           tenant={{ name: step.data.tenant }}
@@ -145,6 +170,7 @@ function screen(step: Step, controls: StepControls, messages: Readonly<Messages>
           onPasswordChange={controls.onPasswordChange}
           onLogIn={controls.onPasswordLogIn}
           onEdit={controls.onEditIdentifier}
+          onForgotPassword={controls.onForgotPassword}
           error={step.data.error === 'incorrect' ? messages.passwordIncorrect : undefined}
           pending={controls.pending}
         />
@@ -179,7 +205,48 @@ function screen(step: Step, controls: StepControls, messages: Readonly<Messages>
         />
       );
     case 'link_sent':
-      return <LinkSentScreen tenant={{ name: step.data.tenant }} />;
+      return (
+        <LinkSentScreen
+          tenant={{ name: step.data.tenant }}
+          onBack={step.data.back ? controls.onResetBack : undefined}
+          pending={controls.pending}
+        />
+      );
+    case 'forgot_password':
+      return (
+        <ForgotPasswordScreen
+          tenant={{ name: step.data.tenant }}
+          email={controls.email}
+          onEmailChange={controls.onEmailChange}
+          onSend={controls.onSendReset}
+          onBack={controls.onResetBack}
+          error={fieldError(step.data.error, messages)}
+          pending={controls.pending}
+        />
+      );
+    case 'reset_password': {
+      const { policy, rules, error } = step.data;
+      return (
+        <ResetPasswordScreen
+          tenant={{ name: step.data.tenant }}
+          email={step.data.email ?? undefined}
+          password={controls.password}
+          onPasswordChange={controls.onPasswordChange}
+          confirm={controls.confirm}
+          onConfirmChange={controls.onConfirmChange}
+          minLength={policy.minLength}
+          strength={policy.strength}
+          onSubmit={controls.onResetSubmit}
+          passwordErrors={ruleErrors(error, rules, policy.minLength, messages)}
+          confirmError={error === 'password_mismatch' ? messages.resetPasswordMismatch : undefined}
+          pending={controls.pending}
+        />
+      );
+    }
+    case 'password_changed':
+      return (
+        <PasswordChangedScreen tenant={{ name: step.data.tenant }} logInHref={step.data.continueTo === 'login' ? LOGIN_PATH : undefined} />
+      );
     case 'redirect':
       // The page is leaving by a top-level GET: nothing to show meanwhile.
       return null;
@@ -203,7 +270,15 @@ function initialFocus(main: HTMLElement): HTMLElement | null {
 
 /** Whether the step shows a failed submit: a field error, or "We haven't seen that yet". */
 export function isFailed(step: Step): boolean {
-  return (step.step === 'login' || step.step === 'signup' || step.step === 'password' || step.step === 'verify_email') && step.data.error !== null;
+  return (
+    (step.step === 'login' ||
+      step.step === 'signup' ||
+      step.step === 'password' ||
+      step.step === 'verify_email' ||
+      step.step === 'forgot_password' ||
+      step.step === 'reset_password') &&
+    step.data.error !== null
+  );
 }
 
 /**

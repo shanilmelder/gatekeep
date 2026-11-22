@@ -308,6 +308,8 @@ internal static class CanaryFlows
         new("protocol.sign_up", [], SignUpAsync),
         // Story 4.9: password sign-in, its Session and the code it resumes to, through Hosted Login's own routes.
         new("protocol.sign_in", [], PasswordSignInAsync),
+        // Story 4.11: a password reset, its link and the new password, through Hosted Login's own routes.
+        new("protocol.password_reset", [], PasswordResetAsync),
     ];
 
     private static readonly DateOnly Reviewed = new(2026, 11, 2);
@@ -2125,6 +2127,91 @@ internal static class CanaryFlows
 
         run.Capture("Hosted log", captured.Text);
         Assert.Contains("login/api/password", captured.Text, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Story 4.11: a password reset through Hosted Login, through the real Protocol registration and the hosts' scrubbing
+    /// logging, with the real Transit: Forgot password, the request, the reset link's page and Reset password. The reset
+    /// link, its random part and the new password are canaries: the link travels only as job payload ciphertext and is
+    /// stored only as its SHA-256, and the password reaches only the hasher, so none may reach a table, an event or a log
+    /// line. The link's page sends <c>Referrer-Policy: no-referrer</c>, so the link never leaves in a <c>Referer</c>.
+    /// Failing, an unknown address is asked for first, a mismatched confirmation is submitted, and the used link is
+    /// opened again.
+    /// </summary>
+    private static async Task PasswordResetAsync(CanaryFlowContext context, FlowRun run, bool failing)
+    {
+        const string hostA = "canary-a.reset.test";
+        const string hostB = "canary-b.reset.test";
+        const string email = "canary.reset@example.test";
+
+        var flow = await Identity.SignUpFlow.CreateAsync(context.Postgres, context.Bao, hostA, hostB);
+        run.Database = flow.Database.Name;
+        run.Plant("role-password", PostgresFixture.Password);
+        var (user, _) = await flow.AddPasswordUserAsync(email);
+        // Lower case, numbers and hyphens: three classes, at least 12 characters, and nothing of the email.
+        var password = run.Plant("reset-new-password");
+
+        var captured = new CapturedConsole();
+        await using (var host = await Protocol.ProtocolHost.StartAsync(flow.Database.Hosted, context.Bao, logging: logging =>
+        {
+            logging.AddGatekeepLogging().SetMinimumLevel(LogLevel.Trace);
+            logging.Services.AddSingleton<Microsoft.Extensions.Logging.Console.ConsoleFormatter>(captured);
+            logging.Services.Configure<Microsoft.Extensions.Logging.Console.ConsoleLoggerOptions>(options => options.FormatterName = captured.Name);
+        }))
+        {
+            if (failing)
+            {
+                var (_, unknown) = await flow.RequestResetAsync(host, hostA, "canary.nobody@example.test");
+                using (unknown)
+                {
+                    run.Capture("unknown reset response", unknown.RootElement.GetProperty("data").GetRawText());
+                }
+            }
+
+            var (browser, sent) = await flow.RequestResetAsync(host, hostA, email);
+            using (sent)
+            {
+                run.Capture("reset response", sent.RootElement.GetProperty("data").GetRawText());
+                Assert.Equal("link_sent", sent.RootElement.GetProperty("step").GetString());
+            }
+
+            var link = Assert.Single(host.Jobs.ResetLinksFor(user));
+            run.Plant("reset-link", link);
+            run.Plant("reset-link-random", link[(link.IndexOf('.', StringComparison.Ordinal) + 1)..]);
+
+            using (var page = await browser.Http.GetAsync(Identity.SignUpFlow.ResetLinkPath(link)))
+            {
+                Assert.Equal(HttpStatusCode.OK, page.StatusCode);
+                Assert.Equal("no-referrer", Assert.Single(page.Headers.GetValues("Referrer-Policy")));
+                using var step = Protocol.StepPage.Read(await page.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
+                run.Capture("reset page step", step.RootElement.GetRawText());
+                Assert.Equal("reset_password", step.RootElement.GetProperty("step").GetString());
+            }
+
+            if (failing)
+            {
+                using var mismatch = await browser.CompleteResetAsync(link, password.Value, password.Value + "-x");
+                run.Capture("mismatched reset response", mismatch.RootElement.GetRawText());
+                Assert.Equal("reset_password", mismatch.RootElement.GetProperty("step").GetString());
+            }
+
+            using (var changed = await browser.CompleteResetAsync(link, password.Value))
+            {
+                run.Capture("password changed response", changed.RootElement.GetRawText());
+                Assert.Equal("password_changed", changed.RootElement.GetProperty("step").GetString());
+            }
+
+            if (failing)
+            {
+                // The used link's page keeps its own link by design, so only its step name is captured.
+                using var again = await browser.OpenResetLinkAsync(link);
+                run.Capture("used reset link page", again.RootElement.GetProperty("step").GetString()!);
+                Assert.Equal("link_expired", again.RootElement.GetProperty("step").GetString());
+            }
+        }
+
+        run.Capture("Hosted log", captured.Text);
+        Assert.Contains("login/api/reset", captured.Text, StringComparison.Ordinal);
     }
 
     /// <summary>

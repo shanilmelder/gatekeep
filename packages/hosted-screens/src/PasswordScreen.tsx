@@ -1,4 +1,4 @@
-import { Button, HostedCard, IdentifierChip, PasswordField, formatMessage, useMessages, type HostedTenant } from '@gatekeep/ui/hosted';
+import { Button, HostedCard, IdentifierChip, LinkButton, PasswordField, formatMessage, useMessages, type HostedTenant } from '@gatekeep/ui/hosted';
 import { useId } from 'react';
 
 export interface PasswordScreenProps {
@@ -13,6 +13,8 @@ export interface PasswordScreenProps {
   onLogIn: () => void;
   /** The chip's "Edit": the caller goes back to Login, the email kept. */
   onEdit: () => void;
+  /** Story 4.11: "Forgot password?": the caller goes to Forgot password, the email kept. Without it the link isn't shown. */
+  onForgotPassword?: () => void;
   /** The password field's error, "Incorrect email or password.", from the catalogue. */
   error?: string;
   /** Log in or Edit is under way. */
@@ -27,9 +29,10 @@ export interface PasswordScreenProps {
  * The Password step (Story 4.9, EXPERIENCE.md, Hosted Login): "Enter your password", the identifier chip with the email
  * (wrapping, never truncated) and its "Edit", a visually hidden read-only `username` field holding the email in the same
  * form for password managers, the masked "Password" field (`autocomplete="current-password"`, paste and password managers
- * allowed) and the primary "Log in". A failed submit shows "Incorrect email or password." under the password, the same
- * for every account. It has no "Forgot password?" (Story 4.11), no "Use a recovery code" (Story 6.8) and no passkey hint
- * (Design Delta): no deferred controls. First load focuses the card heading, since no field is marked for it.
+ * allowed), with "Forgot password?" on the right of its label row (Story 4.11), which goes to Forgot password, and the
+ * primary "Log in". A failed submit shows "Incorrect email or password." under the password, the same for every account.
+ * It has no "Use a recovery code" (Story 6.8) and no passkey hint (Design Delta): no deferred controls. First load
+ * focuses the card heading, since no field is marked for it.
  */
 export function PasswordScreen({
   tenant,
@@ -38,6 +41,7 @@ export function PasswordScreen({
   onPasswordChange,
   onLogIn,
   onEdit,
+  onForgotPassword,
   error,
   pending = false,
   headingLevel,
@@ -78,6 +82,13 @@ export function PasswordScreen({
         />
         <PasswordField
           label={messages.passwordLabel}
+          labelAction={
+            onForgotPassword ? (
+              <LinkButton onClick={onForgotPassword} aria-disabled={pending || undefined} data-testid="password-forgot">
+                {messages.forgotPasswordLink}
+              </LinkButton>
+            ) : undefined
+          }
           name="current-password"
           autoComplete="current-password"
           required

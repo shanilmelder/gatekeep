@@ -403,6 +403,35 @@ public static class SecurityLimits
     public static readonly TimeSpan EmailVerificationLinkLifetime = TimeSpan.FromHours(24);
 
     /// <summary>
+    /// How long a password reset link works: 30 minutes (Story 4.11, PRD §5.2). It works once, only its SHA-256 is stored,
+    /// and a newer reset link for the same User, or a password change, supersedes it.
+    /// </summary>
+    public static readonly TimeSpan PasswordResetLinkLifetime = TimeSpan.FromMinutes(30);
+
+    /// <summary>
+    /// Password reset requests ("Send reset link" and a reset link's "Send a new link" together) one Tenant's Hosted Login
+    /// takes in <see cref="PasswordResetWindow"/>: 600, from every source together (Story 4.11, NFR-6), as sign-up's.
+    /// </summary>
+    public const int PasswordResetTenantAttempts = 600;
+
+    /// <summary>
+    /// Password reset requests one source (an IPv4 address, or an IPv6 /64) may send one Tenant's Hosted Login in
+    /// <see cref="PasswordResetWindow"/>: 10 (Story 4.11, NFR-6).
+    /// </summary>
+    public const int PasswordResetSourceAttempts = 10;
+
+    /// <summary>
+    /// Password reset requests for one email address at one Tenant's Hosted Login in <see cref="PasswordResetWindow"/>: 3
+    /// (Story 4.11, NFR-6), counted for every address alike, known or not, before any lookup, so it can't reveal an account.
+    /// It sits below the per-recipient email limit, so it is the one that bites. Past it the answer stays the neutral
+    /// confirmation, and nothing is issued or sent.
+    /// </summary>
+    public const int PasswordResetRecipientAttempts = 3;
+
+    /// <summary>The fixed window password reset requests are counted in: 15 minutes (Story 4.11).</summary>
+    public static readonly TimeSpan PasswordResetWindow = TimeSpan.FromMinutes(15);
+
+    /// <summary>
     /// How long after its expiry an unused or used one-time token row is kept before the expired-state purge deletes it:
     /// 1 hour (Story 4.7), as a sign-in transaction's restart retention.
     /// </summary>

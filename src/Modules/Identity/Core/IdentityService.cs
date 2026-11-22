@@ -8,13 +8,16 @@ using Gatekeep.Modules.Identity.Contracts;
 namespace Gatekeep.Modules.Identity.Core;
 
 /// <summary>
-/// Identity's Users, password credentials and verification links (Story 4.7), each call in the caller's Tenant context
+/// Identity's Users, password credentials, verification links (Story 4.7) and reset links (Story 4.11), each call in the caller's Tenant context
 /// and transaction. Every statement names the context's Tenant, and row-level security holds it there too.
 /// </summary>
 internal sealed class IdentityService(IAuditAppender audit, TimeProvider time) : IIdentity
 {
-    /// <summary>The one link purpose until Story 4.11 adds reset.</summary>
+    /// <summary>An email verification link's purpose (Story 4.7).</summary>
     private const string EmailVerificationPurpose = "email_verification";
+
+    /// <summary>A password reset link's purpose (Story 4.11).</summary>
+    private const string PasswordResetPurpose = "password_reset";
 
     private const string Pending = "pending";
 
@@ -152,6 +155,43 @@ internal sealed class IdentityService(IAuditAppender audit, TimeProvider time) :
         UPDATE password_credential SET status = 'active', updated_at = @now
         WHERE tenant_id = @tenant_id AND id = @id AND user_id = @user_id AND status = 'pending'
         RETURNING password_hash
+        """;
+
+    // Story 4.11: only a User's active credential gets a reset link; locked, so a reset and a password change run one at a time.
+    private const string LockActiveCredential =
+        """
+        SELECT 1 FROM password_credential
+        WHERE tenant_id = @tenant_id AND id = @id AND user_id = @user_id AND status = 'active'
+        FOR UPDATE
+        """;
+
+    // Story 4.11: a newer reset link, or a password change, leaves only the newest unused one working, by deleting the rest.
+    private const string DeleteUnusedResetLinks =
+        """
+        DELETE FROM one_time_token
+        WHERE tenant_id = @tenant_id AND user_id = @user_id AND purpose = @purpose AND used_at IS NULL
+        """;
+
+    // Found by the hash alone, whatever its state, with the User's active credential now and its email (for the
+    // personal-data rule). With no lock, so a page view or a hash waits on nothing.
+    private const string SelectResetLink =
+        """
+        SELECT t.id, t.user_id, t.credential_id, t.application_id, t.expires_at, t.used_at,
+               (SELECT c.id FROM password_credential c WHERE c.tenant_id = t.tenant_id AND c.user_id = t.user_id AND c.status = 'active'),
+               u.email
+        FROM one_time_token t
+        JOIN "user" u ON u.tenant_id = t.tenant_id AND u.id = t.user_id
+        WHERE t.tenant_id = @tenant_id AND t.token_hash = @token_hash AND t.purpose = @purpose
+        """;
+
+    // The same, locked with its User, read again just before a reset's writes, so two uses of one link run one at a time.
+    private const string LockResetLink = SelectResetLink + " FOR UPDATE OF t, u";
+
+    // The new password replaces the active credential's in place: links reference credentials ON DELETE RESTRICT.
+    private const string ReplaceHash =
+        """
+        UPDATE password_credential SET password_hash = @password_hash, updated_at = @now
+        WHERE tenant_id = @tenant_id AND id = @id AND user_id = @user_id AND status = 'active'
         """;
 
     private const string SelectHistory =
@@ -465,6 +505,141 @@ internal sealed class IdentityService(IAuditAppender audit, TimeProvider time) :
         }
 
         return hashes;
+    }
+
+    public async Task<Secret<string>?> IssueResetLinkAsync(
+        CommandContext context, Guid userId, Guid credentialId, Guid? applicationId, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        var tenantId = TenantOf(context);
+        var now = _time.GetUtcNow();
+
+        await using (var command = context.CreateCommand())
+        {
+            command.CommandText = LockActiveCredential;
+            Add(command, "tenant_id", tenantId);
+            Add(command, "id", credentialId);
+            Add(command, "user_id", userId);
+            // The credential changed since the caller read it: nothing is written.
+            if (await command.ExecuteScalarAsync(cancellationToken) is null)
+            {
+                return null;
+            }
+        }
+
+        // The newest link wins: every other unused one is deleted first.
+        await SupersedeResetLinksAsync(context, userId, cancellationToken);
+
+        var (token, hash) = VerificationLinks.New(tenantId);
+        await ExecuteAsync(
+            context,
+            InsertLink,
+            cancellationToken,
+            ("tenant_id", tenantId),
+            ("id", Guid.CreateVersion7(now)),
+            ("user_id", userId),
+            ("credential_id", credentialId),
+            ("purpose", PasswordResetPurpose),
+            ("token_hash", hash),
+            ("application_id", applicationId),
+            ("expires_at", now + SecurityLimits.PasswordResetLinkLifetime),
+            ("now", now));
+        return token;
+    }
+
+    public async Task<ResetLink?> FindResetLinkAsync(CommandContext context, Secret<string> token, bool lockRows, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        ArgumentNullException.ThrowIfNull(token);
+        var tenantId = TenantOf(context);
+
+        // Another Tenant's link, or no link at all, is refused here, before any lookup.
+        if (token.Use(value => VerificationLinks.OwnHash(tenantId, value)) is not { } hash)
+        {
+            return null;
+        }
+
+        await using var command = context.CreateCommand();
+        command.CommandText = lockRows ? LockResetLink : SelectResetLink;
+        Add(command, "tenant_id", tenantId);
+        Add(command, "token_hash", hash);
+        Add(command, "purpose", PasswordResetPurpose);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        if (!await reader.ReadAsync(cancellationToken))
+        {
+            return null;
+        }
+
+        return new ResetLink(
+            reader.GetGuid(0),
+            reader.GetGuid(1),
+            reader.GetGuid(2),
+            reader.IsDBNull(3) ? null : reader.GetGuid(3),
+            reader.GetFieldValue<DateTimeOffset>(4),
+            reader.IsDBNull(5) ? null : reader.GetFieldValue<DateTimeOffset>(5),
+            reader.IsDBNull(6) ? null : reader.GetGuid(6),
+            reader.IsDBNull(7) ? null : reader.GetString(7));
+    }
+
+    public async Task<bool> ResetPasswordAsync(CommandContext context, ResetLink link, string passwordHash, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        ArgumentNullException.ThrowIfNull(link);
+        var tenantId = TenantOf(context);
+        if (string.IsNullOrEmpty(passwordHash) || passwordHash.Length > MaxHashLength)
+        {
+            throw new ArgumentException("A password hash is a PHC string of 1 to 512 characters.", nameof(passwordHash));
+        }
+
+        var now = _time.GetUtcNow();
+        if (!link.IsUsableAt(now))
+        {
+            return false;
+        }
+
+        // The link first: a link used meanwhile, or expired since it was read, changes nothing.
+        if (await ExecuteAsync(context, UseLink, cancellationToken, ("tenant_id", tenantId), ("id", link.TokenId), ("now", now)) != 1)
+        {
+            return false;
+        }
+
+        if (await ExecuteAsync(
+                context,
+                ReplaceHash,
+                cancellationToken,
+                ("tenant_id", tenantId),
+                ("id", link.CredentialId),
+                ("user_id", link.UserId),
+                ("password_hash", passwordHash),
+                ("now", now)) != 1)
+        {
+            throw new InvalidOperationException("The reset link's credential is no longer the User's active one.");
+        }
+
+        await InsertHistoryAsync(context, tenantId, link.UserId, passwordHash, now, cancellationToken);
+
+        // The link proved the mailbox (T-62): any pending credential, an earlier unverified sign-up's, goes with its links,
+        // and the email is verified.
+        await ExecuteAsync(
+            context, DeleteOtherPendingLinks, cancellationToken, ("tenant_id", tenantId), ("user_id", link.UserId), ("keep", link.CredentialId));
+        await ExecuteAsync(
+            context, DeleteOtherPendingCredentials, cancellationToken, ("tenant_id", tenantId), ("user_id", link.UserId), ("keep", link.CredentialId));
+        await ExecuteAsync(context, MarkVerified, cancellationToken, ("tenant_id", tenantId), ("id", link.UserId), ("now", now));
+
+        await _audit.AppendAsync(
+            context,
+            new AuditEvent(IdentityEvents.PasswordReset.Code, Actor.User(link.UserId), AuditTargetKind.User, link.UserId),
+            detail: null,
+            cancellationToken);
+        return true;
+    }
+
+    public Task<int> SupersedeResetLinksAsync(CommandContext context, Guid userId, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        var tenantId = TenantOf(context);
+        return ExecuteAsync(
+            context, DeleteUnusedResetLinks, cancellationToken, ("tenant_id", tenantId), ("user_id", userId), ("purpose", PasswordResetPurpose));
     }
 
     private static async Task<(Guid Id, bool Verified, bool HasActive)?> FindUserAsync(

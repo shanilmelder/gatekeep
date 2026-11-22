@@ -38,6 +38,7 @@ public sealed class EventClassTests(PostgresFixture postgres)
         [TenantLogClass.CrossTenantRejection] = ProveClientCrossTenantRejectionAsync,
         [TenantLogClass.KeyOperation] = ProveKeyOperationAsync,
         [TenantLogClass.SignIn] = ProveSignInAsync,
+        [TenantLogClass.PasswordReset] = ProvePasswordResetAsync,
     };
 
     [Fact]
@@ -316,6 +317,56 @@ public sealed class EventClassTests(PostgresFixture postgres)
         await using (var scope = await TenantScope.BeginAsync(source, tenantId, CancellationToken.None))
         {
             await signIn.RecordFailureAsync(scope.CreateCommandContext(), result.FailedUserId, CancellationToken.None);
+            await scope.CommitAsync(CancellationToken.None);
+        }
+
+        return (database, tenantId);
+    }
+
+    /// <summary>
+    /// Story 4.11: a completed reset, as <c>gk_hosted</c>, with a reset link Identity issued for a User's active password,
+    /// writes <c>identity.password.reset</c>.
+    /// </summary>
+    private static async Task<(string Database, Guid TenantId)> ProvePasswordResetAsync(PostgresFixture postgres)
+    {
+        var database = await postgres.NewMigratedDatabaseAsync();
+        var tenantId = Guid.CreateVersion7();
+        var userId = Guid.CreateVersion7();
+        var credentialId = Guid.CreateVersion7();
+        var hash = await Gatekeep.Modules.Authentication.Contracts.AuthenticationContract.HashPasswordAsync(
+            new Gatekeep.Kernel.Secrets.Secret<string>("Correct-Horse-7battery"));
+        await PostgresFixture.ExecuteAsync(
+            postgres.SuperuserConnection(database),
+            TestTenants.InsertSql(tenantId)
+            + $"; INSERT INTO connection (tenant_id, id, kind) VALUES ('{tenantId}', gen_random_uuid(), 'database')"
+            + $"; INSERT INTO \"user\" (tenant_id, id, email, email_verified_at) VALUES ('{tenantId}', '{userId}', 'reset.proof@example.com', now())"
+            + "; INSERT INTO password_credential (tenant_id, id, user_id, connection_id, password_hash, status) "
+            + $"SELECT '{tenantId}', '{credentialId}', '{userId}', id, '{hash}', 'active' FROM connection WHERE tenant_id = '{tenantId}'");
+
+        var audit = AuditContract.CreateAppender();
+        var reset = Gatekeep.Modules.Authentication.Contracts.AuthenticationContract.CreatePasswordReset(
+            audit,
+            TimeProvider.System,
+            Gatekeep.Modules.Operations.Contracts.OperationsContract.CreateEnqueuer(Gatekeep.Modules.Operations.Contracts.OperationsContract.ProductionRegistry, custody: null),
+            Gatekeep.Modules.Authentication.Contracts.AuthenticationContract.CreatePasswordHashGate(Gatekeep.Modules.Authentication.Contracts.PasswordHashLimits.Default));
+
+        // A reset link as Identity issues one: the Tenant's prefix and 32 random bytes, stored only as its SHA-256.
+        var token = Gatekeep.Kernel.Identifiers.PublicId.Format(Gatekeep.Kernel.Identifiers.PublicIdType.Tenant, tenantId) + "."
+            + Microsoft.IdentityModel.Tokens.Base64UrlEncoder.Encode(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32));
+        var tokenHash = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.ASCII.GetBytes(token)));
+        await PostgresFixture.ExecuteAsync(
+            postgres.SuperuserConnection(database),
+            "INSERT INTO one_time_token (tenant_id, id, user_id, credential_id, purpose, token_hash, expires_at) "
+            + $"VALUES ('{tenantId}', gen_random_uuid(), '{userId}', '{credentialId}', 'password_reset', '\\x{tokenHash}'::bytea, now() + interval '30 minutes')");
+        var link = new Gatekeep.Kernel.Secrets.Secret<string>(token);
+
+        await using var source = NpgsqlDataSource.Create(postgres.RoleConnection(TableRegistry.Hosted, database));
+
+        await using (var scope = await TenantScope.BeginAsync(source, tenantId, CancellationToken.None))
+        {
+            var password = new Gatekeep.Kernel.Secrets.Secret<string>("Fresh-Lantern-4orbit");
+            var result = await reset.CompleteAsync(scope.CreateCommandContext(), link, password, password, null, CancellationToken.None);
+            Assert.Equal(Gatekeep.Modules.Authentication.Contracts.PasswordResetStatus.Reset, result.Status);
             await scope.CommitAsync(CancellationToken.None);
         }
 

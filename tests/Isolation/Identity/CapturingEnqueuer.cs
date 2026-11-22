@@ -23,6 +23,11 @@ internal sealed class CapturingEnqueuer(IJobEnqueuer inner) : IJobEnqueuer
         [.. _jobs.Where(j => j.UserId == userId && j.TemplateId == NotificationsContract.VerificationTemplate && j.Credential is not null)
             .Select(j => j.Credential!)];
 
+    /// <summary>The password reset links emailed to <paramref name="userId"/> (Story 4.11), oldest first.</summary>
+    public IReadOnlyList<string> ResetLinksFor(Guid userId) =>
+        [.. _jobs.Where(j => j.UserId == userId && j.TemplateId == NotificationsContract.PasswordResetTemplate && j.Credential is not null)
+            .Select(j => j.Credential!)];
+
     /// <summary>The newest verification link emailed to anyone.</summary>
     public string LastLink() =>
         _jobs.LastOrDefault(j => j.TemplateId == NotificationsContract.VerificationTemplate && j.Credential is not null)?.Credential
@@ -41,6 +46,10 @@ internal sealed class CapturingEnqueuer(IJobEnqueuer inner) : IJobEnqueuer
             payload?.Credential?.Use(static bytes => Encoding.ASCII.GetString(bytes))));
         return id;
     }
+
+    /// <summary>Every rehearsal (Story 4.11) is passed on, so the host does exactly the work production does; none is kept.</summary>
+    public Task RehearseAsync(CommandContext context, JobType type, JobPayload payload, CancellationToken cancellationToken) =>
+        inner.RehearseAsync(context, type, payload, cancellationToken);
 
     public Task<Guid> EnqueueAsync(
         CommandContext context, JobType type, Guid? operationId, DateTimeOffset? runAfter, CancellationToken cancellationToken) =>

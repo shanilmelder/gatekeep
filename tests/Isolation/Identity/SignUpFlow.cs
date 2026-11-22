@@ -62,8 +62,44 @@ internal sealed record SignUpFlow(CodeFlowSetup Flow)
     public Task<ProtocolHost> StartHostAsync(
         Gatekeep.Modules.Authentication.Contracts.PasswordHashLimits? hashLimits = null,
         SignUpLimits? signUpLimits = null,
-        SignInLimits? signInLimits = null) =>
-        ProtocolHost.StartAsync(Flow.Database.Hosted, Flow.Bao, hashLimits: hashLimits, signUpLimits: signUpLimits, signInLimits: signInLimits);
+        SignInLimits? signInLimits = null,
+        PasswordResetLimits? resetLimits = null,
+        TimeProvider? time = null) =>
+        ProtocolHost.StartAsync(
+            Flow.Database.Hosted, Flow.Bao, time: time, hashLimits: hashLimits, signUpLimits: signUpLimits, signInLimits: signInLimits, resetLimits: resetLimits);
+
+    /// <summary>Story 4.11: reset request limits no test reaches by accident, for one that sends many.</summary>
+    public static PasswordResetLimits GenerousReset { get; } = new(
+        new("reset.request.tenant", 10_000, TimeSpan.FromMinutes(15)),
+        new("reset.request.source", 10_000, TimeSpan.FromMinutes(15)),
+        new("reset.request.recipient", 10_000, TimeSpan.FromMinutes(15)));
+
+    /// <summary>
+    /// Story 4.11: a browser at <paramref name="tenantHost"/> through Login's Continue with <paramref name="email"/>,
+    /// "Forgot password?" and "Send reset link" with <paramref name="requested"/> (by default the same address). Returns
+    /// the browser and the step the request answered.
+    /// </summary>
+    public async Task<(SignUpBrowser Browser, JsonDocument Step)> RequestResetAsync(
+        ProtocolHost host, string tenantHost, string email, string? requested = null, string? source = null)
+    {
+        var browser = await BeginAsync(host, tenantHost, source);
+        using var password = await browser.IdentifyAsync(email);
+        Assert.Equal(StepNames.Password, Name(password));
+        using var forgot = await browser.ForgotAsync(password);
+        Assert.Equal(StepNames.ForgotPassword, Name(forgot));
+        return (browser, await browser.RequestResetAsync(forgot, requested ?? email));
+    }
+
+    /// <summary>The reset-link-bound CSRF token of <paramref name="token"/> (Story 4.11), derived as the server derives it.</summary>
+    public static string ResetCsrf(string token)
+    {
+        var hash = SHA256.HashData(Encoding.ASCII.GetBytes(token));
+        var input = "gatekeep-reset-csrf\0"u8.ToArray().Concat(hash).ToArray();
+        return Microsoft.IdentityModel.Tokens.Base64UrlEncoder.Encode(SHA256.HashData(input));
+    }
+
+    /// <summary>The reset link page for <paramref name="token"/> (Story 4.11), as the email's link opens it.</summary>
+    public static string ResetLinkPath(string token) => $"{ProtocolContract.ResetPasswordPath}?token={Uri.EscapeDataString(token)}";
 
     /// <summary>
     /// Story 4.9: a User of Tenant A with <paramref name="email"/> and an active password credential holding
@@ -249,6 +285,29 @@ internal sealed class SignUpBrowser(HostedBrowser browser, Pkce pkce)
         using var page = await browser.GetAsync(SignUpFlow.LinkPath(token));
         return await SignUpFlow.PageStepAsync(page);
     }
+
+    /// <summary>Story 4.11: "Forgot password?" from <paramref name="step"/>, the Password step.</summary>
+    public Task<JsonDocument> ForgotAsync(JsonDocument step) =>
+        PostAsync(ProtocolContract.ResetOpenPath, new { stepVersion = Version(step) }, Csrf(step));
+
+    /// <summary>Story 4.11: "Send reset link" from <paramref name="step"/>, Forgot password, for <paramref name="email"/>.</summary>
+    public Task<JsonDocument> RequestResetAsync(JsonDocument step, string email) =>
+        PostAsync(ProtocolContract.ResetPath, new { stepVersion = Version(step), email }, Csrf(step));
+
+    /// <summary>Story 4.11: "Back to login" from <paramref name="step"/>, Forgot password or its confirmation.</summary>
+    public Task<JsonDocument> ResetBackAsync(JsonDocument step) =>
+        PostAsync(ProtocolContract.ResetBackPath, new { stepVersion = Version(step) }, Csrf(step));
+
+    /// <summary>Story 4.11: opens a reset link in this browser, with its cookies.</summary>
+    public async Task<JsonDocument> OpenResetLinkAsync(string token)
+    {
+        using var page = await browser.GetAsync(SignUpFlow.ResetLinkPath(token));
+        return await SignUpFlow.PageStepAsync(page);
+    }
+
+    /// <summary>Story 4.11: "Reset password" with <paramref name="token"/>, in this browser, with the reset-link CSRF token.</summary>
+    public Task<JsonDocument> CompleteResetAsync(string token, string password, string? confirm = null) =>
+        PostAsync(ProtocolContract.ResetCompletePath, new { token, password, confirm = confirm ?? password }, SignUpFlow.ResetCsrf(token));
 
     /// <summary>Follows a redirect step's location, or Email verified's Continue, back to the authorization endpoint.</summary>
     public Task<HttpResponseMessage> FollowAsync(string location) => browser.GetAsync(location);

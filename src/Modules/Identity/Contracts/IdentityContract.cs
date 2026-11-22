@@ -1,5 +1,6 @@
 using Gatekeep.Kernel.Audit;
 using Gatekeep.Kernel.Persistence;
+using Gatekeep.Kernel.Secrets;
 using Gatekeep.Modules.Identity.Core;
 
 namespace Gatekeep.Modules.Identity.Contracts;
@@ -34,7 +35,17 @@ public static class IdentityContract
     /// </summary>
     public static bool IsVerificationLinkShaped(string? token) => VerificationLinks.IsShaped(token);
 
-    /// <summary>The SHA-256 a verification link <paramref name="token"/> is stored as: of the whole value's ASCII text.</summary>
+    /// <summary>
+    /// A link value minted exactly as a reset or verification link is (Story 4.11), for <paramref name="tenantId"/>, stored
+    /// nowhere: a reset request for an address with no active password mints and discards one, so it does the work a
+    /// known address does.
+    /// </summary>
+    public static Secret<string> MintDiscardedLink(Guid tenantId) => VerificationLinks.New(tenantId).Token;
+
+    /// <summary>
+    /// The SHA-256 a verification link <paramref name="token"/> is stored as: of the whole value's ASCII text. A reset link
+    /// (Story 4.11) has the same shape and is stored the same way.
+    /// </summary>
     public static byte[] VerificationLinkHash(string token)
     {
         ArgumentNullException.ThrowIfNull(token);

@@ -62,34 +62,8 @@ internal sealed class JobEnqueuer(JobRegistry registry, IKeyCustody? custody) : 
         var tenantId = context.TenantId
             ?? throw new InvalidOperationException("A Tenant job is enqueued only in a Tenant's scope.");
 
-        var definition = Definition(type, JobScope.Tenant);
-
-        if (payload?.Credential is not null && !definition.MayCarryCredential)
-        {
-            throw new ArgumentException($"Job type {type} carries IDs only, not a credential.", nameof(payload));
-        }
-
-        if (payload?.Credential is not null && custody is null)
-        {
-            throw new InvalidOperationException("No key custody is wired to encrypt a job credential.");
-        }
-
         // Encrypted before any insert, so a custody failure leaves nothing behind.
-        KeyCiphertext? ciphertext = null;
-        if (payload?.Credential is { } credential)
-        {
-            ciphertext = await custody!.EncryptAsync(
-                KeyName.ForTenant(TenantKeyClass.Payload, tenantId),
-                tenantId,
-                credential,
-                cancellationToken);
-        }
-
-        // The schema's CHECK would abort the caller's whole transaction instead.
-        if (ciphertext is not null && ciphertext.Value.Length > MaxCiphertextLength)
-        {
-            throw new ArgumentException($"A job credential's ciphertext is at most {MaxCiphertextLength} characters.", nameof(payload));
-        }
+        var ciphertext = await SealAsync(tenantId, type, payload, cancellationToken);
 
         var id = Guid.CreateVersion7();
 
@@ -120,6 +94,56 @@ internal sealed class JobEnqueuer(JobRegistry registry, IKeyCustody? custody) : 
         }
 
         return id;
+    }
+
+    public async Task RehearseAsync(CommandContext context, JobType type, JobPayload payload, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        ArgumentNullException.ThrowIfNull(type);
+        ArgumentNullException.ThrowIfNull(payload);
+
+        var tenantId = context.TenantId
+            ?? throw new InvalidOperationException("A Tenant job is enqueued only in a Tenant's scope.");
+
+        // The same checks and encryption an enqueue runs; the ciphertext is dropped and nothing is written.
+        _ = await SealAsync(tenantId, type, payload, cancellationToken);
+    }
+
+    /// <summary>
+    /// A Tenant job's checks, then its credential's Transit ciphertext under the Tenant's <c>payload</c> key, or null with no
+    /// credential: what an enqueue does before it writes.
+    /// </summary>
+    private async Task<KeyCiphertext?> SealAsync(Guid tenantId, JobType type, JobPayload? payload, CancellationToken cancellationToken)
+    {
+        var definition = Definition(type, JobScope.Tenant);
+
+        if (payload?.Credential is not null && !definition.MayCarryCredential)
+        {
+            throw new ArgumentException($"Job type {type} carries IDs only, not a credential.", nameof(payload));
+        }
+
+        if (payload?.Credential is not null && custody is null)
+        {
+            throw new InvalidOperationException("No key custody is wired to encrypt a job credential.");
+        }
+
+        KeyCiphertext? ciphertext = null;
+        if (payload?.Credential is { } credential)
+        {
+            ciphertext = await custody!.EncryptAsync(
+                KeyName.ForTenant(TenantKeyClass.Payload, tenantId),
+                tenantId,
+                credential,
+                cancellationToken);
+        }
+
+        // The schema's CHECK would abort the caller's whole transaction instead.
+        if (ciphertext is not null && ciphertext.Value.Length > MaxCiphertextLength)
+        {
+            throw new ArgumentException($"A job credential's ciphertext is at most {MaxCiphertextLength} characters.", nameof(payload));
+        }
+
+        return ciphertext;
     }
 
     public async Task<Guid> EnqueueAsync(

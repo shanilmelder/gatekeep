@@ -268,6 +268,9 @@ public sealed class CrossTenantRouteTests(PostgresFixture postgres, OpenBaoFixtu
             case ProtocolContract.VerificationContinuePath:
             case ProtocolContract.PasswordPath:
             case ProtocolContract.PasswordBackPath:
+            case ProtocolContract.ResetOpenPath:
+            case ProtocolContract.ResetPath:
+            case ProtocolContract.ResetBackPath:
             {
                 // Tenant A's real sign-in transaction cookie, presented at B's host (Story 4.2): B's lookup, under B's
                 // row-level security, finds nothing, so it is refused as invalid_transaction, the refusal logged in B's
@@ -378,6 +381,89 @@ public sealed class CrossTenantRouteTests(PostgresFixture postgres, OpenBaoFixtu
                 using (var step = StepPage.Read(await verified.Content.ReadAsStringAsync(Cancellation)))
                 {
                     Assert.Equal(StepNames.EmailVerified, step.RootElement.GetProperty("step").GetString());
+                }
+
+                break;
+            }
+
+            case ProtocolContract.ResetPasswordPath:
+            case ProtocolContract.ResetCompletePath:
+            case ProtocolContract.ResetNewLinkPath:
+            {
+                // Tenant A's real reset link, from a reset request at A (Story 4.11), at B's host: refused by its prefix
+                // before any lookup, as Link expired, or for "Send a new link" the neutral answer with nothing sent. Neither
+                // Tenant changes, B logs nothing of A, and the link still opens Reset password at A.
+                await database.ExecuteAsync(
+                    $"INSERT INTO connection (tenant_id, id, kind) VALUES ('{a.TenantId}', gen_random_uuid(), 'database'), ('{b.TenantId}', gen_random_uuid(), 'database')");
+                await ProtocolDatabase.ProvisionSecretClassesAsync(bao, a.TenantId);
+                var hash = await Gatekeep.Modules.Authentication.Contracts.AuthenticationContract.HashPasswordAsync(
+                    new Gatekeep.Kernel.Secrets.Secret<string>("Correct-Horse-7battery"));
+                await database.ExecuteAsync(
+                    $"WITH u AS (INSERT INTO \"user\" (tenant_id, id, email, email_verified_at) VALUES ('{a.TenantId}', gen_random_uuid(), 'a.user@example.com', now()) RETURNING id) "
+                    + "INSERT INTO password_credential (tenant_id, id, user_id, connection_id, password_hash, status) "
+                    + $"SELECT '{a.TenantId}', gen_random_uuid(), u.id, c.id, '{hash}', 'active' FROM u, connection c WHERE c.tenant_id = '{a.TenantId}'");
+                var client = await database.CreateWebClientAsync(a.TenantId, [CodeFlowSetup.Callback]);
+                var atA = new HostedBrowser(host, HostA);
+                using (var begun = await atA.GetAsync(CodeFlow.AuthorizeUrl(client.ClientId, CodeFlowSetup.Callback, Pkce.New())))
+                {
+                    Assert.True(HostedBrowser.IsLoginRedirect(begun), "A's request didn't go to Login.");
+                }
+
+                var login = await atA.LoginStepAsync();
+                using (var identified = await atA.PostAsync(ProtocolContract.LoginIdentifierPath, new { stepVersion = login.StepVersion, email = "a.user@example.com" }, login.Csrf))
+                using (var opened = await atA.PostAsync(ProtocolContract.ResetOpenPath, new { stepVersion = login.StepVersion + 1 }, login.Csrf))
+                using (var requested = await atA.PostAsync(ProtocolContract.ResetPath, new { stepVersion = login.StepVersion + 2, email = "a.user@example.com" }, login.Csrf))
+                {
+                    using var step = await HostedBrowser.StepAsync(requested);
+                    Assert.Equal(StepNames.LinkSent, step.RootElement.GetProperty("step").GetString());
+                }
+
+                var link = host.Jobs.Jobs.Last(j => j.TemplateId == Gatekeep.Modules.Notifications.Contracts.NotificationsContract.PasswordResetTemplate).Credential!;
+                var rowsA = await database.ScalarAsync<string>(
+                    $"SELECT string_agg(to_jsonb(t)::text, ';') FROM one_time_token t WHERE tenant_id = '{a.TenantId}'");
+                var credentialsA = await database.ScalarAsync<string>(
+                    $"SELECT string_agg(to_jsonb(c)::text, ';') FROM password_credential c WHERE tenant_id = '{a.TenantId}'");
+                var eventsA = await database.ScalarAsync<long>($"SELECT count(*) FROM audit_event WHERE tenant_id = '{a.TenantId}'");
+                var eventsB = await database.ScalarAsync<long>($"SELECT count(*) FROM audit_event WHERE tenant_id = '{b.TenantId}'");
+                var jobs = host.Jobs.Jobs.Count;
+                var csrf = Gatekeep.Tests.Isolation.Identity.SignUpFlow.ResetCsrf(link);
+
+                var atB = new HostedBrowser(host, HostB);
+                string body;
+                if (entry.Pattern == ProtocolContract.ResetPasswordPath)
+                {
+                    using var page = await atB.GetAsync(Gatekeep.Tests.Isolation.Identity.SignUpFlow.ResetLinkPath(link));
+                    Assert.Equal(HttpStatusCode.OK, page.StatusCode);
+                    body = await page.Content.ReadAsStringAsync(Cancellation);
+                    using var step = StepPage.Read(body);
+                    Assert.Equal(StepNames.LinkExpired, step.RootElement.GetProperty("step").GetString());
+                }
+                else
+                {
+                    var expected = entry.Pattern == ProtocolContract.ResetCompletePath ? StepNames.LinkExpired : StepNames.LinkSent;
+                    using var response = await atB.PostAsync(
+                        entry.Pattern, new { token = link, password = "Fresh-Lantern-4orbit", confirm = "Fresh-Lantern-4orbit" }, csrf);
+                    Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+                    body = await response.Content.ReadAsStringAsync(Cancellation);
+                    using var step = JsonDocument.Parse(body);
+                    Assert.Equal(expected, step.RootElement.GetProperty("step").GetString());
+                }
+
+                Assert.DoesNotContain(HostA, body, StringComparison.OrdinalIgnoreCase);
+                Assert.DoesNotContain(a.TenantId.ToString(), body, StringComparison.OrdinalIgnoreCase);
+                Assert.Equal(jobs, host.Jobs.Jobs.Count);
+                Assert.Equal(rowsA, await database.ScalarAsync<string>(
+                    $"SELECT string_agg(to_jsonb(t)::text, ';') FROM one_time_token t WHERE tenant_id = '{a.TenantId}'"));
+                Assert.Equal(credentialsA, await database.ScalarAsync<string>(
+                    $"SELECT string_agg(to_jsonb(c)::text, ';') FROM password_credential c WHERE tenant_id = '{a.TenantId}'"));
+                Assert.Equal(eventsA, await database.ScalarAsync<long>($"SELECT count(*) FROM audit_event WHERE tenant_id = '{a.TenantId}'"));
+                Assert.Equal(eventsB, await database.ScalarAsync<long>($"SELECT count(*) FROM audit_event WHERE tenant_id = '{b.TenantId}'"));
+                Assert.Empty(atB.SetCookies);
+
+                using (var page = await new HostedBrowser(host, HostA).GetAsync(Gatekeep.Tests.Isolation.Identity.SignUpFlow.ResetLinkPath(link)))
+                using (var step = StepPage.Read(await page.Content.ReadAsStringAsync(Cancellation)))
+                {
+                    Assert.Equal(StepNames.ResetPassword, step.RootElement.GetProperty("step").GetString());
                 }
 
                 break;

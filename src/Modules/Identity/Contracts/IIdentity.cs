@@ -56,6 +56,29 @@ public sealed record VerificationLink(
     public bool IsUsableAt(DateTimeOffset now) => UsedAt is null && ExpiresAt > now;
 }
 
+/// <summary>
+/// A password reset link's row (Story 4.11), found by the link's SHA-256 alone, whatever its state: its User, the active
+/// credential it was issued for, the Application its request was for, its expiry, when it was used, the User's active
+/// credential now (null with none), and the User's email. Times are in UTC.
+/// </summary>
+public sealed record ResetLink(
+    Guid TokenId,
+    Guid UserId,
+    Guid CredentialId,
+    Guid? ApplicationId,
+    DateTimeOffset ExpiresAt,
+    DateTimeOffset? UsedAt,
+    Guid? ActiveCredentialId,
+    string? Email)
+{
+    /// <summary>
+    /// Whether it can still be used at <paramref name="now"/>: unused, unexpired, and its credential still the User's active
+    /// one. A used or expired link's row is still found, but can't be used; a superseded link's row is deleted, so it is
+    /// never found at all.
+    /// </summary>
+    public bool IsUsableAt(DateTimeOffset now) => UsedAt is null && ExpiresAt > now && ActiveCredentialId == CredentialId;
+}
+
 /// <summary>What using a verification link came to (Story 4.7).</summary>
 public enum EmailVerificationStatus
 {
@@ -161,4 +184,51 @@ public interface IIdentity
     /// <summary>The User's newest <paramref name="count"/> earlier password hashes, newest first (Story 4.7, for the history rule). It writes nothing.</summary>
     /// <exception cref="InvalidOperationException">The context has no Tenant.</exception>
     Task<IReadOnlyList<string>> ReadPasswordHistoryAsync(CommandContext context, Guid userId, int count, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Issues a password reset link for the active credential <paramref name="credentialId"/> of <paramref name="userId"/>
+    /// (Story 4.11, FR-19), under the credential's lock: <c>{tenantPublicId}.{base64url of 32 random bytes}</c>, the shape of
+    /// a verification link, of which only the SHA-256 of the whole value is stored, with the purpose <c>password_reset</c>.
+    /// It lasts <c>SecurityLimits.PasswordResetLinkLifetime</c> and works once. Every other unused reset link of the User is
+    /// deleted first (<see cref="SupersedeResetLinksAsync"/>), so only the newest works. The value is returned once, for the
+    /// email; null, writing nothing, when that credential is no longer the User's active one (it changed since the caller
+    /// read it). A User with only pending credentials, a sign-up never verified, never gets one: their path is signing up again.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The context has no Tenant. Nothing is written.</exception>
+    [StateChanging]
+    Task<Secret<string>?> IssueResetLinkAsync(
+        CommandContext context, Guid userId, Guid credentialId, Guid? applicationId, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// The reset link <paramref name="token"/> is (Story 4.11): a used or expired one is found as it is, but can't be used
+    /// (<see cref="ResetLink.IsUsableAt"/>); a superseded one was deleted, so it is null, as an unknown one is. With
+    /// <paramref name="lockRows"/> the row is locked with its User until the caller's transaction ends, which a reset does
+    /// only just before its writes; a page view and a reset's checks read with no lock. A value without a link's shape, or
+    /// whose prefix isn't the context Tenant's public ID, is refused before any lookup. A verification link is never a
+    /// reset link. It writes nothing.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The context has no Tenant.</exception>
+    Task<ResetLink?> FindResetLinkAsync(CommandContext context, Secret<string> token, bool lockRows, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Completes a password reset with <paramref name="link"/>, as <see cref="FindResetLinkAsync"/> read it, locked, in the
+    /// caller's transaction (Story 4.11), in one command: the link is marked used; the active credential's PHC string becomes
+    /// <paramref name="passwordHash"/> in place, with its <c>updated_at</c>, and the hash is kept in the User's password
+    /// history; every pending credential of the User is deleted with its links; the email is marked verified if it wasn't;
+    /// and <see cref="IdentityEvents.PasswordReset"/> is written, the User as Actor and target. False, writing nothing, when
+    /// the link can't be used now. The caller supersedes the User's other reset links, revokes access and notifies.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The context has no Tenant, or the link's credential is no longer active. Nothing is kept.</exception>
+    /// <exception cref="ArgumentException">The hash is empty or too long. Nothing is written.</exception>
+    [StateChanging]
+    Task<bool> ResetPasswordAsync(CommandContext context, ResetLink link, string passwordHash, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Deletes every unused password reset link of <paramref name="userId"/> (Story 4.11), so none works any more: a newer
+    /// reset link supersedes the older ones, and so does a completed reset or a password change (Story 16.4 calls it). A
+    /// sign-in's rehash never does. How many it deleted.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The context has no Tenant. Nothing is written.</exception>
+    [StateChanging]
+    Task<int> SupersedeResetLinksAsync(CommandContext context, Guid userId, CancellationToken cancellationToken);
 }

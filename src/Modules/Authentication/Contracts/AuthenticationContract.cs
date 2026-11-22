@@ -102,6 +102,22 @@ public static class AuthenticationContract
     }
 
     /// <summary>
+    /// Password reset through Hosted Login (Story 4.11) over the Kernel audit port. <paramref name="time"/> sets every
+    /// expiry. The reset email and security notice are enqueued through <paramref name="enqueuer"/>, the host's, whose
+    /// custody encrypts the link; an unknown address's request has it encrypt a discarded one. Every hash passes
+    /// <paramref name="gate"/>, the gate sign-up and sign-in share. Access ends through Sessions' own <c>ISessions</c>.
+    /// </summary>
+    public static IPasswordReset CreatePasswordReset(IAuditAppender audit, TimeProvider time, IJobEnqueuer enqueuer, IPasswordHashGate gate) =>
+        new PasswordResetService(
+            audit,
+            time,
+            SessionsContract.CreateSessions(audit, time),
+            IdentityContract.CreateIdentity(audit, time),
+            DirectoryContract.CreateDirectory(audit, time),
+            enqueuer,
+            gate ?? throw new ArgumentNullException(nameof(gate)));
+
+    /// <summary>
     /// A hashing gate sized by <paramref name="limits"/>, timing its waits by <paramref name="time"/> (Story 4.7): the one a
     /// host keeps and hands to both <see cref="CreateSignUp"/> and <see cref="CreateSignIn"/> (Story 4.9). Tests check the
     /// budget through it too.

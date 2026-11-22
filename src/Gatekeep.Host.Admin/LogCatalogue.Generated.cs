@@ -55,6 +55,7 @@ internal static partial class LogCatalogue
         new("directory.client_secret.rotated", AuditOutcome.Success, "An Application's client secret was rotated: a new secret was created, and the old one stays valid for 24 hours unless ended sooner. Names the Application only, never a secret."),
         new("directory.connection.password_policy_updated", AuditOutcome.Success, "The password policy of the Tenant's database Connection was changed. Records no value. A save that changes nothing writes no event."),
         new("directory.connection.updated", AuditOutcome.Success, "Sign-up was turned on or off for the Tenant's database Connection. Records no value. A save that changes nothing writes no event."),
+        new("identity.password.reset", AuditOutcome.Success, "A User reset their password with a reset link; every Session and Token Family of theirs ended. The User is Actor and target."),
         new("identity.user.email_verified", AuditOutcome.Success, "A User's email was verified by a link, which activated the password it was sent for and removed any other pending one. Names the User only."),
         new("identity.user.signed_up", AuditOutcome.Success, "A sign-up gave a User a new password, pending its email's verification unless a Dev Tenant turned that off. Names the User only, never the email or password."),
         new("keys.signing_key.created", AuditOutcome.Success, "A Tenant's replacement next Signing or Management key was created in key custody. Names no key."),

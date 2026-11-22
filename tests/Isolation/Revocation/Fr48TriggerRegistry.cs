@@ -65,7 +65,7 @@ public static class Fr48TriggerRegistry
 
     public static readonly IReadOnlyDictionary<string, Fr48Trigger> Triggers = new Dictionary<string, Fr48Trigger>(StringComparer.Ordinal)
     {
-        ["password reset"] = Fr48Trigger.Pending("4-11"),
+        ["password reset"] = Fr48Trigger.Covered("PasswordResetTests.A_completed_reset_ends_every_Session_and_Token_Family_of_the_User_and_starts_none"),
         ["password change"] = Fr48Trigger.Pending("16-4"),
         ["Factor added"] = Fr48Trigger.Pending("16-5"),
         ["Factor removed"] = Fr48Trigger.Pending("16-5"),

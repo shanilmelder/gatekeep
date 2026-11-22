@@ -74,15 +74,42 @@ export interface EmailVerifiedData {
   location: string | null;
 }
 
-/** Link expired's props (Story 4.7): the link's own value for "Send a new link", when it had a link's shape. */
+/**
+ * Link expired's props (Story 4.7): the link's own value for "Send a new link", when it had a link's shape, and (Story
+ * 4.11) which link it is, so "Send a new link" posts to the right place.
+ */
 export interface LinkExpiredData {
   tenant: string;
   token: string | null;
+  purpose: 'verification' | 'reset';
 }
 
-/** The neutral link confirmation's props (Story 4.7). */
+/** The neutral link confirmation's props (Story 4.7): from Story 4.11, whether "Back to login" shows. */
 export interface LinkSentData {
   tenant: string;
+  back: boolean;
+}
+
+/** Forgot password's props (Story 4.11): the email to fill in and an error's code, or null. */
+export interface ForgotPasswordData {
+  tenant: string;
+  email: string | null;
+  error: string | null;
+}
+
+/** Reset password's props (Story 4.11): the link User's email, the policy, an error's code and the failing rules. It holds no link. */
+export interface ResetPasswordData {
+  tenant: string;
+  email: string | null;
+  policy: SignupPolicy;
+  error: string | null;
+  rules: string[];
+}
+
+/** Password changed's props (Story 4.11): "Log in" back at Login, or "You can close this page.". */
+export interface PasswordChangedData {
+  tenant: string;
+  continueTo: 'login' | 'close';
 }
 
 /** A redirect's props (Story 4.2): the same-origin path the client opens with a top-level GET. */
@@ -110,6 +137,9 @@ export type Step = StepMeta &
     | { step: 'email_verified'; data: EmailVerifiedData }
     | { step: 'link_expired'; data: LinkExpiredData }
     | { step: 'link_sent'; data: LinkSentData }
+    | { step: 'forgot_password'; data: ForgotPasswordData }
+    | { step: 'reset_password'; data: ResetPasswordData }
+    | { step: 'password_changed'; data: PasswordChangedData }
   );
 
 type StepName = Step['step'];
@@ -165,6 +195,12 @@ export const PASSWORD_RULES: readonly string[] = Object.freeze(['length', 'too_l
 /** The Password step's error codes (Story 4.9): one, the same for every account. */
 export const PASSWORD_ERRORS: readonly string[] = Object.freeze(['incorrect']);
 
+/** Forgot password's error codes (Story 4.11). */
+export const FORGOT_PASSWORD_ERRORS: readonly string[] = Object.freeze(['email_invalid']);
+
+/** Reset password's error codes (Story 4.11): the confirmation's, or the new password's, whose rules the step names. */
+export const RESET_PASSWORD_ERRORS: readonly string[] = Object.freeze(['password_mismatch', 'password_rule']);
+
 /** Email verification required's error codes (Story 4.7). */
 export const VERIFY_EMAIL_ERRORS: readonly string[] = Object.freeze(['not_verified_yet']);
 
@@ -176,6 +212,18 @@ const knownCode = (value: unknown, known: readonly string[]): string | null | un
 
 /** A step that needs its transaction's CSRF token and remaining life. */
 const live = (meta: StepMeta): boolean => meta.csrfToken !== null && meta.expiresInSeconds !== null;
+
+/** The password policy the strength meter checks (Stories 4.7 and 4.11), or undefined when it isn't one. */
+const readPolicy = (value: unknown): SignupPolicy | undefined => {
+  const policy = isRecord(value) ? value : {};
+  const minLength = typeof policy.minLength === 'number' && Number.isInteger(policy.minLength) && policy.minLength > 0 ? policy.minLength : undefined;
+  const strength = policy.strength === 'good' || policy.strength === 'excellent' ? policy.strength : undefined;
+  return minLength === undefined || strength === undefined ? undefined : { minLength, strength };
+};
+
+/** The password rule codes a refusal names, or undefined when any isn't one. */
+const readRules = (value: unknown): string[] | undefined =>
+  Array.isArray(value) && value.every((rule) => typeof rule === 'string' && PASSWORD_RULES.includes(rule)) ? (value as string[]) : undefined;
 
 /** Each step's props reader: undefined when the data, or the step's meta, doesn't fit the screen. */
 const readers: { [name in StepName]: (data: Record<string, unknown>, meta: StepMeta) => Extract<Step, { step: name }>['data'] | undefined } = {
@@ -239,12 +287,40 @@ const readers: { [name in StepName]: (data: Record<string, unknown>, meta: StepM
   link_expired: (data, meta) => {
     const tenant = text(data.tenant);
     const token = optionalText(data.token);
+    // Story 4.11: a missing purpose is a verification link's page; anything else unknown is unreadable.
+    const purpose = data.purpose === undefined || data.purpose === 'verification' ? 'verification' : data.purpose === 'reset' ? 'reset' : undefined;
     // A link to send again needs its link-bound CSRF token.
-    return tenant === undefined || token === undefined || (token !== null && meta.csrfToken === null) ? undefined : { tenant, token };
+    return tenant === undefined || token === undefined || purpose === undefined || (token !== null && meta.csrfToken === null)
+      ? undefined
+      : { tenant, token, purpose };
   },
-  link_sent: (data) => {
+  link_sent: (data, meta) => {
     const tenant = text(data.tenant);
-    return tenant === undefined ? undefined : { tenant };
+    // Story 4.11: "Back to login" posts on the sign-in transaction, so it needs its CSRF token and life.
+    const back = data.back === true;
+    return tenant === undefined || (back && !live(meta)) ? undefined : { tenant, back };
+  },
+  forgot_password: (data, meta) => {
+    const tenant = text(data.tenant);
+    const email = optionalText(data.email);
+    const error = knownCode(data.error, FORGOT_PASSWORD_ERRORS);
+    return tenant === undefined || email === undefined || error === undefined || !live(meta) ? undefined : { tenant, email, error };
+  },
+  reset_password: (data, meta) => {
+    const tenant = text(data.tenant);
+    const email = data.email === undefined ? null : optionalText(data.email);
+    const policy = readPolicy(data.policy);
+    const error = knownCode(data.error, RESET_PASSWORD_ERRORS);
+    const rules = readRules(data.rules);
+    // Reset password posts with its reset-link-bound CSRF token.
+    return tenant === undefined || email === undefined || policy === undefined || error === undefined || rules === undefined || meta.csrfToken === null
+      ? undefined
+      : { tenant, email, policy, error, rules };
+  },
+  password_changed: (data) => {
+    const tenant = text(data.tenant);
+    const continueTo = data.continueTo === 'login' || data.continueTo === 'close' ? data.continueTo : undefined;
+    return tenant === undefined || continueTo === undefined ? undefined : { tenant, continueTo };
   },
 };
 

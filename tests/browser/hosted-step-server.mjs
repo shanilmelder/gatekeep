@@ -45,6 +45,19 @@
 // - POST /login/api/password/back: Login with the email kept.
 // - POST /login/api/transaction/extend from the Password step: that same step with a fresh life.
 //
+// Story 4.11: reset's fixtures and requests, for hosted-reset.spec.ts: forgot_password, reset_link_sent (the neutral
+// confirmation with "Back to login"), reset_password (a usable reset link's page, opened with ?token=), reset_link_expired
+// (Link expired for a reset link), password_changed_login and password_changed_close. The stubbed requests answer as
+// Host.Hosted does:
+// - POST /login/api/reset/open: Forgot password for known@example.com.
+// - POST /login/api/reset: "nope" gets Forgot password with email_invalid, any other address the same confirmation.
+// - POST /login/api/reset/back: Login with the email kept.
+// - POST /login/api/reset/complete, with the reset-link CSRF token: another token gets Link expired; a confirmation that
+//   differs gets Reset password with password_mismatch, "aaaaaaaaaaaa" Reset password naming the classes rule, anything
+//   else Password changed with "You can close this page.".
+// - POST /login/api/reset/new-link, with the reset-link CSRF token: the neutral confirmation.
+// - POST /login/api/transaction/extend from Forgot password or the reset confirmation: that same step with a fresh life.
+//
 //   node hosted-step-server.mjs <port>
 
 import { createHash } from 'node:crypto';
@@ -155,6 +168,16 @@ export const CORRECT_PASSWORD = 'Correct-Horse-7battery';
 /** Story 4.9: an address too long for one line of the identifier chip at 320px. */
 export const LONG_EMAIL = 'a.very.long.first.name.and.a.very.long.last.name.for.wrapping@subdomain.northwind-example.com';
 
+/** Story 4.11: Forgot password's and the reset confirmation's CSRF tokens, each its own for "Keep going". */
+export const FORGOT_CSRF = 'fixture-csrf-forgot';
+export const RESET_SENT_CSRF = 'fixture-csrf-reset-sent';
+
+/** Story 4.11: the reset-link-bound CSRF token Reset password and a reset link's Link expired carry. */
+export const RESET_CSRF = 'fixture-reset-csrf-token';
+
+/** Story 4.11: the reset link the reset_password page is opened with, in its ?token=. */
+export const RESET_LINK = 'ten_aaaaaaaaaaaaaaaaaaaaaaaaaa.BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB';
+
 /** Story 4.7: the link-bound CSRF token Link expired's "Send a new link" carries. */
 export const LINK_CSRF = 'fixture-link-csrf-token';
 
@@ -198,6 +221,47 @@ const emailVerified = (location) => ({
 
 const linkSent = { step: 'link_sent', stepVersion: 1, expiresInSeconds: null, data: { tenant: 'Northwind' }, csrfToken: null };
 
+/** Story 4.11: reset's steps. */
+const forgotPassword = (email = 'known@example.com', error = null) => ({
+  step: 'forgot_password',
+  stepVersion: 3,
+  expiresInSeconds: LIFE,
+  data: { tenant: 'Northwind', email, error },
+  csrfToken: FORGOT_CSRF,
+});
+
+const resetLinkSent = {
+  step: 'link_sent',
+  stepVersion: 4,
+  expiresInSeconds: LIFE,
+  data: { tenant: 'Northwind', back: true },
+  csrfToken: RESET_SENT_CSRF,
+};
+
+const resetPassword = (error = null, rules = []) => ({
+  step: 'reset_password',
+  stepVersion: 1,
+  expiresInSeconds: null,
+  data: { tenant: 'Northwind', email: 'known@example.com', policy: { minLength: 12, strength: 'good' }, error, rules },
+  csrfToken: RESET_CSRF,
+});
+
+const resetLinkExpired = {
+  step: 'link_expired',
+  stepVersion: 1,
+  expiresInSeconds: null,
+  data: { tenant: 'Northwind', token: RESET_LINK, purpose: 'reset' },
+  csrfToken: RESET_CSRF,
+};
+
+const passwordChanged = (continueTo) => ({
+  step: 'password_changed',
+  stepVersion: 1,
+  expiresInSeconds: null,
+  data: { tenant: 'Northwind', continueTo },
+  csrfToken: null,
+});
+
 /** Each fixture's data block text, before escaping; null leaves the block out. */
 const fixtures = {
   login: JSON.stringify(login()),
@@ -221,6 +285,12 @@ const fixtures = {
     csrfToken: LINK_CSRF,
   }),
   link_sent: JSON.stringify(linkSent),
+  forgot_password: JSON.stringify(forgotPassword()),
+  reset_link_sent: JSON.stringify(resetLinkSent),
+  reset_password: JSON.stringify(resetPassword()),
+  reset_link_expired: JSON.stringify(resetLinkExpired),
+  password_changed_login: JSON.stringify(passwordChanged('login')),
+  password_changed_close: JSON.stringify(passwordChanged('close')),
   ...Object.fromEntries(
     Object.entries({
       redirect_protocol_relative: '//evil.example/x',
@@ -266,6 +336,8 @@ function answer(pathname, body, csrf) {
     if (csrf === SIGNUP_CSRF) return signup('new.user@example.com');
     if (csrf === VERIFY_CSRF) return verifyEmail();
     if (csrf === PASSWORD_CSRF) return password();
+    if (csrf === FORGOT_CSRF) return forgotPassword();
+    if (csrf === RESET_SENT_CSRF) return resetLinkSent;
     return login();
   }
   const email = typeof body.email === 'string' ? body.email.trim() : '';
@@ -289,6 +361,18 @@ function answer(pathname, body, csrf) {
         : password('known@example.com', 'incorrect');
     case '/login/api/password/back':
       return login('known@example.com');
+    case '/login/api/reset/open':
+      return forgotPassword();
+    case '/login/api/reset':
+      return email === 'nope' ? forgotPassword(email, 'email_invalid') : resetLinkSent;
+    case '/login/api/reset/back':
+      return login('known@example.com');
+    case '/login/api/reset/complete':
+      if (body.token !== RESET_LINK) return resetLinkExpired;
+      if (body.password !== body.confirm) return resetPassword('password_mismatch');
+      return body.password === 'aaaaaaaaaaaa' ? resetPassword('password_rule', ['classes']) : passwordChanged('close');
+    case '/login/api/reset/new-link':
+      return linkSent;
     default:
       break;
   }
@@ -303,7 +387,7 @@ function answer(pathname, body, csrf) {
   return password(email);
 }
 
-/** The stubbed API's paths: Story 4.2's two, Story 4.7's sign-up and verification requests, and Story 4.9's two. */
+/** The stubbed API's paths: Story 4.2's two, Story 4.7's sign-up and verification requests, Story 4.9's two and Story 4.11's five. */
 const API_PATHS = new Set([
   '/login/api/identifier',
   '/login/api/transaction/extend',
@@ -315,12 +399,18 @@ const API_PATHS = new Set([
   '/login/api/verification/new-link',
   '/login/api/password',
   '/login/api/password/back',
+  '/login/api/reset/open',
+  '/login/api/reset',
+  '/login/api/reset/back',
+  '/login/api/reset/complete',
+  '/login/api/reset/new-link',
 ]);
 
 /** The fixtures a real step page answers 200 for: every step but Generic error and the unreadable ones. */
 const OK_FIXTURES = new Set([
   'login', 'login_kept', 'login_signup', 'signup', 'signup_excellent', 'signup_terms', 'signup_terms_late', 'verify_email',
   'email_verified_app', 'email_verified_close', 'link_expired', 'link_sent', 'password', 'password_long',
+  'forgot_password', 'reset_link_sent', 'reset_password', 'reset_link_expired', 'password_changed_login', 'password_changed_close',
 ]);
 
 const types = { '.js': 'text/javascript', '.css': 'text/css', '.woff2': 'font/woff2', '.svg': 'image/svg+xml' };
@@ -342,7 +432,12 @@ const server = createServer((request, response) => {
       const origin = `http://${request.headers.host}`;
       if (request.headers.origin !== origin) return json(403, { ...genericError('Northwind'), data: { ...genericError('Northwind').data, code: 'origin_mismatch' } });
       const presented = request.headers['x-gatekeep-csrf'];
-      const allowed = url.pathname === '/login/api/verification/new-link' ? [LINK_CSRF] : [CSRF, SIGNUP_CSRF, VERIFY_CSRF, PASSWORD_CSRF];
+      const allowed =
+        url.pathname === '/login/api/verification/new-link'
+          ? [LINK_CSRF]
+          : url.pathname === '/login/api/reset/complete' || url.pathname === '/login/api/reset/new-link'
+            ? [RESET_CSRF]
+            : [CSRF, SIGNUP_CSRF, VERIFY_CSRF, PASSWORD_CSRF, FORGOT_CSRF, RESET_SENT_CSRF];
       if (!allowed.includes(presented)) return json(403, { ...genericError('Northwind'), data: { ...genericError('Northwind').data, code: 'csrf_mismatch' } });
       let body;
       try {

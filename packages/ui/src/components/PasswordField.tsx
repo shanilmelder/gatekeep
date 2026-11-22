@@ -1,12 +1,22 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useMessages } from '../messages';
 import { mergeRefs } from '../util';
+import a11y from './a11y.module.css';
 import styles from './controls.module.css';
 import { Field, type Validate } from './Field';
 import { Input, type InputProps } from './Input';
 
 export interface PasswordFieldProps extends Omit<InputProps, 'type' | 'code'> {
   label: ReactNode;
+  /** An action on the right of the label's row (Story 4.11), such as "Forgot password?". */
+  labelAction?: ReactNode;
+  /**
+   * The account's username (Story 4.11), such as Reset password's email, held in a visually hidden read-only
+   * `autocomplete="username"` field beside the password, out of the tab order, so password managers save the new
+   * password for it. `usernameLabel` is that field's accessible name. With none, there is no such field.
+   */
+  username?: string;
+  usernameLabel?: string;
   helper?: ReactNode;
   validate?: Validate;
   error?: ReactNode;
@@ -20,6 +30,9 @@ export interface PasswordFieldProps extends Omit<InputProps, 'type' | 'code'> {
  */
 export function PasswordField({
   label,
+  labelAction,
+  username,
+  usernameLabel,
   helper,
   validate,
   error,
@@ -55,7 +68,20 @@ export function PasswordField({
   }, [form]);
 
   return (
-    <Field label={label} helper={helper} validate={validate} error={error} id={id} surface={surface} className={className}>
+    <Field label={label} labelAction={labelAction} helper={helper} validate={validate} error={error} id={id} surface={surface} className={className}>
+      {username !== undefined && (
+        <input
+          className={a11y.visuallyHidden}
+          type="text"
+          name="username"
+          autoComplete="username"
+          value={username}
+          readOnly
+          tabIndex={-1}
+          aria-label={usernameLabel}
+          data-testid="password-field-username"
+        />
+      )}
       <span className={styles.passwordWrap}>
         <Input
           {...rest}

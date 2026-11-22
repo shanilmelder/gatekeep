@@ -27,6 +27,16 @@ public interface IJobEnqueuer
         CancellationToken cancellationToken);
 
     /// <summary>
+    /// Does to <paramref name="payload"/> what enqueuing a Tenant job of <paramref name="type"/> would, writing nothing
+    /// (Story 4.11): the same registry checks and, for a credential, the same Transit encryption under the context Tenant's
+    /// <c>payload</c> key, whose ciphertext is then discarded. A request that must cost what an enqueue costs whether or
+    /// not it sends anything, such as a password reset for an unknown address, calls it in place of the enqueue.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The context has no Tenant.</exception>
+    /// <exception cref="ArgumentException">As for an enqueue: the type or its credential isn't allowed.</exception>
+    Task RehearseAsync(CommandContext context, JobType type, JobPayload payload, CancellationToken cancellationToken);
+
+    /// <summary>
     /// Enqueues a Deployment-wide job. Its only parameter is an optional Operation ID,
     /// and it carries no payload.
     /// </summary>

@@ -87,6 +87,14 @@ public static class TenantKeyedTypes
         ["Gatekeep.Modules.Protocol.Contracts.SignInLimits.Source"] = KeyScope.Tenant,
         ["Gatekeep.Modules.Protocol.Contracts.SignInLimits.TenantPolicy"] = KeyScope.Tenant,
         ["Gatekeep.Modules.Protocol.Contracts.SignInLimits.SourcePolicy"] = KeyScope.Tenant,
+        // Story 4.11: password reset requests, counted in each Tenant's own tenant_attempt rows. The recipient key is an
+        // address, counted for every address alike before any lookup, so it can't reveal an account.
+        ["Gatekeep.Modules.Protocol.Contracts.PasswordResetLimits.Tenant"] = KeyScope.Tenant,
+        ["Gatekeep.Modules.Protocol.Contracts.PasswordResetLimits.Source"] = KeyScope.Tenant,
+        ["Gatekeep.Modules.Protocol.Contracts.PasswordResetLimits.Recipient"] = KeyScope.Tenant,
+        ["Gatekeep.Modules.Protocol.Contracts.PasswordResetLimits.TenantPolicy"] = KeyScope.Tenant,
+        ["Gatekeep.Modules.Protocol.Contracts.PasswordResetLimits.SourcePolicy"] = KeyScope.Tenant,
+        ["Gatekeep.Modules.Protocol.Contracts.PasswordResetLimits.RecipientPolicy"] = KeyScope.Tenant,
         ["Gatekeep.Modules.Admins.Contracts.AdminsContract.EnrolmentPolicy"] = KeyScope.DeploymentWide("recover-admin enrolment use per client (Story 1.32); Admins are Deployment-scoped."),
         ["Gatekeep.Modules.Admins.Contracts.AdminsContract.EnrolmentDeploymentPolicy"] = KeyScope.DeploymentWide("One Deployment-wide cap on recover-admin enrolment use (Story 1.32)."),
     };

@@ -44,8 +44,16 @@ internal sealed class TokenEndpointServices(
     SignUpLimits? signUpLimits = null,
     ISignIn? signIn = null,
     SignInLimits? signInLimits = null,
-    Gatekeep.Modules.Tenancy.Contracts.ITenants? tenants = null)
+    Gatekeep.Modules.Tenancy.Contracts.ITenants? tenants = null,
+    IPasswordReset? passwordReset = null,
+    PasswordResetLimits? passwordResetLimits = null)
 {
+    /// <summary>Password reset (Story 4.11), sharing sign-up's hashing gate.</summary>
+    public IPasswordReset PasswordReset { get; } = passwordReset ?? throw new ArgumentNullException(nameof(passwordReset));
+
+    /// <summary>The limits Hosted Login's reset requests count under (Story 4.11).</summary>
+    public PasswordResetLimits PasswordResetLimits { get; } = passwordResetLimits ?? PasswordResetLimits.Default;
+
     /// <summary>The limits Hosted Login's sign-up and verification sends count under (Story 4.8).</summary>
     public SignUpLimits SignUpLimits { get; } = signUpLimits ?? SignUpLimits.Default;
 

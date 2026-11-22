@@ -49,6 +49,7 @@ Every audit type code Gatekeep writes, declared in its module's contract. Codes 
 | `directory.client_secret.rotated` | Directory | Success | An Application's client secret was rotated: a new secret was created, and the old one stays valid for 24 hours unless ended sooner. Names the Application only, never a secret. | None |
 | `directory.connection.password_policy_updated` | Directory | Success | The password policy of the Tenant's database Connection was changed. Records no value. A save that changes nothing writes no event. | None |
 | `directory.connection.updated` | Directory | Success | Sign-up was turned on or off for the Tenant's database Connection. Records no value. A save that changes nothing writes no event. | None |
+| `identity.password.reset` | Identity | Success | A User reset their password with a reset link; every Session and Token Family of theirs ended. The User is Actor and target. | Password resets |
 | `identity.user.email_verified` | Identity | Success | A User's email was verified by a link, which activated the password it was sent for and removed any other pending one. Names the User only. | None |
 | `identity.user.signed_up` | Identity | Success | A sign-up gave a User a new password, pending its email's verification unless a Dev Tenant turned that off. Names the User only, never the email or password. | None |
 | `keys.signing_key.created` | Keys | Success | A Tenant's replacement next Signing or Management key was created in key custody. Names no key. | Key operations |
@@ -88,7 +89,7 @@ Each class a Tenant's Log must cover, and the codes that prove it. A pending cla
 | Class | Codes | Status |
 | --- | --- | --- |
 | Sign-ins and failures | `authentication.signin.failed`, `authentication.signin.succeeded` | Proved |
-| Password resets | None yet | Pending: Story 4.11 |
+| Password resets | `identity.password.reset` | Proved |
 | Email changes | None yet | Pending: Story 16.8 |
 | Factor events | None yet | Pending: Story 6.1 |
 | Recovery Code events | None yet | Pending: Story 6.8 |
