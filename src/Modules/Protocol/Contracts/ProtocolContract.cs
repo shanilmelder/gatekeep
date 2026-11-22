@@ -246,9 +246,21 @@ public sealed record SignUpLimits(
     Gatekeep.Kernel.RateLimiting.RateLimitPolicy SendTenant,
     Gatekeep.Kernel.RateLimiting.RateLimitPolicy SendSource)
 {
-    public static SignUpLimits Default { get; } = new(
-        new("signup.attempt.tenant", Gatekeep.Kernel.Limits.SecurityLimits.SignUpTenantAttempts, Gatekeep.Kernel.Limits.SecurityLimits.SignUpWindow),
-        new("signup.attempt.source", Gatekeep.Kernel.Limits.SecurityLimits.SignUpSourceAttempts, Gatekeep.Kernel.Limits.SecurityLimits.SignUpWindow),
-        new("verification.send.tenant", Gatekeep.Kernel.Limits.SecurityLimits.VerificationSendTenantAttempts, Gatekeep.Kernel.Limits.SecurityLimits.SignUpWindow),
-        new("verification.send.source", Gatekeep.Kernel.Limits.SecurityLimits.VerificationSendSourceAttempts, Gatekeep.Kernel.Limits.SecurityLimits.SignUpWindow));
+    /// <summary>Create account per Tenant: <c>signup.attempt.tenant</c>, 600 per 15 minutes.</summary>
+    public static readonly Gatekeep.Kernel.RateLimiting.RateLimitPolicy SignUpTenantPolicy = new(
+        "signup.attempt.tenant", Gatekeep.Kernel.Limits.SecurityLimits.SignUpTenantAttempts, Gatekeep.Kernel.Limits.SecurityLimits.SignUpWindow);
+
+    /// <summary>Create account per source: <c>signup.attempt.source</c>, 10 per 15 minutes.</summary>
+    public static readonly Gatekeep.Kernel.RateLimiting.RateLimitPolicy SignUpSourcePolicy = new(
+        "signup.attempt.source", Gatekeep.Kernel.Limits.SecurityLimits.SignUpSourceAttempts, Gatekeep.Kernel.Limits.SecurityLimits.SignUpWindow);
+
+    /// <summary>Resend and "Send a new link" per Tenant: <c>verification.send.tenant</c>, 600 per 15 minutes.</summary>
+    public static readonly Gatekeep.Kernel.RateLimiting.RateLimitPolicy SendTenantPolicy = new(
+        "verification.send.tenant", Gatekeep.Kernel.Limits.SecurityLimits.VerificationSendTenantAttempts, Gatekeep.Kernel.Limits.SecurityLimits.SignUpWindow);
+
+    /// <summary>Resend and "Send a new link" per source: <c>verification.send.source</c>, 10 per 15 minutes.</summary>
+    public static readonly Gatekeep.Kernel.RateLimiting.RateLimitPolicy SendSourcePolicy = new(
+        "verification.send.source", Gatekeep.Kernel.Limits.SecurityLimits.VerificationSendSourceAttempts, Gatekeep.Kernel.Limits.SecurityLimits.SignUpWindow);
+
+    public static SignUpLimits Default { get; } = new(SignUpTenantPolicy, SignUpSourcePolicy, SendTenantPolicy, SendSourcePolicy);
 }

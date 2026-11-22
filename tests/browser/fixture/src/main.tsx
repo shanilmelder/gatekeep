@@ -103,6 +103,8 @@ const HOSTED = [
   'filledSegments',
   'hasLongRun',
   'passwordRules',
+  // Story 4.8: Signup's terms checkbox and link.
+  'TermsAgreement',
 ];
 // The admin entry's own exports, exactly: anything else it gains fails the check.
 const ADMIN_ONLY = [
