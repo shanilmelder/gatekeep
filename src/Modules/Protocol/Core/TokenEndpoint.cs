@@ -41,10 +41,22 @@ internal sealed class TokenEndpointServices(
     TimeProvider time,
     ISignUp signUp,
     ILoggerFactory? loggers = null,
-    SignUpLimits? signUpLimits = null)
+    SignUpLimits? signUpLimits = null,
+    ISignIn? signIn = null,
+    SignInLimits? signInLimits = null,
+    Gatekeep.Modules.Tenancy.Contracts.ITenants? tenants = null)
 {
     /// <summary>The limits Hosted Login's sign-up and verification sends count under (Story 4.8).</summary>
     public SignUpLimits SignUpLimits { get; } = signUpLimits ?? SignUpLimits.Default;
+
+    /// <summary>Password sign-in (Story 4.9), sharing sign-up's hashing gate.</summary>
+    public ISignIn SignIn { get; } = signIn ?? throw new ArgumentNullException(nameof(signIn));
+
+    /// <summary>The limits Hosted Login's password submits count under (Story 4.9).</summary>
+    public SignInLimits SignInLimits { get; } = signInLimits ?? SignInLimits.Default;
+
+    /// <summary>The Tenant settings a code flow's default audience is read from (Story 4.9).</summary>
+    public Gatekeep.Modules.Tenancy.Contracts.ITenants Tenants { get; } = tenants ?? throw new ArgumentNullException(nameof(tenants));
 
     public IAuthentication Authentication { get; } = authentication;
 

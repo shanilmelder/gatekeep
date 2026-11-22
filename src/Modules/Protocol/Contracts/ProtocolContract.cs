@@ -73,6 +73,12 @@ public static class ProtocolContract
     /// <summary>"Send a new link" (Story 4.7): <c>{token}</c> with the link-bound CSRF token, always answered with the neutral confirmation.</summary>
     public const string VerificationNewLinkPath = "/login/api/verification/new-link";
 
+    /// <summary>"Log in" at the Password step (Story 4.9): <c>{stepVersion, password}</c>, answered with the redirect or the step again.</summary>
+    public const string PasswordPath = "/login/api/password";
+
+    /// <summary>The identifier chip's "Edit" at the Password step (Story 4.9): <c>{stepVersion}</c>, answered with Login, the email kept.</summary>
+    public const string PasswordBackPath = "/login/api/password/back";
+
     /// <summary>The cookie binding a sign-in transaction to the browser (Story 4.2): host-only, Secure, HttpOnly, SameSite=Lax.</summary>
     public const string TransactionCookie = "__Host-gk_txn";
 
@@ -102,7 +108,8 @@ public static class ProtocolContract
     /// request limits are <see cref="TokenRequestLimits"/>'s, unless the host registered its own first.
     /// The authorization endpoint completes a sign-in through <see cref="IAuthorizationSignIn"/>, Protocol's own
     /// (Story 4.2). The step after Login's email is the host's <c>ICredentialStep</c> when it registered one (only
-    /// tests do), Authentication's release default otherwise, which offers none.
+    /// tests do), Authentication's release default otherwise, which authenticates no one, so the Password step follows
+    /// (Story 4.9), counted under <see cref="SignInLimits"/> and hashing through the gate sign-up shares.
     /// <paramref name="stepPages"/> builds the host's Hosted Login step pages (AD-21, Story 4.1), which the
     /// authorization endpoint shows Generic error through for a request it can't send back to any client, and
     /// Hosted Login's <c>/login</c> surface its steps through. Sign-up (Story 4.7) enqueues its verification email through the
@@ -263,4 +270,24 @@ public sealed record SignUpLimits(
         "verification.send.source", Gatekeep.Kernel.Limits.SecurityLimits.VerificationSendSourceAttempts, Gatekeep.Kernel.Limits.SecurityLimits.SignUpWindow);
 
     public static SignUpLimits Default { get; } = new(SignUpTenantPolicy, SignUpSourcePolicy, SendTenantPolicy, SendSourcePolicy);
+}
+
+/// <summary>
+/// The limits Hosted Login's password submits count under (Story 4.9, NFR-6): per Tenant and per source, the source first.
+/// Neither is keyed by an email address, so a limit can't reveal an account. Continue and Edit aren't counted. The defaults
+/// are <see cref="Default"/>, from <c>SecurityLimits</c>; a host registers its own only to test them.
+/// </summary>
+public sealed record SignInLimits(
+    Gatekeep.Kernel.RateLimiting.RateLimitPolicy Tenant,
+    Gatekeep.Kernel.RateLimiting.RateLimitPolicy Source)
+{
+    /// <summary>Password submits per Tenant: <c>signin.attempt.tenant</c>, 1,200 per 15 minutes.</summary>
+    public static readonly Gatekeep.Kernel.RateLimiting.RateLimitPolicy TenantPolicy = new(
+        "signin.attempt.tenant", Gatekeep.Kernel.Limits.SecurityLimits.SignInTenantAttempts, Gatekeep.Kernel.Limits.SecurityLimits.SignInWindow);
+
+    /// <summary>Password submits per source: <c>signin.attempt.source</c>, 30 per 15 minutes.</summary>
+    public static readonly Gatekeep.Kernel.RateLimiting.RateLimitPolicy SourcePolicy = new(
+        "signin.attempt.source", Gatekeep.Kernel.Limits.SecurityLimits.SignInSourceAttempts, Gatekeep.Kernel.Limits.SecurityLimits.SignInWindow);
+
+    public static SignInLimits Default { get; } = new(TenantPolicy, SourcePolicy);
 }

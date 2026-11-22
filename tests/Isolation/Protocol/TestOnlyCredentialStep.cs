@@ -9,7 +9,8 @@ namespace Gatekeep.Tests.Isolation.Protocol;
 /// The test host's credential step (Story 4.2), plugged into Authentication's <see cref="ICredentialStep"/> port by
 /// <see cref="ProtocolHost"/>: it authenticates with no real factor the User an identifier of <see cref="Email"/>'s
 /// form names, with the method <see cref="TestOnlyAuthenticator.Method"/>, now or at the time the identifier names.
-/// Any other identifier gets no credential step, as the release build's default gives none. Test only: the one
+/// Any other identifier authenticates no one here, as with the release build's default, and goes on to the Password step
+/// (Story 4.9) where the database Connection is enabled. Test only: the one
 /// <c>src</c> credential step is Authentication's empty default, and a test checks this type stays here.
 /// </summary>
 internal sealed class TestOnlyCredentialStep(TimeProvider time) : ICredentialStep

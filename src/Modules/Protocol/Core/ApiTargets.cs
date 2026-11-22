@@ -2,6 +2,7 @@ using System.Collections.Immutable;
 using System.Security.Claims;
 using Gatekeep.Kernel.Persistence;
 using Gatekeep.Modules.Directory.Contracts;
+using Gatekeep.Modules.Protocol.Contracts;
 using OpenIddict.Abstractions;
 using OpenIddict.Server;
 using static OpenIddict.Abstractions.OpenIddictConstants;
@@ -19,7 +20,9 @@ namespace Gatekeep.Modules.Protocol.Core;
 /// else is <c>invalid_target</c>.</item>
 /// <item>Gatekeep decides all of this, and the parameters are then removed from the request, so none of OpenIddict's own
 /// audience, resource or scope checks, which would need scope or audience permissions (AD-8), ever reads them.</item>
-/// <item>The API's identifier is the access token's only <c>aud</c>. With no API, an access token has none.</item>
+/// <item>The API's identifier is the access token's only <c>aud</c>. A code flow naming none takes the Tenant's default
+/// audience as if named, and with none its userinfo endpoint is the only <c>aud</c> (Story 4.9). A Client Credentials
+/// request must name one.</item>
 /// </list>
 /// </summary>
 internal static class ApiTargets
@@ -57,6 +60,16 @@ internal static class ApiTargets
     public const string OtherApiDescription = "The requested API isn't the one this grant is for.";
 
     public const string GoneDescription = "The API this grant is for is no longer available.";
+
+    /// <summary>
+    /// A User token's audience when its request named no API and the Tenant has no default audience (Story 4.9): the
+    /// Tenant's userinfo endpoint, <c>{issuer}connect/userinfo</c>, from the stored issuer.
+    /// </summary>
+    public static string UserinfoAudience(Uri issuer)
+    {
+        ArgumentNullException.ThrowIfNull(issuer);
+        return new Uri(issuer, ProtocolContract.UserinfoPath[1..]).AbsoluteUri;
+    }
 
     /// <summary>What a request named: <see cref="Many"/> when it named more than one value, else its one identifier or none.</summary>
     public sealed record Named(bool Many, string? Identifier);

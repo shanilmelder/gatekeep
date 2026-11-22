@@ -4,6 +4,8 @@ import {
   postExtend,
   postIdentifier,
   postNewLink,
+  postPassword,
+  postPasswordBack,
   postResend,
   postSignup,
   postSignupBack,
@@ -16,16 +18,17 @@ import type { Step } from './step';
 import { StepScreen, isFailed } from './StepScreen';
 
 /** The steps that stand on a live sign-in transaction, whose life is counted and can be extended. */
-const LIVE_STEPS: ReadonlySet<Step['step']> = new Set(['login', 'signup', 'verify_email']);
+const LIVE_STEPS: ReadonlySet<Step['step']> = new Set(['login', 'signup', 'password', 'verify_email']);
 
 /** The email a step carries, as its field starts. */
 function emailOf(step: Step): string {
-  return step.step === 'login' || step.step === 'signup' ? (step.data.email ?? '') : '';
+  return step.step === 'login' || step.step === 'signup' || step.step === 'password' ? (step.data.email ?? '') : '';
 }
 
 /**
- * Hosted Login's page (Stories 4.1, 4.2 and 4.7). It shows the step the server sent and follows the next one each
- * request answers with, holding no flow logic: Continue posts the email, Sign up opens Signup carrying it, Create account
+ * Hosted Login's page (Stories 4.1, 4.2, 4.7 and 4.9). It shows the step the server sent and follows the next one each
+ * request answers with, holding no flow logic: Continue posts the email, the Password step's Log in posts the password and
+ * its Edit goes back to Login, Sign up opens Signup carrying it, Create account
  * posts the email and password, the verification step's actions ask the server again, a redirect step is opened with a
  * top-level GET, and while a step has a life, its expiry warning shows two minutes before the end. "Keep going" extends
  * the life without a reload; at expiry the page goes to Login, which restarts with the email kept.
@@ -75,9 +78,10 @@ export function App({ initial }: { initial: Step }) {
     setWarning(false);
     setLife((n) => n + 1);
     setShown((n) => n + 1);
-    // The password is kept only for a refused Create account, so it can be corrected; anything else drops it.
+    // The password is kept only for a refused Create account, so it can be corrected; anything else drops it, every
+    // answer to the Password step's Log in included (Story 4.9).
     if (next.step !== 'signup') setPassword('');
-    if (next.step === 'login' || next.step === 'signup') setEmail((typed) => next.data.email ?? typed);
+    if (next.step === 'login' || next.step === 'signup' || next.step === 'password') setEmail((typed) => next.data.email ?? typed);
     // Story 4.8: the terms box starts unticked on a Signup reached from another step, or asking for other terms.
     if (next.step !== 'signup' || step.step !== 'signup' || step.data.termsUrl !== next.data.termsUrl) setTermsAccepted(false);
   }
@@ -138,6 +142,18 @@ export function App({ initial }: { initial: Step }) {
     void send(() => postSignup(stepVersion, email, password, termsAccepted, csrfToken, step.data.tenant));
   }
 
+  function onPasswordLogIn() {
+    if (step.step !== 'password' || step.csrfToken === null) return;
+    const { stepVersion, csrfToken } = step;
+    void send(() => postPassword(stepVersion, password, csrfToken, step.data.tenant));
+  }
+
+  function onEditIdentifier() {
+    if (step.step !== 'password' || step.csrfToken === null) return;
+    const { stepVersion, csrfToken } = step;
+    void send(() => postPasswordBack(stepVersion, csrfToken, step.data.tenant));
+  }
+
   function onVerified() {
     if (step.step !== 'verify_email' || step.csrfToken === null) return;
     const { stepVersion, csrfToken } = step;
@@ -188,6 +204,8 @@ export function App({ initial }: { initial: Step }) {
     onSignUp,
     onLogIn,
     onCreate,
+    onPasswordLogIn,
+    onEditIdentifier,
     termsAccepted,
     onTermsChange,
     onVerified,

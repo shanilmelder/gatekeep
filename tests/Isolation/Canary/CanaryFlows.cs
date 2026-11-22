@@ -306,6 +306,8 @@ internal static class CanaryFlows
         new("protocol.userinfo_and_revocation", [], UserinfoAndRevocationAsync),
         // Story 4.7: sign-up and its verification link, through Hosted Login's own routes.
         new("protocol.sign_up", [], SignUpAsync),
+        // Story 4.9: password sign-in, its Session and the code it resumes to, through Hosted Login's own routes.
+        new("protocol.sign_in", [], PasswordSignInAsync),
     ];
 
     private static readonly DateOnly Reviewed = new(2026, 11, 2);
@@ -2054,6 +2056,75 @@ internal static class CanaryFlows
         Assert.Contains("login/api/signup", captured.Text, StringComparison.Ordinal);
         Assert.DoesNotContain(termsUrl, captured.Text, StringComparison.Ordinal);
         Assert.Equal(1L, await flow.RowsAsync("user", $"terms_accepted_url = '{termsUrl}'"));
+    }
+
+    /// <summary>
+    /// Story 4.9: a password sign-in through Hosted Login, through the real Protocol registration and the hosts' scrubbing
+    /// logging, with the real Transit: Continue, the password, the Session cookie, the resumed code and its tokens. The
+    /// password, the Session identifier, the code and every token are canaries: the password reaches only the verifier, and
+    /// the Session is stored only as its SHA-256, so none may reach a table, an event or a log line. Failing, a wrong
+    /// password and an unknown account are submitted first, each answered alike.
+    /// </summary>
+    private static async Task PasswordSignInAsync(CanaryFlowContext context, FlowRun run, bool failing)
+    {
+        const string hostA = "canary-a.signin.test";
+        const string hostB = "canary-b.signin.test";
+        const string email = "canary.signin@example.test";
+
+        var flow = await Identity.SignUpFlow.CreateAsync(context.Postgres, context.Bao, hostA, hostB);
+        run.Database = flow.Database.Name;
+        run.Plant("role-password", PostgresFixture.Password);
+        run.Plant("client-secret", flow.Flow.ClientA.Secret);
+        var password = run.Plant("signin-password");
+        await flow.AddPasswordUserAsync(email, await Gatekeep.Modules.Authentication.Contracts.AuthenticationContract.HashPasswordAsync(
+            new Gatekeep.Kernel.Secrets.Secret<string>(password.Value)));
+
+        var captured = new CapturedConsole();
+        await using (var host = await Protocol.ProtocolHost.StartAsync(flow.Database.Hosted, context.Bao, logging: logging =>
+        {
+            logging.AddGatekeepLogging().SetMinimumLevel(LogLevel.Trace);
+            logging.Services.AddSingleton<Microsoft.Extensions.Logging.Console.ConsoleFormatter>(captured);
+            logging.Services.Configure<Microsoft.Extensions.Logging.Console.ConsoleLoggerOptions>(options => options.FormatterName = captured.Name);
+        }))
+        {
+            if (failing)
+            {
+                var wrong = run.Plant("signin-wrong-password");
+                foreach (var address in new[] { email, "canary.nobody@example.test" })
+                {
+                    var refusedBrowser = await flow.BeginAsync(host, hostA);
+                    using var refusedStep = await refusedBrowser.IdentifyAsync(address);
+                    using var refused = await refusedBrowser.LogInAsync(refusedStep, wrong.Value);
+                    run.Capture("refused sign-in response", refused.RootElement.GetProperty("data").GetRawText());
+                    Assert.Equal("password", refused.RootElement.GetProperty("step").GetString());
+                }
+            }
+
+            var browser = await flow.BeginAsync(host, hostA);
+            run.Plant("code-verifier", browser.Pkce.Verifier);
+            using var step = await browser.IdentifyAsync(email);
+            run.Capture("password step", step.RootElement.GetProperty("data").GetRawText());
+            using var redirect = await browser.LogInAsync(step, password.Value);
+            run.Capture("sign-in response", redirect.RootElement.GetProperty("step").GetString()!);
+            Assert.Equal("redirect", redirect.RootElement.GetProperty("step").GetString());
+            run.Plant("session-cookie", browser.Http.Cookies[Gatekeep.Modules.Protocol.Contracts.ProtocolContract.SessionCookie]);
+
+            using var resumed = await browser.FollowAsync(redirect.RootElement.GetProperty("data").GetProperty("location").GetString()!);
+            Assert.Equal(HttpStatusCode.Found, resumed.StatusCode);
+            var code = Microsoft.AspNetCore.WebUtilities.QueryHelpers.ParseQuery(resumed.Headers.Location!.Query)["code"].ToString();
+            run.Plant("authorization-code", code);
+            run.Plant("authorization-code-random", code[(code.IndexOf('.', StringComparison.Ordinal) + 1)..]);
+
+            using var issued = await Protocol.CodeFlow.ExchangeAsync(
+                host, hostA, flow.Flow.ClientA.ClientId, flow.Flow.ClientA.Secret, code, Protocol.CodeFlowSetup.Callback, browser.Pkce.Verifier);
+            Assert.Equal(HttpStatusCode.OK, issued.Status);
+            run.Plant("access-token", issued.AccessToken);
+            run.Plant("id-token", issued.Body.RootElement.GetProperty("id_token").GetString()!);
+            run.Capture("token response", $"{issued.Body.RootElement.GetProperty("token_type").GetString()} {issued.Body.RootElement.GetProperty("expires_in").GetInt32()}");
+        }
+
+        run.Capture("Hosted log", captured.Text);
+        Assert.Contains("login/api/password", captured.Text, StringComparison.Ordinal);
     }
 
     /// <summary>

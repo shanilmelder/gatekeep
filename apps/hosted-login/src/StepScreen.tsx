@@ -5,6 +5,7 @@ import {
   LinkExpiredScreen,
   LinkSentScreen,
   LoginScreen,
+  PasswordScreen,
   SignupScreen,
   VerifyEmailScreen,
 } from '@gatekeep/hosted-screens';
@@ -38,6 +39,8 @@ function heading(step: Step, messages: Readonly<Messages>): string {
       return messages.loginTitle;
     case 'signup':
       return messages.signupTitle;
+    case 'password':
+      return messages.passwordTitle;
     case 'verify_email':
       return messages.verifyEmailTitle;
     case 'email_verified':
@@ -63,6 +66,10 @@ export interface StepControls {
   onLogIn: () => void;
   /** Signup's Create account. */
   onCreate: () => void;
+  /** Story 4.9: the Password step's Log in. */
+  onPasswordLogIn: () => void;
+  /** The Password step's identifier chip "Edit". */
+  onEditIdentifier: () => void;
   /** Story 4.8: whether Signup's terms checkbox is ticked, and its change. */
   termsAccepted: boolean;
   onTermsChange: (accepted: boolean) => void;
@@ -129,6 +136,19 @@ function screen(step: Step, controls: StepControls, messages: Readonly<Messages>
         />
       );
     }
+    case 'password':
+      return (
+        <PasswordScreen
+          tenant={{ name: step.data.tenant }}
+          email={step.data.email ?? controls.email}
+          password={controls.password}
+          onPasswordChange={controls.onPasswordChange}
+          onLogIn={controls.onPasswordLogIn}
+          onEdit={controls.onEditIdentifier}
+          error={step.data.error === 'incorrect' ? messages.passwordIncorrect : undefined}
+          pending={controls.pending}
+        />
+      );
     case 'verify_email':
       return (
         <VerifyEmailScreen
@@ -183,7 +203,7 @@ function initialFocus(main: HTMLElement): HTMLElement | null {
 
 /** Whether the step shows a failed submit: a field error, or "We haven't seen that yet". */
 export function isFailed(step: Step): boolean {
-  return (step.step === 'login' || step.step === 'signup' || step.step === 'verify_email') && step.data.error !== null;
+  return (step.step === 'login' || step.step === 'signup' || step.step === 'password' || step.step === 'verify_email') && step.data.error !== null;
 }
 
 /**

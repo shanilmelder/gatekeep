@@ -65,11 +65,11 @@ public static class AuthenticationContract
     /// <summary>
     /// Sign-up and email verification through Hosted Login (Story 4.7) over the Kernel audit port. <paramref name="time"/>
     /// sets every expiry. The verification email is enqueued through <paramref name="enqueuer"/>, the host's, whose custody
-    /// encrypts the link under the Tenant's <c>payload</c> key. Every Argon2id hash passes one gate per returned instance,
-    /// sized by <paramref name="hashLimits"/> (<see cref="PasswordHashLimits.Default"/> unless given), so a host keeps one.
+    /// encrypts the link under the Tenant's <c>payload</c> key. Every Argon2id hash passes <paramref name="gate"/>, the one
+    /// gate the host keeps (<see cref="CreatePasswordHashGate"/>) and shares with <see cref="CreateSignIn"/> (Story 4.9).
     /// Sessions are issued through Sessions' own <c>ISessions</c>.
     /// </summary>
-    public static ISignUp CreateSignUp(IAuditAppender audit, TimeProvider time, IJobEnqueuer enqueuer, PasswordHashLimits? hashLimits = null) =>
+    public static ISignUp CreateSignUp(IAuditAppender audit, TimeProvider time, IJobEnqueuer enqueuer, IPasswordHashGate gate) =>
         new SignUpService(
             audit,
             time,
@@ -78,11 +78,33 @@ public static class AuthenticationContract
             DirectoryContract.CreateDirectory(audit, time),
             TenancyContract.CreateTenants(audit),
             enqueuer,
-            new PasswordHashGate(hashLimits ?? PasswordHashLimits.Default, time));
+            gate ?? throw new ArgumentNullException(nameof(gate)));
 
     /// <summary>
-    /// A hashing gate sized by <paramref name="limits"/>, timing its waits by <paramref name="time"/> (Story 4.7): the one each
-    /// <see cref="CreateSignUp"/> holds. A host never needs its own; tests check the budget through it.
+    /// Password sign-in through Hosted Login (Story 4.9) over the Kernel audit port. <paramref name="time"/> sets every
+    /// expiry. Every verification and rehash passes <paramref name="gate"/>, the same gate sign-up holds, so both share one
+    /// hashing budget. An unverified User's new verification email is enqueued through <paramref name="enqueuer"/>, the
+    /// host's. Sessions are issued through Sessions' own <c>ISessions</c>.
+    /// </summary>
+    public static ISignIn CreateSignIn(IAuditAppender audit, TimeProvider time, IJobEnqueuer enqueuer, IPasswordHashGate gate)
+    {
+        // The dummy hash an unknown account is verified against starts building now, not in a request's hashing slot.
+        SignInService.WarmDummyHash();
+        return new SignInService(
+            audit,
+            time,
+            SessionsContract.CreateSessions(audit, time),
+            IdentityContract.CreateIdentity(audit, time),
+            DirectoryContract.CreateDirectory(audit, time),
+            TenancyContract.CreateTenants(audit),
+            enqueuer,
+            gate ?? throw new ArgumentNullException(nameof(gate)));
+    }
+
+    /// <summary>
+    /// A hashing gate sized by <paramref name="limits"/>, timing its waits by <paramref name="time"/> (Story 4.7): the one a
+    /// host keeps and hands to both <see cref="CreateSignUp"/> and <see cref="CreateSignIn"/> (Story 4.9). Tests check the
+    /// budget through it too.
     /// </summary>
     public static IPasswordHashGate CreatePasswordHashGate(PasswordHashLimits limits, TimeProvider? time = null) => new PasswordHashGate(limits, time);
 
@@ -122,8 +144,8 @@ public static class AuthenticationContract
         PasswordHasher.ParametersOf(phc) is { } parameters ? (parameters.MemoryKiB, parameters.Iterations, parameters.Parallelism) : null;
 
     /// <summary>
-    /// The release build's credential step (Story 4.2): it offers none, so a sign-in past Login's email can't
-    /// continue until Story 4.9's password step. It is the only credential step in <c>src</c>.
+    /// The release build's credential step (Story 4.2): it authenticates no one at Continue, so a sign-in past Login's
+    /// email goes on to the Password step (Story 4.9). It is the only credential step in <c>src</c>.
     /// </summary>
     public static ICredentialStep NoCredentialStep { get; } = new NoCredentialStep();
 

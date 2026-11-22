@@ -163,6 +163,10 @@ public static class RouteRegistry
         new("GET", "/login/verify-email", CaseKind.HostResolved),
         new("POST", "/login/api/verification/new-link", CaseKind.HostResolved),
 
+        // Story 4.9: the Password step's Log in and Edit, each on the resolved Tenant's sign-in transaction.
+        new("POST", "/login/api/password", CaseKind.HostResolved),
+        new("POST", "/login/api/password/back", CaseKind.HostResolved),
+
         new("*", "{*path:nonfile}", CaseKind.NotTenantBound, Reason: "the one fixed 404, the same as an unknown host's (AD-6)"),
     ];
 }

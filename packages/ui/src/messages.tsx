@@ -144,6 +144,16 @@ export interface Messages {
   signupTermsLink: string;
   /** Story 4.8: under the terms checkbox, when Create account was pressed without it ticked. */
   signupTermsRequired: string;
+  /** Story 4.9: the Password step's heading. */
+  passwordTitle: string;
+  /** The Password step's password field label. */
+  passwordLabel: string;
+  /** The Password step's primary action. */
+  passwordLogIn: string;
+  /** Under the password after a failed submit (code incorrect), the same for an unknown account and a wrong password. */
+  passwordIncorrect: string;
+  /** The identifier chip's action, back to Login with the email kept. */
+  identifierEdit: string;
   /** The strength meter's label. Placeholder: {level}, one of the three below. */
   strengthMeterLabel: string;
   strengthGood: string;
@@ -1067,6 +1077,11 @@ export const defaultMessages: Readonly<Messages> = Object.freeze({
   signupTermsAgree: 'I agree to the',
   signupTermsLink: 'Terms of Service',
   signupTermsRequired: 'Accept the terms to continue.',
+  passwordTitle: 'Enter your password',
+  passwordLabel: 'Password',
+  passwordLogIn: 'Log in',
+  passwordIncorrect: 'Incorrect email or password.',
+  identifierEdit: 'Edit',
   strengthMeterLabel: 'Password strength: {level}',
   strengthGood: 'Good',
   strengthExcellent: 'Excellent',

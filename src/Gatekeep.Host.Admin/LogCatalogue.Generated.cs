@@ -30,6 +30,8 @@ internal static partial class LogCatalogue
         new("admin.signin.failed", AuditOutcome.Failure, "A sign-in whose signature verified over an Admin's WebAuthn credential was refused. Holds no credential ID, challenge or user handle."),
         new("admin.signin.succeeded", AuditOutcome.Success, "An Admin signed in with a WebAuthn credential and a full Admin Session started. Holds no credential ID, challenge, user handle or Session ID."),
         new("audit.retention.checkpoint", AuditOutcome.Success, "Retention deleted a chain's sealed prefix past the Log period. Names the last deleted row's epoch, seq and hash."),
+        new("authentication.signin.failed", AuditOutcome.Failure, "A password sign-in at Hosted Login failed. Anonymous; the target is the User when the account exists."),
+        new("authentication.signin.succeeded", AuditOutcome.Success, "A User signed in with their password at Hosted Login, and a Session started. The User is Actor and target."),
         new("authentication.signin_transaction.completed", AuditOutcome.Success, "An authenticated sign-in transaction completed its authorization request, and can't be used again. The caller is anonymous."),
         new("authentication.signin_transaction.extended", AuditOutcome.Success, "A sign-in transaction's 30-minute sliding life was extended: its Login page was opened, Keep going was chosen or its email was recorded. Anonymous."),
         new("authentication.signin_transaction.identified", AuditOutcome.Success, "A sign-in transaction recorded the email entered at Login. The caller is anonymous, and the email isn't in the event."),

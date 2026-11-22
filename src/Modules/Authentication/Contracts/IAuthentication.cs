@@ -16,7 +16,8 @@ public sealed record StartedSignIn(Guid TransactionId, Secret<string> Binding);
 /// <summary>
 /// The steps a sign-in transaction records as passed, in order, in <c>completed_steps</c> (Story 4.2): Login's
 /// <see cref="Identifier"/>, or a sign-up's <see cref="Signup"/> then <see cref="Registered"/> (Story 4.7), then
-/// <see cref="Authenticated"/>.
+/// <see cref="Authenticated"/>. From Story 4.9 a transaction at <see cref="Identifier"/> stands at the Password step, and
+/// the correct password of a User whose email isn't verified records <see cref="Registered"/> after it.
 /// </summary>
 public static class SignInSteps
 {
@@ -26,7 +27,10 @@ public static class SignInSteps
     /// <summary>"Sign up" was chosen at Login (Story 4.7): the transaction stands at Signup. Back removes it.</summary>
     public const string Signup = "signup";
 
-    /// <summary>A sign-up was submitted and recorded (Story 4.7): the transaction stands at Email verification required.</summary>
+    /// <summary>
+    /// A sign-up was submitted and recorded (Story 4.7), or the correct password of an unverified User was (Story 4.9): the
+    /// transaction stands at Email verification required.
+    /// </summary>
     public const string Registered = "registered";
 
     /// <summary>A credential step authenticated the User, and a Session was issued.</summary>
@@ -153,9 +157,10 @@ public interface IAuthentication
 
 /// <summary>
 /// Authentication's credential-step port (Story 4.2): the step after Login's email. A credential step that
-/// authenticates the User returns who and how; null means no credential step is available, and the sign-in
-/// can't continue. The release build's default returns null until Story 4.9's password step; only the tests
-/// plug in one that authenticates. The step after Continue never depends on whether an account exists.
+/// authenticates the User returns who and how; null means it authenticated no one, and the sign-in
+/// goes on to the Password step (Story 4.9) while the database Connection is enabled. The release build's default always
+/// returns null; only the tests plug in one that authenticates. The step after Continue never depends on whether an
+/// account exists.
 /// </summary>
 public interface ICredentialStep
 {

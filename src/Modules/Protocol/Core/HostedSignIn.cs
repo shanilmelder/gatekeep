@@ -131,8 +131,9 @@ internal static class SignInStepResponses
     public const string InvalidTransaction = "invalid_transaction";
 
     /// <summary>
-    /// No credential step is available after Login's email (Story 4.2, until Story 4.9), no hashing slot came free in
-    /// time for a sign-up (Story 4.7), or a sign-up or resend was rate limited (Story 4.8, with 429).
+    /// No database Connection is enabled after Login's email (Stories 4.2 and 4.9), no hashing slot came free in time for a
+    /// sign-up or sign-in (Stories 4.7 and 4.9), or a sign-up, resend or password submit was rate limited (Stories 4.8 and
+    /// 4.9, with 429).
     /// </summary>
     public const string TemporarilyUnavailable = "temporarily_unavailable";
 
@@ -145,9 +146,10 @@ internal static class SignInStepResponses
 
     /// <summary>
     /// The transaction's current step, from the steps it records as passed: once authenticated, the redirect that resumes
-    /// the authorization request; once a sign-up is registered, Email verification required; at Signup, Signup with
-    /// <paramref name="policy"/>; past Login's email with no credential step available, Generic error
-    /// <c>temporarily_unavailable</c>; otherwise Login, its "Sign up" link shown while <paramref name="policy"/> is open.
+    /// the authorization request; once a sign-up or an unverified User's sign-in is registered, Email verification
+    /// required; at Signup, Signup with <paramref name="policy"/>; past Login's email, the Password step while the database
+    /// Connection is enabled (Story 4.9), else Generic error <c>temporarily_unavailable</c>, the same for every identifier;
+    /// otherwise Login, its "Sign up" link shown while <paramref name="policy"/> is open.
     /// </summary>
     public static StepResponse Current(
         ResolvedTenant tenant,
@@ -188,7 +190,9 @@ internal static class SignInStepResponses
 
         if (transaction.HasPassed(SignInSteps.Identifier))
         {
-            return StepResponse.GenericError(tenant.Name, TemporarilyUnavailable, traceId);
+            return policy.PasswordEnabled
+                ? StepResponse.Password(tenant.Name, transaction.StepVersion, expiresIn, SignInCsrf.Derive(binding), transaction.Identifier, error)
+                : StepResponse.GenericError(tenant.Name, TemporarilyUnavailable, traceId);
         }
 
         return StepResponse.Login(
@@ -300,7 +304,8 @@ internal sealed class HostedAuthorizationSignIn(TokenEndpointServices services) 
 /// uncompleted one within an hour restarts at Login with its email kept, under a new cookie.</item>
 /// <item><c>POST /login/api/identifier</c>, <c>/login/api/transaction/extend</c>, and Story 4.7's sign-up requests
 /// (<c>/login/api/signup/open</c>, <c>/login/api/signup/back</c>, <c>/login/api/signup</c>,
-/// <c>/login/api/verification/resend</c> and <c>/login/api/verification/continue</c>): an exact-host <c>Origin</c>, then the
+/// <c>/login/api/verification/resend</c> and <c>/login/api/verification/continue</c>), and Story 4.9's Password step
+/// (<c>/login/api/password</c> and <c>/login/api/password/back</c>): an exact-host <c>Origin</c>, then the
 /// transaction's CSRF token, are checked before anything is read or written, and each answers a JSON step. A stale
 /// <c>stepVersion</c>, or a transaction not at the step a request needs, gets the current step, writing nothing.</item>
 /// <item><c>GET /login/verify-email?token=</c> (Story 4.7): the verification link's page, Email verified or Link expired;
@@ -317,7 +322,7 @@ internal static class LoginEndpoints
     private const int MaxBodyBytes = 4 * 1024;
 
     /// <summary>
-    /// The largest Create account body read (Story 4.7): 16 KiB, room for a 254-character email and a password past the
+    /// The largest Create account or password body read (Stories 4.7 and 4.9): 16 KiB, room for a 254-character email and a password past the
     /// 256-code-point limit written entirely in <c>\uXXXX</c> escapes (12 bytes a code point, as a surrogate pair), so a
     /// too-long password is named by its rule rather than refused as an unreadable body.
     /// </summary>
@@ -328,6 +333,10 @@ internal static class LoginEndpoints
         endpoints.MapGet(ProtocolContract.LoginPath, (RequestDelegate)PageAsync);
         endpoints.MapPost(ProtocolContract.LoginIdentifierPath, (RequestDelegate)IdentifierAsync);
         endpoints.MapPost(ProtocolContract.LoginExtendPath, (RequestDelegate)ExtendAsync);
+
+        // Story 4.9: password sign-in.
+        endpoints.MapPost(ProtocolContract.PasswordPath, (RequestDelegate)PasswordAsync);
+        endpoints.MapPost(ProtocolContract.PasswordBackPath, (RequestDelegate)PasswordBackAsync);
 
         // Story 4.7: sign-up and email verification.
         endpoints.MapPost(ProtocolContract.SignupOpenPath, (RequestDelegate)SignupOpenAsync);
@@ -420,11 +429,11 @@ internal static class LoginEndpoints
         var now = login.Services.Time.GetUtcNow();
         var identified = await login.Services.Authentication.IdentifyAsync(
             context, transaction, email, SignInCookies.Read(http, ProtocolContract.SessionCookie), login.Cancellation);
-        await scope.CommitAsync(login.Cancellation);
 
         StepResponse next;
         if (identified.Session is { } session)
         {
+            await scope.CommitAsync(login.Cancellation);
             SignInCookies.SetSession(http, session.Token, session.AbsoluteExpiresAt, login.Services.Time.GetUtcNow());
             next = StepResponse.Redirect(
                 login.Tenant.Name,
@@ -434,7 +443,19 @@ internal static class LoginEndpoints
         }
         else
         {
-            next = StepResponse.GenericError(login.Tenant.Name, SignInStepResponses.TemporarilyUnavailable, login.TraceId);
+            // Story 4.9: the Password step, or Generic error with no enabled database Connection, alike for every identifier:
+            // no account is looked up here.
+            next = await login.CurrentAsync(
+                context,
+                transaction with
+                {
+                    Identifier = email,
+                    CompletedSteps = [SignInSteps.Identifier],
+                    StepVersion = identified.StepVersion,
+                    ExpiresAt = identified.ExpiresAt,
+                },
+                binding);
+            await scope.CommitAsync(login.Cancellation);
         }
 
         await login.AnswerAsync(StatusCodes.Status200OK, next);
@@ -645,6 +666,135 @@ internal static class LoginEndpoints
         }
     }
 
+    /// <summary>
+    /// "Log in" at the Password step (Story 4.9): counted per source then per Tenant before any lookup or hash, then one
+    /// Argon2id verification, whatever the account. The correct password of a verified User gets the redirect, with its
+    /// Session; of an unverified one, Email verification required. Anything else gets the Password step with
+    /// <c>incorrect</c>, alike for every account, writing nothing but the counters and <c>authentication.signin.failed</c>,
+    /// kept through its own scope. A full hashing budget, or no enabled database Connection, gets Generic error
+    /// <c>temporarily_unavailable</c>, writing nothing.
+    /// </summary>
+    private static async Task PasswordAsync(HttpContext http)
+    {
+        var login = Login.Of(http);
+        if (await login.CheckAsync() is not { } binding)
+        {
+            return;
+        }
+
+        using var body = await ReadBodyAsync(http, login.Cancellation, MaxSignupBodyBytes);
+        if (StepVersion(body) is not { } stepVersion || Text(body, "password") is not { } typed)
+        {
+            await login.InvalidRequestAsync();
+            return;
+        }
+
+        var password = new Secret<string>(typed);
+        await using var scope = await TenantScope.BeginAsync(login.Services.Database.Source, login.Tenant.TenantId, login.Cancellation);
+        var context = scope.CreateCommandContext();
+        if (await login.UsableAsync(scope, binding) is not { } transaction)
+        {
+            return;
+        }
+
+        if (stepVersion != transaction.StepVersion || !IsAt(transaction, SignInSteps.Identifier))
+        {
+            await login.AnswerCurrentAsync(context, transaction, binding);
+            return;
+        }
+
+        // Counted per source, then per Tenant, never by account, before any lookup or hash.
+        if (await login.LimitAsync(login.Services.SignInLimits.Tenant, login.Services.SignInLimits.Source) is { } retryAfter)
+        {
+            await login.AnswerLimitedAsync(retryAfter);
+            return;
+        }
+
+        var result = await login.Services.SignIn.SignInAsync(
+            context, transaction, password, SignInCookies.Read(http, ProtocolContract.SessionCookie), login.Cancellation);
+        var now = login.Services.Time.GetUtcNow();
+
+        switch (result.Status)
+        {
+            case SignInStatus.Authenticated when result.Session is { } session:
+                await scope.CommitAsync(login.Cancellation);
+                SignInCookies.SetSession(http, session.Token, session.AbsoluteExpiresAt, login.Services.Time.GetUtcNow());
+                await login.AnswerAsync(
+                    StatusCodes.Status200OK,
+                    StepResponse.Redirect(
+                        login.Tenant.Name,
+                        result.StepVersion,
+                        SignInStepResponses.ExpiresIn(result.ExpiresAt, now),
+                        SignInStepResponses.ResumeLocation(transaction.Parameters)));
+                return;
+
+            case SignInStatus.VerificationRequired:
+                await scope.CommitAsync(login.Cancellation);
+                await login.AnswerAsync(
+                    StatusCodes.Status200OK,
+                    StepResponse.VerifyEmail(
+                        login.Tenant.Name,
+                        result.StepVersion,
+                        SignInStepResponses.ExpiresIn(result.ExpiresAt, now),
+                        SignInCsrf.Derive(binding),
+                        transaction.Identifier));
+                return;
+
+            case SignInStatus.Incorrect:
+            {
+                // The step is built first; then the request's work is undone and only the failure's event kept.
+                var incorrect = await login.CurrentAsync(context, transaction, binding, PasswordErrors.Incorrect);
+                var failedUser = result.FailedUserId;
+                await FailureContext.CommitAfterRollbackAsync(
+                    scope, (failure, cancellation) => login.Services.SignIn.RecordFailureAsync(failure, failedUser, cancellation));
+                await login.AnswerAsync(StatusCodes.Status200OK, incorrect);
+                return;
+            }
+
+            default:
+                // Nothing was hashed or written: the scope is undone with the request.
+                await login.AnswerAsync(
+                    StatusCodes.Status200OK, StepResponse.GenericError(login.Tenant.Name, SignInStepResponses.TemporarilyUnavailable, login.TraceId));
+                return;
+        }
+    }
+
+    /// <summary>The identifier chip's "Edit" (Story 4.9): back to Login, the email kept, so Continue works again.</summary>
+    private static async Task PasswordBackAsync(HttpContext http)
+    {
+        var login = Login.Of(http);
+        if (await login.CheckAsync() is not { } binding)
+        {
+            return;
+        }
+
+        using var body = await ReadBodyAsync(http, login.Cancellation);
+        if (StepVersion(body) is not { } stepVersion)
+        {
+            await login.InvalidRequestAsync();
+            return;
+        }
+
+        await using var scope = await TenantScope.BeginAsync(login.Services.Database.Source, login.Tenant.TenantId, login.Cancellation);
+        var context = scope.CreateCommandContext();
+        if (await login.UsableAsync(scope, binding) is not { } transaction)
+        {
+            return;
+        }
+
+        if (stepVersion != transaction.StepVersion || !IsAt(transaction, SignInSteps.Identifier))
+        {
+            await login.AnswerCurrentAsync(context, transaction, binding);
+            return;
+        }
+
+        var moved = await login.Services.SignIn.BackAsync(context, transaction, login.Cancellation);
+        var next = await login.CurrentAsync(
+            context, transaction with { CompletedSteps = [], StepVersion = moved.StepVersion, ExpiresAt = moved.ExpiresAt }, binding);
+        await scope.CommitAsync(login.Cancellation);
+        await login.AnswerAsync(StatusCodes.Status200OK, next);
+    }
+
     /// <summary>"Resend email" (Story 4.7): Email verification required, resent, whatever was sent.</summary>
     private static async Task ResendAsync(HttpContext http)
     {
@@ -668,7 +818,7 @@ internal static class LoginEndpoints
             return;
         }
 
-        if (stepVersion != transaction.StepVersion || !IsAt(transaction, SignInSteps.Signup, SignInSteps.Registered))
+        if (stepVersion != transaction.StepVersion || !IsRegistered(transaction))
         {
             await login.AnswerCurrentAsync(context, transaction, binding);
             return;
@@ -710,7 +860,7 @@ internal static class LoginEndpoints
             return;
         }
 
-        if (stepVersion != transaction.StepVersion || !IsAt(transaction, SignInSteps.Signup, SignInSteps.Registered))
+        if (stepVersion != transaction.StepVersion || !IsRegistered(transaction))
         {
             await login.AnswerCurrentAsync(context, transaction, binding);
             return;
@@ -844,6 +994,13 @@ internal static class LoginEndpoints
     /// <summary>Whether the transaction has passed exactly <paramref name="steps"/>, in order.</summary>
     private static bool IsAt(SignInTransaction transaction, params string[] steps) =>
         transaction.CompletedSteps.SequenceEqual(steps, StringComparer.Ordinal);
+
+    /// <summary>
+    /// Whether the transaction stands at Email verification required: after a sign-up (Story 4.7), or after an unverified
+    /// User's correct password (Story 4.9).
+    /// </summary>
+    private static bool IsRegistered(SignInTransaction transaction) =>
+        IsAt(transaction, SignInSteps.Signup, SignInSteps.Registered) || IsAt(transaction, SignInSteps.Identifier, SignInSteps.Registered);
 
     /// <summary>The body's whole-number <c>stepVersion</c>, or null when there is none.</summary>
     private static int? StepVersion(JsonDocument? body) =>
@@ -1036,7 +1193,7 @@ internal static class LoginEndpoints
         }
 
         /// <summary>
-        /// A rate-limited sign-up or resend (Story 4.8): 429 with <c>Retry-After</c> in whole seconds, at least 1, and Generic
+        /// A rate-limited sign-up, resend (Story 4.8) or password submit (Story 4.9): 429 with <c>Retry-After</c> in whole seconds, at least 1, and Generic
         /// error <c>temporarily_unavailable</c>, the same for every address.
         /// </summary>
         public Task AnswerLimitedAsync(TimeSpan retryAfter)

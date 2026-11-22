@@ -37,6 +37,7 @@ public sealed class EventClassTests(PostgresFixture postgres)
         [TenantLogClass.TokenFamilyRevocation] = ProveTokenFamilyRevocationAsync,
         [TenantLogClass.CrossTenantRejection] = ProveClientCrossTenantRejectionAsync,
         [TenantLogClass.KeyOperation] = ProveKeyOperationAsync,
+        [TenantLogClass.SignIn] = ProveSignInAsync,
     };
 
     [Fact]
@@ -270,6 +271,55 @@ public sealed class EventClassTests(PostgresFixture postgres)
         Assert.Equal(System.Net.HttpStatusCode.OK, rotated.StatusCode);
 
         return (host.Database, tenant);
+    }
+
+    /// <summary>
+    /// Story 4.9: a password submit for an account the Tenant doesn't have, as <c>gk_hosted</c>: one dummy verification,
+    /// the answer <c>Incorrect</c> with nothing written, then <c>authentication.signin.failed</c> in its own committed scope,
+    /// as Hosted Login keeps it. <c>SignInTests</c> drives the same path, and the success event, end to end.
+    /// </summary>
+    private static async Task<(string Database, Guid TenantId)> ProveSignInAsync(PostgresFixture postgres)
+    {
+        var database = await postgres.NewMigratedDatabaseAsync();
+        var tenantId = Guid.CreateVersion7();
+        await PostgresFixture.ExecuteAsync(
+            postgres.SuperuserConnection(database),
+            TestTenants.InsertSql(tenantId) + $"; INSERT INTO connection (tenant_id, id, kind) VALUES ('{tenantId}', gen_random_uuid(), 'database')");
+
+        var audit = AuditContract.CreateAppender();
+        var signIn = Gatekeep.Modules.Authentication.Contracts.AuthenticationContract.CreateSignIn(
+            audit,
+            TimeProvider.System,
+            Gatekeep.Modules.Operations.Contracts.OperationsContract.CreateEnqueuer(Gatekeep.Modules.Operations.Contracts.OperationsContract.ProductionRegistry, custody: null),
+            Gatekeep.Modules.Authentication.Contracts.AuthenticationContract.CreatePasswordHashGate(Gatekeep.Modules.Authentication.Contracts.PasswordHashLimits.Default));
+        var transaction = new Gatekeep.Modules.Authentication.Contracts.SignInTransaction(
+            Guid.CreateVersion7(),
+            Guid.CreateVersion7(),
+            new Dictionary<string, string>(),
+            [Gatekeep.Modules.Authentication.Contracts.SignInSteps.Identifier],
+            2,
+            "nobody@example.com",
+            null,
+            DateTimeOffset.UtcNow.AddMinutes(30),
+            null);
+
+        await using var source = NpgsqlDataSource.Create(postgres.RoleConnection(TableRegistry.Hosted, database));
+        Gatekeep.Modules.Authentication.Contracts.SignInResult result;
+        await using (var scope = await TenantScope.BeginAsync(source, tenantId, CancellationToken.None))
+        {
+            result = await signIn.SignInAsync(
+                scope.CreateCommandContext(), transaction, new Gatekeep.Kernel.Secrets.Secret<string>("Correct-Horse-7battery"), null, CancellationToken.None);
+        }
+
+        Assert.Equal(Gatekeep.Modules.Authentication.Contracts.SignInStatus.Incorrect, result.Status);
+        Assert.Null(result.FailedUserId);
+        await using (var scope = await TenantScope.BeginAsync(source, tenantId, CancellationToken.None))
+        {
+            await signIn.RecordFailureAsync(scope.CreateCommandContext(), result.FailedUserId, CancellationToken.None);
+            await scope.CommitAsync(CancellationToken.None);
+        }
+
+        return (database, tenantId);
     }
 
     /// <summary>Story 2.7: a Tenant-scope <c>RevokeAccessAsync</c> as <c>gk_hosted</c> writes <c>sessions.access.revoked</c>.</summary>

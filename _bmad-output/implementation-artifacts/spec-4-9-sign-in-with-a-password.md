@@ -2,7 +2,8 @@
 title: 'Story 4.9: Sign in with a password'
 type: 'feature'
 created: '2026-11-22'
-status: 'ready-for-dev'
+status: 'done'
+baseline_revision: '31594e4d32f730109583b9143dae36fdfcd6745a'
 review_loop_iteration: 0
 followup_review_recommended: false
 context:
@@ -199,6 +200,51 @@ deferred: []
 
 ## Review Triage Log
 
+### 2026-11-22 — Review pass
+- verdicts: 40 findings — high 0, medium 2, low 27, false 6, maybe-false 5
+- findings:
+  - `low` `reject` (Intent) Audience tests sign in with the test-only step, not a password — patched alongside: the correct-password test now asserts the userinfo `aud` on its own token.
+  - `low` `reject` (Intent) Continue isn't compared for an account that signs in another way — the only Connection in v1 is the database one; no other method exists yet.
+  - `low` `reject` (Intent) Old-parameter hashes verify at a different cost than the dummy — recorded residual in T-6; they upgrade at the first sign-in.
+  - `low` `reject` (Intent) Session flow isn't driven through a real browser against the real host — the HTTP tests follow the resume and exchange the code; browser tests cover the screens against the stub, as every Hosted story does.
+  - `maybe-false` `reject` (Intent) The Caddy-only forwarded-address clause isn't exercised on the password route — it is the shared `UseGatekeepForwardedClient` from Stories 1.21/2.5, already tested; if missing it would be low.
+  - `low` `reject` (Intent) The Session row ID isn't planted as a canary — only the cookie value is a Session identifier a client sees; the row ID is a UUID, not a credential.
+  - `low` `reject` (Intent) Screens aren't compared with the design file — no such check exists for any screen; the copy and order come from the design.
+  - `false` `reject` (Intent) The audience change applies to every code flow — the criterion says "a User token", so every code flow is the intended surface.
+  - `low` `patch` (Blind) The rehash can overwrite a newer password — the UPDATE now requires the verified hash (`AND password_hash = @previous_hash`).
+  - `low` `patch` (Blind) The rehash result is ignored — a false return now skips the upgrade explicitly and still signs in.
+  - `medium` `patch` (Blind) A faulted dummy hash is cached forever, so unknown accounts would error while known ones get `incorrect` — rebuilt on next use after a fault.
+  - `medium` `patch` (Blind) The first unknown submit builds the dummy inside the slot (two hashes) — the dummy is now built when the service is created and awaited before the slot.
+  - `low` `patch` (Blind) The 100 ms tolerance can't catch a skipped dummy verify — the timing test also asserts the unknown median is at least half the wrong-password median.
+  - `low` `patch` (Blind) An unverified User's correct-password link isn't counted under `verification.send.*`, against T-63's wording — T-63 now states it counts under `signin.attempt.*` and the per-recipient limit.
+  - `low` `patch` (Blind) T-64 says every sign-in and failure is logged — reworded: only verified submits write a SignIn event.
+  - `low` `reject` (Blind) A full hashing budget answers 200 Generic error, not 503 — the same answer sign-up gives (Story 4.7), by the architecture's "generic failure".
+  - `low` `reject` (Blind) A default audience makes existing clients' extra scopes and `offline_access` follow that API — the spec's chosen rule ("exactly as if it were requested"); the default is an Admin's deliberate setting.
+  - `false` `reject` (Blind) The audience change rides along unflagged — it is this story's last acceptance criterion; the PR body names it.
+  - `low` `reject` (Blind) `ISignIn? signIn = null` and `ITenants? tenants = null` look optional — the same pattern as the existing optional services there; it fails loudly at construction.
+  - `low` `reject` (Blind) The "looking nothing up" tests don't instrument reads — the order is structural (limits and Continue never call Identity); instrumentation adds test-only surface.
+  - `low` `reject` (Blind) `PasswordEnabled` sits on `SignupPolicy` and the default audience is read through sign-up settings — naming only; both read the same Connection and settings rows.
+  - `low` `patch` (Blind) `IdentifierChip`'s `form` prop is unused — removed.
+  - `false` `reject` (Blind) The client step reader has no unit tests while others do — `apps/hosted-login` has no unit tests for any reader; readers are covered through Playwright.
+  - `low` `patch` (Verification Gap) Dev Tenant verification-off sign-in untested — `On_a_Dev_Tenant_with_verification_off_an_unverified_User_signs_in_with_no_email`.
+  - `low` `patch` (Verification Gap) Session rotation on a password sign-in untested — `Signing_in_again_with_the_live_Session_of_the_same_User_rotates_it`.
+  - `low` `patch` (Verification Gap) Case-insensitive lookup untested — `An_email_typed_in_another_case_signs_in`.
+  - `low` `patch` (Verification Gap) Send a new link for an unverified active credential untested — `An_unverified_Users_sign_in_link_once_expired_sends_a_new_one`.
+  - `low` `patch` (Verification Gap) The shared hashing gate is untested — `Hosted_Login_hashes_sign_up_and_sign_in_through_one_gate`.
+  - `low` `patch` (Verification Gap) The Password step's expiry warning and Keep going are untested in the browser — mirrored test added to `hosted-signin.spec.ts`.
+  - `low` `reject` (Verification Gap, other) A default audience changes existing clients' scope and `offline_access` handling — same as the Blind row.
+  - `medium` `patch` (Edge) Faulted dummy cached forever — same root cause as the Blind row, fixed by it.
+  - `medium` `patch` (Edge) Dummy built inside the slot — fixed with the Blind row.
+  - `maybe-false` `reject` (Edge) The email verified elsewhere between the read and `IssueVerificationLinkAsync` gives a 500 — a two-browser race within one request; if true it would be low.
+  - `low` `patch` (Edge) The rehash overwrites a concurrent change and ignores its result — fixed with the Blind rows.
+  - `maybe-false` `reject` (Edge) A Session starts for a credential deleted concurrently — needs another link verified in the same instant; if true it would be low.
+  - `low` `reject` (Edge) An empty password is hashed and counted — the same for every account, so it reveals nothing; the field is labelled and the cost is one counted attempt.
+  - `false` `reject` (Edge) An oversized password is hashed — the route's body limit and 4.7's `too_long` cap bound it.
+  - `low` `reject` (Edge) A default audience drops extra scopes silently — same as the Blind row.
+  - `false` `reject` (Edge) An issuer with no trailing slash resolves the wrong userinfo URL — `ProtocolIssuer.Parse` always ends the issuer in `/`.
+  - `maybe-false` `reject` (Edge) `Authenticated` with a null Session falls to Generic error — the service always sets the Session with that status; if true it would be low.
+  - `maybe-false` `reject` (Edge) Old-parameter accounts and the first unknown submit are told apart by timing — the first is fixed above; the old-parameter residual is recorded in T-6.
+
 ## Design Notes
 
 - **Dummy hash:** one hash made per process with the current parameters, so a verify against it costs exactly what a real credential with current parameters costs. Old-parameter real hashes cost less until they are upgraded, which is acceptable: they upgrade at the first sign-in.
@@ -213,3 +259,44 @@ deferred: []
 - With `MSYS_NO_PATHCONV=1`, run `docker run --rm -v "D:/Projects/Personal/gatekeep:/src" -v gk-nuget:/root/.nuget -w /src mcr.microsoft.com/dotnet/sdk:10.0.403-noble sh -c 'dotnet build Gatekeep.slnx -p:NuGetAudit=false -v q'`. Expected: 0 warnings and 0 errors.
 - `corepack pnpm -r build`, `corepack pnpm --filter @gatekeep/ui check`, `corepack pnpm --filter @gatekeep/hosted-login budget`, and the package unit tests. Expected: green.
 - The Isolation, Architecture and browser suites run on CI on the PR. Don't run them locally.
+
+## Auto Run Result
+
+Status: done
+
+**Summary:**
+- **Password step:** Login's Continue leads every identifier to the same Password step while the database Connection is enabled.
+- **Submitting a password:** it runs exactly one Argon2id verify in the shared hashing gate, against a dummy hash built at service start when there is no account or no active password.
+  - Wrong password, unknown account and pending-only account answer an identical `incorrect`, with timing medians within 100 ms.
+  - The correct password of a verified User upgrades an old-parameter hash (compare-and-swap), starts a `pwd` Session with `auth_time` and the Connection, and resumes to the Application's code.
+  - An unverified User's correct password gets Email verification required with a new link.
+- **Rate limits:** sign-in is limited per source (30) and per Tenant (1,200) per 15 minutes.
+- **Audit:** `authentication.signin.succeeded` and `authentication.signin.failed` prove the SignIn log class.
+- **User token `aud`:** the requested API, else the Tenant's default audience, else `{issuer}connect/userinfo`.
+
+**Files changed (main ones):**
+- `src/Modules/Authentication/{Contracts/ISignIn.cs, Core/SignInService.cs, Core/PasswordHasher.cs, Contracts/AuthenticationEvents.cs, Contracts/AuthenticationContract.cs}`: sign-in, dummy hash, rehash check, events, shared gate.
+- `src/Modules/Identity/{Contracts/IIdentity.cs, Core/IdentityService.cs}`: the sign-in account read and the guarded hash update. The verification link also serves an unverified User's active credential.
+- `src/Modules/Authentication/Core/SignUpService.cs`: Continue now also needs the email verified (or verification off); Resend and new-link accept the sign-in path.
+- `src/Modules/Protocol/{Core/HostedSignIn.cs, Contracts/StepResponse.cs, Contracts/ProtocolContract.cs, Core/AuthorizeEndpoint.cs, Core/ApiTargets.cs, Core/ProtocolServer.cs, Core/TokenEndpoint.cs}`: the Password step, routes, `SignInLimits`, and the audience fallback.
+- `packages/ui` (`IdentifierChip`, copy), `packages/hosted-screens/src/PasswordScreen.tsx`, `apps/hosted-login/src/*`: the screen and client.
+- Tests: `SignInTests` (new), release-build tests flipped to `password`, `AuthorizationCodeTests` and `RefreshTokenTests` audiences, the canary `protocol.sign_in`, `EventClassTests`, `AuditCatalogue`, `TenantKeyedTypes`, `RouteRegistry`, and `hosted-signin.spec.ts` with its stub.
+- Docs: threat model T-6, T-63, T-64 and T-65; `docs/audit-events.md` regenerated.
+
+**Review findings:** 40.
+- **17 patched:** the dummy-hash fault and warm-up, the rehash compare-and-swap, the threat-model wording, the stronger timing test, the unused prop, and seven test gaps.
+- **None deferred.**
+- **The rest rejected** with reasons in the triage log.
+
+**Follow-up review recommended:** false. No `high`, and one `medium` entry (the dummy-hash fault and warm-up, one root cause across four rows) was patched. Patched entries: high 0, medium 1, low 12.
+
+**Verification:**
+- .NET build in the SDK 10.0.403 Docker image: 0 warnings, 0 errors.
+- `@gatekeep/ui` build, check and unit tests (68) pass, and `@gatekeep/hosted-screens` builds. The bundle is 96.6 kB of 150 kB.
+- The Isolation, Architecture and browser suites run on CI (the source of truth).
+
+**Residual risks:**
+- **Userinfo audience:** depends on the userinfo endpoint accepting a token whose `aud` is the userinfo URL, and on exchange and refresh keeping it. The `SignInTests` audience cases prove it on CI.
+- **Timing test:** the medians are measured on CI runners.
+- **Old-parameter hashes:** they verify faster than the dummy until their first sign-in.
+- **Default audience:** setting one changes how extra scopes and `offline_access` are handled for requests that name no API.

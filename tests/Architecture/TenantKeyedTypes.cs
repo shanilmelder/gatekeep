@@ -82,6 +82,11 @@ public static class TenantKeyedTypes
         ["Gatekeep.Modules.Protocol.Contracts.SignUpLimits.SignUpSourcePolicy"] = KeyScope.Tenant,
         ["Gatekeep.Modules.Protocol.Contracts.SignUpLimits.SendTenantPolicy"] = KeyScope.Tenant,
         ["Gatekeep.Modules.Protocol.Contracts.SignUpLimits.SendSourcePolicy"] = KeyScope.Tenant,
+        // Story 4.9: password submits, counted in each Tenant's own tenant_attempt rows, never by account.
+        ["Gatekeep.Modules.Protocol.Contracts.SignInLimits.Tenant"] = KeyScope.Tenant,
+        ["Gatekeep.Modules.Protocol.Contracts.SignInLimits.Source"] = KeyScope.Tenant,
+        ["Gatekeep.Modules.Protocol.Contracts.SignInLimits.TenantPolicy"] = KeyScope.Tenant,
+        ["Gatekeep.Modules.Protocol.Contracts.SignInLimits.SourcePolicy"] = KeyScope.Tenant,
         ["Gatekeep.Modules.Admins.Contracts.AdminsContract.EnrolmentPolicy"] = KeyScope.DeploymentWide("recover-admin enrolment use per client (Story 1.32); Admins are Deployment-scoped."),
         ["Gatekeep.Modules.Admins.Contracts.AdminsContract.EnrolmentDeploymentPolicy"] = KeyScope.DeploymentWide("One Deployment-wide cap on recover-admin enrolment use (Story 1.32)."),
     };

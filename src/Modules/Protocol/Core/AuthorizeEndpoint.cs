@@ -275,6 +275,13 @@ internal sealed class ValidateGatekeepAuthorizationRequest(
 
             context.Transaction.SetProperty(ApiTargets.ApiProperty, api);
         }
+        else if (await DefaultApiAsync(context.CancellationToken) is { } fallback)
+        {
+            // Story 4.9: with none named, the Tenant's default audience, exactly as if the request had named it. One since
+            // removed is passed over, as if none were set.
+            api = fallback;
+            context.Transaction.SetProperty(ApiTargets.ApiProperty, api);
+        }
 
         var scopes = context.Request.GetScopes();
         if (api is not null && scopes.Any(s => !AuthorizeEndpoint.GrantableScopes.Contains(s)))
@@ -303,6 +310,13 @@ internal sealed class ValidateGatekeepAuthorizationRequest(
             context.Reject(Errors.LoginRequired, "The User must sign in.");
         }
     }
+
+    /// <summary>The Tenant's default audience (Story 4.9), when it names one of its APIs that is available here; else null.</summary>
+    private async Task<DirectoryApiTarget?> DefaultApiAsync(CancellationToken cancellationToken) =>
+        transaction.Context.TenantId is { } tenantId
+        && await services.Tenants.GetSignupSettingsAsync(transaction.Context, tenantId, cancellationToken) is { DefaultAudience: { } identifier }
+            ? await ApiTargets.ResolveAsync(services.Directory, transaction.Context, identifier, cancellationToken)
+            : null;
 
     /// <summary>Whether the client, which <see cref="TrustRedirectTarget"/> already found, is allowed the refresh grant.</summary>
     private async Task<bool> MayRefreshAsync(ValidateAuthorizationRequestContext context) =>
@@ -516,7 +530,8 @@ internal static class AuthorizePassthrough
 
         var subject = PublicId.Format(PublicIdType.User, result.UserId);
 
-        // Story 3.7: the API the request named, kept as the authorization's audience; with none, no aud at all.
+        // Story 3.7: the API the request named, or (Story 4.9) the Tenant's default audience, kept as the authorization's
+        // audience; with neither, only the Tenant's userinfo endpoint, never the Epic 2 placeholder.
         var api = transaction.GetProperty<DirectoryApiTarget>(ApiTargets.ApiProperty);
 
         // openid, and offline_access when it was asked for and allowed (Story 2.10): what the family grants.
@@ -530,6 +545,12 @@ internal static class AuthorizePassthrough
 
             // Kept on the code and the family's refresh tokens, so each exchange and refresh reads the API again by it.
             identity.SetClaim(ApiTargets.ApiClaim, api.Identifier);
+        }
+        else
+        {
+            // The URL the token is good for, from the stored issuer, so no resource server mistakes it for an API audience.
+            // No gk_api: each exchange and refresh keeps it as it is.
+            identity.SetAudiences(ApiTargets.UserinfoAudience(runtime.Issuer));
         }
 
         AuthorizeEndpoint.SetUserClaims(identity, result.UserId, result.SessionId, result.AuthTime, result.Amr);

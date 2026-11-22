@@ -6,8 +6,8 @@ namespace Gatekeep.Tests.Architecture;
 /// Stories 2.9 and 4.2 (AD-8, AD-12): a release build signs a User in only through Hosted Login. Protocol's
 /// <c>IAuthorizationSignIn</c> port has exactly one implementation in <c>src</c>, Protocol's own, over the bound
 /// sign-in transaction and the Session cookie. Authentication's <c>ICredentialStep</c> port has exactly one too,
-/// the empty default, which offers no credential step until Story 4.9, so nothing in <c>src</c> authenticates a
-/// User yet. The test-only credential step and authenticator, which trust the User they are given, live only in
+/// the empty default, which authenticates no one at Continue, so a User signs in only through Story 4.9's Password
+/// step. The test-only credential step and authenticator, which trust the User they are given, live only in
 /// the Isolation tests. The built <c>src</c> assemblies are read by reflection in their own load context, as
 /// <see cref="TenantKeyedTypeTests"/> reads them.
 /// </summary>

@@ -16,8 +16,8 @@
 // Story 4.2: Hosted Login's two API requests are stubbed, as Host.Hosted answers them, each refusing
 // a request without the fixture's CSRF token or this server's exact Origin with 403:
 // - POST /login/api/identifier: "nope" gets Login with the email_invalid field error, redirect@example.com
-//   a redirect step to /login/?fixture=generic_error, and any other email Generic error
-//   temporarily_unavailable, as a release build answers.
+//   a redirect step to /login/?fixture=generic_error, unavailable@example.com Generic error temporarily_unavailable
+//   (as with no database Connection enabled), and any other email the Password step for it (Story 4.9).
 // - POST /login/api/transaction/extend: Login with a fresh 30-minute life.
 //
 // Story 4.7: sign-up's fixtures and requests, for hosted-signup.spec.ts: login_signup (Login with "Sign up"), signup
@@ -37,6 +37,13 @@
 // "rate-limited" gets a 429 Generic error temporarily_unavailable, as a rate-limited sign-up does. signup_terms_late is
 // Signup for terms@example.com with no terms URL yet, so the client sends acceptTerms false and the server's
 // terms_required, with the URL, is what shows the row; signup_terms_hostile has a terms URL that isn't https.
+//
+// Story 4.9: password and password_long are the Password step, for known@example.com and for an address too long to fit
+// one line at 320px. The stubbed requests answer as Host.Hosted does:
+// - POST /login/api/password: the password Correct-Horse-7battery gets a redirect step to /login/?fixture=generic_error,
+//   "rate-limited" a 429 Generic error temporarily_unavailable, and any other the Password step with incorrect.
+// - POST /login/api/password/back: Login with the email kept.
+// - POST /login/api/transaction/extend from the Password step: that same step with a fresh life.
 //
 //   node hosted-step-server.mjs <port>
 
@@ -139,6 +146,15 @@ const login = (email = null, error = null, expiresInSeconds = LIFE, signupEnable
 export const SIGNUP_CSRF = 'fixture-csrf-signup';
 export const VERIFY_CSRF = 'fixture-csrf-verify';
 
+/** Story 4.9: the Password step's CSRF token, its own for the same reason. */
+export const PASSWORD_CSRF = 'fixture-csrf-password';
+
+/** Story 4.9: the password the stubbed Log in accepts. */
+export const CORRECT_PASSWORD = 'Correct-Horse-7battery';
+
+/** Story 4.9: an address too long for one line of the identifier chip at 320px. */
+export const LONG_EMAIL = 'a.very.long.first.name.and.a.very.long.last.name.for.wrapping@subdomain.northwind-example.com';
+
 /** Story 4.7: the link-bound CSRF token Link expired's "Send a new link" carries. */
 export const LINK_CSRF = 'fixture-link-csrf-token';
 
@@ -154,6 +170,14 @@ const signup = (email = null, strength = 'good', error = null, rules = [], terms
   expiresInSeconds: LIFE,
   data: { tenant: 'Northwind', email, policy: { minLength: 12, strength }, error, rules, termsUrl },
   csrfToken: SIGNUP_CSRF,
+});
+
+const password = (email = 'known@example.com', error = null) => ({
+  step: 'password',
+  stepVersion: 2,
+  expiresInSeconds: LIFE,
+  data: { tenant: 'Northwind', email, error },
+  csrfToken: PASSWORD_CSRF,
 });
 
 const verifyEmail = (email = 'new.user@example.com', resent = false, error = null) => ({
@@ -185,6 +209,8 @@ const fixtures = {
   signup_terms_late: JSON.stringify(signup('terms@example.com')),
   signup_terms_hostile: JSON.stringify(signup('terms@example.com', 'good', null, [], 'javascript:alert(1)')),
   verify_email: JSON.stringify(verifyEmail()),
+  password: JSON.stringify(password()),
+  password_long: JSON.stringify(password(LONG_EMAIL)),
   email_verified_app: JSON.stringify(emailVerified('/login/?fixture=generic_error')),
   email_verified_close: JSON.stringify(emailVerified(null)),
   link_expired: JSON.stringify({
@@ -239,6 +265,7 @@ function answer(pathname, body, csrf) {
   if (pathname === '/login/api/transaction/extend') {
     if (csrf === SIGNUP_CSRF) return signup('new.user@example.com');
     if (csrf === VERIFY_CSRF) return verifyEmail();
+    if (csrf === PASSWORD_CSRF) return password();
     return login();
   }
   const email = typeof body.email === 'string' ? body.email.trim() : '';
@@ -256,6 +283,12 @@ function answer(pathname, body, csrf) {
       return verifyEmail('new.user@example.com', false, 'not_verified_yet');
     case '/login/api/verification/new-link':
       return linkSent;
+    case '/login/api/password':
+      return body.password === CORRECT_PASSWORD
+        ? { step: 'redirect', stepVersion: 3, expiresInSeconds: LIFE, data: { tenant: 'Northwind', location: '/login/?fixture=generic_error' }, csrfToken: null }
+        : password('known@example.com', 'incorrect');
+    case '/login/api/password/back':
+      return login('known@example.com');
     default:
       break;
   }
@@ -263,10 +296,14 @@ function answer(pathname, body, csrf) {
   if (email === 'redirect@example.com') {
     return { step: 'redirect', stepVersion: 3, expiresInSeconds: LIFE, data: { tenant: 'Northwind', location: '/login/?fixture=generic_error' }, csrfToken: null };
   }
-  return { ...genericError('Northwind'), data: { ...genericError('Northwind').data, code: 'temporarily_unavailable' } };
+  if (email === 'unavailable@example.com') {
+    return { ...genericError('Northwind'), data: { ...genericError('Northwind').data, code: 'temporarily_unavailable' } };
+  }
+  // Story 4.9: every other address gets the same Password step, as Host.Hosted answers with the database Connection on.
+  return password(email);
 }
 
-/** The stubbed API's paths: Story 4.2's two, and Story 4.7's sign-up and verification requests. */
+/** The stubbed API's paths: Story 4.2's two, Story 4.7's sign-up and verification requests, and Story 4.9's two. */
 const API_PATHS = new Set([
   '/login/api/identifier',
   '/login/api/transaction/extend',
@@ -276,12 +313,14 @@ const API_PATHS = new Set([
   '/login/api/verification/resend',
   '/login/api/verification/continue',
   '/login/api/verification/new-link',
+  '/login/api/password',
+  '/login/api/password/back',
 ]);
 
 /** The fixtures a real step page answers 200 for: every step but Generic error and the unreadable ones. */
 const OK_FIXTURES = new Set([
   'login', 'login_kept', 'login_signup', 'signup', 'signup_excellent', 'signup_terms', 'signup_terms_late', 'verify_email',
-  'email_verified_app', 'email_verified_close', 'link_expired', 'link_sent',
+  'email_verified_app', 'email_verified_close', 'link_expired', 'link_sent', 'password', 'password_long',
 ]);
 
 const types = { '.js': 'text/javascript', '.css': 'text/css', '.woff2': 'font/woff2', '.svg': 'image/svg+xml' };
@@ -303,7 +342,7 @@ const server = createServer((request, response) => {
       const origin = `http://${request.headers.host}`;
       if (request.headers.origin !== origin) return json(403, { ...genericError('Northwind'), data: { ...genericError('Northwind').data, code: 'origin_mismatch' } });
       const presented = request.headers['x-gatekeep-csrf'];
-      const allowed = url.pathname === '/login/api/verification/new-link' ? [LINK_CSRF] : [CSRF, SIGNUP_CSRF, VERIFY_CSRF];
+      const allowed = url.pathname === '/login/api/verification/new-link' ? [LINK_CSRF] : [CSRF, SIGNUP_CSRF, VERIFY_CSRF, PASSWORD_CSRF];
       if (!allowed.includes(presented)) return json(403, { ...genericError('Northwind'), data: { ...genericError('Northwind').data, code: 'csrf_mismatch' } });
       let body;
       try {
@@ -311,7 +350,7 @@ const server = createServer((request, response) => {
       } catch {
         body = {};
       }
-      if (url.pathname === '/login/api/signup' && body?.password === 'rate-limited') {
+      if ((url.pathname === '/login/api/signup' || url.pathname === '/login/api/password') && body?.password === 'rate-limited') {
         const limited = { ...genericError('Northwind'), data: { ...genericError('Northwind').data, code: 'temporarily_unavailable' } };
         return send(429, 'application/json; charset=utf-8', JSON.stringify(limited), { 'Cache-Control': 'no-store', Pragma: 'no-cache', 'Retry-After': '900' });
       }

@@ -32,8 +32,8 @@ builder.AddGatekeepHost(new HostProfile(
 // Each Tenant's OpenID Provider (Stories 2.3, 2.5 and 2.9): discovery, JWKS, Client Credentials and
 // the code flow with PKCE, as gk_hosted. Its audit events, such as a refused cross-Tenant credential,
 // go to the Tenant's Log. From Story 4.2 a valid authorization request reuses a live Session or goes to
-// Login under a bound sign-in transaction. No credential step exists in a release build before Story
-// 4.9, so after Login's email the step is Generic error temporarily_unavailable.
+// Login under a bound sign-in transaction. From Story 4.9, while the Tenant's database Connection is enabled, Login's
+// email leads every identifier to the Password step; with none enabled, to Generic error temporarily_unavailable.
 // Every Hosted Login step page is the bundle's index.html with the step embedded as JSON and the
 // Tenant's theme linked, under the AD-21 headers. The authorization endpoint shows Generic error
 // through it for a request it can't send back. A refused host never builds it.

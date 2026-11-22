@@ -79,11 +79,30 @@ internal sealed class IdentityService(IAuditAppender audit, TimeProvider time) :
         VALUES (@tenant_id, @id, @user_id, @password_hash, @now)
         """;
 
-    private const string LockPendingCredential =
+    // Story 4.9: an active credential gets a link too while its User's email isn't verified, which happens only after a Dev
+    // Tenant turned verification back on.
+    private const string LockLinkableCredential =
         """
-        SELECT 1 FROM password_credential
-        WHERE tenant_id = @tenant_id AND id = @id AND user_id = @user_id AND status = 'pending'
-        FOR UPDATE
+        SELECT 1 FROM password_credential c
+        JOIN "user" u ON u.tenant_id = c.tenant_id AND u.id = c.user_id
+        WHERE c.tenant_id = @tenant_id AND c.id = @id AND c.user_id = @user_id
+          AND (c.status = 'pending' OR u.email_verified_at IS NULL)
+        FOR UPDATE OF c
+        """;
+
+    // Story 4.9: no lock, so a sign-in never waits on a sign-up for the same address. Only an active credential signs in.
+    private const string SelectSignInAccount =
+        """
+        SELECT u.id, c.id, c.password_hash, c.connection_id, u.email_verified_at
+        FROM "user" u
+        LEFT JOIN password_credential c ON c.tenant_id = u.tenant_id AND c.user_id = u.id AND c.status = 'active'
+        WHERE u.tenant_id = @tenant_id AND lower(u.email) = lower(@email)
+        """;
+
+    private const string UpdateHash =
+        """
+        UPDATE password_credential SET password_hash = @password_hash, updated_at = @now
+        WHERE tenant_id = @tenant_id AND id = @id AND status = 'active' AND password_hash = @previous_hash
         """;
 
     private const string SelectCredential =
@@ -249,13 +268,13 @@ internal sealed class IdentityService(IAuditAppender audit, TimeProvider time) :
 
         await using (var command = context.CreateCommand())
         {
-            command.CommandText = LockPendingCredential;
+            command.CommandText = LockLinkableCredential;
             Add(command, "tenant_id", tenantId);
             Add(command, "id", credentialId);
             Add(command, "user_id", userId);
             if (await command.ExecuteScalarAsync(cancellationToken) is null)
             {
-                throw new InvalidOperationException("No pending credential of that User has that ID in this Tenant.");
+                throw new InvalidOperationException("No pending credential, or credential of an unverified User, has that ID in this Tenant.");
             }
         }
 
@@ -374,6 +393,54 @@ internal sealed class IdentityService(IAuditAppender audit, TimeProvider time) :
         await _audit.AppendAsync(
             context, new AuditEvent(IdentityEvents.UserEmailVerified.Code, Actor.Anonymous, AuditTargetKind.User, link.UserId), detail: null, cancellationToken);
         return new EmailVerification(EmailVerificationStatus.Verified, link.UserId, link.CredentialId);
+    }
+
+    public async Task<SignInAccount?> FindSignInAccountAsync(CommandContext context, string email, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        var tenantId = TenantOf(context);
+        if (string.IsNullOrWhiteSpace(email) || email.Length > SecurityLimits.MaxEmailLength)
+        {
+            return null;
+        }
+
+        await using var command = context.CreateCommand();
+        command.CommandText = SelectSignInAccount;
+        Add(command, "tenant_id", tenantId);
+        Add(command, "email", email);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        if (!await reader.ReadAsync(cancellationToken))
+        {
+            return null;
+        }
+
+        return new SignInAccount(
+            reader.GetGuid(0),
+            reader.IsDBNull(1) ? null : reader.GetGuid(1),
+            reader.IsDBNull(2) ? null : reader.GetString(2),
+            reader.IsDBNull(3) ? null : reader.GetGuid(3),
+            reader.IsDBNull(4) ? null : reader.GetFieldValue<DateTimeOffset>(4));
+    }
+
+    public async Task<bool> UpdatePasswordHashAsync(
+        CommandContext context, Guid credentialId, string previousHash, string passwordHash, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        var tenantId = TenantOf(context);
+        if (string.IsNullOrEmpty(passwordHash) || passwordHash.Length > MaxHashLength)
+        {
+            throw new ArgumentException("A password hash is a PHC string of 1 to 512 characters.", nameof(passwordHash));
+        }
+
+        return await ExecuteAsync(
+            context,
+            UpdateHash,
+            cancellationToken,
+            ("tenant_id", tenantId),
+            ("id", credentialId),
+            ("password_hash", passwordHash),
+            ("previous_hash", previousHash),
+            ("now", _time.GetUtcNow())) == 1;
     }
 
     public async Task<IReadOnlyList<string>> ReadPasswordHistoryAsync(CommandContext context, Guid userId, int count, CancellationToken cancellationToken)

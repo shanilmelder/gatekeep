@@ -239,9 +239,19 @@ for (const scheme of ['light', 'dark'] as const) {
       expect(results.violations.map((violation) => ({ id: violation.id, nodes: violation.nodes.map((node) => node.target) }))).toEqual([]);
     });
 
-    test('Continue: the next step renders, Generic error temporarily_unavailable in a release build', async ({ page }) => {
+    test('Continue: the next step renders, the Password step in a release build (Story 4.9)', async ({ page }) => {
       await openLogin(page);
       await email(page).fill('someone@example.com');
+      await email(page).press('Enter');
+
+      await expect(heading(page)).toHaveText('Enter your password');
+      await expect(page.getByTestId('identifier-chip-identifier')).toHaveText('someone@example.com');
+      await expect(heading(page)).toBeFocused();
+    });
+
+    test('Continue: with no database Connection enabled, Generic error temporarily_unavailable', async ({ page }) => {
+      await openLogin(page);
+      await email(page).fill('unavailable@example.com');
       await email(page).press('Enter');
 
       await expect(heading(page)).toHaveText(messages.genericErrorTitle);

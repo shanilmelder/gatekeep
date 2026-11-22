@@ -44,11 +44,13 @@ internal static class AuditCatalogue
     /// <summary>
     /// The 11 FR-40 Tenant classes, in the Kernel enum's order. A class is proved once its story
     /// maps it to a catalogued code: Session and token revocation (Story 2.7), Token Family revocations (Story 2.10, through the same code), rejected
-    /// cross-Tenant attempts (Stories 2.5 and 7.4) and Key operations (Story 9.2) so far. The rest are pending (Story 7.8).
+    /// cross-Tenant attempts (Stories 2.5 and 7.4), Key operations (Story 9.2) and sign-ins and failures (Story 4.9) so far. The rest are pending (Story 7.8).
     /// </summary>
     public static readonly IReadOnlyList<LogClass> TenantLogClasses =
     [
-        new("SignIn", "Sign-ins and failures", "4.9"),
+        // Story 4.9: a password sign-in writes authentication.signin.succeeded, and a failed one authentication.signin.failed
+        // (SignInTests, EventClassTests).
+        new("SignIn", "Sign-ins and failures", null),
         new("PasswordReset", "Password resets", "4.11"),
         new("EmailChange", "Email changes", "16.8"),
         new("Factor", "Factor events", "6.1"),

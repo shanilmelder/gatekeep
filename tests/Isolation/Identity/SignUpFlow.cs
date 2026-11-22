@@ -55,10 +55,39 @@ internal sealed record SignUpFlow(CodeFlowSetup Flow)
         return new SignUpFlow(flow);
     }
 
-    /// <summary>The host, with <paramref name="hashLimits"/> and (Story 4.8) <paramref name="signUpLimits"/> in place of the defaults when given.</summary>
+    /// <summary>
+    /// The host, with <paramref name="hashLimits"/>, (Story 4.8) <paramref name="signUpLimits"/> and (Story 4.9)
+    /// <paramref name="signInLimits"/> in place of the defaults when given.
+    /// </summary>
     public Task<ProtocolHost> StartHostAsync(
-        Gatekeep.Modules.Authentication.Contracts.PasswordHashLimits? hashLimits = null, SignUpLimits? signUpLimits = null) =>
-        ProtocolHost.StartAsync(Flow.Database.Hosted, Flow.Bao, hashLimits: hashLimits, signUpLimits: signUpLimits);
+        Gatekeep.Modules.Authentication.Contracts.PasswordHashLimits? hashLimits = null,
+        SignUpLimits? signUpLimits = null,
+        SignInLimits? signInLimits = null) =>
+        ProtocolHost.StartAsync(Flow.Database.Hosted, Flow.Bao, hashLimits: hashLimits, signUpLimits: signUpLimits, signInLimits: signInLimits);
+
+    /// <summary>
+    /// Story 4.9: a User of Tenant A with <paramref name="email"/> and an active password credential holding
+    /// <paramref name="passwordHash"/> (by default <see cref="Password"/>'s hash under the current parameters), under Tenant
+    /// A's database Connection, verified unless <paramref name="verified"/> is false, as an earlier sign-up leaves one.
+    /// Returns the User's and the credential's IDs.
+    /// </summary>
+    public async Task<(Guid UserId, Guid CredentialId)> AddPasswordUserAsync(string email, string? passwordHash = null, bool verified = true)
+    {
+        var hash = passwordHash ?? await Gatekeep.Modules.Authentication.Contracts.AuthenticationContract.HashPasswordAsync(
+            new Gatekeep.Kernel.Secrets.Secret<string>(Password));
+        var user = Guid.CreateVersion7();
+        var credential = Guid.CreateVersion7();
+        await Database.ExecuteAsync(
+            $"INSERT INTO \"user\" (tenant_id, id, email, email_verified_at) VALUES ('{TenantA}', '{user}', '{email}', {(verified ? "now()" : "NULL")}); "
+            + "INSERT INTO password_credential (tenant_id, id, user_id, connection_id, password_hash, status) "
+            + $"SELECT '{TenantA}', '{credential}', '{user}', id, '{hash}', 'active' FROM connection WHERE tenant_id = '{TenantA}' AND kind = 'database'");
+        return (user, credential);
+    }
+
+    /// <summary>Story 4.9: limits no test reaches by accident, for one that sends many password submits.</summary>
+    public static SignInLimits GenerousSignIn { get; } = new(
+        new("signin.attempt.tenant", 10_000, TimeSpan.FromMinutes(15)),
+        new("signin.attempt.source", 10_000, TimeSpan.FromMinutes(15)));
 
     /// <summary>Limits no test reaches by accident (Story 4.8), for one that sends many sign-ups or resends.</summary>
     public static SignUpLimits Generous { get; } = new(
@@ -190,6 +219,21 @@ internal sealed class SignUpBrowser(HostedBrowser browser, Pkce pkce)
         acceptTerms is { } accept
             ? new { stepVersion = Version(signup), email, password, acceptTerms = accept }
             : new { stepVersion = Version(signup), email, password };
+
+    /// <summary>Story 4.9: Continue from the page's Login step with <paramref name="email"/>, answering the Password step.</summary>
+    public async Task<JsonDocument> IdentifyAsync(string email)
+    {
+        var login = await browser.LoginStepAsync();
+        return await PostAsync(ProtocolContract.LoginIdentifierPath, new { stepVersion = login.StepVersion, email }, login.Csrf);
+    }
+
+    /// <summary>Story 4.9: Log in from <paramref name="step"/>, the Password step, with <paramref name="password"/>.</summary>
+    public Task<JsonDocument> LogInAsync(JsonDocument step, string password) =>
+        PostAsync(ProtocolContract.PasswordPath, new { stepVersion = Version(step), password }, Csrf(step));
+
+    /// <summary>Story 4.9: the identifier chip's Edit from <paramref name="step"/>, the Password step.</summary>
+    public Task<JsonDocument> EditAsync(JsonDocument step) =>
+        PostAsync(ProtocolContract.PasswordBackPath, new { stepVersion = Version(step) }, Csrf(step));
 
     /// <summary>"Resend email" from <paramref name="verify"/>'s step.</summary>
     public Task<JsonDocument> ResendAsync(JsonDocument verify) =>

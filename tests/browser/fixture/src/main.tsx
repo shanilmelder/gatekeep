@@ -105,6 +105,8 @@ const HOSTED = [
   'passwordRules',
   // Story 4.8: Signup's terms checkbox and link.
   'TermsAgreement',
+  // Story 4.9: the Password step's identifier chip.
+  'IdentifierChip',
 ];
 // The admin entry's own exports, exactly: anything else it gains fails the check.
 const ADMIN_ONLY = [
