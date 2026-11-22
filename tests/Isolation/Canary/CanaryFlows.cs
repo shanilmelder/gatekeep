@@ -1988,6 +1988,8 @@ internal static class CanaryFlows
     /// The password and the link, and the link's random part, are canaries: the password reaches only the hasher, and the
     /// link travels only as job payload ciphertext and is stored only as its SHA-256, so neither may reach a table, an
     /// event or a log line. Failing, a password the policy refuses is submitted first, and the used link is opened again.
+    /// Story 4.8: Tenant A sets a terms URL the sign-up accepts. It is stored by design, on the Tenant and on the User, so
+    /// it isn't a canary, but no log line may hold it.
     /// </summary>
     private static async Task SignUpAsync(CanaryFlowContext context, FlowRun run, bool failing)
     {
@@ -1997,6 +1999,8 @@ internal static class CanaryFlows
 
         var flow = await Identity.SignUpFlow.CreateAsync(context.Postgres, context.Bao, hostA, hostB);
         run.Database = flow.Database.Name;
+        var termsUrl = $"https://terms.example.test/terms-{Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(8))}";
+        await flow.SetTermsAsync(flow.TenantA, termsUrl);
         run.Plant("role-password", PostgresFixture.Password);
         // Lower case, numbers and hyphens: three classes, at least 12 characters, and nothing of the email.
         var password = run.Plant("signup-password");
@@ -2016,12 +2020,12 @@ internal static class CanaryFlows
             {
                 // Lower case and numbers only: refused for its classes, with nothing written.
                 var weak = run.Plant("signup-weak-password", $"cnryweak{Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(8))}");
-                using var refused = await browser.CreateAsync(signup, email, weak.Value);
+                using var refused = await browser.CreateAsync(signup, email, weak.Value, acceptTerms: true);
                 run.Capture("refused sign-up response", refused.RootElement.GetRawText());
                 Assert.Equal("signup", refused.RootElement.GetProperty("step").GetString());
             }
 
-            using var verify = await browser.CreateAsync(signup, email, password.Value);
+            using var verify = await browser.CreateAsync(signup, email, password.Value, acceptTerms: true);
             run.Capture("sign-up response", verify.RootElement.GetRawText());
             Assert.Equal("verify_email", verify.RootElement.GetProperty("step").GetString());
 
@@ -2048,6 +2052,8 @@ internal static class CanaryFlows
 
         run.Capture("Hosted log", captured.Text);
         Assert.Contains("login/api/signup", captured.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain(termsUrl, captured.Text, StringComparison.Ordinal);
+        Assert.Equal(1L, await flow.RowsAsync("user", $"terms_accepted_url = '{termsUrl}'"));
     }
 
     /// <summary>

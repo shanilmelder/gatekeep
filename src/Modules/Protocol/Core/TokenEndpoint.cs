@@ -40,8 +40,12 @@ internal sealed class TokenEndpointServices(
     Gatekeep.Modules.Sessions.Contracts.ISessions sessions,
     TimeProvider time,
     ISignUp signUp,
-    ILoggerFactory? loggers = null)
+    ILoggerFactory? loggers = null,
+    SignUpLimits? signUpLimits = null)
 {
+    /// <summary>The limits Hosted Login's sign-up and verification sends count under (Story 4.8).</summary>
+    public SignUpLimits SignUpLimits { get; } = signUpLimits ?? SignUpLimits.Default;
+
     public IAuthentication Authentication { get; } = authentication;
 
     /// <summary>Sign-up and email verification (Story 4.7).</summary>

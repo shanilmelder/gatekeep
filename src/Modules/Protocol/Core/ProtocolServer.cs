@@ -44,6 +44,7 @@ internal static class ProtocolServer
         services.TryAddSingleton(new TokenRequestLimits(
             AuthenticationContract.TokenRequestTenantPolicy, AuthenticationContract.TokenRequestSourcePolicy));
         services.TryAddSingleton(PasswordHashLimits.Default);
+        services.TryAddSingleton(SignUpLimits.Default);
         services.AddSingleton(provider => new TokenEndpointServices(
             provider.GetRequiredService<HostedDataSource>(),
             AuthenticationContract.CreateAttemptLimiter(),
@@ -62,7 +63,8 @@ internal static class ProtocolServer
                 provider.GetRequiredService<TimeProvider>(),
                 provider.GetRequiredService<IJobEnqueuer>(),
                 provider.GetRequiredService<PasswordHashLimits>()),
-            provider.GetService<ILoggerFactory>()));
+            provider.GetService<ILoggerFactory>(),
+            provider.GetRequiredService<SignUpLimits>()));
         services.AddScoped<TokenRequestTransaction>();
 
         var inert = new InertCredentials();

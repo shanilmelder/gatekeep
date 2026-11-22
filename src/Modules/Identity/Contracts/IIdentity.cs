@@ -10,6 +10,19 @@ namespace Gatekeep.Modules.Identity.Contracts;
 /// </summary>
 public sealed record RegisteredUser(Guid UserId, Guid CredentialId);
 
+/// <summary>
+/// How a sign-up's registration ended (Stories 4.7 and 4.8): <see cref="Registered"/> when a new or unverified User got a
+/// new password credential, else <see cref="ExistingUserId"/>, the User already holding that address, whose account the
+/// sign-up didn't change, so the caller can send its owner the existing-address notice. Exactly one of them is set.
+/// </summary>
+public sealed record Registration(RegisteredUser? Registered, Guid? ExistingUserId)
+{
+    public static Registration New(RegisteredUser registered) =>
+        new(registered ?? throw new ArgumentNullException(nameof(registered)), null);
+
+    public static Registration Existing(Guid userId) => new(null, userId);
+}
+
 /// <summary>A password credential as sign-up reads it back (Story 4.7): its User, whether it is active, and whether the User's email is verified.</summary>
 public sealed record CredentialState(Guid UserId, bool Active, bool UserVerified);
 
@@ -57,21 +70,24 @@ public interface IIdentity
     /// <summary>
     /// Registers a sign-up for <paramref name="email"/> (Story 4.7, FR-17), under the User row's lock. When no User has that
     /// address (compared case-insensitively) one is created with it, unverified. When one has it whose email is verified,
-    /// or who already holds an active password, nothing is written and the result is null: a sign-up never changes an
-    /// existing account. Otherwise a password credential with <paramref name="passwordHash"/> is added, made under
-    /// <paramref name="connectionId"/>: <c>pending</c>, or with <paramref name="activate"/> (verification off) <c>active</c>,
-    /// with every pending one deleted and the hash kept in the User's password history. It writes
-    /// <see cref="IdentityEvents.UserSignedUp"/>, the User as target.
+    /// or who already holds an active password, nothing is written and the result names that User only
+    /// (<see cref="Registration.ExistingUserId"/>): a sign-up never changes an existing account. Otherwise a password
+    /// credential with <paramref name="passwordHash"/> is added, made under <paramref name="connectionId"/>: <c>pending</c>,
+    /// or with <paramref name="activate"/> (verification off) <c>active</c>, with every pending one deleted and the hash kept
+    /// in the User's password history. When <paramref name="acceptedTermsUrl"/> is set (Story 4.8), the User records it and
+    /// the time as the terms they accepted: on the new User's row, or on the unverified User's with its new credential. It
+    /// writes <see cref="IdentityEvents.UserSignedUp"/>, the User as target.
     /// </summary>
     /// <exception cref="InvalidOperationException">The context has no Tenant. Nothing is written.</exception>
-    /// <exception cref="ArgumentException">The email or hash is empty or too long. Nothing is written.</exception>
+    /// <exception cref="ArgumentException">The email, hash or terms URL is empty or too long. Nothing is written.</exception>
     [StateChanging]
-    Task<RegisteredUser?> RegisterAsync(
+    Task<Registration> RegisterAsync(
         CommandContext context,
         string email,
         Guid connectionId,
         string passwordHash,
         bool activate,
+        string? acceptedTermsUrl,
         CancellationToken cancellationToken);
 
     /// <summary>

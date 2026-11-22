@@ -233,3 +233,22 @@ public interface ITenantServerOptions
 /// policies, from the §5.2 limits; a host registers its own only to test them.
 /// </summary>
 public sealed record TokenRequestLimits(Gatekeep.Kernel.RateLimiting.RateLimitPolicy Tenant, Gatekeep.Kernel.RateLimiting.RateLimitPolicy Source);
+
+/// <summary>
+/// The limits Hosted Login's sign-up counts under (Story 4.8, NFR-6): Create account per Tenant and per source, and the
+/// verification emails asked for ("Resend email" and "Send a new link" together) per Tenant and per source. None is keyed
+/// by an email address, so a limit can't reveal an account. The defaults are <see cref="Default"/>, from
+/// <c>SecurityLimits</c>; a host registers its own only to test them.
+/// </summary>
+public sealed record SignUpLimits(
+    Gatekeep.Kernel.RateLimiting.RateLimitPolicy SignUpTenant,
+    Gatekeep.Kernel.RateLimiting.RateLimitPolicy SignUpSource,
+    Gatekeep.Kernel.RateLimiting.RateLimitPolicy SendTenant,
+    Gatekeep.Kernel.RateLimiting.RateLimitPolicy SendSource)
+{
+    public static SignUpLimits Default { get; } = new(
+        new("signup.attempt.tenant", Gatekeep.Kernel.Limits.SecurityLimits.SignUpTenantAttempts, Gatekeep.Kernel.Limits.SecurityLimits.SignUpWindow),
+        new("signup.attempt.source", Gatekeep.Kernel.Limits.SecurityLimits.SignUpSourceAttempts, Gatekeep.Kernel.Limits.SecurityLimits.SignUpWindow),
+        new("verification.send.tenant", Gatekeep.Kernel.Limits.SecurityLimits.VerificationSendTenantAttempts, Gatekeep.Kernel.Limits.SecurityLimits.SignUpWindow),
+        new("verification.send.source", Gatekeep.Kernel.Limits.SecurityLimits.VerificationSendSourceAttempts, Gatekeep.Kernel.Limits.SecurityLimits.SignUpWindow));
+}

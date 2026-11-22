@@ -2,14 +2,22 @@
 title: 'Story 4.8: Keep sign-up neutral and limited'
 type: 'feature'
 created: '2026-11-22'
-status: 'ready-for-dev'
+status: 'done'
+baseline_revision: '4158625732b93f371205b115ee5c8dc81e0e72d5'
 review_loop_iteration: 0
 followup_review_recommended: false
 context:
   - '{project-root}/_bmad-output/implementation-artifacts/epic-4-context.md'
   - '{project-root}/_bmad-output/implementation-artifacts/spec-4-7-sign-up-and-verify-an-email-address.md'
 warnings: ['oversized']
-deferred: []
+deferred:
+  - summary: >-
+      `identity.user.signed_up` doesn't carry `termsAccepted: true` as the spec asked.
+    evidence: |-
+      AuditEvent admits no free-form detail fields (an architecture test enforces it) and AuditDetail holds only IP, user agent and email; adding one means changing the audit tables and their hash chain. Acceptance itself is recorded on the User (terms_accepted_url, terms_accepted_at).
+    location: >-
+      src/Modules/Identity/Core/IdentityService.cs (RegisterAsync audit append)
+    severity: low
 ---
 
 <intent-contract>
@@ -179,6 +187,40 @@ deferred: []
 
 ## Review Triage Log
 
+### 2026-11-22 — Review pass
+- verdicts: 30 findings — high 0, medium 2, low 22, false 2, maybe-false 4
+- findings:
+  - `medium` `patch` (Blind) One source past its limit still bumps the Tenant counter, so it alone can fill the Tenant's 600 — `LimitAsync` now counts the source first and bumps the Tenant only when the source is allowed; T-63 updated; test `A_source_kept_going_past_its_limit_doesnt_use_up_the_Tenants_limit`.
+  - `low` `reject` (Blind) The terms URL recorded is the Tenant's at submit, not the one shown — only when an Owner changes the URL mid-sign-up; the fix adds a request field and a branch. The misleading comment is patched (Edge row below).
+  - `low` `patch` (Blind) The terms tick isn't reset when Signup is opened again — `App.tsx` resets it on a step change or a new terms URL.
+  - `low` `patch` (Blind) The terms error stays after ticking — ticking clears `terms_required` and the failed state.
+  - `low` `patch` (Blind) The checkbox's accessible name is "I agree to the" — `aria-labelledby` covers the label and the link: "I agree to the Terms of Service".
+  - `low` `reject` (Blind) A limited Resend replaces Email verification required with Generic error — the spec's chosen answer; reached only after 10 resends from one source; the link already sent still works.
+  - `maybe-false` `reject` (Blind) Unforwarded requests share one `unknown` source counter — Kestrel always sets RemoteIpAddress behind Caddy; if true it would be low (a proxy misconfiguration).
+  - `low` `patch` (Blind) The two terms columns can disagree — CHECK `user_terms_accepted_together` added.
+  - `low` `reject` (Blind) The 100 ms tolerance is weak against many-sample averaging — the tolerance is the stated one (NFR-20 "within a stated tolerance"); matching every insert is new design.
+  - `low` `reject` (Blind) The notice is generic and notice jobs pile up — the template text is fixed (five IDs); jobs are bounded by the sign-up limits and delivery by the per-recipient limit.
+  - `low` `reject` (Blind) Create account and Resend hold a second connection while counting — bounded by the pool and only for two upserts; moving the count changes the spec's "after the step is valid" order.
+  - `low` `reject` (Blind) No test proves a terms refusal costs a limit slot — it follows from the handler order; test-only with no user-visible gain.
+  - `low` `reject` (Edge) Second connection during counting — same as the Blind row.
+  - `medium` `patch` (Edge) One source fills the Tenant counter — same root cause as the Blind row, fixed by it.
+  - `low` `reject` (Edge) Terms changed between render and submit — same as the Blind row.
+  - `low` `patch` (Edge) Tick carried to a fresh Signup — fixed with the Blind row.
+  - `low` `reject` (Edge) With an invalid email and unticked terms the client shows only the terms error — a second submit shows the email error; reordering client checks for a corner case.
+  - `low` `reject` (Edge) An unverified re-sign-up after the terms URL is removed keeps the earlier acceptance — that acceptance did happen; clearing it adds a branch for a rare case.
+  - `low` `reject` (Edge) `signed_up` lacks `termsAccepted` — the audit model has no field for it; deferred (frontmatter) since the fix changes the audit schema; AC2's recording is met on the User.
+  - `low` `patch` (Edge) The comment claims the URL is "recorded as it was shown" — reworded to the URL at submit.
+  - `low` `patch` (Edge) T-63 understates single-source exhaustion — fixed with the limiter patch.
+  - `low` `patch` (Verification Gap) A server-sent `terms_required` never passes the client reader in a test — fixture `signup_terms_late` and a browser test added.
+  - `low` `patch` (Verification Gap) The https-only `termsUrl` guard is untested — fixture `signup_terms_hostile` (`javascript:`) and a Generic error test added.
+  - `low` `patch` (Verification Gap) The Tenant-wide send limit is never exercised — test `With_the_Tenants_send_counter_at_its_limit_a_new_sources_Resend_is_429_and_its_new_link_sends_nothing` added.
+  - `low` `reject` (Intent) `/signup/open` isn't limited — it hashes nothing, writes only the step, and sends nothing; the cost-bearing endpoints are limited.
+  - `false` `reject` (Intent) The design's "Privacy Policy" link is missing — EXPERIENCE.md's Design Delta: "Terms row uses the Tenant's single terms URL."
+  - `false` `reject` (Intent) An unverified existing address is changed and gets no notice — FR-17's "existing account" is a held one; T-62 records the unverified case, and a notice to it would itself differ from a new sign-up.
+  - `maybe-false` `reject` (Intent) Only verified-vs-new is timed — the unverified path does the new path's work; if true it would be low.
+  - `maybe-false` `reject` (Intent) No test compares a limited answer for an existing and a new address — the limit runs before any lookup and keys on no address; if true it would be low.
+  - `maybe-false` `reject` (Intent) The disabled path's timing isn't compared — the disabled path does no lookup for any address; if true it would be low.
+
 ## Design Notes
 
 - **Notice template:** `security_notification` is the template that already exists for this story ("Stories 4.8 and 4.11: takes no credential"). Its generic text names no account detail. A sixth template would break the "five IDs, fixed for good" contract.
@@ -196,3 +238,38 @@ deferred: []
 - With `MSYS_NO_PATHCONV=1`, run `docker run --rm -v "D:/Projects/Personal/gatekeep:/src" -v gk-nuget:/root/.nuget -w /src mcr.microsoft.com/dotnet/sdk:10.0.403-noble sh -c 'dotnet build Gatekeep.slnx -p:NuGetAudit=false -v q'`. Expected: 0 warnings and 0 errors. If Docker isn't running, use the local SDK.
 - `pnpm -r build`, `pnpm --filter @gatekeep/ui check`, `pnpm --filter @gatekeep/hosted-login budget`, and the package unit tests. Expected: green.
 - The Isolation, Architecture and browser suites run on CI on the PR. Don't run them locally.
+
+## Auto Run Result
+
+Status: done
+
+**Summary:**
+- **Existing verified address:** sign-up changes no account row and enqueues one `security_notification` email to its owner. It answers the same `verify_email` 200 as a new address, with medians within the stated 100 ms tolerance.
+- **Terms:** with a Tenant terms URL, Signup shows a required terms checkbox (server and client enforced, refused before the rules and the hash). The accepted URL and time are stored on the User.
+- **Rate limits:** Create account, Resend and Send a new link are limited per Tenant and per source (never by address). Refused-by-source requests don't count against the Tenant. Past a limit: 429 `Retry-After` Generic error, or the neutral `link_sent`.
+- **Tests:** two Tenants with one email give unrelated Users, and disabled sign-up answers identically.
+
+**Files changed (main ones):**
+- `Migration20261129000000SignUpTerms.cs`, `TableRegistry.cs`: `user.terms_accepted_url/at`, checks and grants.
+- `SecurityLimits.cs`, `ProtocolContract.cs` (`SignUpLimits`), `ProtocolServer.cs`, `TokenEndpoint.cs`: the four policies.
+- `IdentityService.cs`, `IIdentity.cs` (`Registration`), `SignUpService.cs`, `ISignUp.cs`: terms, notice, `TermsRequired`.
+- `HostedSignIn.cs`, `StepResponse.cs`: limits, `acceptTerms`, `termsUrl`, `terms_required`.
+- `packages/ui` (`TermsAgreement`, copy), `SignupScreen.tsx`, `apps/hosted-login/src/{App,StepScreen,step,api}`: terms row and client checks.
+- Tests: `SignUpNeutralityTests` (new), `SignUpTests`, `SignUpFlow`, `MigrateCommandTests` (45), the canary flow, Architecture key scopes, browser `hosted-signup.spec.ts` and stub. Docs: threat model T-6 and T-63.
+
+**Review findings:** 30.
+- **13 patched:** the single-source Tenant exhaustion (one root cause, two rows), the terms tick reset and error clearing, the accessible name, the paired-columns CHECK, the comment, the T-63 wording, and three test gaps.
+- **1 deferred:** the `termsAccepted` audit detail.
+- **The rest rejected** with reasons in the triage log.
+
+**Follow-up review recommended:** false. One `medium` entry (the limiter order, two rows) was patched and is covered by a new test. Patched entries: high 0, medium 1, low 10.
+
+**Verification:**
+- .NET build in the SDK 10.0.403 Docker image: 0 warnings, 0 errors.
+- `pnpm -r build`, the `@gatekeep/ui` check and the ui unit tests are green. The bundle is 96.0 kB of 150 kB.
+- The Isolation, Architecture and browser suites run on CI (the source of truth).
+
+**Residual risks:**
+- The timing test compares medians on CI runners; a noisy runner could flake it.
+- A terms URL changed mid-sign-up records the new URL.
+- A limited Resend shows Generic error in place of Email verification required.

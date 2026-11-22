@@ -71,7 +71,8 @@ internal sealed class ProtocolHost : IAsyncDisposable
     /// so any other email gets the release build's answer; <paramref name="releaseSignIn"/> leaves Authentication's
     /// release default in place instead. <paramref name="configure"/> changes the services once Protocol
     /// registered its own, for a test that wraps one. <paramref name="hashLimits"/> replaces the hashing budget (Story 4.7),
-    /// for a test of its overflow.
+    /// for a test of its overflow. <paramref name="signUpLimits"/> replaces the sign-up and verification send limits
+    /// (Story 4.8), for a test that sends more than they allow or wants to reach them sooner.
     /// </summary>
     public static async Task<ProtocolHost> StartAsync(
         string hostedConnection,
@@ -81,7 +82,8 @@ internal sealed class ProtocolHost : IAsyncDisposable
         Action<ILoggingBuilder>? logging = null,
         bool releaseSignIn = false,
         Action<IServiceCollection>? configure = null,
-        Gatekeep.Modules.Authentication.Contracts.PasswordHashLimits? hashLimits = null)
+        Gatekeep.Modules.Authentication.Contracts.PasswordHashLimits? hashLimits = null,
+        SignUpLimits? signUpLimits = null)
     {
         var custody = new ControlledCustody(bao.Custody(OpenBaoFixture.Hosted));
         var logs = new CapturingLoggerProvider();
@@ -119,6 +121,11 @@ internal sealed class ProtocolHost : IAsyncDisposable
         if (hashLimits is not null)
         {
             builder.Services.AddSingleton(hashLimits);
+        }
+
+        if (signUpLimits is not null)
+        {
+            builder.Services.AddSingleton(signUpLimits);
         }
         // With none, Authentication's release default stands, as on Host.Hosted.
         if (!releaseSignIn)

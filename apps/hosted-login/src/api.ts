@@ -86,9 +86,16 @@ export function postSignupBack(stepVersion: number, csrfToken: string, tenant: s
   return post(SIGNUP_BACK_PATH, { stepVersion }, csrfToken, tenant);
 }
 
-/** Create account: the email and password as typed. */
-export function postSignup(stepVersion: number, email: string, password: string, csrfToken: string, tenant: string): Promise<Step> {
-  return post(SIGNUP_PATH, { stepVersion, email, password }, csrfToken, tenant);
+/** Create account: the email and password as typed, and (Story 4.8) whether the terms checkbox is ticked. */
+export function postSignup(
+  stepVersion: number,
+  email: string,
+  password: string,
+  acceptTerms: boolean,
+  csrfToken: string,
+  tenant: string,
+): Promise<Step> {
+  return post(SIGNUP_PATH, { stepVersion, email, password, acceptTerms }, csrfToken, tenant);
 }
 
 /** Resend email. */

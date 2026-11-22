@@ -6,6 +6,7 @@ import {
   LinkButton,
   PasswordField,
   StrengthMeter,
+  TermsAgreement,
   formatMessage,
   useMessages,
   type HostedTenant,
@@ -33,6 +34,16 @@ export interface SignupScreenProps {
   emailError?: string;
   /** The server's refusal of the password, each failing rule's sentence from the catalogue. */
   passwordErrors?: readonly string[];
+  /**
+   * The Tenant's terms URL (Story 4.8), or null for none: with one, a required "I agree to the Terms of Service" row
+   * shows between the strength meter and Create account.
+   */
+  termsUrl?: string | null;
+  /** Whether the terms checkbox is ticked. The caller owns it, and Create account sends it. */
+  termsAccepted?: boolean;
+  onTermsChange?: (accepted: boolean) => void;
+  /** The terms checkbox's error, "Accept the terms to continue.", from the catalogue. */
+  termsError?: string;
   /** Create account is under way. */
   pending?: boolean;
   /** The heading level: 2 inside another page, such as the theme preview. 1 otherwise. */
@@ -46,7 +57,8 @@ export interface SignupScreenProps {
  * (`autocomplete="username"`), the masked "Password" field (`autocomplete="new-password"`, paste and password managers
  * allowed), the strength meter and its checklist, Create account, and "Already have an account? Log in". The meter
  * follows the typing with no request; the server checks the whole policy at submit, and its refusal names each rule under
- * the password. There is no terms row (Story 4.8) and no breach tick (Design Delta).
+ * the password. With a terms URL (Story 4.8), a terms checkbox follows the meter, its link outside the label opening the
+ * terms in a new tab; refused, its error shows under it. There is no breach tick (Design Delta).
  */
 export function SignupScreen({
   tenant,
@@ -60,6 +72,10 @@ export function SignupScreen({
   onLogIn,
   emailError,
   passwordErrors,
+  termsUrl = null,
+  termsAccepted = false,
+  onTermsChange,
+  termsError,
   pending = false,
   headingLevel,
   className,
@@ -124,6 +140,17 @@ export function SignupScreen({
           data-testid="signup-password"
         />
         <StrengthMeter password={password} minLength={minLength} strength={strength} data-testid="strength-meter" />
+        {termsUrl !== null && (
+          <TermsAgreement
+            label={messages.signupTermsAgree}
+            linkLabel={messages.signupTermsLink}
+            href={termsUrl}
+            checked={termsAccepted}
+            onChange={(accepted) => onTermsChange?.(accepted)}
+            error={termsError}
+            data-testid="signup-terms"
+          />
+        )}
       </form>
     </HostedCard>
   );

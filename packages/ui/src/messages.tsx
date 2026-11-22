@@ -138,6 +138,12 @@ export interface Messages {
   signupHaveAccount: string;
   /** Signup's "Log in" action, back to Login with the email kept. */
   signupLogIn: string;
+  /** Story 4.8: the terms checkbox's label, before `signupTermsLink`, shown only when the Tenant set a terms URL. */
+  signupTermsAgree: string;
+  /** Story 4.8: the link to the Tenant's terms, after the checkbox's label and outside it. */
+  signupTermsLink: string;
+  /** Story 4.8: under the terms checkbox, when Create account was pressed without it ticked. */
+  signupTermsRequired: string;
   /** The strength meter's label. Placeholder: {level}, one of the three below. */
   strengthMeterLabel: string;
   strengthGood: string;
@@ -1058,6 +1064,9 @@ export const defaultMessages: Readonly<Messages> = Object.freeze({
   signupCreate: 'Create account',
   signupHaveAccount: 'Already have an account?',
   signupLogIn: 'Log in',
+  signupTermsAgree: 'I agree to the',
+  signupTermsLink: 'Terms of Service',
+  signupTermsRequired: 'Accept the terms to continue.',
   strengthMeterLabel: 'Password strength: {level}',
   strengthGood: 'Good',
   strengthExcellent: 'Excellent',

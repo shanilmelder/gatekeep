@@ -35,6 +35,7 @@ export function App({ initial }: { initial: Step }) {
   const [step, setStep] = useState(initial);
   const [email, setEmail] = useState(emailOf(initial));
   const [password, setPassword] = useState('');
+  const [termsAccepted, setTermsAccepted] = useState(false);
   const [pending, setPending] = useState(false);
   const [resending, setResending] = useState(false);
   const [sends, setSends] = useState(0);
@@ -77,6 +78,17 @@ export function App({ initial }: { initial: Step }) {
     // The password is kept only for a refused Create account, so it can be corrected; anything else drops it.
     if (next.step !== 'signup') setPassword('');
     if (next.step === 'login' || next.step === 'signup') setEmail((typed) => next.data.email ?? typed);
+    // Story 4.8: the terms box starts unticked on a Signup reached from another step, or asking for other terms.
+    if (next.step !== 'signup' || step.step !== 'signup' || step.data.termsUrl !== next.data.termsUrl) setTermsAccepted(false);
+  }
+
+  /** Story 4.8: the terms box ticked or not; ticking it clears a terms_required error, which no longer holds. */
+  function onTermsChange(accepted: boolean) {
+    setTermsAccepted(accepted);
+    if (accepted && step.step === 'signup' && step.data.error === 'terms_required') {
+      setStep({ ...step, data: { ...step.data, error: null } });
+      setFailed(false);
+    }
   }
 
   /** Sends one request for the step on screen, at most one at a time, and shows its answer. */
@@ -114,7 +126,16 @@ export function App({ initial }: { initial: Step }) {
   function onCreate() {
     if (step.step !== 'signup' || step.csrfToken === null) return;
     const { stepVersion, csrfToken } = step;
-    void send(() => postSignup(stepVersion, email, password, csrfToken, step.data.tenant));
+    // Story 4.8: the terms unticked are refused here first, with the server's own error, and focus moves to the box. The
+    // step keeps its life: nothing was asked of the server, which checks again whatever is sent.
+    if (step.data.termsUrl !== null && !termsAccepted) {
+      if (inFlight.current) return;
+      setStep({ ...step, data: { ...step.data, error: 'terms_required', rules: [] } });
+      setFailed(true);
+      setShown((n) => n + 1);
+      return;
+    }
+    void send(() => postSignup(stepVersion, email, password, termsAccepted, csrfToken, step.data.tenant));
   }
 
   function onVerified() {
@@ -167,6 +188,8 @@ export function App({ initial }: { initial: Step }) {
     onSignUp,
     onLogIn,
     onCreate,
+    termsAccepted,
+    onTermsChange,
     onVerified,
     onResend: () => void onResend(),
     onSendNewLink,
