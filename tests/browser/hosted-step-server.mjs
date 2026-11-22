@@ -58,6 +58,15 @@
 // - POST /login/api/reset/new-link, with the reset-link CSRF token: the neutral confirmation.
 // - POST /login/api/transaction/extend from Forgot password or the reset confirmation: that same step with a fresh life.
 //
+// Story 4.13: logout's fixtures and request, for hosted-logout.spec.ts: logout (the confirmation for an end-session request
+// with no parameters), logout_redirect (the confirmation for one with a valid hint, the Application's registered logout URL
+// and a state), logged_out (a completed logout with no redirect) and logged_out_redirect (one with a redirect to the
+// Application), and the logged_out_hostile_* fixtures (redirectTo a javascript: or data: URL, one with userinfo or an embedded
+// tab, which the client must never open). Their values are hosted-logout-fixture.mjs's, which the spec imports. The
+// stubbed request answers as Host.Hosted does:
+// - POST /login/api/logout, with the Session-bound logout CSRF token: logged_out, its redirectTo the registered logout URL
+//   with the state when the parameters posted back are logout_redirect's, else null.
+//
 //   node hosted-step-server.mjs <port>
 
 import { createHash } from 'node:crypto';
@@ -66,6 +75,7 @@ import { createServer } from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { tokens } from '@gatekeep/design-tokens';
+import { APP_LOGOUT_URL, HOSTILE_LOGOUT_TARGETS, ID_TOKEN_HINT, LOGOUT_CSRF, LOGOUT_STATE } from './hosted-logout-fixture.mjs';
 
 const [port] = process.argv.slice(2);
 if (!port) {
@@ -262,6 +272,23 @@ const passwordChanged = (continueTo) => ({
   csrfToken: null,
 });
 
+/** Story 4.13: logout's steps. */
+const logout = (idTokenHint = null, postLogoutRedirectUri = null, state = null, clientId = null) => ({
+  step: 'logout',
+  stepVersion: 1,
+  expiresInSeconds: null,
+  data: { tenant: 'Northwind', idTokenHint, postLogoutRedirectUri, state, clientId },
+  csrfToken: LOGOUT_CSRF,
+});
+
+const loggedOut = (redirectTo = null) => ({
+  step: 'logged_out',
+  stepVersion: 1,
+  expiresInSeconds: null,
+  data: { tenant: 'Northwind', redirectTo },
+  csrfToken: null,
+});
+
 /** Each fixture's data block text, before escaping; null leaves the block out. */
 const fixtures = {
   login: JSON.stringify(login()),
@@ -291,6 +318,11 @@ const fixtures = {
   reset_link_expired: JSON.stringify(resetLinkExpired),
   password_changed_login: JSON.stringify(passwordChanged('login')),
   password_changed_close: JSON.stringify(passwordChanged('close')),
+  logout: JSON.stringify(logout()),
+  logout_redirect: JSON.stringify(logout(ID_TOKEN_HINT, APP_LOGOUT_URL, LOGOUT_STATE)),
+  logged_out: JSON.stringify(loggedOut()),
+  logged_out_redirect: JSON.stringify(loggedOut(`${APP_LOGOUT_URL}?state=${LOGOUT_STATE}`)),
+  ...Object.fromEntries(Object.entries(HOSTILE_LOGOUT_TARGETS).map(([name, target]) => [name, JSON.stringify(loggedOut(target))])),
   ...Object.fromEntries(
     Object.entries({
       redirect_protocol_relative: '//evil.example/x',
@@ -373,6 +405,12 @@ function answer(pathname, body, csrf) {
       return body.password === 'aaaaaaaaaaaa' ? resetPassword('password_rule', ['classes']) : passwordChanged('close');
     case '/login/api/reset/new-link':
       return linkSent;
+    case '/login/api/logout':
+      return loggedOut(
+        body.idTokenHint === ID_TOKEN_HINT && body.postLogoutRedirectUri === APP_LOGOUT_URL
+          ? `${APP_LOGOUT_URL}${typeof body.state === 'string' ? `?state=${encodeURIComponent(body.state)}` : ''}`
+          : null,
+      );
     default:
       break;
   }
@@ -387,7 +425,7 @@ function answer(pathname, body, csrf) {
   return password(email);
 }
 
-/** The stubbed API's paths: Story 4.2's two, Story 4.7's sign-up and verification requests, Story 4.9's two and Story 4.11's five. */
+/** The stubbed API's paths: Story 4.2's two, Story 4.7's sign-up and verification requests, Story 4.9's two, Story 4.11's five and Story 4.13's one. */
 const API_PATHS = new Set([
   '/login/api/identifier',
   '/login/api/transaction/extend',
@@ -404,6 +442,7 @@ const API_PATHS = new Set([
   '/login/api/reset/back',
   '/login/api/reset/complete',
   '/login/api/reset/new-link',
+  '/login/api/logout',
 ]);
 
 /** The fixtures a real step page answers 200 for: every step but Generic error and the unreadable ones. */
@@ -411,6 +450,7 @@ const OK_FIXTURES = new Set([
   'login', 'login_kept', 'login_signup', 'signup', 'signup_excellent', 'signup_terms', 'signup_terms_late', 'verify_email',
   'email_verified_app', 'email_verified_close', 'link_expired', 'link_sent', 'password', 'password_long',
   'forgot_password', 'reset_link_sent', 'reset_password', 'reset_link_expired', 'password_changed_login', 'password_changed_close',
+  'logout', 'logout_redirect', 'logged_out', 'logged_out_redirect',
 ]);
 
 const types = { '.js': 'text/javascript', '.css': 'text/css', '.woff2': 'font/woff2', '.svg': 'image/svg+xml' };
@@ -437,7 +477,9 @@ const server = createServer((request, response) => {
           ? [LINK_CSRF]
           : url.pathname === '/login/api/reset/complete' || url.pathname === '/login/api/reset/new-link'
             ? [RESET_CSRF]
-            : [CSRF, SIGNUP_CSRF, VERIFY_CSRF, PASSWORD_CSRF, FORGOT_CSRF, RESET_SENT_CSRF];
+            : url.pathname === '/login/api/logout'
+              ? [LOGOUT_CSRF]
+              : [CSRF, SIGNUP_CSRF, VERIFY_CSRF, PASSWORD_CSRF, FORGOT_CSRF, RESET_SENT_CSRF];
       if (!allowed.includes(presented)) return json(403, { ...genericError('Northwind'), data: { ...genericError('Northwind').data, code: 'csrf_mismatch' } });
       let body;
       try {

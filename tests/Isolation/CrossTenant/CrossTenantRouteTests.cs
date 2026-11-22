@@ -469,6 +469,54 @@ public sealed class CrossTenantRouteTests(PostgresFixture postgres, OpenBaoFixtu
                 break;
             }
 
+            case ProtocolContract.EndSessionPath:
+            case ProtocolContract.LogoutPath:
+            {
+                // Tenant A's real Session cookie and ID token, presented at B's host (Story 4.13): B's lookup, under B's
+                // row-level security, finds no Session, so nothing ends, and B's keys don't verify A's hint, so there is no
+                // redirect. The CSRF token is the cookie's own, so only the lookup refuses. A's Session and family live on.
+                var flow = await CodeFlowWithin(database, a, b);
+                await database.ExecuteAsync(
+                    $"UPDATE application SET post_logout_redirect_uris = ARRAY['https://client.code.test/signed-out'] WHERE id = '{flow.ClientA.ApplicationId}'");
+                var signedIn = await LogoutFlow.SignInAsync(host, HostA, flow.ClientA.ClientId, flow.ClientA.Secret, flow.UserA);
+                var url = LogoutFlow.EndSessionUrl(signedIn.IdToken, "https://client.code.test/signed-out", "cross-tenant", null);
+                using var page = await signedIn.Browser.GetAsync(url);
+                var confirmation = await LogoutFlow.PageStepAsync(page);
+                Assert.Equal(StepNames.Logout, confirmation.Step);
+                var eventsA = await database.ScalarAsync<long>($"SELECT count(*) FROM audit_event WHERE tenant_id = '{a.TenantId}'");
+
+                var atB = new HostedBrowser(host, HostB);
+                atB.Cookies[ProtocolContract.SessionCookie] = signedIn.Browser.Cookies[ProtocolContract.SessionCookie];
+                string body;
+                if (entry.Pattern == ProtocolContract.EndSessionPath)
+                {
+                    using var response = await atB.GetAsync(url);
+                    body = await response.Content.ReadAsStringAsync(Cancellation);
+                    var step = await LogoutFlow.PageStepAsync(response);
+                    Assert.Equal(StepNames.LoggedOut, step.Step);
+                    Assert.Equal(JsonValueKind.Null, step.Data.GetProperty("redirectTo").ValueKind);
+                }
+                else
+                {
+                    using var response = await atB.PostAsync(entry.Pattern, LogoutFlow.Body(confirmation), confirmation.Csrf);
+                    Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+                    body = await response.Content.ReadAsStringAsync(Cancellation);
+                    using var step = JsonDocument.Parse(body);
+                    Assert.Equal(StepNames.LoggedOut, step.RootElement.GetProperty("step").GetString());
+                    Assert.Equal(JsonValueKind.Null, step.RootElement.GetProperty("data").GetProperty("redirectTo").ValueKind);
+                }
+
+                Assert.DoesNotContain(HostA, body, StringComparison.OrdinalIgnoreCase);
+                Assert.DoesNotContain(a.TenantId.ToString(), body, StringComparison.OrdinalIgnoreCase);
+                Assert.Equal(1L, await database.ScalarAsync<long>($"SELECT count(*) FROM user_session WHERE tenant_id = '{a.TenantId}' AND ended_at IS NULL"));
+                Assert.Equal(0L, await database.ScalarAsync<long>("SELECT count(*) FROM audit_event WHERE type_code = 'sessions.access.revoked'"));
+                Assert.Equal(eventsA, await database.ScalarAsync<long>($"SELECT count(*) FROM audit_event WHERE tenant_id = '{a.TenantId}'"));
+                Assert.All(atB.SetCookies, c => Assert.DoesNotContain("Domain", c, StringComparison.OrdinalIgnoreCase));
+                using var refreshed = await CodeFlow.RefreshAsync(host, HostA, flow.ClientA.ClientId, flow.ClientA.Secret, signedIn.Refresh!);
+                Assert.Equal(HttpStatusCode.OK, refreshed.Status);
+                break;
+            }
+
             case Gatekeep.Modules.Tenancy.Contracts.TenancyContract.ThemeRoute:
             {
                 // B's theme stylesheet at the hash B's step pages link (Story 4.1), from B's resolved Tenant only:

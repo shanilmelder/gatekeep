@@ -112,6 +112,27 @@ export interface PasswordChangedData {
   continueTo: 'login' | 'close';
 }
 
+/**
+ * The logout confirmation's props (Story 4.13): the end-session request's own parameters, each as sent or null, which
+ * "Log out" posts back unchanged for the server to decide the redirect again.
+ */
+export interface LogoutData {
+  tenant: string;
+  idTokenHint: string | null;
+  postLogoutRedirectUri: string | null;
+  state: string | null;
+  clientId: string | null;
+}
+
+/**
+ * A completed logout's props (Story 4.13): the Application's logout URL the server decided, which the client leaves for
+ * at once with a top-level GET, or null for "You're logged out.".
+ */
+export interface LoggedOutData {
+  tenant: string;
+  redirectTo: string | null;
+}
+
 /** A redirect's props (Story 4.2): the same-origin path the client opens with a top-level GET. */
 export interface RedirectData {
   tenant: string;
@@ -140,6 +161,8 @@ export type Step = StepMeta &
     | { step: 'forgot_password'; data: ForgotPasswordData }
     | { step: 'reset_password'; data: ResetPasswordData }
     | { step: 'password_changed'; data: PasswordChangedData }
+    | { step: 'logout'; data: LogoutData }
+    | { step: 'logged_out'; data: LoggedOutData }
   );
 
 type StepName = Step['step'];
@@ -168,6 +191,32 @@ export function isSameOriginPath(path: string): boolean {
   if (!path.startsWith('/') || path.startsWith('//') || path.startsWith('/\\')) return false;
   try {
     return new URL(path, PROBE_ORIGIN).origin === PROBE_ORIGIN;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * A native Application's custom scheme, shaped as a reverse domain such as `com.example.app:` (Story 3.2 registers only
+ * those): a letter, then scheme characters, with at least one dot.
+ */
+const NATIVE_SCHEME = /^[a-z][a-z0-9+.-]*\.[a-z0-9+.-]+:$/;
+
+/**
+ * A logout target the client may leave for (Story 4.13): an absolute `https:` or `http:` URL, or one with a native
+ * Application's reverse-domain scheme, with no ASCII control character or whitespace and no userinfo. Every other
+ * scheme is refused. The server decided it is a registered logout URL; this only keeps anything else from ever being
+ * opened.
+ */
+export function isExternalTarget(value: string): boolean {
+  for (const character of value) {
+    const code = character.charCodeAt(0);
+    if (code <= 0x20 || code === 0x7f) return false;
+  }
+  try {
+    const url = new URL(value);
+    const allowed = url.protocol === 'https:' || url.protocol === 'http:' || NATIVE_SCHEME.test(url.protocol);
+    return allowed && url.username === '' && url.password === '';
   } catch {
     return false;
   }
@@ -321,6 +370,22 @@ const readers: { [name in StepName]: (data: Record<string, unknown>, meta: StepM
     const tenant = text(data.tenant);
     const continueTo = data.continueTo === 'login' || data.continueTo === 'close' ? data.continueTo : undefined;
     return tenant === undefined || continueTo === undefined ? undefined : { tenant, continueTo };
+  },
+  logout: (data, meta) => {
+    const tenant = text(data.tenant);
+    const idTokenHint = optionalText(data.idTokenHint);
+    const postLogoutRedirectUri = optionalText(data.postLogoutRedirectUri);
+    const state = optionalText(data.state);
+    const clientId = optionalText(data.clientId);
+    // "Log out" posts with the Session-bound logout CSRF token.
+    return tenant === undefined || idTokenHint === undefined || postLogoutRedirectUri === undefined || state === undefined || clientId === undefined || meta.csrfToken === null
+      ? undefined
+      : { tenant, idTokenHint, postLogoutRedirectUri, state, clientId };
+  },
+  logged_out: (data) => {
+    const tenant = text(data.tenant);
+    const redirectTo = optionalText(data.redirectTo);
+    return tenant === undefined || redirectTo === undefined || (redirectTo !== null && !isExternalTarget(redirectTo)) ? undefined : { tenant, redirectTo };
   },
 };
 

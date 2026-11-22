@@ -1,4 +1,4 @@
-// Hosted Login's only network requests (Stories 4.2, 4.7, 4.9 and 4.11): Continue, Keep going, sign-up's, the Password step's and reset's. Each is a same-origin
+// Hosted Login's only network requests (Stories 4.2, 4.7, 4.9, 4.11 and 4.13): Continue, Keep going, sign-up's, the Password step's, reset's and Log out. Each is a same-origin
 // POST with the step's CSRF token in X-Gatekeep-CSRF, and each answers with a step, which the client renders as it
 // renders the page's own. The browser sends the Origin and the HttpOnly transaction cookie; the client never reads
 // either. The password goes only in Create account's, Log in's and Reset password's bodies, and a link only in Send a new
@@ -51,6 +51,9 @@ export const RESET_COMPLETE_PATH = '/login/api/reset/complete';
 /** "Send a new link" from an expired reset link's page, with the reset-link-bound CSRF token. */
 export const RESET_NEW_LINK_PATH = '/login/api/reset/new-link';
 
+/** Story 4.13: "Log out" at the logout confirmation, with the Session-bound logout CSRF token. */
+export const LOGOUT_PATH = '/login/api/logout';
+
 /** The header the CSRF token goes in. */
 export const CSRF_HEADER = 'X-Gatekeep-CSRF';
 
@@ -72,7 +75,8 @@ type ApiPath =
   | typeof RESET_PATH
   | typeof RESET_BACK_PATH
   | typeof RESET_COMPLETE_PATH
-  | typeof RESET_NEW_LINK_PATH;
+  | typeof RESET_NEW_LINK_PATH
+  | typeof LOGOUT_PATH;
 
 async function post(path: ApiPath, body: object, csrfToken: string, tenant: string): Promise<Step> {
   let response: Response;
@@ -170,4 +174,14 @@ export function postResetBack(stepVersion: number, csrfToken: string, tenant: st
 /** "Reset password": the page's own link, the new password and its confirmation, with the reset-link-bound CSRF token. */
 export function postResetComplete(token: string, password: string, confirm: string, csrfToken: string, tenant: string): Promise<Step> {
   return post(RESET_COMPLETE_PATH, { token, password, confirm }, csrfToken, tenant);
+}
+
+/** Story 4.13: "Log out", posting back the end-session request's own parameters, so the server decides the redirect again. */
+export function postLogout(
+  parameters: { idTokenHint: string | null; postLogoutRedirectUri: string | null; state: string | null; clientId: string | null },
+  csrfToken: string,
+  tenant: string,
+): Promise<Step> {
+  const { idTokenHint, postLogoutRedirectUri, state, clientId } = parameters;
+  return post(LOGOUT_PATH, { idTokenHint, postLogoutRedirectUri, state, clientId }, csrfToken, tenant);
 }

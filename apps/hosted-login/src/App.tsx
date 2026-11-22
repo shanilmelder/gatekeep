@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import {
   postExtend,
   postIdentifier,
+  postLogout,
   postNewLink,
   postPassword,
   postPasswordBack,
@@ -17,7 +18,7 @@ import {
   postVerifiedContinue,
 } from './api';
 import { useExpiry } from './expiry';
-import { LOGIN_PATH, forgetQuery, go, queryToken } from './navigate';
+import { LOGIN_PATH, forgetQuery, go, leaveForApplication, queryToken } from './navigate';
 import type { Step } from './step';
 import { StepScreen, isFailed } from './StepScreen';
 
@@ -30,13 +31,14 @@ function emailOf(step: Step): string {
 }
 
 /**
- * Hosted Login's page (Stories 4.1, 4.2, 4.7, 4.9 and 4.11). It shows the step the server sent and follows the next one each
+ * Hosted Login's page (Stories 4.1, 4.2, 4.7, 4.9, 4.11 and 4.13). It shows the step the server sent and follows the next one each
  * request answers with, holding no flow logic: Continue posts the email, the Password step's Log in posts the password and
  * its Edit goes back to Login, Sign up opens Signup carrying it, Create account
  * posts the email and password, the verification step's actions ask the server again, "Forgot password?" leads to
  * Forgot password and its neutral confirmation, a reset link's page posts its new password with the link it was opened
  * with (kept in memory once the address bar drops it), a redirect step is opened with a
- * top-level GET, and while a step has a life, its expiry warning shows two minutes before the end. "Keep going" extends
+ * top-level GET, the logout confirmation posts "Log out" (and "Stay signed in" goes back with no request), a completed
+ * logout with a target leaves for the Application by a top-level GET, and while a step has a life, its expiry warning shows two minutes before the end. "Keep going" extends
  * the life without a reload; at expiry the page goes to Login, which restarts with the email kept.
  */
 export function App({ initial }: { initial: Step }) {
@@ -48,6 +50,8 @@ export function App({ initial }: { initial: Step }) {
   const [confirm, setConfirm] = useState('');
   const resetToken = useRef(initial.step === 'reset_password' ? queryToken() : null);
   const [termsAccepted, setTermsAccepted] = useState(false);
+  // Story 4.13: "Stay signed in" with no history entry to go back to.
+  const [stayed, setStayed] = useState(false);
   const [pending, setPending] = useState(false);
   const [resending, setResending] = useState(false);
   const [sends, setSends] = useState(0);
@@ -72,6 +76,8 @@ export function App({ initial }: { initial: Step }) {
 
   useEffect(() => {
     if (step.step === 'redirect') go(step.data.location);
+    // Story 4.13: a completed logout with a target goes back to the Application at once, the one external navigation.
+    if (step.step === 'logged_out' && step.data.redirectTo !== null) leaveForApplication(step.data.redirectTo);
   }, [step]);
 
   // A verification link's page: its token leaves the address bar once the page has it.
@@ -223,6 +229,27 @@ export function App({ initial }: { initial: Step }) {
     void send(() => postNewLink(token, csrfToken, step.data.tenant, reset));
   }
 
+  /** Story 4.13: "Log out", posting back the end-session request's own parameters. */
+  function onLogOut() {
+    if (step.step !== 'logout' || step.csrfToken === null) return;
+    const { csrfToken } = step;
+    void send(() => postLogout(step.data, csrfToken, step.data.tenant));
+  }
+
+  /**
+   * "Stay signed in": nothing is asked of the server. The browser goes back to where it came from, or, opened with no
+   * page before it, the confirmation says the User is still signed in and the page can be closed.
+   */
+  function onStay() {
+    if (step.step !== 'logout' || inFlight.current) return;
+    if (window.history.length <= 1) {
+      setStayed(true);
+      setShown((n) => n + 1);
+      return;
+    }
+    window.history.back();
+  }
+
   async function onKeepGoing() {
     if (!LIVE_STEPS.has(step.step) || step.csrfToken === null || extending.current) return;
     extending.current = true;
@@ -266,6 +293,9 @@ export function App({ initial }: { initial: Step }) {
     onVerified,
     onResend: () => void onResend(),
     onSendNewLink,
+    onLogOut,
+    onStay,
+    stayed,
     pending,
     resending,
     sends,

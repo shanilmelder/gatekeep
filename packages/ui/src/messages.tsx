@@ -208,6 +208,16 @@ export interface Messages {
   /** The neutral link confirmation (Story 4.7): heading and body, the same whatever was sent. */
   linkSentTitle: string;
   linkSentBody: string;
+  /** The logout confirmation (Story 4.13): heading and body (placeholder {tenant}), "Stay signed in" and "Log out". */
+  logoutTitle: string;
+  logoutBody: string;
+  logoutStay: string;
+  logoutConfirm: string;
+  /** A completed logout with no redirect (Story 4.13), which has no action. */
+  loggedOutTitle: string;
+  /** "Stay signed in" with no page to go back to (Story 4.13): heading and body, with no action. */
+  stillSignedInTitle: string;
+  stillSignedInBody: string;
   /** The Admin Dashboard's `<title>`, written into its index.html at build. */
   adminDocumentTitle: string;
   /** The product's name, which the Admin pages before a session speak for, as a Tenant's name does on Hosted Login. */
@@ -1156,6 +1166,13 @@ export const defaultMessages: Readonly<Messages> = Object.freeze({
   linkExpiredSendNew: 'Send a new link',
   linkSentTitle: 'Check your email',
   linkSentBody: "If an account exists for that email, we've sent a link.",
+  logoutTitle: 'Log out of {tenant}?',
+  logoutBody: "You'll be signed out of all {tenant} apps on this browser.",
+  logoutStay: 'Stay signed in',
+  logoutConfirm: 'Log out',
+  loggedOutTitle: "You're logged out.",
+  stillSignedInTitle: "You're still signed in.",
+  stillSignedInBody: 'You can close this page.',
   adminDocumentTitle: 'Gatekeep Admin Dashboard',
   productName: 'Gatekeep',
   bootstrapTitle: 'Claim this Deployment',

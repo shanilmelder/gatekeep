@@ -136,6 +136,22 @@ public sealed record StepResponse(string Step, int StepVersion, int? ExpiresInSe
             null);
 
     /// <summary>
+    /// The logout confirmation (Story 4.13): "Log out of {Tenant}?", for a browser with a live Session. It carries the
+    /// end-session request's own parameters, which "Log out" posts back so the redirect is decided again, and the
+    /// Session-bound logout CSRF token. It has no transaction, so no version or life.
+    /// </summary>
+    public static StepResponse Logout(string tenant, string csrfToken, LogoutData parameters) =>
+        new(StepNames.Logout, 1, null, parameters with { Tenant = tenant }, csrfToken);
+
+    /// <summary>
+    /// A completed logout (Story 4.13): <paramref name="redirectTo"/> is the Application's registered logout URL, with
+    /// <c>state</c>, that the client opens at once with a top-level GET, decided on the server for this request; with
+    /// none, "You're logged out." with no action. No CSRF token.
+    /// </summary>
+    public static StepResponse LoggedOut(string tenant, string? redirectTo) =>
+        new(StepNames.LoggedOut, 1, null, new LoggedOutData(tenant, redirectTo), null);
+
+    /// <summary>
     /// A redirect (Story 4.2): the client follows <paramref name="location"/>, a same-origin path, with a top-level
     /// GET. It leaves the step and needs no CSRF token.
     /// </summary>
@@ -183,6 +199,12 @@ public static class StepNames
 
     /// <summary>A completed reset (Story 4.11).</summary>
     public const string PasswordChanged = "password_changed";
+
+    /// <summary>The logout confirmation, "Log out of {Tenant}?" (Story 4.13).</summary>
+    public const string Logout = "logout";
+
+    /// <summary>A completed logout, back to the Application or "You're logged out." (Story 4.13).</summary>
+    public const string LoggedOut = "logged_out";
 }
 
 /// <summary>The codes a Login field error is sent as; the client shows the catalogue's text for each.</summary>
@@ -307,6 +329,16 @@ public sealed record ResetPasswordData(string Tenant, string? Email, SignupPolic
 
 /// <summary>Password changed's props (Story 4.11): <c>login</c> or <c>close</c>.</summary>
 public sealed record PasswordChangedData(string Tenant, string ContinueTo);
+
+/// <summary>
+/// The logout confirmation's props (Story 4.13): the Tenant's display name and the end-session request's own
+/// <c>id_token_hint</c>, <c>post_logout_redirect_uri</c>, <c>state</c> and <c>client_id</c>, each as sent or null, which
+/// "Log out" posts back unchanged. None is trusted: the server decides the redirect from them again.
+/// </summary>
+public sealed record LogoutData(string Tenant, string? IdTokenHint, string? PostLogoutRedirectUri, string? State, string? ClientId);
+
+/// <summary>A completed logout's props (Story 4.13): the redirect target the server decided, or null for "You're logged out.".</summary>
+public sealed record LoggedOutData(string Tenant, string? RedirectTo);
 
 /// <summary>A redirect's props (Story 4.2): the Tenant's display name and the same-origin path the client goes to.</summary>
 public sealed record RedirectData(string Tenant, string Location);

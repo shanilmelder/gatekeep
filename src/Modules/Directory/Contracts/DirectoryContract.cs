@@ -182,6 +182,20 @@ public static class DirectoryContract
                 || (application.IsNative && LoopbackRedirects.SameButPort(registered, redirectUri)));
     }
 
+    /// <summary>
+    /// Whether a logout request's <paramref name="postLogoutRedirectUri"/> is one of <paramref name="application"/>'s
+    /// Allowed Logout URLs (Story 4.13): matched as <see cref="MatchesRedirectUri"/> matches a callback, exactly, string for
+    /// string, but for a <c>native</c> Application's loopback port (RFC 8252 §7.3).
+    /// </summary>
+    public static bool MatchesPostLogoutRedirectUri(DirectoryApplication application, string postLogoutRedirectUri)
+    {
+        ArgumentNullException.ThrowIfNull(application);
+        return !string.IsNullOrEmpty(postLogoutRedirectUri)
+            && application.PostLogoutRedirectUris.Any(registered =>
+                string.Equals(registered, postLogoutRedirectUri, StringComparison.Ordinal)
+                || (application.IsNative && LoopbackRedirects.SameButPort(registered, postLogoutRedirectUri)));
+    }
+
     /// <summary>The <c>connection.kind</c> of a Tenant's database Connection (Story 4.6): the only kind in v1, one per Tenant.</summary>
     public const string DatabaseConnectionKind = "database";
 

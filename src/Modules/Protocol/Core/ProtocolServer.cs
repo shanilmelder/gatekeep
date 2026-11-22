@@ -30,7 +30,9 @@ namespace Gatekeep.Modules.Protocol.Core;
 /// <c>client_secret_basic</c> and <c>client_secret_post</c>. The authorization endpoint serves the code
 /// flow only, with S256 PKCE, <c>iss</c> in every response, and its sign-in through the passthrough. Userinfo
 /// (Story 2.11) reads its bearer access token alone and answers <c>sub</c> only; revocation authenticates its
-/// client the token endpoint's way and revokes only a refresh token's family, through the one revocation path.
+/// client the token endpoint's way and revokes only a refresh token's family, through the one revocation path. The
+/// end-session endpoint (Story 4.13) runs through its passthrough with OpenIddict's own checks removed: Gatekeep decides
+/// the redirect and ends only the browser's own Session.
 /// </summary>
 internal static class ProtocolServer
 {
@@ -120,7 +122,8 @@ internal static class ProtocolServer
                 .SetTokenEndpointUris(ProtocolContract.TokenPath[1..])
                 .SetAuthorizationEndpointUris(ProtocolContract.AuthorizePath[1..])
                 .SetUserInfoEndpointUris(ProtocolContract.UserinfoPath[1..])
-                .SetRevocationEndpointUris(ProtocolContract.RevocationPath[1..]);
+                .SetRevocationEndpointUris(ProtocolContract.RevocationPath[1..])
+                .SetEndSessionEndpointUris(ProtocolContract.EndSessionPath[1..]);
 
             // Client Credentials (Story 2.5), the code flow with PKCE (Story 2.9) and its refresh tokens
             // (Story 2.10): any other grant is unsupported_grant_type, and implicit, hybrid and the password
@@ -250,6 +253,18 @@ internal static class ProtocolServer
             options.AddEventHandler(KeepResponseModes.Descriptor);
             options.AddEventHandler(AnswerInvalidRequestPage.Descriptor);
 
+            // The end-session endpoint (Story 4.13, RP-Initiated Logout): Gatekeep decides every outcome. OpenIddict's checks
+            // of the hint, the client, the post-logout redirect URI and a pushed request are gone, so none of them can answer
+            // an error; EndSessionPassthrough decides the redirect and ends only the browser's own Session, and any error
+            // OpenIddict still raises, such as an unreadable request, gets the same logout page with no redirect.
+            options.RemoveEventHandler(OpenIddictServerHandlers.Session.ValidateRequestUriParameter.Descriptor);
+            options.RemoveEventHandler(OpenIddictServerHandlers.Session.ValidatePostLogoutRedirectUriParameter.Descriptor);
+            options.RemoveEventHandler(OpenIddictServerHandlers.Session.ValidateAuthentication.Descriptor);
+            options.RemoveEventHandler(OpenIddictServerHandlers.Session.ValidateClientPostLogoutRedirectUri.Descriptor);
+            options.RemoveEventHandler(OpenIddictServerHandlers.Session.ValidateEndpointPermissions.Descriptor);
+            options.RemoveEventHandler(OpenIddictServerHandlers.Session.ValidateAuthorizedParty.Descriptor);
+            options.AddEventHandler(AnswerEndSessionWithLogoutPage.Descriptor);
+
             // Codes and refresh tokens are {tenantPublicId}.{random} reference tokens, protected with the Tenant's key, and a
             // presented one with another prefix is refused before any lookup (AD-9).
             options.RemoveEventHandler(OpenIddictServerHandlers.Protection.AttachTokenPayload.Descriptor);
@@ -260,7 +275,8 @@ internal static class ProtocolServer
             // forwarded scheme is believed (AD-6): the stored https issuer is what clients see.
             options.UseAspNetCore()
                 .DisableTransportSecurityRequirement()
-                .EnableAuthorizationEndpointPassthrough();
+                .EnableAuthorizationEndpointPassthrough()
+                .EnableEndSessionEndpointPassthrough();
         });
     }
 

@@ -1,8 +1,9 @@
 // Hosted Login's only navigation (Story 4.2): a top-level GET, never a form post, to a path on this
 // origin. A redirect step's location goes back to the authorization endpoint; an expired sign-in goes
-// to /login, which restarts it with the email kept.
+// to /login, which restarts it with the email kept. From Story 4.13 a completed logout leaves this
+// origin for its Application, the one external navigation, through leaveForApplication.
 
-import { isSameOriginPath } from './step';
+import { isExternalTarget, isSameOriginPath } from './step';
 
 /** Where an expired sign-in goes. */
 export const LOGIN_PATH = '/login';
@@ -21,6 +22,17 @@ export function go(path: string): void {
     return;
   }
   if (target.origin === origin) window.location.assign(target.href);
+}
+
+/**
+ * Leaves Hosted Login for an Application (Story 4.13): a top-level GET, never a form post, to a completed logout's
+ * `redirectTo`. It is the client's one navigation off this origin, made only for that step's value, which the server
+ * decided on the same request is the Application's registered logout URL for a valid `id_token_hint`. Anything that
+ * isn't a safe absolute URL is ignored. The page's `Referrer-Policy: no-referrer` keeps the hint out of `Referer`.
+ */
+export function leaveForApplication(redirectTo: string): void {
+  if (!isExternalTarget(redirectTo)) return;
+  window.location.assign(redirectTo);
 }
 
 /**

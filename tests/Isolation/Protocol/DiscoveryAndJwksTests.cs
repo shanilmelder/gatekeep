@@ -57,6 +57,8 @@ public sealed class DiscoveryAndJwksTests(PostgresFixture postgres, OpenBaoFixtu
         Assert.Contains("offline_access", root.GetProperty("scopes_supported").EnumerateArray().Select(e => e.GetString()));
         Assert.Contains("openid", root.GetProperty("scopes_supported").EnumerateArray().Select(e => e.GetString()));
         Assert.Equal(["RS256"], root.GetProperty("id_token_signing_alg_values_supported").EnumerateArray().Select(e => e.GetString()));
+        // Story 4.13: RP-Initiated Logout.
+        Assert.Equal($"{a.Issuer}connect/endsession", root.GetProperty("end_session_endpoint").GetString());
         Assert.Equal(0, host.Custody.Calls(KeyOperation.Sign));
     }
 
@@ -461,6 +463,27 @@ public sealed class DiscoveryAndJwksTests(PostgresFixture postgres, OpenBaoFixtu
         Assert.True(revocation.Order < OpenIddict.Server.OpenIddictServerHandlers.Revocation.ValidateAuthentication.Descriptor.Order);
         Assert.DoesNotContain(handlers, d => d.ServiceDescriptor.ServiceType == typeof(OpenIddict.Server.OpenIddictServerHandlers.Revocation.RevokeToken));
         Assert.Single(handlers, d => d.ServiceDescriptor.ServiceType.FullName == "Gatekeep.Modules.Protocol.Core.RevokeRefreshTokenFamily");
+
+        // Story 4.13: Gatekeep decides every end-session outcome. OpenIddict's checks of the hint, the client and the post-logout
+        // redirect URI are gone, so none can answer an error, and Gatekeep's page replaces any response OpenIddict would send,
+        // before OpenIddict attaches a redirect URI.
+        foreach (var removed in new[]
+        {
+            typeof(OpenIddict.Server.OpenIddictServerHandlers.Session.ValidateRequestUriParameter),
+            typeof(OpenIddict.Server.OpenIddictServerHandlers.Session.ValidatePostLogoutRedirectUriParameter),
+            typeof(OpenIddict.Server.OpenIddictServerHandlers.Session.ValidateAuthentication),
+            typeof(OpenIddict.Server.OpenIddictServerHandlers.Session.ValidateClientPostLogoutRedirectUri),
+            typeof(OpenIddict.Server.OpenIddictServerHandlers.Session.ValidateEndpointPermissions),
+            typeof(OpenIddict.Server.OpenIddictServerHandlers.Session.ValidateAuthorizedParty),
+        })
+        {
+            Assert.DoesNotContain(handlers, d => d.ServiceDescriptor.ServiceType == removed);
+        }
+
+        var logoutPage = Assert.Single(handlers, d => d.ServiceDescriptor.ServiceType.FullName == "Gatekeep.Modules.Protocol.Core.AnswerEndSessionWithLogoutPage");
+        Assert.Equal(typeof(ApplyEndSessionResponseContext), logoutPage.ContextType);
+        Assert.True(logoutPage.Order < OpenIddict.Server.OpenIddictServerHandlers.Session.AttachPostLogoutRedirectUri.Descriptor.Order);
+        Assert.Equal("connect/endsession", Assert.Single(host.GlobalOptions.EndSessionEndpointUris).OriginalString);
         Assert.False(host.GlobalOptions.EnableDegradedMode);
         Assert.Equal(
             ["client_secret_basic", "client_secret_post"],

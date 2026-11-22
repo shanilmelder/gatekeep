@@ -2,9 +2,10 @@
 title: 'Story 4.13: Log out'
 type: 'feature'
 created: '2026-11-22'
-status: 'ready-for-dev'
+status: 'done'
+baseline_revision: '34cc4f0560a56a0c37d8af3e1c046dbad5ee750f'
 review_loop_iteration: 0
-followup_review_recommended: false
+followup_review_recommended: true
 context:
   - '{project-root}/_bmad-output/implementation-artifacts/epic-4-context.md'
   - '{project-root}/_bmad-output/implementation-artifacts/spec-4-9-sign-in-with-a-password.md'
@@ -127,6 +128,46 @@ deferred: []
 
 ## Review Triage Log
 
+### 2026-11-22 — Review pass
+- verdicts: 36 findings — high 1, medium 3, low 24, false 3, maybe-false 5
+- findings:
+  - `low` `patch` (Verification Gap) The `state` encoding and query-bearing logout URLs are untested — tested with `?from=app` and `state=a&b=c d`; the target is now built with `QueryHelpers.AddQueryString`.
+  - `low` `patch` (Verification Gap) `isExternalTarget` is tested only against `javascript:` — hostile fixtures for `data:`, userinfo and an embedded tab; the guard is now an allowlist.
+  - `maybe-false` `reject` (Intent) No test drives the real server and client together — the project's pattern (server over HTTP, client against the stub); if it hid a defect it would be low.
+  - `false` `reject` (Intent) The server never sends a 302 — EXPERIENCE requires a top-level GET, which the client performs from the validated `redirectTo`.
+  - `low` `reject` (Intent) The confirmation shows even with an invalid hint — the design draws one confirmation; logging out without asking would let any link end a Session.
+  - `low` `patch` (Intent) The buttons are stacked, unlike the design's side-by-side pair, and the shared `.action` gap changed every screen — reverted; an opt-in `actionLayout="pair"` on `HostedCard` gives Logout its two columns.
+  - `false` `reject` (Intent) The `HOSTED` list wasn't updated — it lists `@gatekeep/ui/hosted` exports only, and the new screens live in `@gatekeep/hosted-screens`.
+  - `low` `reject` (Intent) No Gatekeep-side logout entry point — the Account Portal (Epic 16) adds one; v1 logout is Application-initiated.
+  - `false` `reject` (Intent) The conformance plan isn't run — Story 4.14.
+  - `high` `patch` (Blind) A cross-site form POST to end-session carries no `SameSite=Lax` cookie, so it says "logged out" while the Session stays live — a cookie-less POST now gets a 303 to the GET form; test added.
+  - `low` `reject` (Blind) The `HOSTED` fixture list wasn't updated — same as the Intent row.
+  - `medium` `patch` (Blind) The confirm body cap is below what the parameters allow — `MaxLogoutBodyBytes` sized for four maximal escaped parameters; boundary test.
+  - `medium` `patch` (Blind) A failure in the redirect decision rolls back the logout — the revocation commits first; the decision runs after and treats any failure as no target.
+  - `low` `patch` (Blind) A cookie gone before the click gives a 403 — with no cookie there's nothing to end, so it answers `logged_out`; a wrong CSRF with a cookie stays 403.
+  - `low` `reject` (Blind) A logout CSRF refusal writes the sign-in refusal event — the shared refusal path every Login route uses; a new event code adds catalogue surface for a refusal.
+  - `low` `patch` (Blind) Stay signed in does nothing with no history — shows "You're still signed in. You can close this page."
+  - `maybe-false` `reject` (Blind) Going back lands on an auto-posting page and loops — the auto-post now 303s to a GET, so the history entry is that GET; if a loop remained it would be low.
+  - `low` `patch` (Blind) `isExternalTarget` is a denylist — now an allowlist.
+  - `low` `reject` (Blind) A registered URL that already carries `state` gets a duplicate — Admins register their own logout URLs; a registered `state` is an Application choice.
+  - `low` `patch` (Blind) The encoding branches are untested — fixed with the Verification Gap row.
+  - `low` `patch` (Blind) There are no negative tests for an `at+jwt` hint, several audiences, the system Application or a retired key — the first three added with forged hints; a retired key follows the published-keys rule already tested by userinfo.
+  - `low` `patch` (Blind) The logout CSRF has no server secret — recorded in T-38's What remains (forced logout only).
+  - `low` `patch` (Blind) Unauthenticated end-session costs a signature check with no rate limit — recorded in T-38's What remains.
+  - `low` `patch` (Blind) The browser spec copies harness constants — moved to `hosted-logout-fixture.mjs` and imported by both.
+  - `low` `reject` (Blind) The Tenant name is passed twice — harmless duplication in one call site.
+  - `medium` `patch` (Edge) The confirm body cap — fixed with the Blind row.
+  - `medium` `patch` (Edge) A decision failure rolls back the logout — fixed with the Blind row.
+  - `low` `patch` (Edge) Only `ArgumentException` is caught — any non-cancellation exception is now no target.
+  - `low` `patch` (Edge) Any non-`at+jwt` type passes as a hint — only an absent `typ` or `JWT` is accepted; `oi_reft+jwt` and `oi_auc+jwt` are refused in tests.
+  - `low` `patch` (Edge) A started response returns without `HandleRequest` — now calls it.
+  - `low` `patch` (Edge) Stay with no history is stuck — fixed with the Blind row.
+  - `maybe-false` `reject` (Edge) Going back loops through an auto-posting page — same as the Blind row.
+  - `low` `patch` (Edge) The concatenated target breaks on `?`, `&` or a fragment — fixed with `QueryHelpers`.
+  - `maybe-false` `reject` (Edge) The `HOSTED`-list claim misleads — the spec line didn't apply; recorded here.
+  - `maybe-false` `reject` (Edge) Logout's guarantee fails on the over-limit body or a decision error — both fixed above, so the claim no longer holds.
+  - `false` `reject` (Intent) The process steps aren't in the diff — they happen after review.
+
 ## Design Notes
 
 - **A stateless confirm:** the confirm POST carries the original parameters back and re-runs the same decision. No logout request has to be stored, and a tampered POST can only lose its redirect, never gain one.
@@ -139,3 +180,43 @@ deferred: []
 - With `MSYS_NO_PATHCONV=1`, run `docker run --rm -v "D:/Projects/Personal/gatekeep:/src" -v gk-nuget:/root/.nuget -w /src mcr.microsoft.com/dotnet/sdk:10.0.403-noble sh -c 'dotnet build Gatekeep.slnx -p:NuGetAudit=false -v q'`. Expected: 0 warnings and 0 errors.
 - `corepack pnpm -r build`, `corepack pnpm --filter @gatekeep/ui check`, `corepack pnpm --filter @gatekeep/hosted-login budget`. Expected: green.
 - The Isolation, Architecture and browser suites run on CI.
+
+## Auto Run Result
+
+Status: done
+
+**Summary:**
+- **Endpoint:** `/connect/endsession` (GET and POST, advertised in discovery) always answers Hosted Login, never an OpenIddict error.
+  - **With a live Session cookie:** it shows "Log out of {Tenant}?" (Stay signed in / Log out, side by side).
+  - **Cookie-less cross-site POST:** 303s to its GET, so the Lax cookie arrives.
+  - **Otherwise:** nothing to end, so the answer is `logged_out`.
+- **Confirming** ends this browser's Session and its Token Families through `RevokeAccess` (committed first), clears the cookie, and answers `logged_out`.
+- **The redirect** is a top-level GET back to the Application with `state`, allowed only when all of these hold:
+  - the hint is an ID token (`typ` absent or `JWT`) signed by the Tenant's published key with its issuer, even if expired;
+  - its single `aud` is a live, visible Application;
+  - any `client_id` matches;
+  - the URL matches a registered one exactly (native apps get the loopback-port exception).
+- **Otherwise** the User is logged out with no redirect. The hint never chooses the Session.
+
+**Files changed (main ones):**
+- `src/Modules/Protocol/Core/HostedLogout.cs` (new): the decision, the page, the confirm route, the CSRF and the OpenIddict handler.
+- `ProtocolServer.cs`, `ProtocolContract.cs`, `StepResponse.cs`, `DirectoryContract.MatchesPostLogoutRedirectUri`.
+- `packages/hosted-screens/src/{LogoutScreen, LoggedOutScreen, StillSignedInScreen}.tsx`; `packages/ui` (`HostedCard` `actionLayout="pair"`, copy); `apps/hosted-login/src/{step.ts, navigate.ts, App.tsx, StepScreen.tsx, api.ts}`.
+- Tests: `LogoutTests` (new), discovery and handler removal, routes, cross-Tenant, the canary `protocol.logout`, and `hosted-logout.spec.ts` with `hosted-logout-fixture.mjs`. Docs: T-38.
+
+**Review findings:** 36.
+- **24 patched:** the SameSite 303, the body limit, revoke before deciding, the catch-all decision, the hint type allowlist, the no-cookie confirm, `QueryHelpers`, `HandleRequest`, the client allowlist, the Stay fallback, the side-by-side layout (shared CSS reverted), the shared fixture constants, two threat-model residuals, and the tests.
+- **None deferred.**
+- **The rest rejected** with reasons in the triage log.
+
+**Follow-up review recommended:** true. A `high` was patched (the SameSite 303), plus three `medium` entries (the body limit and the revoke-first ordering, which share a root cause). The 303 and the reordering changed control flow after review.
+
+**Verification:**
+- .NET build in the SDK 10.0.403 Docker image: 0 warnings, 0 errors.
+- `pnpm -r build`, the `@gatekeep/ui` check and the budget (98.9 of 150 kB) pass. Playwright lists all 24 logout tests.
+- The Isolation, Architecture and browser suites run on CI.
+
+**Residual risks:**
+- The forged-hint tests rely on Transit signatures being usable directly in a JWT.
+- The no-history test relies on Chromium reporting `history.length` as 1.
+- T-38: a forced logout is possible for anyone who can read the stored Session hash, and end-session has no rate limit yet.

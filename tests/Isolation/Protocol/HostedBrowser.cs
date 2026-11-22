@@ -67,6 +67,19 @@ internal sealed class HostedBrowser(ProtocolHost host, string tenantHost, string
         return await SendAsync(request);
     }
 
+    /// <summary>
+    /// POSTs <paramref name="form"/> as <c>application/x-www-form-urlencoded</c> to <paramref name="path"/> with the browser's
+    /// cookies, as a relying party's auto-submitted form does (Story 4.13's end-session endpoint).
+    /// </summary>
+    public async Task<HttpResponseMessage> PostFormAsync(string path, IEnumerable<KeyValuePair<string, string>> form)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Post, new Uri($"http://{tenantHost}{path}"))
+        {
+            Content = new FormUrlEncodedContent(form),
+        };
+        return await SendAsync(request);
+    }
+
     /// <summary>The value <see cref="PostAsync"/> takes to send no <c>Origin</c> at all.</summary>
     public const string NoOrigin = "";
 

@@ -32,6 +32,7 @@
 // Story 4.7: sign-up, the strength meter and email verification's steps (hosted-signup.spec.ts), on that same server.
 // Story 4.9: the Password step and its identifier chip (hosted-signin.spec.ts), on that same server.
 // Story 4.11: password reset's steps (hosted-reset.spec.ts), on that same server.
+// Story 4.13: logout's confirmation and completed logout (hosted-logout.spec.ts), on that same server.
 
 import { existsSync } from 'node:fs';
 import path from 'node:path';
@@ -72,7 +73,7 @@ export default defineConfig({
       name,
       // Every spec that isn't another project's own, so a new spec runs by default.
       testMatch: '*.spec.ts',
-      testIgnore: ['hosted-step.spec.ts', 'admin-csp.spec.ts', 'bootstrap.spec.ts', 'credential-setup.spec.ts', 'signin.spec.ts', 'controls.spec.ts', 'data.spec.ts', 'overlay.spec.ts', 'drawer.spec.ts', 'hosted.spec.ts', 'shell.spec.ts', 'admin-shell.spec.ts', 'admin-credentials.spec.ts', 'admin-recovery.spec.ts', 'admin-tenants.spec.ts', 'admin-tenant-switcher.spec.ts', 'admin-tenant-delete.spec.ts', 'admin-logs.spec.ts', 'admin-signing-keys.spec.ts', 'admin-applications.spec.ts', 'admin-apis.spec.ts', 'admin-email-provider.spec.ts', 'admin-database.spec.ts', 'admin-connections.spec.ts', 'hosted-signup.spec.ts', 'hosted-signin.spec.ts', 'hosted-reset.spec.ts'],
+      testIgnore: ['hosted-step.spec.ts', 'admin-csp.spec.ts', 'bootstrap.spec.ts', 'credential-setup.spec.ts', 'signin.spec.ts', 'controls.spec.ts', 'data.spec.ts', 'overlay.spec.ts', 'drawer.spec.ts', 'hosted.spec.ts', 'shell.spec.ts', 'admin-shell.spec.ts', 'admin-credentials.spec.ts', 'admin-recovery.spec.ts', 'admin-tenants.spec.ts', 'admin-tenant-switcher.spec.ts', 'admin-tenant-delete.spec.ts', 'admin-logs.spec.ts', 'admin-signing-keys.spec.ts', 'admin-applications.spec.ts', 'admin-apis.spec.ts', 'admin-email-provider.spec.ts', 'admin-database.spec.ts', 'admin-connections.spec.ts', 'hosted-signup.spec.ts', 'hosted-signin.spec.ts', 'hosted-reset.spec.ts', 'hosted-logout.spec.ts'],
       use: { baseURL: `http://127.0.0.1:${port}` },
     })),
     // Hosted Login's step pages (Story 4.1), on the built bundle as Host.Hosted serves it.
@@ -83,6 +84,8 @@ export default defineConfig({
     { name: 'hosted-signin', testMatch: 'hosted-signin.spec.ts', use: { baseURL: `http://127.0.0.1:${hostedStep.port}` } },
     // Password reset (Story 4.11), on the same harness.
     { name: 'hosted-reset', testMatch: 'hosted-reset.spec.ts', use: { baseURL: `http://127.0.0.1:${hostedStep.port}` } },
+    // Logout (Story 4.13), on the same harness.
+    { name: 'hosted-logout', testMatch: 'hosted-logout.spec.ts', use: { baseURL: `http://127.0.0.1:${hostedStep.port}` } },
     { name: fixture.name, testMatch: 'controls.spec.ts', use: { baseURL: `http://127.0.0.1:${fixture.port}` } },
     // The data display (Story 1.15), on the same fixture build at ?page=data.
     { name: 'data', testMatch: 'data.spec.ts', use: { baseURL: `http://127.0.0.1:${fixture.port}` } },
