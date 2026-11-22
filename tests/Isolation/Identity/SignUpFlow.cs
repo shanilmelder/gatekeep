@@ -41,8 +41,8 @@ internal sealed record SignUpFlow(CodeFlowSetup Flow)
         {
             // The verification link is enqueued as payload ciphertext, under the Tenant's payload key.
             await ProtocolDatabase.ProvisionSecretClassesAsync(bao, tenant);
-            await flow.Database.ExecuteAsync(
-                $"INSERT INTO connection (tenant_id, id, kind, signup_enabled) VALUES ('{tenant}', gen_random_uuid(), 'database', {(signupEnabled ? "true" : "false")})");
+            // Story 4.12: enabled for the web client, which was created before it.
+            await flow.Database.ExecuteAsync(TestTenants.DatabaseConnectionSql(tenant, signupEnabled));
         }
 
         if (verificationOff)
@@ -57,16 +57,25 @@ internal sealed record SignUpFlow(CodeFlowSetup Flow)
 
     /// <summary>
     /// The host, with <paramref name="hashLimits"/>, (Story 4.8) <paramref name="signUpLimits"/> and (Story 4.9)
-    /// <paramref name="signInLimits"/> in place of the defaults when given.
+    /// <paramref name="signInLimits"/> in place of the defaults when given; with <paramref name="releaseSignIn"/> (Story 4.12)
+    /// the release build's credential step, so Login with no Connection is Generic error as on Host.Hosted.
     /// </summary>
     public Task<ProtocolHost> StartHostAsync(
         Gatekeep.Modules.Authentication.Contracts.PasswordHashLimits? hashLimits = null,
         SignUpLimits? signUpLimits = null,
         SignInLimits? signInLimits = null,
         PasswordResetLimits? resetLimits = null,
-        TimeProvider? time = null) =>
+        TimeProvider? time = null,
+        bool releaseSignIn = false) =>
         ProtocolHost.StartAsync(
-            Flow.Database.Hosted, Flow.Bao, time: time, hashLimits: hashLimits, signUpLimits: signUpLimits, signInLimits: signInLimits, resetLimits: resetLimits);
+            Flow.Database.Hosted,
+            Flow.Bao,
+            time: time,
+            releaseSignIn: releaseSignIn,
+            hashLimits: hashLimits,
+            signUpLimits: signUpLimits,
+            signInLimits: signInLimits,
+            resetLimits: resetLimits);
 
     /// <summary>Story 4.11: reset request limits no test reaches by accident, for one that sends many.</summary>
     public static PasswordResetLimits GenerousReset { get; } = new(

@@ -46,8 +46,16 @@ internal sealed class TokenEndpointServices(
     SignInLimits? signInLimits = null,
     Gatekeep.Modules.Tenancy.Contracts.ITenants? tenants = null,
     IPasswordReset? passwordReset = null,
-    PasswordResetLimits? passwordResetLimits = null)
+    PasswordResetLimits? passwordResetLimits = null,
+    bool credentialStepOffered = false)
 {
+    /// <summary>
+    /// Whether the host registered a credential step of its own (only the tests do, Story 4.2), which can sign a User in at
+    /// Login with no Connection: Login is then always shown. With the release default, Login with no Connection enabled for
+    /// the Application is Generic error (Story 4.12).
+    /// </summary>
+    public bool CredentialStepOffered { get; } = credentialStepOffered;
+
     /// <summary>Password reset (Story 4.11), sharing sign-up's hashing gate.</summary>
     public IPasswordReset PasswordReset { get; } = passwordReset ?? throw new ArgumentNullException(nameof(passwordReset));
 

@@ -9,6 +9,8 @@ import {
   PASSWORD_MIN_LENGTH_CEILING,
   PASSWORD_MIN_LENGTH_FLOOR,
   TERMS_URL_MAX_LENGTH,
+  anyUsable,
+  applicationConnectionsPath,
   checkPolicyDraft,
   checkSettingsDraft,
   databasePath,
@@ -157,5 +159,18 @@ describe('the Tenant settings card', () => {
     assert.deepEqual(serverSettingsErrors([{ field: 'defaultAudience', reason: 'built_in', detail: "Choose one of the Tenant's APIs." }]), {
       defaultAudience: { reason: 'built_in', detail: "Choose one of the Tenant's APIs." },
     });
+  });
+});
+
+describe("an Application's Connections (Story 4.12)", () => {
+  it('is usable only through a Connection on for the Application and enabled in the Tenant', () => {
+    assert.equal(anyUsable([{ enabled: true, tenantEnabled: true }]), true);
+    assert.equal(anyUsable([{ enabled: false, tenantEnabled: true }]), false);
+    assert.equal(anyUsable([{ enabled: true, tenantEnabled: false }]), false);
+    assert.equal(anyUsable([]), false);
+  });
+
+  it("links to the Application's Connections tab with both IDs encoded", () => {
+    assert.equal(applicationConnectionsPath('ten_a/b', 'app_c?d'), '/tenants/ten_a%2Fb/applications/app_c%3Fd?tab=connections');
   });
 });

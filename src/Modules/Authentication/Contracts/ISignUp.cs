@@ -132,9 +132,13 @@ public sealed record LinkVerification(bool Verified, StartedSession? Session, in
 /// </summary>
 public interface ISignUp
 {
-    /// <summary>The Tenant's sign-up as Hosted Login shows it. It writes nothing.</summary>
+    /// <summary>
+    /// The Tenant's sign-up as Hosted Login shows it to Application <paramref name="applicationId"/> (Story 4.12): the
+    /// database Connection counts only while it is enabled for that Application; a null one is the Tenant's own view. It
+    /// writes nothing.
+    /// </summary>
     /// <exception cref="InvalidOperationException">The context has no Tenant.</exception>
-    Task<SignupPolicy> ReadPolicyAsync(CommandContext context, CancellationToken cancellationToken);
+    Task<SignupPolicy> ReadPolicyAsync(CommandContext context, Guid? applicationId, CancellationToken cancellationToken);
 
     /// <summary>
     /// Moves a transaction at Login to Signup (Story 4.7): <see cref="SignInSteps.Signup"/> recorded, <paramref name="email"/>

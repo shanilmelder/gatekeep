@@ -35,7 +35,7 @@ internal sealed class SessionService(IAuditAppender audit, TimeProvider time) : 
 
     private const string SelectLive =
         """
-        SELECT id, user_id, amr, auth_time, idle_expires_at, absolute_expires_at
+        SELECT id, user_id, amr, auth_time, idle_expires_at, absolute_expires_at, connection_id
         FROM user_session
         WHERE tenant_id = @tenant_id AND {0}
           AND ended_at IS NULL AND idle_expires_at > @now AND absolute_expires_at > @now
@@ -248,7 +248,8 @@ internal sealed class SessionService(IAuditAppender audit, TimeProvider time) : 
             reader.GetFieldValue<string[]>(2),
             reader.GetFieldValue<DateTimeOffset>(3),
             reader.GetFieldValue<DateTimeOffset>(4),
-            reader.GetFieldValue<DateTimeOffset>(5));
+            reader.GetFieldValue<DateTimeOffset>(5),
+            reader.IsDBNull(6) ? null : reader.GetGuid(6));
     }
 
     public async Task<TokenFamily?> FindFamilyAsync(CommandContext context, Guid authorizationId, CancellationToken cancellationToken)

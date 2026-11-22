@@ -1,7 +1,8 @@
-import type { DatabaseConnectionResponse } from '@gatekeep/api-client';
+import type { ConnectionApplicationResponse, DatabaseConnectionResponse } from '@gatekeep/api-client';
 import {
   Banner,
   Button,
+  EmptyState,
   ErrorReference,
   Field,
   Input,
@@ -19,15 +20,18 @@ import {
   passwordRules,
   type PasswordRule,
 } from '@gatekeep/ui/admin';
-import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type FormEvent, type MouseEvent, type ReactNode } from 'react';
+import { navigate } from '../navigation';
 import { api } from '../session';
 import { useCapabilities } from './capabilities';
+import { kindText } from './CreateApplicationModal';
 import type { ShellRequest } from './CredentialsPage';
 import {
   PASSWORD_HISTORY_MAX,
   PASSWORD_MIN_LENGTH_CEILING,
   PASSWORD_MIN_LENGTH_FLOOR,
   PASSWORD_STRENGTHS,
+  applicationConnectionsPath,
   checkPolicyDraft,
   isPolicyDirty,
   isStrength,
@@ -115,7 +119,8 @@ export interface DatabasePageProps {
  * and Owners). Password policy holds the minimum length, the strength, the history rule with its count, and the
  * dictionary and personal-data rules, which only tenant.password_policy.manage changes (Tenant Owners): anyone else
  * sees them read-only, "Tenant Owner only". Beside them, "what users see" lists the rules as met or not for a sample
- * typed into a field that is never sent. Each tab has its own Save and toast; its draft survives a switch of tab. The
+ * typed into a field that is never sent. Each tab has its own Save and toast; its draft survives a switch of tab.
+ * Applications (Story 4.12) lists the Applications the Connection is enabled for, each linking to its Connections tab. The
  * server decides every request: the page follows the capability lists, never a role (AD-20).
  */
 export function DatabasePage({ request, tenantId }: DatabasePageProps) {
@@ -317,6 +322,11 @@ export function DatabasePage({ request, tenantId }: DatabasePageProps) {
                 onSubmit={savePolicy}
               />
             ),
+          },
+          {
+            id: 'applications',
+            label: messages.databaseTabApplications,
+            panel: <ApplicationsTab request={request} tenantId={tenantId} messages={messages} />,
           },
         ]}
       />
@@ -574,5 +584,89 @@ function PolicyTab(props: PolicyTabProps) {
         </p>
       )}
     </form>
+  );
+}
+
+type ApplicationsLoad =
+  | { kind: 'loading' }
+  | { kind: 'ready'; applications: ConnectionApplicationResponse[] }
+  | { kind: 'failed'; failure: Failure };
+
+interface ApplicationsTabProps {
+  request: ShellRequest;
+  tenantId: string;
+  messages: Messages;
+}
+
+/**
+ * The Applications tab (Story 4.12): the Applications the database Connection is enabled for, by name, each with its type
+ * and a link to its Connections tab, where the Connection is switched for it. Never the hidden system Application.
+ */
+function ApplicationsTab({ request, tenantId, messages }: ApplicationsTabProps) {
+  const [load, setLoad] = useState<ApplicationsLoad>({ kind: 'loading' });
+  const [attempt, setAttempt] = useState(0);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    setLoad({ kind: 'loading' });
+
+    void (async () => {
+      let result;
+      try {
+        result = await request('get', () => api.listDatabaseConnectionApplications(tenantId), controller.signal);
+      } catch {
+        result = null;
+      }
+      if (controller.signal.aborted) return;
+      const applications = result?.ok ? result.data?.applications : undefined;
+      if (Array.isArray(applications)) setLoad({ kind: 'ready', applications });
+      else setLoad({ kind: 'failed', failure: failureOf(result) });
+    })();
+
+    return () => controller.abort();
+  }, [request, tenantId, attempt]);
+
+  if (load.kind === 'loading') return <SkeletonRows rows={2} caption={false} />;
+
+  if (load.kind === 'failed') {
+    return (
+      <Banner tone="bad" action={{ label: messages.retry, onClick: () => setAttempt((n) => n + 1) }} data-testid="database-applications-load-failed">
+        <p>{messages.loadFailed}</p>
+        <ErrorReference code={load.failure.code} traceId={load.failure.traceId} />
+      </Banner>
+    );
+  }
+
+  if (load.applications.length === 0) {
+    return (
+      <div className={styles.form} data-testid="database-applications-empty">
+        <EmptyState message={messages.databaseApplicationsEmpty} />
+      </div>
+    );
+  }
+
+  const open = (href: string) => (event: MouseEvent<HTMLAnchorElement>) => {
+    // A plain click stays in the dashboard; a modified one opens the link as the browser does.
+    if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    event.preventDefault();
+    navigate(href);
+  };
+
+  return (
+    <section className={styles.card} aria-label={messages.databaseApplicationsLabel} data-testid="database-applications">
+      <ul className={styles.applications}>
+        {load.applications.map((application) => {
+          const href = applicationConnectionsPath(tenantId, application.id);
+          return (
+            <li key={application.id} className={styles.application} data-testid={`database-application-${application.id}`}>
+              <a href={href} onClick={open(href)}>
+                <bdi>{application.name}</bdi>
+              </a>
+              <span className={styles.applicationType}>{kindText(application.type, messages).name}</span>
+            </li>
+          );
+        })}
+      </ul>
+    </section>
   );
 }

@@ -233,6 +233,17 @@ internal static class AdminOpenApi
                 {
                     Enumerate(schema, "kind", ["database"]);
                 }
+                else if (type == typeof(ApplicationConnectionResponse))
+                {
+                    // Story 4.12: in v1 a Connection's ID is its kind, and the one kind is database.
+                    Enumerate(schema, "kind", ["database"]);
+                    Enumerate(schema, "connectionId", ["database"]);
+                }
+                else if (type == typeof(ConnectionApplicationResponse))
+                {
+                    Enumerate(schema, "type", ApplicationsApi.Types);
+                    Bound(schema, "id", ApplicationIdPattern, maxLength: null);
+                }
                 else if (type == typeof(SetTenantSettingsRequest) || type == typeof(TenantSettingsResponse))
                 {
                     Bound(schema, "termsUrl", pattern: "^https://", maxLength: ManagementContract.MaxTermsUrlLength);

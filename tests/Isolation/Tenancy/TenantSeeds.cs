@@ -43,6 +43,9 @@ internal static class TenantSeeds
             $"VALUES ('{t}', 'authentication.token_request.tenant', sha256(convert_to('{t}', 'UTF8')), now(), 1) ON CONFLICT DO NOTHING"),
         ("connection", (t, n) =>
             $"INSERT INTO connection (tenant_id, id, kind) VALUES ('{t}', '{n}', 'database') ON CONFLICT DO NOTHING"),
+        ("application_connection", (t, n) =>
+            "INSERT INTO application_connection (tenant_id, application_id, connection_id, enabled) " +
+            $"SELECT '{t}', '{n}', id, true FROM connection WHERE tenant_id = '{t}' ON CONFLICT DO NOTHING"),
         ("user", (t, n) => $"INSERT INTO \"user\" (tenant_id, id) VALUES ('{t}', '{n}')"),
         ("password_history", (t, n) =>
             $"INSERT INTO password_history (tenant_id, id, user_id, password_hash) VALUES ('{t}', '{n}', '{n}', '$argon2id$seeded')"),

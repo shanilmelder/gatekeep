@@ -172,7 +172,9 @@ internal static class SignInStepResponses
     /// required; at Signup, Signup with <paramref name="policy"/>; after a reset request, the neutral confirmation with "Back
     /// to login", and at Forgot password, Forgot password (Story 4.11); past Login's email, the Password step while the database
     /// Connection is enabled (Story 4.9), else Generic error <c>temporarily_unavailable</c>, the same for every identifier;
-    /// otherwise Login, its "Sign up" link shown while <paramref name="policy"/> is open.
+    /// otherwise Login, its "Sign up" link shown while <paramref name="policy"/> is open, or (Story 4.12) Generic error
+    /// <c>temporarily_unavailable</c> when no Connection is enabled for the transaction's Application and
+    /// <paramref name="credentialStep"/> is false. <paramref name="policy"/> is the Application's own (Story 4.12).
     /// </summary>
     public static StepResponse Current(
         ResolvedTenant tenant,
@@ -184,7 +186,8 @@ internal static class SignInStepResponses
         string? error = null,
         string? email = null,
         IReadOnlyList<string>? rules = null,
-        bool resent = false)
+        bool resent = false,
+        bool credentialStep = false)
     {
         var expiresIn = ExpiresIn(transaction.ExpiresAt, now);
         if (transaction.HasPassed(SignInSteps.Authenticated))
@@ -227,6 +230,13 @@ internal static class SignInStepResponses
             return policy.PasswordEnabled
                 ? StepResponse.Password(tenant.Name, transaction.StepVersion, expiresIn, SignInCsrf.Derive(binding), transaction.Identifier, error)
                 : StepResponse.GenericError(tenant.Name, TemporarilyUnavailable, traceId);
+        }
+
+        // Story 4.12: with no Connection enabled for the Application, nothing can sign in, so Login is Generic error, the same for
+        // every identifier, unless the host's own credential step (only the tests') can.
+        if (!policy.PasswordEnabled && !credentialStep)
+        {
+            return StepResponse.GenericError(tenant.Name, TemporarilyUnavailable, traceId);
         }
 
         return StepResponse.Login(
@@ -275,10 +285,14 @@ internal sealed class HostedAuthorizationSignIn(TokenEndpointServices services) 
             return await ResumeAsync(context, request, http, cancellationToken);
         }
 
-        // A reusable Session: live, and fresh enough for prompt=login and max_age. Its idle expiry is touched, unaudited.
+        // A reusable Session: live, fresh enough for prompt=login and max_age, and (Story 4.12) started through a Connection
+        // enabled for this Application, or through none. Its idle expiry is touched, unaudited. Otherwise Login, as prompt=login
+        // asks: the Session isn't revoked, and the new sign-in rotates it.
         if (SignInCookies.Read(http, ProtocolContract.SessionCookie) is { } presented
             && await services.Sessions.FindLiveAsync(context, presented, cancellationToken) is { } live
             && AuthorizeEndpoint.IsFreshEnough(live.AuthTime, request.AuthenticatedSince, request.ExactFreshness)
+            && (live.ConnectionId is not { } connectionId
+                || await services.Directory.IsConnectionEnabledForApplicationAsync(context, request.ApplicationId, connectionId, cancellationToken))
             && await services.Sessions.TouchAsync(context, live.SessionId, cancellationToken))
         {
             return new AuthorizationSignInOutcome(
@@ -311,7 +325,10 @@ internal sealed class HostedAuthorizationSignIn(TokenEndpointServices services) 
             || !transaction.HasPassed(SignInSteps.Authenticated)
             || transaction.IsExpiredAt(services.Time.GetUtcNow())
             || transaction.AuthenticatedSessionId is not { } sessionId
-            || await services.Sessions.FindLiveAsync(context, sessionId, cancellationToken) is not { } session)
+            || await services.Sessions.FindLiveAsync(context, sessionId, cancellationToken) is not { } session
+            // Story 4.12: as a reused Session, its Connection must still be enabled for the Application, or it records none.
+            || (session.ConnectionId is { } connectionId
+                && !await services.Directory.IsConnectionEnabledForApplicationAsync(context, request.ApplicationId, connectionId, cancellationToken)))
         {
             return refused;
         }
@@ -422,7 +439,7 @@ internal static class LoginEndpoints
 
         // With the database Connection's password sign-in disabled, there is no reset: the current step, unchanged.
         if (stepVersion != transaction.StepVersion || !IsAt(transaction, SignInSteps.Identifier)
-            || !(await login.Services.SignUp.ReadPolicyAsync(context, login.Cancellation)).PasswordEnabled)
+            || !(await login.Services.SignUp.ReadPolicyAsync(context, transaction.ApplicationId, login.Cancellation)).PasswordEnabled)
         {
             await login.AnswerCurrentAsync(context, transaction, binding);
             return;
@@ -467,7 +484,7 @@ internal static class LoginEndpoints
         }
 
         if (stepVersion != transaction.StepVersion || !IsAt(transaction, SignInSteps.Identifier, SignInSteps.Reset)
-            || !(await login.Services.SignUp.ReadPolicyAsync(context, login.Cancellation)).PasswordEnabled)
+            || !(await login.Services.SignUp.ReadPolicyAsync(context, transaction.ApplicationId, login.Cancellation)).PasswordEnabled)
         {
             await login.AnswerCurrentAsync(context, transaction, binding);
             return;
@@ -711,7 +728,7 @@ internal static class LoginEndpoints
             return;
         }
 
-        var policy = await login.Services.SignUp.ReadPolicyAsync(context, login.Cancellation);
+        var policy = await login.Services.SignUp.ReadPolicyAsync(context, transaction.ApplicationId, login.Cancellation);
 
         // Expired before it completed: a new transaction for the same request, with the email kept.
         if (transaction.IsExpiredAt(now))
@@ -719,13 +736,17 @@ internal static class LoginEndpoints
             var restarted = await login.Services.Authentication.RestartAsync(context, transaction, login.Cancellation);
             await scope.CommitAsync(login.Cancellation);
             SignInCookies.SetTransaction(http, restarted.Binding);
-            var step = StepResponse.Login(
-                login.Tenant.Name,
-                1,
-                SignInStepResponses.ExpiresIn(now + SecurityLimits.SignInTransactionLifetime, now),
-                SignInCsrf.Derive(restarted.Binding),
-                transaction.Identifier,
-                signupEnabled: policy.Enabled);
+
+            // Story 4.12: with no Connection enabled for the Application, the restart is Generic error, as Login is.
+            var step = !policy.PasswordEnabled && !login.Services.CredentialStepOffered
+                ? StepResponse.GenericError(login.Tenant.Name, SignInStepResponses.TemporarilyUnavailable, login.TraceId)
+                : StepResponse.Login(
+                    login.Tenant.Name,
+                    1,
+                    SignInStepResponses.ExpiresIn(now + SecurityLimits.SignInTransactionLifetime, now),
+                    SignInCsrf.Derive(restarted.Binding),
+                    transaction.Identifier,
+                    signupEnabled: policy.Enabled);
             await login.Pages.WriteAsync(http, StatusCodes.Status200OK, step, login.Cancellation);
             return;
         }
@@ -733,7 +754,8 @@ internal static class LoginEndpoints
         var expiresAt = await login.Services.Authentication.ExtendAsync(context, transaction.Id, login.Cancellation);
         await scope.CommitAsync(login.Cancellation);
 
-        var current = SignInStepResponses.Current(login.Tenant, transaction with { ExpiresAt = expiresAt }, binding, now, login.TraceId, policy);
+        var current = SignInStepResponses.Current(
+            login.Tenant, transaction with { ExpiresAt = expiresAt }, binding, now, login.TraceId, policy, credentialStep: login.Services.CredentialStepOffered);
         await login.Pages.WriteAsync(http, StatusCodes.Status200OK, current, login.Cancellation);
     }
 
@@ -822,14 +844,15 @@ internal static class LoginEndpoints
             return;
         }
 
-        var policy = await login.Services.SignUp.ReadPolicyAsync(context, login.Cancellation);
+        var policy = await login.Services.SignUp.ReadPolicyAsync(context, transaction.ApplicationId, login.Cancellation);
         var expiresAt = await login.Services.Authentication.ExtendAsync(context, transaction.Id, login.Cancellation);
         await scope.CommitAsync(login.Cancellation);
 
         var now = login.Services.Time.GetUtcNow();
         await login.AnswerAsync(
             StatusCodes.Status200OK,
-            SignInStepResponses.Current(login.Tenant, transaction with { ExpiresAt = expiresAt }, binding, now, login.TraceId, policy));
+            SignInStepResponses.Current(
+                login.Tenant, transaction with { ExpiresAt = expiresAt }, binding, now, login.TraceId, policy, credentialStep: login.Services.CredentialStepOffered));
     }
 
     /// <summary>"Sign up" at Login (Story 4.7): Signup while sign-up is open; otherwise the current Login step, unchanged.</summary>
@@ -1490,8 +1513,9 @@ internal static class LoginEndpoints
             IReadOnlyList<string>? rules = null,
             bool resent = false)
         {
-            var policy = await Services.SignUp.ReadPolicyAsync(context, Cancellation);
-            return SignInStepResponses.Current(Tenant, transaction, binding, Services.Time.GetUtcNow(), TraceId, policy, error, email, rules, resent);
+            var policy = await Services.SignUp.ReadPolicyAsync(context, transaction.ApplicationId, Cancellation);
+            return SignInStepResponses.Current(
+                Tenant, transaction, binding, Services.Time.GetUtcNow(), TraceId, policy, error, email, rules, resent, Services.CredentialStepOffered);
         }
 
         /// <summary>Answers the transaction's current step, writing nothing.</summary>

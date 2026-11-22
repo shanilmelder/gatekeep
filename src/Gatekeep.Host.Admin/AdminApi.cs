@@ -905,6 +905,23 @@ internal static class AdminApi
             .Produces<ApiProblem>(StatusCodes.Status409Conflict, AdminResponses.ProblemContentType)
             .Produces(StatusCodes.Status503ServiceUnavailable);
 
+        app.MapGet("/api/v1/tenants/{tenantId}/connections/database/applications", static (HttpContext context, AdminApiServices services) => ApplicationConnectionsApi.ListApplicationsAsync(context, services))
+            .WithMetadata(TenantApiEndpoint.Instance, new RequiresCapability(AdminCapabilities.TenantConfigurationRead))
+            .WithName("ListDatabaseConnectionApplications")
+            .WithTags(TenantTag)
+            .WithSummary("The path Tenant's Applications its database Connection is enabled for, ordered by name.")
+            .WithDescription(
+                "Any Tenant Role in the path Tenant. Read only, in the Tenant's own scope. Each Application the database " +
+                "Connection is enabled for, while the Tenant enables the Connection: its ID, name and type. Neither a deleted " +
+                "Application nor the Tenant's hidden system Application, which follows every Connection its Tenant enables, is " +
+                "ever listed. A Tenant with no Connection yet is 404 not_found. It writes nothing. A malformed, unknown or " +
+                "role-less Tenant is 403 access_denied, audited as every Tenant capability refusal is.")
+            .Produces<ConnectionApplicationsResponse>(StatusCodes.Status200OK)
+            .Produces(StatusCodes.Status401Unauthorized)
+            .Produces<ApiProblem>(StatusCodes.Status403Forbidden, AdminResponses.ProblemContentType)
+            .Produces<ApiProblem>(StatusCodes.Status404NotFound, AdminResponses.ProblemContentType)
+            .Produces(StatusCodes.Status503ServiceUnavailable);
+
         app.MapGet("/api/v1/tenants/{tenantId}/settings", static (HttpContext context, AdminApiServices services) => TenantSettingsApi.GetAsync(context, services))
             .WithMetadata(TenantApiEndpoint.Instance, new RequiresCapability(AdminCapabilities.TenantConfigurationRead))
             .WithName("GetTenantSettings")
@@ -1098,6 +1115,54 @@ internal static class AdminApi
             .Produces(StatusCodes.Status401Unauthorized)
             .Produces<ApiProblem>(StatusCodes.Status403Forbidden, AdminResponses.ProblemContentType)
             .Produces<ApiProblem>(StatusCodes.Status404NotFound, AdminResponses.ProblemContentType)
+            .Produces<ApiProblem>(StatusCodes.Status409Conflict, AdminResponses.ProblemContentType)
+            .Produces(StatusCodes.Status503ServiceUnavailable);
+
+        app.MapGet("/api/v1/tenants/{tenantId}/applications/{applicationId}/connections", static (HttpContext context, AdminApiServices services) => ApplicationConnectionsApi.GetAsync(context, services))
+            .WithMetadata(TenantApiEndpoint.Instance, new RequiresCapability(AdminCapabilities.TenantConfigurationRead))
+            .WithName("ListApplicationConnections")
+            .WithTags(TenantTag)
+            .WithSummary("The Connections Users can sign in to an Application through.")
+            .WithDescription(
+                "Any Tenant Role in the path Tenant. Read only, in the Tenant's own scope. Each of the Tenant's Connections, in v1 " +
+                "the one database Connection, whose connectionId is database: its name, its kind, whether it is enabled for " +
+                "this Application, and whether the Tenant enables it at all (tenantEnabled). Users sign in to the Application " +
+                "through a Connection only when both are true; a new Application starts with every Connection its Tenant " +
+                "enables on. An applicationId that isn't an app_ ID, names no Application of this Tenant, another Tenant's, a " +
+                "deleted one or the hidden system Application is the same 404 not_found. It writes nothing. A malformed, " +
+                "unknown or role-less Tenant is 403 access_denied, audited as every Tenant capability refusal is.")
+            .Produces<ApplicationConnectionsResponse>(StatusCodes.Status200OK)
+            .Produces(StatusCodes.Status401Unauthorized)
+            .Produces<ApiProblem>(StatusCodes.Status403Forbidden, AdminResponses.ProblemContentType)
+            .Produces<ApiProblem>(StatusCodes.Status404NotFound, AdminResponses.ProblemContentType)
+            .Produces(StatusCodes.Status503ServiceUnavailable);
+
+        app.MapPut("/api/v1/tenants/{tenantId}/applications/{applicationId}/connections/{connectionId}", static (HttpContext context, AdminApiServices services) => ApplicationConnectionsApi.SetAsync(context, services))
+            .WithMetadata(
+                TenantApiEndpoint.Instance,
+                new RequiresCapability(AdminCapabilities.TenantConnectionsToggle),
+                new JsonRequestBody(typeof(SetApplicationConnectionRequest)))
+            .WithName("SetApplicationConnection")
+            .WithTags(TenantTag)
+            .WithSummary("Turn a Connection on or off for one Application.")
+            .WithDescription(
+                "Editors and Owners, and machine principals allowed tenant.connections.toggle, in an active Tenant. When enabled " +
+                "is false, Hosted Login no longer offers the Connection to this Application and refuses its requests through it, " +
+                "and a Session started through it no longer skips Login for this Application; nothing is revoked, and tokens " +
+                "already issued run to expiry. A change writes directory.application_connection.updated on the Tenant's own Log, " +
+                "targeting the Application and recording no value; an unchanged toggle writes nothing and is 200. The answer is " +
+                "the Connection as the list gives it. A body that isn't JSON, is over 4096 bytes or has no boolean enabled is 400 " +
+                "connection_invalid with no errors. An applicationId that isn't an app_ ID, names no Application of this " +
+                "Tenant, another Tenant's, a deleted one or the hidden system Application, and a connectionId other than " +
+                "database, is the same 404 not_found, with nothing written. A Tenant that isn't active is 409 tenant_not_active. " +
+                "A malformed, unknown or role-less Tenant, and a Viewer, is 403 access_denied, audited as every Tenant " +
+                "capability refusal is.")
+            .Produces<ApplicationConnectionResponse>(StatusCodes.Status200OK)
+            .Produces<ApiProblem>(StatusCodes.Status400BadRequest, AdminResponses.ProblemContentType)
+            .Produces(StatusCodes.Status401Unauthorized)
+            .Produces<ApiProblem>(StatusCodes.Status403Forbidden, AdminResponses.ProblemContentType)
+            .Produces<ApiProblem>(StatusCodes.Status404NotFound, AdminResponses.ProblemContentType)
+            // tenant_not_active, and the request checks' tenant_mismatch, which every state-changing Tenant route declares.
             .Produces<ApiProblem>(StatusCodes.Status409Conflict, AdminResponses.ProblemContentType)
             .Produces(StatusCodes.Status503ServiceUnavailable);
 

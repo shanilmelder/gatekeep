@@ -2,9 +2,10 @@
 title: 'Story 4.12: Choose Connections per Application'
 type: 'feature'
 created: '2026-11-22'
-status: 'ready-for-dev'
+status: 'done'
+baseline_revision: 'e302861602f55ebb4a196975a6d5b422f96a2e3b'
 review_loop_iteration: 0
-followup_review_recommended: false
+followup_review_recommended: true
 context:
   - '{project-root}/_bmad-output/implementation-artifacts/epic-4-context.md'
   - '{project-root}/_bmad-output/implementation-artifacts/spec-4-6-configure-the-database-connection.md'
@@ -170,6 +171,45 @@ deferred: []
 
 ## Review Triage Log
 
+### 2026-11-22 — Review pass
+- verdicts: 35 findings — high 0, medium 4, low 22, false 3, maybe-false 6
+- findings:
+  - `low` `reject` (Intent) Login can't hide one Connection and keep another — v1 has one Connection kind (Design Delta); per-kind Login arrives with Epic 14.
+  - `low` `reject` (Intent) The banner is on the Connections tab, not the Settings tab — the UX table places it on Application · Connections.
+  - `low` `reject` (Intent) Sessions with no recorded Connection stay reusable — a deliberate Design Note: they are pre-4.7 or test-only, and refusing them would sign everyone out.
+  - `maybe-false` `reject` (Intent) The system-Application test doesn't go through the Portal — the Portal is Epic 16; the rule is tested at the Directory and service layers. If it hid a defect it would be low.
+  - `medium` `patch` (Intent) An Application created while the Connection is off stays off after it comes back — `InsertDefaults` now writes a row for every Connection.
+  - `false` `reject` (Intent) Database · Applications can't toggle — the design draws a read-only list that links to the Application.
+  - `maybe-false` `reject` (Intent) The Admin screens are tested only against a stubbed API — the routes are tested on the real host; that is the project's browser pattern.
+  - `medium` `patch` (Blind) A Connection created after a Tenant's Applications leaves them all off — Ensure writes enabled rows for the existing Applications (a new `gk_worker` INSERT grant).
+  - `medium` `patch` (Blind) The backfill and the defaults follow different rules — fixed with the Intent row.
+  - `maybe-false` `reject` (Blind) A null `ApplicationId` on a link passes the per-Application check — every link is issued from a transaction carrying its Application; null means the Tenant view by design. If reachable it would be low.
+  - `low` `reject` (Blind) No database guard stops rows for the system Application — the only write paths exclude it, and the effective rule ignores such rows.
+  - `low` `reject` (Blind) The audit event records no value — `AuditDetail` admits no free-form field (the 4.8 deferral); the target names the Application.
+  - `low` `reject` (Blind) The row says "Enabled" while the Tenant has the Connection off — no v1 control can turn it off at Tenant level; `tenantEnabled` drives the banner.
+  - `low` `reject` (Blind) Database · Applications says "Not used" while the Tenant has it off — the same v1 unreachability.
+  - `low` `patch` (Blind) Other switches drop presses during a save — every Toggle is disabled while saving.
+  - `low` `reject` (Blind) An unchanged save still says "Changes saved" — it reaches the state the Admin asked for; exposing `changed` adds API surface for a cosmetic difference.
+  - `low` `patch` (Blind) The badge always reads "Database" — taken from the kind (`kindBadge`).
+  - `low` `patch` (Blind) A restart writes a transaction before the Generic error, against T-67's wording — T-67 reworded.
+  - `low` `patch` (Blind) Missing test: a Connection created after the Applications — added with the Ensure fix.
+  - `low` `reject` (Blind) Missing tests: a null link Application, the restart writes, the 409 and 403 banners — the first is unreachable as above, the second is now documented, and the banners reuse the Database page's tested refusal component.
+  - `low` `patch` (Verification Gap) Sign-up submit and the verification new-link aren't tested with the Connection off for the Application — both added.
+  - `low` `patch` (Verification Gap) The Applications list isn't tested with the Tenant's Connection off — added.
+  - `low` `patch` (Verification Gap) `tenantEnabled` is only tested true — a false case added.
+  - `low` `patch` (Verification Gap, other) The GK012 → 404 branch is dead — removed.
+  - `medium` `patch` (Edge) New Applications get rows only for enabled Connections — fixed with the Intent row.
+  - `medium` `patch` (Edge) Ensure leaves existing Applications without rows — fixed with the Blind row.
+  - `medium` `patch` (Edge) A resume issues a code after the Connection was turned off mid-flow — `ResumeAsync` runs the reuse check; test added.
+  - `maybe-false` `reject` (Edge) A null link `ApplicationId` falls back to the Tenant view — same as the Blind row.
+  - `low` `patch` (Edge) Presses dropped during a save — fixed with the Blind row.
+  - `false` `reject` (Edge) "Refused" implies no writes, but Continue records the identifier — refusal means no credential or account is written; T-67 now says so.
+  - `medium` `patch` (Edge) A mid-flow toggle doesn't stop the in-flight code — fixed with the resume row.
+  - `low` `reject` (Intent) The backfill, the audit event and the extra routes go beyond the story's text — the backfill keeps existing apps working, and the event follows the one-command-one-event convention.
+  - `false` `reject` (Intent) The workflow steps aren't in the diff — process happens after review.
+  - `maybe-false` `reject` (Intent) The system Application's Tenant-disabled case is tested only at the Directory layer — the service reads the same rule. If it hid a defect it would be low.
+  - `maybe-false` `reject` (Blind) The admin bundle's 500 kB chunk warning — unrelated to this change's size (a new tab component); unverified whether it predates it.
+
 ## Design Notes
 
 - **A missing row means off, and the system Application has no rows.** The system row can't be updated (GK012), and "follows every Tenant-enabled Connection" is exactly the Tenant-level flag, so the effective rule handles it with no stored state.
@@ -183,3 +223,40 @@ deferred: []
 - With `MSYS_NO_PATHCONV=1`, run `docker run --rm -v "D:/Projects/Personal/gatekeep:/src" -v gk-nuget:/root/.nuget -w /src mcr.microsoft.com/dotnet/sdk:10.0.403-noble sh -c 'dotnet build Gatekeep.slnx -p:NuGetAudit=false -v q'`. Expected: 0 warnings and 0 errors.
 - `corepack pnpm -r build`, `corepack pnpm --filter @gatekeep/ui check`, and the admin-dashboard unit tests. Expected: green.
 - The Isolation, Architecture and browser suites run on CI.
+
+## Auto Run Result
+
+Status: done
+
+**Summary:**
+- **Storage:** `application_connection` (Directory) holds each Application's on/off per Connection.
+  - **The effective rule:** the Tenant enables the Connection AND (the Application is the system one OR its row is on).
+  - **Rows:** the backfill, every new Application, and a Connection created later all write enabled rows.
+- **Admin:** Admins toggle on Application · Connections, which saves immediately with a toast and shows a banner when nothing is usable. Database · Applications lists who uses the Connection. Three Admin routes back these.
+- **Hosted Login:** Login, Continue, restart and Extend answer Generic `temporarily_unavailable` for an Application with no usable Connection. Every credential route refuses as for a disabled Connection.
+- **Sessions:** authorize reuses, and resumes, only a Session from a Connection still enabled for the Application.
+
+**Files changed (main ones):**
+- `Migration20261201000000ApplicationConnections.cs` and `TableRegistry.cs`: the table, RLS, grants and backfill.
+- `src/Modules/Directory/{Core/DirectoryService.ApplicationConnections.cs, Core/DirectoryService.Connections.cs, Core/DirectoryService.cs, Core/DirectoryPurge.cs, Contracts/*}`.
+- `src/Modules/Management/*` and `src/Gatekeep.Host.Admin/{AdminApi.cs, ApplicationConnectionsApi.cs}`; OpenAPI and the api-client regenerated.
+- Hosted: `SignInService`, `SignUpService`, `PasswordResetService`, `HostedSignIn.cs` (checks, Login, reuse, resume), and `ISessions`/`SessionService` (`ConnectionId`).
+- `apps/admin-dashboard/src/shell/{ApplicationConnections.tsx, ApplicationDetailPage.tsx, DatabasePage.tsx, database.ts}` and `packages/ui/src/messages.tsx`.
+- Tests: `ApplicationConnectionTests`, `ApplicationConnectionsApiTests`, `ApplicationConnectionSignInTests` and `admin-connections.spec.ts` (new); updated seeds, purge registry, grants, migration count (47), routes, capability rules and fixtures (`TestTenants.DatabaseConnectionSql`). Docs: threat model T-67, audit events.
+
+**Review findings:** 35.
+- **16 patched:** rows for every Connection, Ensure writing rows for existing Applications, the resume check, disabled toggles during a save, the badge, T-67's wording, the dead branch, and five tests.
+- **None deferred.**
+- **The rest rejected** with reasons in the triage log.
+
+**Follow-up review recommended:** true. Three `medium` root causes were patched: the default rows, the rows written when a Connection is created (with a new `gk_worker` INSERT grant), and the resume check. The resume check and the new grant landed after review. Patched entries: high 0, medium 3, low 9.
+
+**Verification:**
+- .NET build in the SDK 10.0.403 Docker image: 0 warnings, 0 errors.
+- `pnpm -r build`, the `@gatekeep/ui` check, and the admin-dashboard unit tests (152) pass.
+- The Isolation, Architecture and browser suites run on CI.
+
+**Residual risks:**
+- The fixture changes and new tests are first run on CI.
+- Sessions with no recorded Connection stay reusable.
+- The admin bundle shows Vite's 500 kB chunk warning.

@@ -967,6 +967,21 @@ export interface Messages {
   databaseSave: string;
   databaseSaved: string;
   databaseSaveFailed: string;
+  /** Story 4.12: the Database page's Applications tab: its label, the list's name, and its empty state. */
+  databaseTabApplications: string;
+  databaseApplicationsLabel: string;
+  databaseApplicationsEmpty: string;
+  /** Story 4.12: an Application's Connections tab, its card, each row's kind and state, and the no-Connection banner. */
+  applicationTabConnections: string;
+  applicationConnectionsTitle: string;
+  /** Placeholder: {application}. */
+  applicationConnectionsDescription: string;
+  applicationConnectionKindDatabase: string;
+  applicationConnectionEnabled: string;
+  applicationConnectionDisabled: string;
+  applicationConnectionsNone: string;
+  applicationConnectionsSaved: string;
+  applicationConnectionsSaveFailed: string;
   /** The Password policy tab's fields. */
   passwordMinLength: string;
   /** Placeholders: {min}, {max}. */
@@ -1672,6 +1687,18 @@ export const defaultMessages: Readonly<Messages> = Object.freeze({
   databaseSave: 'Save',
   databaseSaved: 'Changes saved',
   databaseSaveFailed: "Couldn't save your changes. Nothing was changed.",
+  databaseTabApplications: 'Applications',
+  databaseApplicationsLabel: 'Applications using this Connection',
+  databaseApplicationsEmpty: 'Not used by any application',
+  applicationTabConnections: 'Connections',
+  applicationConnectionsTitle: 'Connections enabled for this app',
+  applicationConnectionsDescription: 'Users can only sign in to {application} through enabled connections.',
+  applicationConnectionKindDatabase: 'Database',
+  applicationConnectionEnabled: 'Enabled',
+  applicationConnectionDisabled: 'Disabled',
+  applicationConnectionsNone: "No Connections enabled. Users can't sign in.",
+  applicationConnectionsSaved: 'Changes saved',
+  applicationConnectionsSaveFailed: "Couldn't save your changes. Nothing was changed.",
   passwordMinLength: 'Minimum length',
   passwordMinLengthHelper: '{min} to {max} characters.',
   passwordStrength: 'Strength',

@@ -82,3 +82,36 @@ public enum ConnectionWriteStatus
 
 /// <summary>A database Connection save's result: its status, and the Connection as it now stands unless none was found.</summary>
 public sealed record ConnectionWrite(ConnectionWriteStatus Status, DatabaseConnection? Connection);
+
+/// <summary>
+/// One Connection as an Application sees it (Story 4.12, FR-14): the Connection's row ID, kind and fixed name, whether it is
+/// enabled for the Application (its <c>application_connection</c> row; a missing row means off), and whether the Tenant
+/// enables it at all. Users sign in to the Application through it only when both are true.
+/// </summary>
+public sealed record ApplicationConnection(Guid ConnectionId, string Kind, string Name, bool Enabled, bool TenantEnabled)
+{
+    /// <summary>Whether Users can sign in to the Application through it: enabled for the Application and in the Tenant.</summary>
+    public bool Usable => Enabled && TenantEnabled;
+}
+
+/// <summary>How an Application's Connection toggle ended (Story 4.12).</summary>
+public enum ApplicationConnectionWriteStatus
+{
+    /// <summary>Written, with its one event.</summary>
+    Saved,
+
+    /// <summary>The toggle held what is stored already: nothing written, no event.</summary>
+    Unchanged,
+
+    /// <summary>No visible Application by that ID (unknown, deleted, or the <c>system</c> one), or no such Connection. Nothing written.</summary>
+    NotFound,
+}
+
+/// <summary>An Application's Connection toggle's result: its status, and the Connection as the Application now sees it unless none was found.</summary>
+public sealed record ApplicationConnectionWrite(ApplicationConnectionWriteStatus Status, ApplicationConnection? Connection);
+
+/// <summary>
+/// An Application a Connection is enabled for (Story 4.12): its row ID, its <c>app_</c> public ID, its name and its kind.
+/// Never the <c>system</c> Application or a deleted one.
+/// </summary>
+public sealed record ConnectionApplication(Guid Id, string ClientId, string Name, string Kind);

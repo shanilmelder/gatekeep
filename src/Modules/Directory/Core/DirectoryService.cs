@@ -176,6 +176,9 @@ internal sealed partial class DirectoryService(IAuditAppender audit, TimeProvide
             await command.ExecuteNonQueryAsync(cancellationToken);
         }
 
+        // Story 4.12: as an Admin's Application does, it starts with every Connection its Tenant enables on.
+        await InsertDefaultConnectionsAsync(context, applicationId, cancellationToken);
+
         await using (var command = context.CreateCommand())
         {
             command.CommandText = InsertSecret;
@@ -239,6 +242,9 @@ internal sealed partial class DirectoryService(IAuditAppender audit, TimeProvide
             Add(command, "created_at", now);
             await command.ExecuteNonQueryAsync(cancellationToken);
         }
+
+        // Story 4.12: a new Application starts with every Connection its Tenant enables on, in the same command.
+        await InsertDefaultConnectionsAsync(context, applicationId, cancellationToken);
 
         await _audit.AppendAsync(
             context,

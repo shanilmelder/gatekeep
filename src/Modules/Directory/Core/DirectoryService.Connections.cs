@@ -22,7 +22,20 @@ internal sealed partial class DirectoryService
         }
 
         // ON CONFLICT still lets a concurrent ensure that won insert it first.
-        return await ConnectionRows.InsertAsync(context, tenantId, Guid.CreateVersion7(_time.GetUtcNow()), cancellationToken);
+        var connectionId = Guid.CreateVersion7(_time.GetUtcNow());
+        if (!await ConnectionRows.InsertAsync(context, tenantId, connectionId, cancellationToken))
+        {
+            return false;
+        }
+
+        // Story 4.12: a Tenant that already has Applications (the hourly backfill) keeps their sign-in: on for each, in the
+        // same command, as the migration's backfill does.
+        await using var command = context.CreateCommand();
+        command.CommandText = ApplicationConnectionRows.EnableForApplications;
+        Add(command, "tenant_id", tenantId);
+        Add(command, "connection_id", connectionId);
+        await command.ExecuteNonQueryAsync(cancellationToken);
+        return true;
     }
 
     public Task<DatabaseConnection?> FindDatabaseConnectionAsync(CommandContext context, CancellationToken cancellationToken)
@@ -116,7 +129,8 @@ internal static class ConnectionRows
 
     private const string Select = $"SELECT {Columns} FROM connection WHERE tenant_id = @tenant_id AND kind = @kind";
 
-    // NO KEY UPDATE: nothing references the row, and gk_admin's column UPDATE is enough to take it.
+    // NO KEY UPDATE: a reference to the row (Story 4.12's application_connection) never waits on it, and gk_admin's column
+    // UPDATE is enough to take it.
     private const string SelectLocked = Select + " FOR NO KEY UPDATE";
 
     private const string UpdateSignup =

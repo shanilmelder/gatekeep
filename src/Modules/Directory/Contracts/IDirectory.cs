@@ -122,7 +122,8 @@ public interface IDirectory
     /// <c>spa</c> and <c>native</c> none), no redirect URI, no audience and no client secret, and one
     /// <c>directory.application.created</c> audit event by <paramref name="actor"/>, all in the caller's
     /// context and only in its Tenant. With no secret, a <c>web</c> or <c>machine</c> Application fails
-    /// client authentication until one is created (Story 3.3), and no flow serves the others yet.
+    /// client authentication until one is created (Story 3.3), and no flow serves the others yet. From Story 4.12 every
+    /// Connection the Tenant enables is on for it, in the same command.
     /// </summary>
     /// <exception cref="InvalidOperationException">The context has no Tenant. Nothing is written.</exception>
     /// <exception cref="ArgumentException">
@@ -413,7 +414,8 @@ public interface IDirectory
     /// <see cref="DirectoryContract.DatabaseConnectionName"/>, enabled, with sign-up open and
     /// <see cref="DirectoryContract.DefaultPasswordPolicy"/>: it inserts it only when the Tenant has none, and attempts no
     /// insert at all when it has one. Whether it inserted. Like the built-in Management API it writes no audit event: the
-    /// Tenant's activation, or the backfill, is the record.
+    /// Tenant's activation, or the backfill, is the record. From Story 4.12, an inserted Connection is on for each of the
+    /// Tenant's existing non-system, non-deleted Applications, in the same command.
     /// </summary>
     /// <exception cref="InvalidOperationException">The context has no Tenant. Nothing is written.</exception>
     [StateChanging]
@@ -444,4 +446,51 @@ public interface IDirectory
     /// <exception cref="ArgumentException">The policy breaks a rule of <see cref="DirectoryContract.CheckPasswordPolicy"/>. Nothing is written.</exception>
     [StateChanging]
     Task<ConnectionWrite> UpdatePasswordPolicyAsync(CommandContext context, Actor actor, PasswordPolicy policy, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// The context Tenant's database Connection as Application <paramref name="applicationId"/> sees it (Story 4.12, FR-14),
+    /// its <see cref="DatabaseConnection.Enabled"/> narrowed by the one effective rule: the Connection is enabled for the
+    /// Application when the Tenant enables it and either the Application is the <c>system</c> one, which follows every
+    /// Connection its Tenant enables, or its <c>application_connection</c> row is enabled. A missing row means off, and an
+    /// unknown or deleted Application enables nothing. A null <paramref name="applicationId"/> is the <c>system</c>
+    /// Application's view: the Tenant's own. Null when the Tenant has no database Connection. It only reads.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The context has no Tenant.</exception>
+    Task<DatabaseConnection?> FindDatabaseConnectionForApplicationAsync(CommandContext context, Guid? applicationId, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Whether the Connection <paramref name="connectionId"/> is enabled for Application <paramref name="applicationId"/>
+    /// by the effective rule of <see cref="FindDatabaseConnectionForApplicationAsync"/> (Story 4.12): a reused Session must
+    /// come from one. False for an unknown Connection. It only reads.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The context has no Tenant.</exception>
+    Task<bool> IsConnectionEnabledForApplicationAsync(CommandContext context, Guid applicationId, Guid connectionId, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// The context Tenant's Connections as its Application <paramref name="applicationId"/> sees them (Story 4.12): in v1 the
+    /// one database Connection, when the Tenant has it. Null when the Tenant has no visible Application by that ID: an
+    /// unknown one, a deleted one and the <c>system</c> one alike. It only reads.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The context has no Tenant.</exception>
+    Task<IReadOnlyList<ApplicationConnection>?> ListApplicationConnectionsAsync(CommandContext context, Guid applicationId, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Turns the Connection of kind <paramref name="connectionKind"/> on or off for the context Tenant's Application
+    /// <paramref name="applicationId"/> (Story 4.12, FR-14), under the Application's row lock, in the caller's transaction.
+    /// When it changes it writes the row (inserting a missing one) and <c>directory.application_connection.updated</c> by
+    /// <paramref name="actor"/>, the Application as target; when it doesn't, nothing and no event. The <c>system</c>
+    /// Application is never found here, and no row is ever written for it.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The context has no Tenant. Nothing is written.</exception>
+    [StateChanging]
+    Task<ApplicationConnectionWrite> SetApplicationConnectionAsync(
+        CommandContext context, Actor actor, Guid applicationId, string connectionKind, bool enabled, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// The context Tenant's visible Applications the Connection of kind <paramref name="connectionKind"/> is enabled for
+    /// (Story 4.12), ordered by name: never the <c>system</c> Application or a deleted one. Null when the Tenant has no such
+    /// Connection. It only reads.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The context has no Tenant.</exception>
+    Task<IReadOnlyList<ConnectionApplication>?> ListConnectionApplicationsAsync(CommandContext context, string connectionKind, CancellationToken cancellationToken);
 }
