@@ -84,8 +84,8 @@ public sealed class AuthorizationCodeTests(PostgresFixture postgres, OpenBaoFixt
         Assert.Equal(SecurityAlgorithms.RsaSha256, access.Alg);
         Assert.Equal(await CodeFlow.CurrentKidAsync(flow.Database, flow.A.TenantId), access.Kid);
         Assert.Equal(subject, access.Subject);
-        // Story 3.7: no API named, so no aud at all, and never the Story 2.5 placeholder.
-        Assert.Empty(access.Audiences);
+        // Story 4.9: no API named and no default audience, so only the Tenant's userinfo endpoint, never the placeholder.
+        Assert.Equal([$"{flow.A.Issuer}connect/userinfo"], access.Audiences);
 
         var idToken = token.Body.RootElement.GetProperty("id_token").GetString()!;
         var id = new JsonWebToken(idToken);
@@ -103,8 +103,8 @@ public sealed class AuthorizationCodeTests(PostgresFixture postgres, OpenBaoFixt
 
         var jwksA = await CodeFlow.JwksAsync(host, HostA);
         var jwksB = await CodeFlow.JwksAsync(host, HostB);
-        Assert.True(await CodeFlow.VerifiesAsync(token.AccessToken, jwksA, flow.A.Issuer, audience: null, "at+jwt"), "A's access token doesn't verify with A's JWKS.");
-        Assert.False(await CodeFlow.VerifiesAsync(token.AccessToken, jwksB, flow.A.Issuer, audience: null, "at+jwt"), "A's access token verifies with B's JWKS.");
+        Assert.True(await CodeFlow.VerifiesAsync(token.AccessToken, jwksA, flow.A.Issuer, $"{flow.A.Issuer}connect/userinfo", "at+jwt"), "A's access token doesn't verify with A's JWKS.");
+        Assert.False(await CodeFlow.VerifiesAsync(token.AccessToken, jwksB, flow.A.Issuer, $"{flow.A.Issuer}connect/userinfo", "at+jwt"), "A's access token verifies with B's JWKS.");
         Assert.True(await CodeFlow.VerifiesAsync(idToken, jwksA, flow.A.Issuer, flow.ClientA.ClientId, null), "A's ID token doesn't verify with A's JWKS.");
         Assert.False(await CodeFlow.VerifiesAsync(idToken, jwksB, flow.A.Issuer, flow.ClientA.ClientId, null), "A's ID token verifies with B's JWKS.");
 
@@ -409,9 +409,10 @@ public sealed class AuthorizationCodeTests(PostgresFixture postgres, OpenBaoFixt
     }
 
     [Fact]
-    public async Task The_release_credential_step_offers_none_so_Continue_is_temporarily_unavailable_and_no_code_is_issued()
+    public async Task The_release_credential_step_authenticates_no_one_so_Continue_is_the_Password_step_and_no_code_is_issued()
     {
         var flow = await CodeFlowSetup.CreateAsync(postgres, bao, HostA, HostB);
+        await flow.Database.ExecuteAsync($"INSERT INTO connection (tenant_id, id, kind) VALUES ('{flow.A.TenantId}', gen_random_uuid(), 'database')");
         await using var host = await ProtocolHost.StartAsync(flow.Database.Hosted, bao, releaseSignIn: true);
         var browser = new HostedBrowser(host, HostA);
 
@@ -425,8 +426,8 @@ public sealed class AuthorizationCodeTests(PostgresFixture postgres, OpenBaoFixt
             ProtocolContract.LoginIdentifierPath, new { stepVersion = login.StepVersion, email = TestOnlyCredentialStep.Email(flow.UserA) }, login.Csrf);
         Assert.Equal(HttpStatusCode.OK, continued.StatusCode);
         using var step = await HostedBrowser.StepAsync(continued);
-        Assert.Equal("generic_error", step.RootElement.GetProperty("step").GetString());
-        Assert.Equal("temporarily_unavailable", step.RootElement.GetProperty("data").GetProperty("code").GetString());
+        // Story 4.9: only the Password step can sign anyone in now.
+        Assert.Equal("password", step.RootElement.GetProperty("step").GetString());
 
         Assert.Equal(0L, await flow.Database.ScalarAsync<long>("SELECT count(*) FROM user_session"));
         Assert.Equal(0L, await flow.Database.ScalarAsync<long>("SELECT count(*) FROM \"authorization\""));
@@ -1027,7 +1028,10 @@ internal static class CodeFlow
         return new TokenResponse(response, System.Text.Json.JsonDocument.Parse(body));
     }
 
-    /// <summary>Whether the token verifies; with no <paramref name="audience"/> (Story 3.7), it must carry no <c>aud</c>.</summary>
+    /// <summary>
+    /// Whether the token verifies; with no <paramref name="audience"/> it must carry no <c>aud</c> (a User token always
+    /// carries one from Story 4.9: its API, the default audience or the Tenant's userinfo endpoint).
+    /// </summary>
     public static async Task<bool> VerifiesAsync(string token, JsonWebKeySet jwks, string issuer, string? audience, string? type)
     {
         if (audience is null && new JsonWebToken(token).Audiences.Any())

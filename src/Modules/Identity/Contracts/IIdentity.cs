@@ -23,6 +23,18 @@ public sealed record Registration(RegisteredUser? Registered, Guid? ExistingUser
     public static Registration Existing(Guid userId) => new(null, userId);
 }
 
+/// <summary>
+/// A User as password sign-in reads it (Story 4.9), by address: its ID, its <c>active</c> password credential's ID, PHC
+/// string and Connection, or null for each when it has none (a <c>pending</c> one never signs in), and when its email was
+/// verified, or null. Times are in UTC.
+/// </summary>
+public sealed record SignInAccount(
+    Guid UserId,
+    Guid? CredentialId,
+    string? PasswordHash,
+    Guid? ConnectionId,
+    DateTimeOffset? EmailVerifiedAt);
+
 /// <summary>A password credential as sign-up reads it back (Story 4.7): its User, whether it is active, and whether the User's email is verified.</summary>
 public sealed record CredentialState(Guid UserId, bool Active, bool UserVerified);
 
@@ -92,11 +104,14 @@ public interface IIdentity
 
     /// <summary>
     /// Issues an email verification link for the pending credential <paramref name="credentialId"/> of
-    /// <paramref name="userId"/> (Story 4.7): <c>{tenantPublicId}.{base64url of 32 random bytes}</c>, of which only the
+    /// <paramref name="userId"/> (Story 4.7), or for the active one of a User whose email isn't verified (Story 4.9): <c>{tenantPublicId}.{base64url of 32 random bytes}</c>, of which only the
     /// SHA-256 of the whole value is stored. It lasts <c>SecurityLimits.EmailVerificationLinkLifetime</c> and works once. It
     /// replaces the credential's unused link, if any, so only the newest works. The value is returned once, for the email.
     /// </summary>
-    /// <exception cref="InvalidOperationException">The context has no Tenant, or no pending credential of that User has that ID. Nothing is written.</exception>
+    /// <exception cref="InvalidOperationException">
+    /// The context has no Tenant, or that User has no credential with that ID that is pending or belongs to an unverified
+    /// User. Nothing is written.
+    /// </exception>
     [StateChanging]
     Task<Secret<string>> IssueVerificationLinkAsync(
         CommandContext context, Guid userId, Guid credentialId, Guid? applicationId, CancellationToken cancellationToken);
@@ -123,6 +138,25 @@ public interface IIdentity
     /// <exception cref="InvalidOperationException">The context has no Tenant. Nothing is written.</exception>
     [StateChanging]
     Task<EmailVerification> VerifyEmailAsync(CommandContext context, Secret<string> token, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// The User with <paramref name="email"/>, compared case-insensitively, as password sign-in reads it (Story 4.9), with
+    /// no lock; null when the Tenant has none. It writes nothing.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The context has no Tenant.</exception>
+    Task<SignInAccount?> FindSignInAccountAsync(CommandContext context, string email, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Replaces the active credential <paramref name="credentialId"/>'s PHC string with <paramref name="passwordHash"/>, the
+    /// same password under the current parameters (Story 4.9, NFR-2), and its <c>updated_at</c>, in one statement, only
+    /// while it still holds <paramref name="previousHash"/>, the hash that was verified: a password changed meanwhile is
+    /// never overwritten. The password history is left as it is. Whether it replaced one.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The context has no Tenant. Nothing is written.</exception>
+    /// <exception cref="ArgumentException">The hash is empty or too long. Nothing is written.</exception>
+    [StateChanging]
+    Task<bool> UpdatePasswordHashAsync(
+        CommandContext context, Guid credentialId, string previousHash, string passwordHash, CancellationToken cancellationToken);
 
     /// <summary>The User's newest <paramref name="count"/> earlier password hashes, newest first (Story 4.7, for the history rule). It writes nothing.</summary>
     /// <exception cref="InvalidOperationException">The context has no Tenant.</exception>

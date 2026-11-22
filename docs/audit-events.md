@@ -24,6 +24,8 @@ Every audit type code Gatekeep writes, declared in its module's contract. Codes 
 | `admin.signin.failed` | Admins | Failure | A sign-in whose signature verified over an Admin's WebAuthn credential was refused. Holds no credential ID, challenge or user handle. | None |
 | `admin.signin.succeeded` | Admins | Success | An Admin signed in with a WebAuthn credential and a full Admin Session started. Holds no credential ID, challenge, user handle or Session ID. | None |
 | `audit.retention.checkpoint` | Audit | Success | Retention deleted a chain's sealed prefix past the Log period. Names the last deleted row's epoch, seq and hash. | None |
+| `authentication.signin.failed` | Authentication | Failure | A password sign-in at Hosted Login failed. Anonymous; the target is the User when the account exists. | Sign-ins and failures |
+| `authentication.signin.succeeded` | Authentication | Success | A User signed in with their password at Hosted Login, and a Session started. The User is Actor and target. | Sign-ins and failures |
 | `authentication.signin_transaction.completed` | Authentication | Success | An authenticated sign-in transaction completed its authorization request, and can't be used again. The caller is anonymous. | None |
 | `authentication.signin_transaction.extended` | Authentication | Success | A sign-in transaction's 30-minute sliding life was extended: its Login page was opened, Keep going was chosen or its email was recorded. Anonymous. | None |
 | `authentication.signin_transaction.identified` | Authentication | Success | A sign-in transaction recorded the email entered at Login. The caller is anonymous, and the email isn't in the event. | None |
@@ -85,7 +87,7 @@ Each class a Tenant's Log must cover, and the codes that prove it. A pending cla
 
 | Class | Codes | Status |
 | --- | --- | --- |
-| Sign-ins and failures | None yet | Pending: Story 4.9 |
+| Sign-ins and failures | `authentication.signin.failed`, `authentication.signin.succeeded` | Proved |
 | Password resets | None yet | Pending: Story 4.11 |
 | Email changes | None yet | Pending: Story 16.8 |
 | Factor events | None yet | Pending: Story 6.1 |

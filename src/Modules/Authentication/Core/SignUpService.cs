@@ -28,7 +28,7 @@ internal sealed class SignUpService(
     IDirectory directory,
     ITenants tenants,
     IJobEnqueuer enqueuer,
-    PasswordHashGate gate) : ISignUp
+    IPasswordHashGate gate) : ISignUp
 {
     /// <summary>A password sign-up's one authentication method (RFC 8176).</summary>
     private static readonly IReadOnlyList<string> PasswordAmr = ["pwd"];
@@ -90,7 +90,7 @@ internal sealed class SignUpService(
     private readonly IDirectory _directory = directory ?? throw new ArgumentNullException(nameof(directory));
     private readonly ITenants _tenants = tenants ?? throw new ArgumentNullException(nameof(tenants));
     private readonly IJobEnqueuer _enqueuer = enqueuer ?? throw new ArgumentNullException(nameof(enqueuer));
-    private readonly PasswordHashGate _gate = gate ?? throw new ArgumentNullException(nameof(gate));
+    private readonly IPasswordHashGate _gate = gate ?? throw new ArgumentNullException(nameof(gate));
 
     public async Task<SignupPolicy> ReadPolicyAsync(CommandContext context, CancellationToken cancellationToken)
     {
@@ -262,8 +262,9 @@ internal sealed class SignUpService(
         var tenantId = TenantOf(context);
         RequireRegistered(transaction);
 
+        // Story 4.9: an unverified User's active credential, after a sign-in with the correct password, gets a link too.
         if (transaction is { SignupUserId: { } userId, SignupCredentialId: { } credentialId }
-            && await _identity.FindCredentialAsync(context, credentialId, cancellationToken) is { Active: false, UserVerified: false } credential
+            && await _identity.FindCredentialAsync(context, credentialId, cancellationToken) is { UserVerified: false } credential
             && credential.UserId == userId)
         {
             var link = await _identity.IssueVerificationLinkAsync(context, userId, credentialId, transaction.ApplicationId, cancellationToken);
@@ -282,10 +283,13 @@ internal sealed class SignUpService(
         RequireRegistered(transaction);
 
         // Only the credential this sign-up made, once active, signs it in: another sign-up's verification deleted it. A
-        // database Connection disabled since signs nobody in.
+        // database Connection disabled since signs nobody in. Story 4.9: an active credential isn't enough on its own, since a
+        // sign-in may record an unverified User's: the email must be verified, or verification off on a Dev Tenant.
         if (transaction is { SignupUserId: { } userId, SignupCredentialId: { } credentialId }
             && await _identity.FindCredentialAsync(context, credentialId, cancellationToken) is { Active: true } credential
             && credential.UserId == userId
+            && (credential.UserVerified
+                || (await _tenants.GetSignupSettingsAsync(context, tenantId, cancellationToken))?.EmailVerificationOff == true)
             && await _directory.FindDatabaseConnectionAsync(context, cancellationToken) is { Enabled: true } connection)
         {
             var (session, stepVersion, expiresAt) = await AuthenticateAsync(
@@ -319,7 +323,7 @@ internal sealed class SignUpService(
         if (verification is { Status: EmailVerificationStatus.Verified, UserId: { } userId, CredentialId: { } credentialId }
             && transaction is { CompletedAt: null } live
             && !live.IsExpiredAt(now)
-            && IsAt(live, SignInSteps.Signup, SignInSteps.Registered)
+            && IsRegistered(live)
             && live.SignupUserId == userId
             && live.SignupCredentialId == credentialId
             && await _directory.FindDatabaseConnectionAsync(context, cancellationToken) is { Enabled: true } connection)
@@ -339,18 +343,24 @@ internal sealed class SignUpService(
         TenantOf(context);
 
         if (await _identity.FindVerificationLinkAsync(context, token, cancellationToken) is { UserVerified: false } link
-            && await _identity.FindCredentialAsync(context, link.CredentialId, cancellationToken) is { Active: false, UserVerified: false })
+            && await _identity.FindCredentialAsync(context, link.CredentialId, cancellationToken) is { UserVerified: false })
         {
             var fresh = await _identity.IssueVerificationLinkAsync(context, link.UserId, link.CredentialId, link.ApplicationId, cancellationToken);
             await EnqueueVerificationAsync(context, link.UserId, fresh, cancellationToken);
         }
     }
 
-    /// <summary>The Connection as Hosted Login shows its sign-up: open only while it is enabled with sign-up on.</summary>
+    /// <summary>
+    /// The Connection as Hosted Login shows it: sign-up open only while it is enabled with sign-up on, and (Story 4.9) the
+    /// Password step offered while it is enabled.
+    /// </summary>
     private static SignupPolicy Policy(DatabaseConnection? connection) =>
         connection is null
             ? new SignupPolicy(false, DirectoryContract.DefaultPasswordPolicy.MinLength, DirectoryContract.DefaultPasswordPolicy.Strength)
-            : new SignupPolicy(connection.Enabled && connection.SignupEnabled, connection.Policy.MinLength, connection.Policy.Strength);
+            : new SignupPolicy(connection.Enabled && connection.SignupEnabled, connection.Policy.MinLength, connection.Policy.Strength)
+            {
+                PasswordEnabled = connection.Enabled,
+            };
 
     /// <summary>
     /// A Session for the User, through Sessions with <c>amr: ["pwd"]</c> and the database Connection, and the transaction's
@@ -422,9 +432,16 @@ internal sealed class SignUpService(
     private static bool IsAt(SignInTransaction transaction, params string[] steps) =>
         transaction.CompletedSteps.SequenceEqual(steps, StringComparer.Ordinal);
 
+    /// <summary>
+    /// Whether the transaction stands at Email verification required: after a sign-up (Story 4.7), or after an unverified
+    /// User's correct password at the Password step (Story 4.9).
+    /// </summary>
+    private static bool IsRegistered(SignInTransaction transaction) =>
+        IsAt(transaction, SignInSteps.Signup, SignInSteps.Registered) || IsAt(transaction, SignInSteps.Identifier, SignInSteps.Registered);
+
     private static void RequireRegistered(SignInTransaction transaction)
     {
-        if (!IsAt(transaction, SignInSteps.Signup, SignInSteps.Registered))
+        if (!IsRegistered(transaction))
         {
             throw new InvalidOperationException("The sign-in transaction isn't registered.");
         }

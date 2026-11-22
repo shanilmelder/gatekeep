@@ -29,7 +29,7 @@ internal static class PasswordHasher
         ArgumentNullException.ThrowIfNull(password);
 
         var salt = RandomNumberGenerator.GetBytes(SecurityLimits.Argon2SaltBytes);
-        var parameters = new Parameters(SecurityLimits.Argon2MemoryKiB, SecurityLimits.Argon2Iterations, SecurityLimits.Argon2Parallelism);
+        var parameters = Current;
         var hash = await ComputeAsync(password, salt, parameters, SecurityLimits.Argon2HashBytes);
         try
         {
@@ -69,6 +69,15 @@ internal static class PasswordHasher
 
     /// <summary>The parameters <paramref name="phc"/> names, or null when it isn't a PHC string this reads.</summary>
     public static Parameters? ParametersOf(string phc) => TryParse(phc, out var parameters, out _, out _) ? parameters : null;
+
+    /// <summary>The parameters a new hash takes: <see cref="SecurityLimits"/>' Argon2id memory, iterations and parallelism.</summary>
+    public static Parameters Current { get; } = new(SecurityLimits.Argon2MemoryKiB, SecurityLimits.Argon2Iterations, SecurityLimits.Argon2Parallelism);
+
+    /// <summary>
+    /// Whether <paramref name="phc"/> should be hashed again at its next successful sign-in (Story 4.9, NFR-2): its
+    /// parameters differ from <see cref="Current"/>, or it isn't a PHC string this reads.
+    /// </summary>
+    public static bool NeedsRehash(string phc) => ParametersOf(phc) != Current;
 
     private static async Task<byte[]> ComputeAsync(Secret<string> password, byte[] salt, Parameters parameters, int length)
     {

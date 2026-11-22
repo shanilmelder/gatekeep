@@ -72,9 +72,15 @@ public interface IPasswordHashGate
 /// What Hosted Login shows of the Tenant's sign-up (Story 4.7): whether it is open, which needs the database Connection
 /// enabled with sign-up on, and the password policy's minimum length and strength, the rules the strength meter checks in
 /// the browser. A Tenant with no database Connection shows sign-up closed, with the policy defaults. From Story 4.8 it
-/// also carries the Tenant's terms URL, or null, which Signup asks the User to accept.
+/// also carries the Tenant's terms URL, or null, which Signup asks the User to accept. From Story 4.9,
+/// <see cref="PasswordEnabled"/> says whether Login's email leads to the Password step: while the database Connection is
+/// enabled, whatever its sign-up setting.
 /// </summary>
-public sealed record SignupPolicy(bool Enabled, int MinLength, string Strength, string? TermsUrl = null);
+public sealed record SignupPolicy(bool Enabled, int MinLength, string Strength, string? TermsUrl = null)
+{
+    /// <summary>Whether the database Connection is enabled, so Login's email leads to the Password step (Story 4.9).</summary>
+    public bool PasswordEnabled { get; init; }
+}
 
 /// <summary>A sign-in transaction moved on (Story 4.7): its new step version and expiry.</summary>
 public sealed record MovedSignIn(int StepVersion, DateTimeOffset ExpiresAt);

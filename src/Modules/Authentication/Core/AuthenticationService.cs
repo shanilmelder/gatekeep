@@ -223,7 +223,7 @@ internal sealed class AuthenticationService(IAuditAppender audit, TimeProvider t
             ExpiresAt = expiresAt,
         };
 
-        // The next step: none in a release build until Story 4.9; only a test's credential step authenticates.
+        // The next step: in a release build always the Password step (Story 4.9); only a test's credential step authenticates here.
         if (await _credentialStep.AfterIdentifierAsync(context, identified, cancellationToken) is not { } authentication)
         {
             return new IdentifiedSignIn(stepVersion, expiresAt, null);
@@ -364,7 +364,7 @@ internal sealed class AuthenticationService(IAuditAppender audit, TimeProvider t
     }
 }
 
-/// <summary>The release build's credential step (Story 4.2): none is available until Story 4.9.</summary>
+/// <summary>The release build's credential step (Story 4.2): it authenticates no one at Continue, so the Password step follows (Story 4.9).</summary>
 internal sealed class NoCredentialStep : ICredentialStep
 {
     public ValueTask<CredentialAuthentication?> AfterIdentifierAsync(

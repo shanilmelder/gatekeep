@@ -1,7 +1,7 @@
-// Hosted Login's only network requests (Stories 4.2 and 4.7): Continue, Keep going, and sign-up's. Each is a same-origin
+// Hosted Login's only network requests (Stories 4.2, 4.7 and 4.9): Continue, Keep going, sign-up's and the Password step's. Each is a same-origin
 // POST with the step's CSRF token in X-Gatekeep-CSRF, and each answers with a step, which the client renders as it
 // renders the page's own. The browser sends the Origin and the HttpOnly transaction cookie; the client never reads
-// either. The password goes only in Create account's body, and a link only in Send a new link's.
+// either. The password goes only in Create account's and Log in's bodies, and a link only in Send a new link's.
 
 import { invalidStep, parseStep, type Step } from './step';
 
@@ -26,6 +26,12 @@ export const RESEND_PATH = '/login/api/verification/resend';
 /** "I've verified, continue". */
 export const VERIFIED_CONTINUE_PATH = '/login/api/verification/continue';
 
+/** Story 4.9: "Log in" at the Password step. */
+export const PASSWORD_PATH = '/login/api/password';
+
+/** The identifier chip's "Edit", back to Login. */
+export const PASSWORD_BACK_PATH = '/login/api/password/back';
+
 /** "Send a new link", from an expired link's page, with the link-bound CSRF token. */
 export const NEW_LINK_PATH = '/login/api/verification/new-link';
 
@@ -43,7 +49,9 @@ type ApiPath =
   | typeof SIGNUP_PATH
   | typeof RESEND_PATH
   | typeof VERIFIED_CONTINUE_PATH
-  | typeof NEW_LINK_PATH;
+  | typeof NEW_LINK_PATH
+  | typeof PASSWORD_PATH
+  | typeof PASSWORD_BACK_PATH;
 
 async function post(path: ApiPath, body: object, csrfToken: string, tenant: string): Promise<Step> {
   let response: Response;
@@ -96,6 +104,16 @@ export function postSignup(
   tenant: string,
 ): Promise<Step> {
   return post(SIGNUP_PATH, { stepVersion, email, password, acceptTerms }, csrfToken, tenant);
+}
+
+/** Log in: the password as typed, at the Password step's version (Story 4.9). */
+export function postPassword(stepVersion: number, password: string, csrfToken: string, tenant: string): Promise<Step> {
+  return post(PASSWORD_PATH, { stepVersion, password }, csrfToken, tenant);
+}
+
+/** The identifier chip's "Edit": back to Login, the email kept. */
+export function postPasswordBack(stepVersion: number, csrfToken: string, tenant: string): Promise<Step> {
+  return post(PASSWORD_BACK_PATH, { stepVersion }, csrfToken, tenant);
 }
 
 /** Resend email. */

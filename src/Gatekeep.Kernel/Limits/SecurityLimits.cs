@@ -380,6 +380,23 @@ public static class SecurityLimits
     public static readonly TimeSpan SignUpWindow = TimeSpan.FromMinutes(15);
 
     /// <summary>
+    /// Password submits one Tenant's Hosted Login takes in <see cref="SignInWindow"/>: 1,200, from every source together
+    /// (Story 4.9, NFR-6), twice the sign-up limit and equal to the token endpoint's. Each is counted before any lookup or
+    /// hash, so past it every password submit is a 429 until the window ends, whatever its account.
+    /// </summary>
+    public const int SignInTenantAttempts = 1200;
+
+    /// <summary>
+    /// Password submits one source (an IPv4 address, or an IPv6 /64) may send one Tenant's Hosted Login in
+    /// <see cref="SignInWindow"/>: 30 (Story 4.9, NFR-6), three times the sign-up limit, counted like the Tenant's and never
+    /// by account. Per-account backoff is Epic 10's.
+    /// </summary>
+    public const int SignInSourceAttempts = 30;
+
+    /// <summary>The fixed window password submits are counted in: 15 minutes (Story 4.9).</summary>
+    public static readonly TimeSpan SignInWindow = TimeSpan.FromMinutes(15);
+
+    /// <summary>
     /// How long an email verification link works: 24 hours (Story 4.7), as the PRD's credential enrolment link (§5.2,
     /// A-18). It works once, and only its SHA-256 is stored.
     /// </summary>

@@ -1,0 +1,30 @@
+/*
+ * The identifier chip (Story 4.9): the identifier and its Edit action on one row while they fit, wrapping otherwise. The
+ * identifier breaks anywhere rather than overflow or truncate.
+ */
+
+.chip {
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--gk-space-4) var(--gk-space-12);
+  min-width: 0;
+  padding: var(--gk-space-8) var(--gk-space-12);
+  border: 1px solid var(--gk-color-bd);
+  border-radius: var(--gk-radius-control);
+  background: var(--gk-color-sf2);
+  font: var(--gk-font-body);
+  color: var(--gk-color-tx);
+}
+
+.identifier {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.edit {
+  flex: none;
+}

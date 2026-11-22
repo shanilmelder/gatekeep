@@ -88,9 +88,10 @@ public sealed partial class SignInTransactionTests(PostgresFixture postgres, Ope
     }
 
     [Fact]
-    public async Task Continue_in_a_release_build_records_the_email_and_is_temporarily_unavailable()
+    public async Task Continue_in_a_release_build_records_the_email_and_answers_the_Password_step()
     {
         var flow = await CodeFlowSetup.CreateAsync(postgres, bao, HostA, HostB);
+        await AddDatabaseConnectionAsync(flow);
         await using var host = await flow.StartHostAsync();
         var browser = await BeginAsync(host, flow);
         var login = await browser.LoginStepAsync();
@@ -102,8 +103,13 @@ public sealed partial class SignInTransactionTests(PostgresFixture postgres, Ope
         Assert.True(continued.Headers.CacheControl?.NoStore, "The API answer isn't no-store.");
         Assert.Equal([SecurityHeadersPolicy], continued.Headers.GetValues("Content-Security-Policy"));
         using var step = await HostedBrowser.StepAsync(continued);
-        Assert.Equal("generic_error", step.RootElement.GetProperty("step").GetString());
-        Assert.Equal("temporarily_unavailable", step.RootElement.GetProperty("data").GetProperty("code").GetString());
+        // Story 4.9: the Password step, its email the one recorded, with no error.
+        Assert.Equal("password", step.RootElement.GetProperty("step").GetString());
+        Assert.Equal(2, step.RootElement.GetProperty("stepVersion").GetInt32());
+        Assert.Equal(["tenant", "email", "error"], step.RootElement.GetProperty("data").EnumerateObject().Select(p => p.Name));
+        Assert.Equal(Release, step.RootElement.GetProperty("data").GetProperty("email").GetString());
+        Assert.Equal(JsonValueKind.Null, step.RootElement.GetProperty("data").GetProperty("error").ValueKind);
+        Assert.True(step.RootElement.GetProperty("csrfToken").GetString() == Csrf(browser), "The CSRF token isn't the one derived from the cookie.");
         Assert.Equal($"{Release}|2|identifier", await TransactionAsync(flow, "identifier || '|' || step_version || '|' || array_to_string(completed_steps, ',')"));
         Assert.Equal(1L, await EventsAsync(flow, "authentication.signin_transaction.identified"));
         Assert.Equal(0L, await flow.Database.ScalarAsync<long>("SELECT count(*) FROM user_session"));
@@ -113,8 +119,10 @@ public sealed partial class SignInTransactionTests(PostgresFixture postgres, Ope
     public async Task The_step_after_Continue_is_the_same_for_a_known_and_an_unknown_account()
     {
         var flow = await CodeFlowSetup.CreateAsync(postgres, bao, HostA, HostB);
+        await AddDatabaseConnectionAsync(flow);
         await using var host = await ProtocolHost.StartAsync(flow.Database.Hosted, bao, releaseSignIn: true);
 
+        // Story 4.9: the same Password step for both, its body equal but for the email typed.
         var answers = new List<string>();
         foreach (var email in new[] { TestOnlyCredentialStep.Email(flow.UserA), Release })
         {
@@ -123,11 +131,16 @@ public sealed partial class SignInTransactionTests(PostgresFixture postgres, Ope
             using var continued = await browser.PostAsync(ProtocolContract.LoginIdentifierPath, new { stepVersion = login.StepVersion, email }, login.Csrf);
             Assert.Equal(HttpStatusCode.OK, continued.StatusCode);
             using var step = await HostedBrowser.StepAsync(continued);
-            answers.Add($"{step.RootElement.GetProperty("step").GetString()} {step.RootElement.GetProperty("data").GetProperty("code").GetString()}");
+            var root = step.RootElement;
+            answers.Add($"{root.GetProperty("step").GetString()} {root.GetProperty("stepVersion").GetInt32()} {root.GetProperty("data").GetProperty("error").ValueKind}");
         }
 
-        Assert.Equal(["generic_error temporarily_unavailable", "generic_error temporarily_unavailable"], answers);
+        Assert.Equal(["password 2 Null", "password 2 Null"], answers);
     }
+
+    /// <summary>Story 4.9: the Tenant A database Connection Login's email needs to lead to the Password step.</summary>
+    private static Task AddDatabaseConnectionAsync(CodeFlowSetup flow) =>
+        flow.Database.ExecuteAsync($"INSERT INTO connection (tenant_id, id, kind) VALUES ('{flow.A.TenantId}', gen_random_uuid(), 'database')");
 
     [Theory]
     [InlineData("nope")]

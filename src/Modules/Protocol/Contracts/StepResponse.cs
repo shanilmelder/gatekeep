@@ -56,6 +56,14 @@ public sealed record StepResponse(string Step, int StepVersion, int? ExpiresInSe
         new(StepNames.Signup, stepVersion, expiresInSeconds, new SignupData(tenant, email, policy, error, rules ?? [], termsUrl), csrfToken);
 
     /// <summary>
+    /// The Password step (Story 4.9): the email recorded at Login, shown in the identifier chip and held in the form's
+    /// read-only <c>username</c> field, and the error <see cref="PasswordErrors.Incorrect"/> after a failed submit, alike
+    /// for every account.
+    /// </summary>
+    public static StepResponse Password(string tenant, int stepVersion, int expiresInSeconds, string csrfToken, string? email, string? error = null) =>
+        new(StepNames.Password, stepVersion, expiresInSeconds, new PasswordData(tenant, email, error), csrfToken);
+
+    /// <summary>
     /// Email verification required (Story 4.7): the address the link went to, whether this answers "Resend email", and the
     /// error <see cref="VerifyEmailErrors.NotVerifiedYet"/> for "I've verified, continue" before the link was used.
     /// </summary>
@@ -110,6 +118,9 @@ public static class StepNames
     /// <summary>A step that leaves Hosted Login by a top-level GET (Story 4.2).</summary>
     public const string Redirect = "redirect";
 
+    /// <summary>The Password step, after Login's email (Story 4.9).</summary>
+    public const string Password = "password";
+
     /// <summary>Signup: email, password and the strength meter (Story 4.7).</summary>
     public const string Signup = "signup";
 
@@ -146,6 +157,13 @@ public static class SignupErrors
     public const string TermsRequired = "terms_required";
 }
 
+/// <summary>The code the Password step's error is sent as (Story 4.9).</summary>
+public static class PasswordErrors
+{
+    /// <summary>"Incorrect email or password.", the same for an unknown account, no password and a wrong one.</summary>
+    public const string Incorrect = "incorrect";
+}
+
 /// <summary>The code Email verification required's error is sent as (Story 4.7).</summary>
 public static class VerifyEmailErrors
 {
@@ -177,6 +195,9 @@ public sealed record SignupPolicyData(int MinLength, string Strength);
 /// from Story 4.8 the Tenant's terms URL, or null, which shows the terms row.
 /// </summary>
 public sealed record SignupData(string Tenant, string? Email, SignupPolicyData Policy, string? Error, IReadOnlyList<string> Rules, string? TermsUrl = null);
+
+/// <summary>The Password step's props (Story 4.9): the email recorded at Login and an error's code, or null.</summary>
+public sealed record PasswordData(string Tenant, string? Email, string? Error);
 
 /// <summary>Email verification required's props (Story 4.7): the address, whether the email was just sent again, and an error's code.</summary>
 public sealed record VerifyEmailData(string Tenant, string? Email, bool Resent, string? Error);

@@ -266,6 +266,8 @@ public sealed class CrossTenantRouteTests(PostgresFixture postgres, OpenBaoFixtu
             case ProtocolContract.SignupPath:
             case ProtocolContract.VerificationResendPath:
             case ProtocolContract.VerificationContinuePath:
+            case ProtocolContract.PasswordPath:
+            case ProtocolContract.PasswordBackPath:
             {
                 // Tenant A's real sign-in transaction cookie, presented at B's host (Story 4.2): B's lookup, under B's
                 // row-level security, finds nothing, so it is refused as invalid_transaction, the refusal logged in B's

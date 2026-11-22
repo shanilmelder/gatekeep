@@ -51,6 +51,8 @@ export { RESEND_COOLDOWN_SECONDS, ResendAction, type ResendActionProps } from '.
 export { STRENGTH_ANNOUNCE_MS, StrengthMeter, type StrengthMeterProps } from './components/StrengthMeter';
 // Story 4.8: Signup's terms checkbox and link.
 export { TermsAgreement, type TermsAgreementProps } from './components/TermsAgreement';
+// Story 4.9: the Password step's identifier chip.
+export { IdentifierChip, type IdentifierChipProps } from './components/IdentifierChip';
 export {
   PASSWORD_MAX_LENGTH,
   STRENGTH_SEGMENTS,

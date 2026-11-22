@@ -45,6 +45,11 @@ internal static class ProtocolServer
             AuthenticationContract.TokenRequestTenantPolicy, AuthenticationContract.TokenRequestSourcePolicy));
         services.TryAddSingleton(PasswordHashLimits.Default);
         services.TryAddSingleton(SignUpLimits.Default);
+        services.TryAddSingleton(SignInLimits.Default);
+
+        // Story 4.9: the one hashing gate this instance holds, shared by sign-up and sign-in.
+        services.TryAddSingleton(provider => AuthenticationContract.CreatePasswordHashGate(
+            provider.GetRequiredService<PasswordHashLimits>(), provider.GetRequiredService<TimeProvider>()));
         services.AddSingleton(provider => new TokenEndpointServices(
             provider.GetRequiredService<HostedDataSource>(),
             AuthenticationContract.CreateAttemptLimiter(),
@@ -62,9 +67,17 @@ internal static class ProtocolServer
                 provider.GetRequiredService<IAuditAppender>(),
                 provider.GetRequiredService<TimeProvider>(),
                 provider.GetRequiredService<IJobEnqueuer>(),
-                provider.GetRequiredService<PasswordHashLimits>()),
+                provider.GetRequiredService<IPasswordHashGate>()),
             provider.GetService<ILoggerFactory>(),
-            provider.GetRequiredService<SignUpLimits>()));
+            provider.GetRequiredService<SignUpLimits>(),
+            // Story 4.9: password sign-in, through the same gate, and its limits.
+            AuthenticationContract.CreateSignIn(
+                provider.GetRequiredService<IAuditAppender>(),
+                provider.GetRequiredService<TimeProvider>(),
+                provider.GetRequiredService<IJobEnqueuer>(),
+                provider.GetRequiredService<IPasswordHashGate>()),
+            provider.GetRequiredService<SignInLimits>(),
+            TenancyContract.CreateTenants(provider.GetRequiredService<IAuditAppender>())));
         services.AddScoped<TokenRequestTransaction>();
 
         var inert = new InertCredentials();

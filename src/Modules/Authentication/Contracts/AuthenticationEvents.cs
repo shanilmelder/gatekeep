@@ -44,4 +44,25 @@ public static class AuthenticationEvents
         new AuditTypeCode("authentication.signin_transaction.refused"),
         "A Hosted Login request was refused: its sign-in transaction was missing, completed, another Application's or not at that step, or its Origin or CSRF token was wrong. Anonymous.",
         AuditOutcome.Failure);
+
+    /// <summary>
+    /// Written when a User signs in with their password at Hosted Login and a Session starts (Story 4.9, FR-40), in the same
+    /// command. Actor and target are the User; it holds no email or password.
+    /// </summary>
+    public static readonly AuditEventDefinition SignInSucceeded = new(
+        new AuditTypeCode("authentication.signin.succeeded"),
+        "A User signed in with their password at Hosted Login, and a Session started. The User is Actor and target.",
+        AuditOutcome.Success,
+        TenantLogClass.SignIn);
+
+    /// <summary>
+    /// Written when a password submit at Hosted Login fails (Story 4.9, FR-40): an unknown account, no active password or
+    /// a wrong one, alike. Anonymous; the target is the User when the account exists, none otherwise. It holds no email or
+    /// password, and is kept through its own committed scope.
+    /// </summary>
+    public static readonly AuditEventDefinition SignInFailed = new(
+        new AuditTypeCode("authentication.signin.failed"),
+        "A password sign-in at Hosted Login failed. Anonymous; the target is the User when the account exists.",
+        AuditOutcome.Failure,
+        TenantLogClass.SignIn);
 }

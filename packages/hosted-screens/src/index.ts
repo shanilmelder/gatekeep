@@ -14,3 +14,5 @@ export { LinkExpiredScreen, type LinkExpiredScreenProps } from './LinkExpiredScr
 export { LinkSentScreen, type LinkSentScreenProps } from './LinkSentScreen';
 export { SignupScreen, type SignupScreenProps } from './SignupScreen';
 export { VerifyEmailScreen, type VerifyEmailScreenProps } from './VerifyEmailScreen';
+// Story 4.9: password sign-in.
+export { PasswordScreen, type PasswordScreenProps } from './PasswordScreen';

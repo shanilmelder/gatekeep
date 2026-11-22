@@ -52,6 +52,13 @@ export interface SignupData {
   termsUrl: string | null;
 }
 
+/** The Password step's props (Story 4.9): the email recorded at Login and an error's code, or null. */
+export interface PasswordData {
+  tenant: string;
+  email: string | null;
+  error: string | null;
+}
+
 /** Email verification required's props (Story 4.7). */
 export interface VerifyEmailData {
   tenant: string;
@@ -98,6 +105,7 @@ export type Step = StepMeta &
     | { step: 'login'; data: LoginData }
     | { step: 'redirect'; data: RedirectData }
     | { step: 'signup'; data: SignupData }
+    | { step: 'password'; data: PasswordData }
     | { step: 'verify_email'; data: VerifyEmailData }
     | { step: 'email_verified'; data: EmailVerifiedData }
     | { step: 'link_expired'; data: LinkExpiredData }
@@ -154,6 +162,9 @@ export const SIGNUP_ERRORS: readonly string[] = Object.freeze(['email_invalid', 
 /** The password rule codes the server names (Story 4.7), each shown as its catalogue sentence. */
 export const PASSWORD_RULES: readonly string[] = Object.freeze(['length', 'too_long', 'classes', 'repeats', 'dictionary', 'personal_data', 'history']);
 
+/** The Password step's error codes (Story 4.9): one, the same for every account. */
+export const PASSWORD_ERRORS: readonly string[] = Object.freeze(['incorrect']);
+
 /** Email verification required's error codes (Story 4.7). */
 export const VERIFY_EMAIL_ERRORS: readonly string[] = Object.freeze(['not_verified_yet']);
 
@@ -204,6 +215,12 @@ const readers: { [name in StepName]: (data: Record<string, unknown>, meta: StepM
     return tenant === undefined || email === undefined || error === undefined || minLength === undefined || strength === undefined || rules === undefined || termsUrl === undefined || !live(meta)
       ? undefined
       : { tenant, email, policy: { minLength, strength }, error, rules, termsUrl };
+  },
+  password: (data, meta) => {
+    const tenant = text(data.tenant);
+    const email = optionalText(data.email);
+    const error = knownCode(data.error, PASSWORD_ERRORS);
+    return tenant === undefined || email === undefined || error === undefined || !live(meta) ? undefined : { tenant, email, error };
   },
   verify_email: (data, meta) => {
     const tenant = text(data.tenant);
