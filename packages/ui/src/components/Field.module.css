@@ -12,6 +12,15 @@
   color: var(--gk-ui-text);
 }
 
+/* Story 4.11: a label with an action on its right, such as "Forgot password?", which wraps under it when narrow. */
+.labelRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--gk-space-4) var(--gk-space-8);
+}
+
 .helper {
   min-height: var(--gk-font-helper-line-height);
   font: var(--gk-font-helper);

@@ -167,6 +167,16 @@ public static class RouteRegistry
         new("POST", "/login/api/password", CaseKind.HostResolved),
         new("POST", "/login/api/password/back", CaseKind.HostResolved),
 
+        // Story 4.11: password reset, Forgot password and its confirmation on the resolved Tenant's sign-in transaction,
+        // and the reset link's page, Reset password and "Send a new link" on a link whose Tenant prefix is checked before
+        // any lookup.
+        new("POST", "/login/api/reset/open", CaseKind.HostResolved),
+        new("POST", "/login/api/reset", CaseKind.HostResolved),
+        new("POST", "/login/api/reset/back", CaseKind.HostResolved),
+        new("GET", "/login/reset-password", CaseKind.HostResolved),
+        new("POST", "/login/api/reset/complete", CaseKind.HostResolved),
+        new("POST", "/login/api/reset/new-link", CaseKind.HostResolved),
+
         new("*", "{*path:nonfile}", CaseKind.NotTenantBound, Reason: "the one fixed 404, the same as an unknown host's (AD-6)"),
     ];
 }

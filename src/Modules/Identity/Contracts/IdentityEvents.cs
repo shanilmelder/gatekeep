@@ -26,4 +26,15 @@ public static class IdentityEvents
         new AuditTypeCode("identity.user.email_verified"),
         "A User's email was verified by a link, which activated the password it was sent for and removed any other pending one. Names the User only.",
         AuditOutcome.Success);
+
+    /// <summary>
+    /// Written when a reset link replaces a User's password (Story 4.11, FR-19, FR-40), in the same command: the link is
+    /// used, the email verified and every pending credential deleted, and every Session and Token Family of the User ends.
+    /// The User is Actor and target; it holds no detail, link or password.
+    /// </summary>
+    public static readonly AuditEventDefinition PasswordReset = new(
+        new AuditTypeCode("identity.password.reset"),
+        "A User reset their password with a reset link; every Session and Token Family of theirs ended. The User is Actor and target.",
+        AuditOutcome.Success,
+        TenantLogClass.PasswordReset);
 }

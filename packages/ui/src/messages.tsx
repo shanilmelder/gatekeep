@@ -154,6 +154,24 @@ export interface Messages {
   passwordIncorrect: string;
   /** The identifier chip's action, back to Login with the email kept. */
   identifierEdit: string;
+  /** Story 4.11: the Password step's link to Forgot password, on the right of the password's label. */
+  forgotPasswordLink: string;
+  /** Forgot password: heading, body, primary action, and the way back to Login (also on the neutral confirmation). */
+  forgotPasswordTitle: string;
+  forgotPasswordBody: string;
+  forgotPasswordSend: string;
+  backToLogin: string;
+  /** Reset password: heading, the two field labels, primary action, and the confirmation's error. */
+  resetPasswordTitle: string;
+  resetPasswordNewLabel: string;
+  resetPasswordConfirmLabel: string;
+  resetPasswordSubmit: string;
+  resetPasswordMismatch: string;
+  /** Password changed: heading, body, "Log in" in the browser that asked, and the text anywhere else, which has no action. */
+  passwordChangedTitle: string;
+  passwordChangedBody: string;
+  passwordChangedLogIn: string;
+  passwordChangedClose: string;
   /** The strength meter's label. Placeholder: {level}, one of the three below. */
   strengthMeterLabel: string;
   strengthGood: string;
@@ -1082,6 +1100,20 @@ export const defaultMessages: Readonly<Messages> = Object.freeze({
   passwordLogIn: 'Log in',
   passwordIncorrect: 'Incorrect email or password.',
   identifierEdit: 'Edit',
+  forgotPasswordLink: 'Forgot password?',
+  forgotPasswordTitle: 'Forgot your password?',
+  forgotPasswordBody: "Enter your email and we'll send a reset link.",
+  forgotPasswordSend: 'Send reset link',
+  backToLogin: 'Back to login',
+  resetPasswordTitle: 'Choose a new password',
+  resetPasswordNewLabel: 'New password',
+  resetPasswordConfirmLabel: 'Confirm password',
+  resetPasswordSubmit: 'Reset password',
+  resetPasswordMismatch: "Passwords don't match.",
+  passwordChangedTitle: 'Password changed',
+  passwordChangedBody: "You've been signed out everywhere for your security.",
+  passwordChangedLogIn: 'Log in',
+  passwordChangedClose: 'You can close this page.',
   strengthMeterLabel: 'Password strength: {level}',
   strengthGood: 'Good',
   strengthExcellent: 'Excellent',

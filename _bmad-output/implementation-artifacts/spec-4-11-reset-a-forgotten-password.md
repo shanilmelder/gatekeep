@@ -2,15 +2,23 @@
 title: 'Story 4.11: Reset a forgotten password'
 type: 'feature'
 created: '2026-11-22'
-status: 'ready-for-dev'
+status: 'done'
+baseline_revision: '58073202eb3d200d89694cf9c5f3d5489613db7c'
 review_loop_iteration: 0
-followup_review_recommended: false
+followup_review_recommended: true
 context:
   - '{project-root}/_bmad-output/implementation-artifacts/epic-4-context.md'
   - '{project-root}/_bmad-output/implementation-artifacts/spec-4-9-sign-in-with-a-password.md'
   - '{project-root}/_bmad-output/implementation-artifacts/spec-4-7-sign-up-and-verify-an-email-address.md'
 warnings: ['oversized']
-deferred: []
+deferred:
+  - summary: >-
+      A reset request for a known address does a few database writes (credential lock, link insert, job insert) that the unknown path doesn't.
+    evidence: |-
+      The unknown path rehearses only the Transit encryption, because a link row needs a real credential (FK RESTRICT). Full equalisation means moving the lookup and issue into a worker-side request job that every address enqueues alike. The difference is recorded in T-6 and held within the stated 100 ms tolerance by PasswordResetTests.
+    location: >-
+      src/Modules/Authentication/Core/PasswordResetService.cs (RequestAsync)
+    severity: medium
 ---
 
 <intent-contract>
@@ -196,6 +204,52 @@ deferred: []
 
 ## Review Triage Log
 
+### 2026-11-22 — Review pass
+- verdicts: 42 findings — high 0, medium 6, low 26, false 3, maybe-false 7
+- findings:
+  - `maybe-false` `reject` (Intent) No single test drives the real browser bundle against the real backend — every Hosted story tests the server over HTTP and the screens against the stub; if it hid a defect it would be low.
+  - `false` `reject` (Intent) "A notification is sent" means delivered — delivery is Story 4.5's job pipeline, tested there; this story queues it in the same command.
+  - `maybe-false` `reject` (Intent) The timing is measured in-process, not over a network — the stated tolerance is the requirement's "within a stated tolerance"; if wider in practice it would be low.
+  - `low` `reject` (Intent) Malformed input gets a different step — it carries no account information; the same for every malformed string.
+  - `low` `patch` (Intent) The recipient limit is tested only for a known address — an unknown-address loop was added.
+  - `maybe-false` `reject` (Intent) No outgoing `Referer` is captured — the page sends `Referrer-Policy: no-referrer` and the canary scans tables, events and logs; if a leak existed it would be low.
+  - `false` `reject` (Intent) PR, CI and merge aren't in the diff — process steps happen after the review.
+  - `medium` `defer` (Blind) The known path does extra writes the unknown path doesn't, so the timing test can't catch the difference — deferred (frontmatter): full equalisation needs a worker-side request job; recorded in T-6 and held within 100 ms.
+  - `medium` `patch` (Blind) An attacker can keep a victim's reset blocked behind the neutral screen — recorded as T-66's residual; a mitigation that keeps neutrality needs a new signal.
+  - `medium` `patch` (Blind) Reset password submits have no rate limit, and the history check runs outside the gate — counted per source and Tenant; history verifies and the hash run inside one slot.
+  - `medium` `patch` (Blind) The completion holds row locks through hashing — the checks read without a lock; locks are taken and usability re-checked just before the writes.
+  - `low` `reject` (Blind) The link is read twice per submit — the second read is now the short locked re-check the lock fix needs.
+  - `low` `patch` (Blind) The GET page takes `FOR UPDATE` — the page reads without a lock.
+  - `low` `patch` (Blind) "Log in" ignores which account the transaction asked for — offered only when the identifier matches the link's email.
+  - `low` `reject` (Blind) No audit event for requests — anonymous request events would add volume with no actor; Epic 10 adds monitoring. The PasswordReset class is proved by the completion, which is what it names.
+  - `low` `patch` (Blind) Malformed inputs count under the recipient key — only valid addresses are counted.
+  - `medium` `patch` (Blind) "Send a new link" skips the recipient limit — counted under the link User's email.
+  - `low` `patch` (Blind) "Send a new link" works from a used link — a used link reissues nothing.
+  - `low` `patch` (Blind) Missing test: a verification link at the reset page or Reset password — added.
+  - `low` `reject` (Blind) Missing test: two completes at once — the locked re-check before the writes makes the second a stale link; a concurrency test adds harness work for a guarded path.
+  - `low` `patch` (Blind) Pending-only Users can't recover, and nothing says so — the docs state their path is signing up again.
+  - `low` `patch` (Blind) No username field for password managers — a hidden read-only `username` field carries the link's email.
+  - `low` `reject` (Blind) A reload loses the link — the token is removed from the address bar by design; reopening the email link works.
+  - `maybe-false` `reject` (Blind) `link_sent` with a null life in `LIVE_STEPS` — the expiry hook skips a null life; if not, it would be low.
+  - `low` `patch` (Blind) The docs disagree on used, expired and superseded links — one rule stated everywhere.
+  - `low` `reject` (Blind) A full hashing budget answers 200 Generic error — the same as sign-up and sign-in.
+  - `low` `patch` (Verification Gap) Send a new link's source and Tenant limits are untested — test added.
+  - `low` `patch` (Verification Gap) The timing test can't detect a missing rehearsal — Transit encrypt calls are counted per address kind.
+  - `low` `patch` (Verification Gap) The recipient test only checks constants for unknown addresses — replaced by a real loop.
+  - `medium` `patch` (Verification Gap, other) T-66's recipient cap doesn't hold for new-link — fixed with the new-link recipient count.
+  - `medium` `patch` (Edge) Reset password has no rate limit — fixed with the Blind row.
+  - `medium` `patch` (Edge) The history check bypasses the gate — fixed with the Blind row.
+  - `low` `patch` (Edge) A credential change mid-request gives a 500 only for a known address — the issue returns null and falls through to the rehearse path.
+  - `low` `patch` (Edge) Forgot password is reachable while password sign-in is disabled — every reset route refuses then.
+  - `low` `patch` (Edge) A password is replaced on a disabled Connection — fixed with the row above.
+  - `medium` `patch` (Edge) One inbox can get many reset emails through new-link — fixed with the Blind row.
+  - `low` `patch` (Edge) A used link keeps producing fresh emails — fixed with the Blind row.
+  - `low` `patch` (Edge) The GET page locks rows — fixed with the Blind row.
+  - `low` `patch` (Edge) Row locks held through hashing — fixed with the Blind row.
+  - `maybe-false` `defer` (Edge) Known vs unknown DB writes are a timing side channel — same entry as the deferred Blind row.
+  - `false` `reject` (Edge) New-link isn't limited per recipient, against the criterion — now counted; the claim no longer holds.
+  - `maybe-false` `reject` (Edge) A browser test's label-row selector may not match — CI runs it; a mismatch is fixed then.
+
 ## Design Notes
 
 - **Reset verifies the email.** Using the link proves control of the mailbox, and it is T-62's stated recovery for a pre-account takeover. So the reset also deletes pending credentials and verifies the email.
@@ -209,3 +263,43 @@ deferred: []
 - With `MSYS_NO_PATHCONV=1`, run `docker run --rm -v "D:/Projects/Personal/gatekeep:/src" -v gk-nuget:/root/.nuget -w /src mcr.microsoft.com/dotnet/sdk:10.0.403-noble sh -c 'dotnet build Gatekeep.slnx -p:NuGetAudit=false -v q'`. Expected: 0 warnings and 0 errors.
 - `corepack pnpm -r build`, `corepack pnpm --filter @gatekeep/ui check`, `corepack pnpm --filter @gatekeep/hosted-login budget`, and the package unit tests. Expected: green.
 - The Isolation, Architecture and browser suites run on CI. Don't run them locally.
+
+## Auto Run Result
+
+Status: done
+
+**Summary:**
+- **Request:** the Password step's "Forgot password?" leads to Forgot password, and a request answers the same neutral confirmation for every address.
+  - A User with an active password gets a 30-minute, single-use, SHA-256-stored reset link (the newest wins) and the `password_reset` email.
+  - Any other address rehearses the same encryption and gets nothing.
+  - Requests are limited per source (10), per Tenant (600) and per recipient (3) per 15 minutes. The recipient key is counted for every valid address alike.
+- **Reset password:** the new and confirm fields, plus the policy with history, run inside the hashing gate.
+- **Completion,** in one command: it replaces the password, verifies the email, removes pending credentials, runs `RevokeAccess` for the User with no acting Session, queues the security notice and writes `identity.password.reset`. No Session starts.
+- **Password changed** offers "Log in" only to the browser whose transaction asked for that address.
+- **Coverage:** FR-48 "password reset", the cross-Tenant "reset link" artifact, and the PasswordReset log class are now covered.
+
+**Files changed (main ones):**
+- `Migration20261130000000PasswordReset.cs` (adds the purpose) and `MigrateCommandTests` (46).
+- `src/Modules/Identity/*`: reset links, completion, supersession and the event.
+- `src/Modules/Authentication/{Contracts/IPasswordReset.cs, Core/PasswordResetService.cs}`.
+- `src/Gatekeep.Kernel/Jobs/IJobEnqueuer.cs` (`RehearseAsync`) and `src/Modules/Operations/Core/JobEnqueuer.cs`.
+- `src/Modules/Protocol/*`: routes, steps, the page, `PasswordResetLimits`, and the reset-link CSRF.
+- `packages/ui` (`PasswordField` label action and username), `packages/hosted-screens` (Forgot, Reset and Changed screens), `apps/hosted-login/src/*`.
+- Tests: `PasswordResetTests` (new), the registries, the canary flow, `EventClassTests`, `AuditCatalogue`, `RouteRegistry`, `CrossTenantRouteTests`, `TenantKeyedTypes`, and `hosted-reset.spec.ts`. Docs: the threat model, and `docs/audit-events.md` regenerated.
+
+**Review findings:** 42.
+- **22 patched:** the completion rate limit, history inside the gate, row locks, the mid-request race, the disabled-Connection refusals, recipient counting (valid only, plus new-link), used-link reissue, the "Log in" account check, the username field, the docs, and eight tests.
+- **1 deferred:** full equal-work database writes for unknown addresses.
+- **The rest rejected** with reasons in the triage log.
+
+**Follow-up review recommended:** true. Four `medium` entries were patched: the completion's rate limit and gate, the row-lock restructure, new-link's recipient cap, and the silent-block residual. The lock restructure (an unlocked read, then a locked re-check before the writes) landed after review and changes concurrency behaviour, so it deserves a second look. Patched entries: high 0, medium 4, low 18.
+
+**Verification:**
+- .NET build in the SDK 10.0.403 Docker image: 0 warnings, 0 errors.
+- `pnpm -r build`, the `@gatekeep/ui` check and its 68 unit tests pass. The bundle is 98.1 kB of 150 kB.
+- The Isolation, Architecture and browser suites run on CI.
+
+**Residual risks:**
+- A known address does a few more writes than an unknown one (deferred, within 100 ms).
+- An attacker can keep a victim's reset blocked behind the neutral screen.
+- The new browser spec's selectors are first exercised on CI.

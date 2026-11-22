@@ -17,7 +17,8 @@ public sealed record StartedSignIn(Guid TransactionId, Secret<string> Binding);
 /// The steps a sign-in transaction records as passed, in order, in <c>completed_steps</c> (Story 4.2): Login's
 /// <see cref="Identifier"/>, or a sign-up's <see cref="Signup"/> then <see cref="Registered"/> (Story 4.7), then
 /// <see cref="Authenticated"/>. From Story 4.9 a transaction at <see cref="Identifier"/> stands at the Password step, and
-/// the correct password of a User whose email isn't verified records <see cref="Registered"/> after it.
+/// the correct password of a User whose email isn't verified records <see cref="Registered"/> after it. From Story 4.11,
+/// "Forgot password?" records <see cref="Reset"/> after <see cref="Identifier"/>, and a reset request <see cref="ResetSent"/>.
 /// </summary>
 public static class SignInSteps
 {
@@ -32,6 +33,15 @@ public static class SignInSteps
     /// transaction stands at Email verification required.
     /// </summary>
     public const string Registered = "registered";
+
+    /// <summary>"Forgot password?" was chosen at the Password step (Story 4.11): the transaction stands at Forgot password.</summary>
+    public const string Reset = "reset";
+
+    /// <summary>
+    /// A reset was requested at Forgot password (Story 4.11), whatever the address: the transaction stands at the neutral
+    /// confirmation, from which "Back to login" goes back to Login.
+    /// </summary>
+    public const string ResetSent = "reset_sent";
 
     /// <summary>A credential step authenticated the User, and a Session was issued.</summary>
     public const string Authenticated = "authenticated";

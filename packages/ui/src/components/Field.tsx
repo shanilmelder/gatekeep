@@ -21,6 +21,11 @@ export type Validate = (value: string) => string | null | undefined | false;
 export interface FieldProps {
   /** The visible label, tied to the control. */
   label: ReactNode;
+  /**
+   * An action on the right of the label's row, outside the label (Story 4.11), such as the Password step's "Forgot
+   * password?": a control of its own, never part of the control's name.
+   */
+  labelAction?: ReactNode;
   /** Text under the control. An error replaces it, in the same element. */
   helper?: ReactNode;
   /**
@@ -57,7 +62,7 @@ const FieldContext = createContext<FieldState | null>(null);
  * aria-describedby, whether or not it holds an error, and the error is written into it
  * silently. Focus never moves on validation: only a submit moves it.
  */
-export function Field({ label, helper, validate, error, id, surface, className, children }: FieldProps) {
+export function Field({ label, labelAction, helper, validate, error, id, surface, className, children }: FieldProps) {
   const generated = useId();
   const controlId = id ?? generated;
   const helperId = `${controlId}-helper`;
@@ -85,9 +90,18 @@ export function Field({ label, helper, validate, error, id, surface, className, 
 
   return (
     <div className={cx(styles.field, className)} data-gk-surface={surface}>
-      <label className={styles.label} htmlFor={claimedId ?? controlId}>
-        {label}
-      </label>
+      {labelAction ? (
+        <div className={styles.labelRow}>
+          <label className={styles.label} htmlFor={claimedId ?? controlId}>
+            {label}
+          </label>
+          {labelAction}
+        </div>
+      ) : (
+        <label className={styles.label} htmlFor={claimedId ?? controlId}>
+          {label}
+        </label>
+      )}
       <FieldContext.Provider value={state}>{children}</FieldContext.Provider>
       <div id={helperId} className={cx(styles.helper, Boolean(shown) && styles.error)}>
         {shown || helper}

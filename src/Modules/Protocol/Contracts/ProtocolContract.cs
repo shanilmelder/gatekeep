@@ -79,6 +79,33 @@ public static class ProtocolContract
     /// <summary>The identifier chip's "Edit" at the Password step (Story 4.9): <c>{stepVersion}</c>, answered with Login, the email kept.</summary>
     public const string PasswordBackPath = "/login/api/password/back";
 
+    /// <summary>"Forgot password?" at the Password step (Story 4.11): <c>{stepVersion}</c>, answered with Forgot password, the email kept.</summary>
+    public const string ResetOpenPath = "/login/api/reset/open";
+
+    /// <summary>
+    /// "Send reset link" at Forgot password (Story 4.11): <c>{stepVersion, email}</c>, answered with the neutral confirmation
+    /// for every address.
+    /// </summary>
+    public const string ResetPath = "/login/api/reset";
+
+    /// <summary>"Back to login" at Forgot password or its confirmation (Story 4.11): <c>{stepVersion}</c>, answered with Login, the email kept.</summary>
+    public const string ResetBackPath = "/login/api/reset/back";
+
+    /// <summary>
+    /// The reset link's page (Story 4.11): <c>GET /login/reset-password?token=</c>, Reset password or Link expired. It is the
+    /// email template's <c>login/reset-password</c>, under the Tenant's email link base.
+    /// </summary>
+    public const string ResetPasswordPath = "/login/reset-password";
+
+    /// <summary>
+    /// "Reset password" (Story 4.11): <c>{token, password, confirm}</c> with the reset-link CSRF token, answered with Password
+    /// changed, or Reset password naming what failed.
+    /// </summary>
+    public const string ResetCompletePath = "/login/api/reset/complete";
+
+    /// <summary>A reset link's "Send a new link" (Story 4.11): <c>{token}</c> with the reset-link CSRF token, always answered with the neutral confirmation.</summary>
+    public const string ResetNewLinkPath = "/login/api/reset/new-link";
+
     /// <summary>The cookie binding a sign-in transaction to the browser (Story 4.2): host-only, Secure, HttpOnly, SameSite=Lax.</summary>
     public const string TransactionCookie = "__Host-gk_txn";
 
@@ -114,7 +141,8 @@ public static class ProtocolContract
     /// authorization endpoint shows Generic error through for a request it can't send back to any client, and
     /// Hosted Login's <c>/login</c> surface its steps through. Sign-up (Story 4.7) enqueues its verification email through the
     /// host's <c>IJobEnqueuer</c>, which the host must register, and hashes within <see cref="PasswordHashLimits"/>, the
-    /// defaults unless the host registered its own first.
+    /// defaults unless the host registered its own first. Password reset (Story 4.11) counts under
+    /// <see cref="PasswordResetLimits"/> and hashes through the same gate.
     /// </summary>
     public static IServiceCollection AddGatekeepProtocol(
         this IServiceCollection services,
@@ -157,7 +185,9 @@ public static class ProtocolContract
     /// requests, <c>POST /login/api/identifier</c>, <c>POST /login/api/transaction/extend</c> and Story 4.7's sign-up and
     /// verification requests, each checked for an exact-host <c>Origin</c> and the transaction's CSRF token before anything
     /// is read or written; and Story 4.7's verification link page, <c>GET /login/verify-email</c>, whose "Send a new link"
-    /// is checked for the <c>Origin</c> and a CSRF token bound to the link.
+    /// is checked for the <c>Origin</c> and a CSRF token bound to the link; and Story 4.11's reset requests, its link's page
+    /// <c>GET /login/reset-password</c>, and Reset password and "Send a new link", checked for the <c>Origin</c> and a CSRF
+    /// token bound to the reset link.
     /// </summary>
     public static IEndpointRouteBuilder MapGatekeepLogin(this IEndpointRouteBuilder endpoints)
     {
@@ -244,7 +274,8 @@ public sealed record TokenRequestLimits(Gatekeep.Kernel.RateLimiting.RateLimitPo
 /// <summary>
 /// The limits Hosted Login's sign-up counts under (Story 4.8, NFR-6): Create account per Tenant and per source, and the
 /// verification emails asked for ("Resend email" and "Send a new link" together) per Tenant and per source. None is keyed
-/// by an email address, so a limit can't reveal an account. The defaults are <see cref="Default"/>, from
+/// by an email address, so a limit can't reveal an account. The one exception anywhere is
+/// <see cref="PasswordResetLimits.Recipient"/>, which is safe because it is counted for every address alike before any lookup. The defaults are <see cref="Default"/>, from
 /// <c>SecurityLimits</c>; a host registers its own only to test them.
 /// </summary>
 public sealed record SignUpLimits(
@@ -274,7 +305,8 @@ public sealed record SignUpLimits(
 
 /// <summary>
 /// The limits Hosted Login's password submits count under (Story 4.9, NFR-6): per Tenant and per source, the source first.
-/// Neither is keyed by an email address, so a limit can't reveal an account. Continue and Edit aren't counted. The defaults
+/// Neither is keyed by an email address, so a limit can't reveal an account (the one exception anywhere is
+/// <see cref="PasswordResetLimits.Recipient"/>, counted for every address alike before any lookup). Continue and Edit aren't counted. The defaults
 /// are <see cref="Default"/>, from <c>SecurityLimits</c>; a host registers its own only to test them.
 /// </summary>
 public sealed record SignInLimits(
@@ -290,4 +322,32 @@ public sealed record SignInLimits(
         "signin.attempt.source", Gatekeep.Kernel.Limits.SecurityLimits.SignInSourceAttempts, Gatekeep.Kernel.Limits.SecurityLimits.SignInWindow);
 
     public static SignInLimits Default { get; } = new(TenantPolicy, SourcePolicy);
+}
+
+/// <summary>
+/// The limits Hosted Login's password reset requests count under (Story 4.11, NFR-6): "Send reset link" and a reset link's
+/// "Send a new link" together, per source, then per Tenant, then per recipient. <see cref="Recipient"/> is the one limit
+/// keyed by an email address (<c>recipient:</c> and the address, lower-cased), and it is safe: it is counted for every
+/// address alike, known or unknown, before any lookup, and past it the answer stays the neutral confirmation, so it can't
+/// reveal an account. Past the source or Tenant limit the answer is 429. The defaults are <see cref="Default"/>, from
+/// <c>SecurityLimits</c>; a host registers its own only to test them.
+/// </summary>
+public sealed record PasswordResetLimits(
+    Gatekeep.Kernel.RateLimiting.RateLimitPolicy Tenant,
+    Gatekeep.Kernel.RateLimiting.RateLimitPolicy Source,
+    Gatekeep.Kernel.RateLimiting.RateLimitPolicy Recipient)
+{
+    /// <summary>Reset requests per Tenant: <c>reset.request.tenant</c>, 600 per 15 minutes.</summary>
+    public static readonly Gatekeep.Kernel.RateLimiting.RateLimitPolicy TenantPolicy = new(
+        "reset.request.tenant", Gatekeep.Kernel.Limits.SecurityLimits.PasswordResetTenantAttempts, Gatekeep.Kernel.Limits.SecurityLimits.PasswordResetWindow);
+
+    /// <summary>Reset requests per source: <c>reset.request.source</c>, 10 per 15 minutes.</summary>
+    public static readonly Gatekeep.Kernel.RateLimiting.RateLimitPolicy SourcePolicy = new(
+        "reset.request.source", Gatekeep.Kernel.Limits.SecurityLimits.PasswordResetSourceAttempts, Gatekeep.Kernel.Limits.SecurityLimits.PasswordResetWindow);
+
+    /// <summary>Reset requests per recipient address: <c>reset.request.recipient</c>, 3 per 15 minutes.</summary>
+    public static readonly Gatekeep.Kernel.RateLimiting.RateLimitPolicy RecipientPolicy = new(
+        "reset.request.recipient", Gatekeep.Kernel.Limits.SecurityLimits.PasswordResetRecipientAttempts, Gatekeep.Kernel.Limits.SecurityLimits.PasswordResetWindow);
+
+    public static PasswordResetLimits Default { get; } = new(TenantPolicy, SourcePolicy, RecipientPolicy);
 }

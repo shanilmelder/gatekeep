@@ -1,7 +1,8 @@
-// Hosted Login's only network requests (Stories 4.2, 4.7 and 4.9): Continue, Keep going, sign-up's and the Password step's. Each is a same-origin
+// Hosted Login's only network requests (Stories 4.2, 4.7, 4.9 and 4.11): Continue, Keep going, sign-up's, the Password step's and reset's. Each is a same-origin
 // POST with the step's CSRF token in X-Gatekeep-CSRF, and each answers with a step, which the client renders as it
 // renders the page's own. The browser sends the Origin and the HttpOnly transaction cookie; the client never reads
-// either. The password goes only in Create account's and Log in's bodies, and a link only in Send a new link's.
+// either. The password goes only in Create account's, Log in's and Reset password's bodies, and a link only in Send a new
+// link's and Reset password's.
 
 import { invalidStep, parseStep, type Step } from './step';
 
@@ -35,6 +36,21 @@ export const PASSWORD_BACK_PATH = '/login/api/password/back';
 /** "Send a new link", from an expired link's page, with the link-bound CSRF token. */
 export const NEW_LINK_PATH = '/login/api/verification/new-link';
 
+/** Story 4.11: the Password step's "Forgot password?". */
+export const RESET_OPEN_PATH = '/login/api/reset/open';
+
+/** "Send reset link" at Forgot password. */
+export const RESET_PATH = '/login/api/reset';
+
+/** "Back to login" at Forgot password or its confirmation. */
+export const RESET_BACK_PATH = '/login/api/reset/back';
+
+/** "Reset password" on a reset link's page, with the reset-link-bound CSRF token. */
+export const RESET_COMPLETE_PATH = '/login/api/reset/complete';
+
+/** "Send a new link" from an expired reset link's page, with the reset-link-bound CSRF token. */
+export const RESET_NEW_LINK_PATH = '/login/api/reset/new-link';
+
 /** The header the CSRF token goes in. */
 export const CSRF_HEADER = 'X-Gatekeep-CSRF';
 
@@ -51,7 +67,12 @@ type ApiPath =
   | typeof VERIFIED_CONTINUE_PATH
   | typeof NEW_LINK_PATH
   | typeof PASSWORD_PATH
-  | typeof PASSWORD_BACK_PATH;
+  | typeof PASSWORD_BACK_PATH
+  | typeof RESET_OPEN_PATH
+  | typeof RESET_PATH
+  | typeof RESET_BACK_PATH
+  | typeof RESET_COMPLETE_PATH
+  | typeof RESET_NEW_LINK_PATH;
 
 async function post(path: ApiPath, body: object, csrfToken: string, tenant: string): Promise<Step> {
   let response: Response;
@@ -126,7 +147,27 @@ export function postVerifiedContinue(stepVersion: number, csrfToken: string, ten
   return post(VERIFIED_CONTINUE_PATH, { stepVersion }, csrfToken, tenant);
 }
 
-/** Send a new link: the expired link's own value, with its link-bound CSRF token. */
-export function postNewLink(token: string, csrfToken: string, tenant: string): Promise<Step> {
-  return post(NEW_LINK_PATH, { token }, csrfToken, tenant);
+/** Send a new link: the expired link's own value, with its link-bound CSRF token; a reset link's goes to its own path. */
+export function postNewLink(token: string, csrfToken: string, tenant: string, reset = false): Promise<Step> {
+  return post(reset ? RESET_NEW_LINK_PATH : NEW_LINK_PATH, { token }, csrfToken, tenant);
+}
+
+/** Story 4.11: "Forgot password?" at the Password step. */
+export function postResetOpen(stepVersion: number, csrfToken: string, tenant: string): Promise<Step> {
+  return post(RESET_OPEN_PATH, { stepVersion }, csrfToken, tenant);
+}
+
+/** "Send reset link": the email as typed. */
+export function postReset(stepVersion: number, email: string, csrfToken: string, tenant: string): Promise<Step> {
+  return post(RESET_PATH, { stepVersion, email }, csrfToken, tenant);
+}
+
+/** "Back to login" from Forgot password or its confirmation. */
+export function postResetBack(stepVersion: number, csrfToken: string, tenant: string): Promise<Step> {
+  return post(RESET_BACK_PATH, { stepVersion }, csrfToken, tenant);
+}
+
+/** "Reset password": the page's own link, the new password and its confirmation, with the reset-link-bound CSRF token. */
+export function postResetComplete(token: string, password: string, confirm: string, csrfToken: string, tenant: string): Promise<Step> {
+  return post(RESET_COMPLETE_PATH, { token, password, confirm }, csrfToken, tenant);
 }

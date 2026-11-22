@@ -102,14 +102,36 @@ internal static class LinkCsrf
 {
     private static ReadOnlySpan<byte> Label => "gatekeep-link-csrf\0"u8;
 
-    public static string Derive(string token)
+    public static string Derive(string token) => LinkBoundCsrf.Derive(Label, token);
+
+    public static bool Matches(string token, string? presented) => LinkBoundCsrf.Matches(Label, token, presented);
+}
+
+/// <summary>
+/// A reset link page's CSRF token (Story 4.11): <c>base64url(SHA-256("gatekeep-reset-csrf\0" || SHA-256(token)))</c>, the
+/// inner hash being what the link is stored as. Its own label, so a verification link's token never posts a reset. Derived,
+/// never stored, and compared in constant time.
+/// </summary>
+internal static class ResetLinkCsrf
+{
+    private static ReadOnlySpan<byte> Label => "gatekeep-reset-csrf\0"u8;
+
+    public static string Derive(string token) => LinkBoundCsrf.Derive(Label, token);
+
+    public static bool Matches(string token, string? presented) => LinkBoundCsrf.Matches(Label, token, presented);
+}
+
+/// <summary>A CSRF token bound to a link: <c>base64url(SHA-256(label || SHA-256(token)))</c> (Stories 4.7 and 4.11).</summary>
+internal static class LinkBoundCsrf
+{
+    public static string Derive(ReadOnlySpan<byte> label, string token)
     {
         var hash = IdentityContract.VerificationLinkHash(token);
-        var input = new byte[Label.Length + hash.Length];
+        var input = new byte[label.Length + hash.Length];
         try
         {
-            Label.CopyTo(input);
-            hash.CopyTo(input.AsSpan(Label.Length));
+            label.CopyTo(input);
+            hash.CopyTo(input.AsSpan(label.Length));
             return Base64Url.EncodeToString(SHA256.HashData(input));
         }
         finally
@@ -119,9 +141,9 @@ internal static class LinkCsrf
         }
     }
 
-    public static bool Matches(string token, string? presented) =>
+    public static bool Matches(ReadOnlySpan<byte> label, string token, string? presented) =>
         !string.IsNullOrEmpty(presented)
-        && CryptographicOperations.FixedTimeEquals(Encoding.ASCII.GetBytes(Derive(token)), Encoding.UTF8.GetBytes(presented));
+        && CryptographicOperations.FixedTimeEquals(Encoding.ASCII.GetBytes(Derive(label, token)), Encoding.UTF8.GetBytes(presented));
 }
 
 /// <summary>The steps a sign-in transaction stands at, as Hosted Login shows them (Stories 4.2 and 4.7).</summary>
@@ -147,7 +169,8 @@ internal static class SignInStepResponses
     /// <summary>
     /// The transaction's current step, from the steps it records as passed: once authenticated, the redirect that resumes
     /// the authorization request; once a sign-up or an unverified User's sign-in is registered, Email verification
-    /// required; at Signup, Signup with <paramref name="policy"/>; past Login's email, the Password step while the database
+    /// required; at Signup, Signup with <paramref name="policy"/>; after a reset request, the neutral confirmation with "Back
+    /// to login", and at Forgot password, Forgot password (Story 4.11); past Login's email, the Password step while the database
     /// Connection is enabled (Story 4.9), else Generic error <c>temporarily_unavailable</c>, the same for every identifier;
     /// otherwise Login, its "Sign up" link shown while <paramref name="policy"/> is open.
     /// </summary>
@@ -186,6 +209,17 @@ internal static class SignInStepResponses
                 error,
                 rules,
                 policy.TermsUrl);
+        }
+
+        // Story 4.11: the neutral confirmation, alike for every address, then Forgot password.
+        if (transaction.HasPassed(SignInSteps.ResetSent))
+        {
+            return StepResponse.ResetLinkSent(tenant.Name, transaction.StepVersion, expiresIn, SignInCsrf.Derive(binding));
+        }
+
+        if (transaction.HasPassed(SignInSteps.Reset))
+        {
+            return StepResponse.ForgotPassword(tenant.Name, transaction.StepVersion, expiresIn, SignInCsrf.Derive(binding), email ?? transaction.Identifier, error);
         }
 
         if (transaction.HasPassed(SignInSteps.Identifier))
@@ -311,6 +345,10 @@ internal sealed class HostedAuthorizationSignIn(TokenEndpointServices services) 
 /// <item><c>GET /login/verify-email?token=</c> (Story 4.7): the verification link's page, Email verified or Link expired;
 /// and <c>POST /login/api/verification/new-link</c>, its "Send a new link", checked for the exact-host <c>Origin</c> and
 /// the link-bound CSRF token, always answered with the neutral confirmation.</item>
+/// <item>Story 4.11's reset: <c>/login/api/reset/open</c>, <c>/login/api/reset</c> and <c>/login/api/reset/back</c> on the
+/// transaction, checked as above; <c>GET /login/reset-password?token=</c>, the reset link's page, Reset password or Link
+/// expired; and <c>POST /login/api/reset/complete</c> and <c>/login/api/reset/new-link</c>, checked for the exact-host
+/// <c>Origin</c> and the reset-link-bound CSRF token.</item>
 /// </list>
 /// A transaction that is missing, completed or too long expired is refused: Generic error <c>invalid_transaction</c>,
 /// 400, its cookie cleared, and nothing written but <c>authentication.signin_transaction.refused</c>, as a wrong
@@ -327,6 +365,9 @@ internal static class LoginEndpoints
     /// too-long password is named by its rule rather than refused as an unreadable body.
     /// </summary>
     private const int MaxSignupBodyBytes = 16 * 1024;
+
+    /// <summary>The largest Reset password body read (Story 4.11): two such passwords and a link, 32 KiB.</summary>
+    private const int MaxResetBodyBytes = 32 * 1024;
 
     public static void Map(IEndpointRouteBuilder endpoints)
     {
@@ -346,6 +387,311 @@ internal static class LoginEndpoints
         endpoints.MapPost(ProtocolContract.VerificationContinuePath, (RequestDelegate)ContinueAsync);
         endpoints.MapGet(ProtocolContract.VerifyEmailPath, (RequestDelegate)VerifyEmailPageAsync);
         endpoints.MapPost(ProtocolContract.VerificationNewLinkPath, (RequestDelegate)NewLinkAsync);
+
+        // Story 4.11: password reset.
+        endpoints.MapPost(ProtocolContract.ResetOpenPath, (RequestDelegate)ResetOpenAsync);
+        endpoints.MapPost(ProtocolContract.ResetPath, (RequestDelegate)ResetRequestAsync);
+        endpoints.MapPost(ProtocolContract.ResetBackPath, (RequestDelegate)ResetBackAsync);
+        endpoints.MapGet(ProtocolContract.ResetPasswordPath, (RequestDelegate)ResetPasswordPageAsync);
+        endpoints.MapPost(ProtocolContract.ResetCompletePath, (RequestDelegate)ResetCompleteAsync);
+        endpoints.MapPost(ProtocolContract.ResetNewLinkPath, (RequestDelegate)ResetNewLinkAsync);
+    }
+
+    /// <summary>"Forgot password?" at the Password step (Story 4.11): Forgot password, the email carried.</summary>
+    private static async Task ResetOpenAsync(HttpContext http)
+    {
+        var login = Login.Of(http);
+        if (await login.CheckAsync() is not { } binding)
+        {
+            return;
+        }
+
+        using var body = await ReadBodyAsync(http, login.Cancellation);
+        if (StepVersion(body) is not { } stepVersion)
+        {
+            await login.InvalidRequestAsync();
+            return;
+        }
+
+        await using var scope = await TenantScope.BeginAsync(login.Services.Database.Source, login.Tenant.TenantId, login.Cancellation);
+        var context = scope.CreateCommandContext();
+        if (await login.UsableAsync(scope, binding) is not { } transaction)
+        {
+            return;
+        }
+
+        // With the database Connection's password sign-in disabled, there is no reset: the current step, unchanged.
+        if (stepVersion != transaction.StepVersion || !IsAt(transaction, SignInSteps.Identifier)
+            || !(await login.Services.SignUp.ReadPolicyAsync(context, login.Cancellation)).PasswordEnabled)
+        {
+            await login.AnswerCurrentAsync(context, transaction, binding);
+            return;
+        }
+
+        var moved = await login.Services.PasswordReset.OpenAsync(context, transaction, login.Cancellation);
+        var next = await login.CurrentAsync(
+            context,
+            transaction with { CompletedSteps = [SignInSteps.Identifier, SignInSteps.Reset], StepVersion = moved.StepVersion, ExpiresAt = moved.ExpiresAt },
+            binding);
+        await scope.CommitAsync(login.Cancellation);
+        await login.AnswerAsync(StatusCodes.Status200OK, next);
+    }
+
+    /// <summary>
+    /// "Send reset link" (Story 4.11): counted per source, then per Tenant (429 past either), then the email is checked, and
+    /// a valid one counted per recipient, before any lookup. With the database Connection disabled it answers the current
+    /// step, unchanged. Every valid address gets the same neutral confirmation, with "Back to login": a
+    /// link and email only for a User holding an active password, an equal discarded encryption for any other, and nothing
+    /// at all past the recipient's limit.
+    /// </summary>
+    private static async Task ResetRequestAsync(HttpContext http)
+    {
+        var login = Login.Of(http);
+        if (await login.CheckAsync() is not { } binding)
+        {
+            return;
+        }
+
+        using var body = await ReadBodyAsync(http, login.Cancellation);
+        if (StepVersion(body) is not { } stepVersion || Text(body, "email") is not { } input)
+        {
+            await login.InvalidRequestAsync();
+            return;
+        }
+
+        await using var scope = await TenantScope.BeginAsync(login.Services.Database.Source, login.Tenant.TenantId, login.Cancellation);
+        var context = scope.CreateCommandContext();
+        if (await login.UsableAsync(scope, binding) is not { } transaction)
+        {
+            return;
+        }
+
+        if (stepVersion != transaction.StepVersion || !IsAt(transaction, SignInSteps.Identifier, SignInSteps.Reset)
+            || !(await login.Services.SignUp.ReadPolicyAsync(context, login.Cancellation)).PasswordEnabled)
+        {
+            await login.AnswerCurrentAsync(context, transaction, binding);
+            return;
+        }
+
+        var limits = login.Services.PasswordResetLimits;
+        if (await login.LimitAsync(limits.Tenant, limits.Source) is { } retryAfter)
+        {
+            await login.AnswerLimitedAsync(retryAfter);
+            return;
+        }
+
+        if (!AuthenticationContract.TryNormalizeEmail(input, out var email))
+        {
+            await login.AnswerCurrentAsync(context, transaction, binding, ForgotPasswordErrors.EmailInvalid, input.Trim());
+            return;
+        }
+
+        // Counted for every valid address alike, known or not, before any lookup, so it can't reveal an account.
+        var recipientAllowed = await login.LimitRecipientAsync(limits.Recipient, email);
+
+        var moved = await login.Services.PasswordReset.RequestAsync(context, transaction, email, recipientAllowed, login.Cancellation);
+        var next = await login.CurrentAsync(
+            context,
+            transaction with
+            {
+                Identifier = email,
+                CompletedSteps = [SignInSteps.Identifier, SignInSteps.Reset, SignInSteps.ResetSent],
+                StepVersion = moved.StepVersion,
+                ExpiresAt = moved.ExpiresAt,
+            },
+            binding);
+        await scope.CommitAsync(login.Cancellation);
+        await login.AnswerAsync(StatusCodes.Status200OK, next);
+    }
+
+    /// <summary>"Back to login" at Forgot password or its confirmation (Story 4.11): Login, the email kept.</summary>
+    private static async Task ResetBackAsync(HttpContext http)
+    {
+        var login = Login.Of(http);
+        if (await login.CheckAsync() is not { } binding)
+        {
+            return;
+        }
+
+        using var body = await ReadBodyAsync(http, login.Cancellation);
+        if (StepVersion(body) is not { } stepVersion)
+        {
+            await login.InvalidRequestAsync();
+            return;
+        }
+
+        await using var scope = await TenantScope.BeginAsync(login.Services.Database.Source, login.Tenant.TenantId, login.Cancellation);
+        var context = scope.CreateCommandContext();
+        if (await login.UsableAsync(scope, binding) is not { } transaction)
+        {
+            return;
+        }
+
+        if (stepVersion != transaction.StepVersion
+            || !(IsAt(transaction, SignInSteps.Identifier, SignInSteps.Reset)
+                || IsAt(transaction, SignInSteps.Identifier, SignInSteps.Reset, SignInSteps.ResetSent)))
+        {
+            await login.AnswerCurrentAsync(context, transaction, binding);
+            return;
+        }
+
+        var moved = await login.Services.PasswordReset.BackAsync(context, transaction, login.Cancellation);
+        var next = await login.CurrentAsync(
+            context, transaction with { CompletedSteps = [], StepVersion = moved.StepVersion, ExpiresAt = moved.ExpiresAt }, binding);
+        await scope.CommitAsync(login.Cancellation);
+        await login.AnswerAsync(StatusCodes.Status200OK, next);
+    }
+
+    /// <summary>
+    /// The reset link's page (Story 4.11), needing no transaction: Reset password for a usable link, with the reset-link CSRF
+    /// token; Link expired for a malformed, foreign, unknown, expired, used or superseded one, or one whose credential is no
+    /// longer active. It writes nothing.
+    /// </summary>
+    private static async Task ResetPasswordPageAsync(HttpContext http)
+    {
+        var login = Login.Of(http);
+        var token = QueryToken(http);
+
+        ResetLinkState? state = null;
+        if (token is not null)
+        {
+            await using var scope = await TenantScope.BeginAsync(login.Services.Database.Source, login.Tenant.TenantId, login.Cancellation);
+            state = await login.Services.PasswordReset.OpenLinkAsync(scope.CreateCommandContext(), new Secret<string>(token), login.Cancellation);
+        }
+
+        var step = state is { Usable: true } usable
+            ? StepResponse.ResetPassword(
+                login.Tenant.Name, ResetLinkCsrf.Derive(token!), new SignupPolicyData(usable.MinLength, usable.Strength), usable.Email)
+            : ResetLinkExpired(login.Tenant.Name, token);
+        await login.Pages.WriteAsync(http, StatusCodes.Status200OK, step, login.Cancellation);
+    }
+
+    /// <summary>
+    /// "Reset password" (Story 4.11): the exact-host <c>Origin</c>, then the reset-link CSRF token, are checked before
+    /// anything is read. A stale link gets Link expired; a mismatched confirmation or a failing rule Reset password naming
+    /// it; a full hashing budget Generic error <c>temporarily_unavailable</c>, all writing nothing. A completed reset gets
+    /// Password changed, with "Log in" when this browser's sign-in went back to Login, and starts no Session.
+    /// </summary>
+    private static async Task ResetCompleteAsync(HttpContext http)
+    {
+        var login = Login.Of(http);
+        if (!await login.CheckOriginAsync())
+        {
+            return;
+        }
+
+        using var body = await ReadBodyAsync(http, login.Cancellation, MaxResetBodyBytes);
+        if (Text(body, "token") is not { } token || Text(body, "password") is not { } typed || Text(body, "confirm") is not { } confirmed)
+        {
+            await login.InvalidRequestAsync();
+            return;
+        }
+
+        if (!ResetLinkCsrf.Matches(token, Login.SingleHeader(http, ProtocolContract.CsrfHeader)))
+        {
+            await login.RefuseChecksAsync(SignInStepResponses.CsrfMismatch);
+            return;
+        }
+
+        // Counted per source, then per Tenant, before any lookup or hash, as a reset request is.
+        if (await login.LimitAsync(login.Services.PasswordResetLimits.Tenant, login.Services.PasswordResetLimits.Source) is { } retryAfter)
+        {
+            await login.AnswerLimitedAsync(retryAfter);
+            return;
+        }
+
+        var binding = SignInCookies.Read(http, ProtocolContract.TransactionCookie);
+        await using var scope = await TenantScope.BeginAsync(login.Services.Database.Source, login.Tenant.TenantId, login.Cancellation);
+        var context = scope.CreateCommandContext();
+        var link = new Secret<string>(token);
+
+        // The browser's transaction is locked before the link and its User, as every other Hosted Login request locks them.
+        var transaction = binding is null ? null : await login.Services.Authentication.FindAsync(context, binding, login.Cancellation);
+        var state = await login.Services.PasswordReset.OpenLinkAsync(context, link, login.Cancellation);
+        var result = await login.Services.PasswordReset.CompleteAsync(
+            context, link, new Secret<string>(typed), new Secret<string>(confirmed), transaction, login.Cancellation);
+        var policy = new SignupPolicyData(state.MinLength, state.Strength);
+        var csrf = ResetLinkCsrf.Derive(token);
+
+        switch (result.Status)
+        {
+            case PasswordResetStatus.Reset:
+                await scope.CommitAsync(login.Cancellation);
+                await login.AnswerAsync(StatusCodes.Status200OK, StepResponse.PasswordChanged(login.Tenant.Name, result.ContinueToLogin));
+                return;
+
+            case PasswordResetStatus.Mismatch:
+                await login.AnswerAsync(
+                    StatusCodes.Status200OK, StepResponse.ResetPassword(login.Tenant.Name, csrf, policy, state.Email, ResetPasswordErrors.PasswordMismatch));
+                return;
+
+            case PasswordResetStatus.RuleFailed:
+                await login.AnswerAsync(
+                    StatusCodes.Status200OK,
+                    StepResponse.ResetPassword(login.Tenant.Name, csrf, policy, state.Email, ResetPasswordErrors.PasswordRule, result.FailedRules));
+                return;
+
+            case PasswordResetStatus.Unavailable:
+                await login.AnswerAsync(
+                    StatusCodes.Status200OK, StepResponse.GenericError(login.Tenant.Name, SignInStepResponses.TemporarilyUnavailable, login.TraceId));
+                return;
+
+            default:
+                await login.AnswerAsync(StatusCodes.Status200OK, ResetLinkExpired(login.Tenant.Name, token));
+                return;
+        }
+    }
+
+    /// <summary>
+    /// A reset link's "Send a new link" (Story 4.11): the exact-host <c>Origin</c>, then the reset-link CSRF token, are
+    /// checked, then it is counted as a reset request per source and per Tenant, before any lookup, and per recipient, by the
+    /// link User's email, before any link is issued. It always answers the neutral confirmation; a new link goes out only
+    /// when the link's row exists unused, its User still holds an active password and the database Connection is enabled.
+    /// </summary>
+    private static async Task ResetNewLinkAsync(HttpContext http)
+    {
+        var login = Login.Of(http);
+        if (!await login.CheckOriginAsync())
+        {
+            return;
+        }
+
+        using var body = await ReadBodyAsync(http, login.Cancellation);
+        if (Text(body, "token") is not { } token)
+        {
+            await login.InvalidRequestAsync();
+            return;
+        }
+
+        if (!ResetLinkCsrf.Matches(token, Login.SingleHeader(http, ProtocolContract.CsrfHeader)))
+        {
+            await login.RefuseChecksAsync(SignInStepResponses.CsrfMismatch);
+            return;
+        }
+
+        // Past a limit nothing is sent, and the answer stays the neutral confirmation.
+        var limits = login.Services.PasswordResetLimits;
+        if (await login.LimitAsync(limits.Tenant, limits.Source) is not null)
+        {
+            await login.AnswerAsync(StatusCodes.Status200OK, StepResponse.LinkSent(login.Tenant.Name));
+            return;
+        }
+
+        await using (var scope = await TenantScope.BeginAsync(login.Services.Database.Source, login.Tenant.TenantId, login.Cancellation))
+        {
+            await login.Services.PasswordReset.SendNewLinkAsync(
+                scope.CreateCommandContext(), new Secret<string>(token), email => login.LimitRecipientAsync(limits.Recipient, email), login.Cancellation);
+            await scope.CommitAsync(login.Cancellation);
+        }
+
+        await login.AnswerAsync(StatusCodes.Status200OK, StepResponse.LinkSent(login.Tenant.Name));
+    }
+
+    /// <summary>A reset link's Link expired (Story 4.11): the token kept only when it has a link's shape, with its reset-link CSRF token.</summary>
+    private static StepResponse ResetLinkExpired(string tenant, string? token)
+    {
+        var kept = IdentityContract.IsVerificationLinkShaped(token) ? token : null;
+        return StepResponse.LinkExpired(tenant, kept, kept is null ? null : ResetLinkCsrf.Derive(kept), LinkPurposes.Reset);
     }
 
     private static async Task PageAsync(HttpContext http)
@@ -1162,7 +1508,8 @@ internal static class LoginEndpoints
         /// Counts this request under <paramref name="perSource"/> (the request's source), then, only when the source is
         /// allowed, under <paramref name="perTenant"/> (subject <see cref="AuthenticationContract.TenantSubject"/>), in their
         /// own short committed scope (Story 4.8, AD-14). Null when both allow it; otherwise how long until both would, the
-        /// larger wait. No subject ever involves an email address.
+        /// larger wait. No subject here involves an email address; the one limit that does is
+        /// <see cref="LimitRecipientAsync"/> (Story 4.11), safe because it is counted for every address alike before any lookup.
         /// </summary>
         public async Task<TimeSpan?> LimitAsync(RateLimitPolicy perTenant, RateLimitPolicy perSource)
         {
@@ -1190,6 +1537,30 @@ internal static class LoginEndpoints
             var policy = tenantDecision.Allowed ? perSource : perTenant;
             Services.Logger?.LogInformation("A Hosted Login request was refused under {Policy}.", policy.Code);
             return TimeSpan.FromTicks(Math.Max(tenantDecision.RetryAfter.Ticks, sourceDecision.RetryAfter.Ticks));
+        }
+
+        /// <summary>
+        /// Counts a reset request under <paramref name="perRecipient"/> (Story 4.11), subject <c>recipient:</c> and
+        /// <paramref name="email"/> lower-cased, in its own short committed scope. It is the one limit keyed by an email
+        /// address, and safe: it is counted for every address alike, known or not, before any lookup, and past it the
+        /// answer stays the neutral confirmation. Whether it allows the request.
+        /// </summary>
+        public async Task<bool> LimitRecipientAsync(RateLimitPolicy perRecipient, string email)
+        {
+            RateLimitDecision decision;
+            await using (var scope = await TenantScope.BeginAsync(Services.Database.Source, Tenant.TenantId, Cancellation))
+            {
+                decision = await Services.Limiter.AttemptAsync(
+                    scope.CreateCommandContext(), perRecipient, "recipient:" + email.ToLowerInvariant(), Cancellation);
+                await scope.CommitAsync(Cancellation);
+            }
+
+            if (!decision.Allowed)
+            {
+                Services.Logger?.LogInformation("A Hosted Login request was refused under {Policy}.", perRecipient.Code);
+            }
+
+            return decision.Allowed;
         }
 
         /// <summary>

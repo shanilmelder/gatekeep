@@ -46,6 +46,7 @@ internal static class ProtocolServer
         services.TryAddSingleton(PasswordHashLimits.Default);
         services.TryAddSingleton(SignUpLimits.Default);
         services.TryAddSingleton(SignInLimits.Default);
+        services.TryAddSingleton(PasswordResetLimits.Default);
 
         // Story 4.9: the one hashing gate this instance holds, shared by sign-up and sign-in.
         services.TryAddSingleton(provider => AuthenticationContract.CreatePasswordHashGate(
@@ -77,7 +78,14 @@ internal static class ProtocolServer
                 provider.GetRequiredService<IJobEnqueuer>(),
                 provider.GetRequiredService<IPasswordHashGate>()),
             provider.GetRequiredService<SignInLimits>(),
-            TenancyContract.CreateTenants(provider.GetRequiredService<IAuditAppender>())));
+            TenancyContract.CreateTenants(provider.GetRequiredService<IAuditAppender>()),
+            // Story 4.11: password reset, through the same gate, and its limits.
+            AuthenticationContract.CreatePasswordReset(
+                provider.GetRequiredService<IAuditAppender>(),
+                provider.GetRequiredService<TimeProvider>(),
+                provider.GetRequiredService<IJobEnqueuer>(),
+                provider.GetRequiredService<IPasswordHashGate>()),
+            provider.GetRequiredService<PasswordResetLimits>()));
         services.AddScoped<TokenRequestTransaction>();
 
         var inert = new InertCredentials();

@@ -24,6 +24,15 @@ export function go(path: string): void {
 }
 
 /**
+ * The page's one non-empty `token` query value, or null (Story 4.11): a reset link's page keeps it in memory for Reset
+ * password, read before `forgetQuery` drops it from the address bar. It is never stored.
+ */
+export function queryToken(): string | null {
+  const values = new URLSearchParams(window.location.search).getAll('token');
+  return values.length === 1 && values[0] !== '' ? values[0]! : null;
+}
+
+/**
  * Drops the page's query from the address bar and its history entry, without a request (Story 4.7): a verification link's
  * token is in its URL, and once its page is shown the token has no further use there.
  */

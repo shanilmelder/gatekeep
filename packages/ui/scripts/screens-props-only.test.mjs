@@ -75,7 +75,7 @@ describe('Props-only screens', () => {
     }
   });
 
-  // Story 4.7 adds sign-up's and the verification link's requests, and Story 4.9 the Password step's, each a fixed path.
+  // Story 4.7 adds sign-up's and the verification link's requests, Story 4.9 the Password step's and Story 4.11 reset's, each a fixed path.
   it('lets api.ts fetch only the Hosted Login API paths, once', async () => {
     const code = stripComments(await readFile(path.join(repository, 'apps/hosted-login/src/api.ts'), 'utf8'));
     assert.equal(code.match(/\bfetch\s*\(/g)?.length, 1);
@@ -84,6 +84,11 @@ describe('Props-only screens', () => {
       '/login/api/identifier',
       '/login/api/password',
       '/login/api/password/back',
+      '/login/api/reset',
+      '/login/api/reset/back',
+      '/login/api/reset/complete',
+      '/login/api/reset/new-link',
+      '/login/api/reset/open',
       '/login/api/signup',
       '/login/api/signup/back',
       '/login/api/signup/open',

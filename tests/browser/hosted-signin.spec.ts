@@ -95,10 +95,10 @@ for (const scheme of ['light', 'dark'] as const) {
       await page.getByRole('button', { name: text.show }).click();
       await expect(passwordField(page)).toHaveAttribute('type', 'text');
 
-      // No "Forgot password?", no recovery code, no passkey hint: no deferred control, and no link at all.
-      await expect(card(page).getByRole('button')).toHaveText([text.edit, 'Hide', text.logIn]);
+      // Story 4.11's "Forgot password?", but no recovery code and no passkey hint: no deferred control, and no link at all.
+      await expect(card(page).getByRole('button')).toHaveText([text.edit, 'Forgot password?', 'Hide', text.logIn]);
       await expect(page.locator('a')).toHaveCount(0);
-      await expect(card(page)).not.toContainText(/forgot|recovery|passkey/i);
+      await expect(card(page)).not.toContainText(/recovery|passkey/i);
       await expectAxe(page);
     });
 

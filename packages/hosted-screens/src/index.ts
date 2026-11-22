@@ -16,3 +16,7 @@ export { SignupScreen, type SignupScreenProps } from './SignupScreen';
 export { VerifyEmailScreen, type VerifyEmailScreenProps } from './VerifyEmailScreen';
 // Story 4.9: password sign-in.
 export { PasswordScreen, type PasswordScreenProps } from './PasswordScreen';
+// Story 4.11: password reset.
+export { ForgotPasswordScreen, type ForgotPasswordScreenProps } from './ForgotPasswordScreen';
+export { PasswordChangedScreen, type PasswordChangedScreenProps } from './PasswordChangedScreen';
+export { ResetPasswordScreen, type ResetPasswordScreenProps } from './ResetPasswordScreen';

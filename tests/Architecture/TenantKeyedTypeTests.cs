@@ -186,6 +186,8 @@ public sealed class TenantKeyedTypeTests
         "Gatekeep.Modules.Protocol.Contracts.SignUpLimits",
         // Story 4.9: and password submits.
         "Gatekeep.Modules.Protocol.Contracts.SignInLimits",
+        // Story 4.11: and password reset requests.
+        "Gatekeep.Modules.Protocol.Contracts.PasswordResetLimits",
         "Gatekeep.Modules.Notifications.Contracts.NotificationsContract",
     ];
 
