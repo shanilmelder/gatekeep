@@ -66,8 +66,8 @@ public interface ISignIn
 
     /// <summary>
     /// Writes <c>authentication.signin.failed</c>, anonymous, targeting <paramref name="userId"/> when the account exists
-    /// and nothing otherwise (Story 4.9). The caller writes it in its own committed scope, so it survives the request's
-    /// rollback. It holds no email or password.
+    /// and nothing otherwise (Story 4.9). The caller writes it in a short scope of its own, so it is kept even though the
+    /// request itself keeps nothing. It holds no email or password.
     /// </summary>
     /// <exception cref="InvalidOperationException">The context has no Tenant. Nothing is written.</exception>
     [StateChanging]
