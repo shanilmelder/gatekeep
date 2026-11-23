@@ -18,7 +18,7 @@ import {
   postVerifiedContinue,
 } from './api';
 import { useExpiry } from './expiry';
-import { LOGIN_PATH, forgetQuery, go, leaveForApplication, queryToken } from './navigate';
+import { LOGIN_PATH, forgetQuery, go, goBack, leaveForApplication, queryToken } from './navigate';
 import type { Step } from './step';
 import { StepScreen, isFailed } from './StepScreen';
 
@@ -242,12 +242,10 @@ export function App({ initial }: { initial: Step }) {
    */
   function onStay() {
     if (step.step !== 'logout' || inFlight.current) return;
-    if (window.history.length <= 1) {
+    if (!goBack()) {
       setStayed(true);
       setShown((n) => n + 1);
-      return;
     }
-    window.history.back();
   }
 
   async function onKeepGoing() {

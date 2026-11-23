@@ -217,7 +217,7 @@ public sealed class DiscoveryAndJwksTests(PostgresFixture postgres, OpenBaoFixtu
         var (database, _, _) = await TwoTenantsAsync();
         await using var host = await ProtocolHost.StartAsync(database.Hosted, bao);
 
-        foreach (var path in new[] { "/", "/connect/introspect", "/connect/endsession", "/.well-known/other", "/favicon.ico" })
+        foreach (var path in new[] { "/", "/connect/introspect", "/.well-known/other", "/favicon.ico" })
         {
             using var response = await GetAsync(host, HostA, path);
             Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);

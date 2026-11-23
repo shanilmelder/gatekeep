@@ -36,6 +36,16 @@ export function leaveForApplication(redirectTo: string): void {
 }
 
 /**
+ * Logout's "Stay signed in" (Story 4.13): back to the page before, sending nothing. False when there is no page before
+ * it (opened in a new tab), so the caller shows that the User is still signed in.
+ */
+export function goBack(): boolean {
+  if (window.history.length <= 1) return false;
+  window.history.back();
+  return true;
+}
+
+/**
  * The page's one non-empty `token` query value, or null (Story 4.11): a reset link's page keeps it in memory for Reset
  * password, read before `forgetQuery` drops it from the address bar. It is never stored.
  */
