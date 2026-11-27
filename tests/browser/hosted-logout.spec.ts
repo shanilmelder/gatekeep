@@ -84,6 +84,11 @@ for (const scheme of ['light', 'dark'] as const) {
     });
 
     test('Stay signed in with no page to go back to says the User is still signed in, with no request', async ({ page }) => {
+      // A tab opened on the logout link has one history entry. Chromium keeps a fresh page's initial about:blank as
+      // an entry before the first goto, so the test pins the length the browser reports instead.
+      await page.addInitScript(() => {
+        Object.defineProperty(History.prototype, 'length', { configurable: true, get: () => 1 });
+      });
       await open(page, 'logout');
       expect(await page.evaluate(() => window.history.length)).toBe(1);
       const posts: string[] = [];
