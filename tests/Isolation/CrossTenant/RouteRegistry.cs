@@ -147,6 +147,9 @@ public static class RouteRegistry
         new("*", "/connect/userinfo", CaseKind.HostResolved),
         new("*", "/connect/revoke", CaseKind.HostResolved),
 
+        // Story 4.13: RP-Initiated Logout, whose page Gatekeep's passthrough answers, on the resolved Tenant's Session only.
+        new("*", "/connect/endsession", CaseKind.HostResolved),
+
         // Hosted Login (Story 4.1): the resolved Tenant's theme stylesheet. Its assets are static files, not routes.
         new("GET", "/login/theme/{hash}.css", CaseKind.HostResolved),
 
@@ -179,6 +182,9 @@ public static class RouteRegistry
         new("GET", "/login/reset-password", CaseKind.HostResolved),
         new("POST", "/login/api/reset/complete", CaseKind.HostResolved),
         new("POST", "/login/api/reset/new-link", CaseKind.HostResolved),
+
+        // Story 4.13: the logout confirmation's "Log out", on the resolved Tenant's Session only.
+        new("POST", "/login/api/logout", CaseKind.HostResolved),
 
         new("*", "{*path:nonfile}", CaseKind.NotTenantBound, Reason: "the one fixed 404, the same as an unknown host's (AD-6)"),
     ];

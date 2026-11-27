@@ -94,6 +94,13 @@
   width: 100%;
 }
 
+/* Two actions side by side in equal columns (Story 4.13), stacking where the card is too narrow for both. */
+.pair {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, calc(var(--gk-space-48) * 3)), 1fr));
+  gap: var(--gk-space-12);
+}
+
 /* A stand-alone link stays plain: no underline at rest (DESIGN.md, Links). */
 .link {
   margin: 0;

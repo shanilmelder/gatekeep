@@ -15,7 +15,7 @@ namespace Gatekeep.Modules.Protocol.Contracts;
 /// Each Tenant's own OpenID Provider on Host.Hosted (Stories 2.3, 2.5, 2.9, 2.10 and 2.11, AD-8, AD-9): OpenIddict
 /// 7.7.2, wrapped per Tenant. It serves discovery, JWKS, the authorization endpoint (the code flow with
 /// S256 PKCE only), the token endpoint (Client Credentials, the authorization code grant and its
-/// rotating refresh tokens), userinfo and revocation.
+/// rotating refresh tokens), userinfo, revocation and (Story 4.13) RP-Initiated Logout's end-session endpoint.
 /// </summary>
 public static class ProtocolContract
 {
@@ -39,6 +39,19 @@ public static class ProtocolContract
     /// Access and ID tokens aren't revocable (AD-13) and get <c>unsupported_token_type</c>.
     /// </summary>
     public const string RevocationPath = "/connect/revoke";
+
+    /// <summary>
+    /// The end-session endpoint (Story 4.13, OpenID Connect RP-Initiated Logout 1.0): GET or POST with optional
+    /// <c>id_token_hint</c>, <c>post_logout_redirect_uri</c>, <c>state</c> and <c>client_id</c>. With a live Session cookie it
+    /// shows "Log out of {Tenant}?"; otherwise the logout is already complete. It never answers an error.
+    /// </summary>
+    public const string EndSessionPath = "/connect/endsession";
+
+    /// <summary>
+    /// "Log out" at the logout confirmation (Story 4.13): <c>{idTokenHint, postLogoutRedirectUri, state, clientId}</c> with the
+    /// Session-bound logout CSRF token, answered with <c>logged_out</c> and its redirect target, or none.
+    /// </summary>
+    public const string LogoutPath = "/login/api/logout";
 
     /// <summary>Hosted Login's step page (Story 4.2): the current step of the browser's sign-in transaction.</summary>
     public const string LoginPath = "/login";
@@ -169,14 +182,16 @@ public static class ProtocolContract
 
     /// <summary>
     /// Runs OpenIddict on the request, after Tenant resolution and before routing, then the authorization
-    /// endpoint's passthrough, which completes a validated authorization request. A path OpenIddict
-    /// doesn't serve passes through to whatever follows.
+    /// endpoint's passthrough, which completes a validated authorization request, and (Story 4.13) the end-session
+    /// endpoint's, which shows the logout confirmation or the completed logout. A path OpenIddict doesn't serve passes
+    /// through to whatever follows.
     /// </summary>
     public static IApplicationBuilder UseGatekeepProtocol(this IApplicationBuilder app)
     {
         ArgumentNullException.ThrowIfNull(app);
         app.UseAuthentication();
-        return app.Use(AuthorizePassthrough.InvokeAsync);
+        app.Use(AuthorizePassthrough.InvokeAsync);
+        return app.Use(EndSessionPassthrough.InvokeAsync);
     }
 
     /// <summary>

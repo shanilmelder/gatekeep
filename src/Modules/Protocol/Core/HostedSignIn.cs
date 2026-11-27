@@ -366,12 +366,14 @@ internal sealed class HostedAuthorizationSignIn(TokenEndpointServices services) 
 /// transaction, checked as above; <c>GET /login/reset-password?token=</c>, the reset link's page, Reset password or Link
 /// expired; and <c>POST /login/api/reset/complete</c> and <c>/login/api/reset/new-link</c>, checked for the exact-host
 /// <c>Origin</c> and the reset-link-bound CSRF token.</item>
+/// <item>Story 4.13's <c>POST /login/api/logout</c>, checked for the exact-host <c>Origin</c> and the logout CSRF token bound to
+/// the Session cookie (<see cref="LogoutCsrf"/>), and the end-session page it confirms.</item>
 /// </list>
 /// A transaction that is missing, completed or too long expired is refused: Generic error <c>invalid_transaction</c>,
 /// 400, its cookie cleared, and nothing written but <c>authentication.signin_transaction.refused</c>, as a wrong
 /// Origin or CSRF token is (403 <c>origin_mismatch</c> or <c>csrf_mismatch</c>).
 /// </summary>
-internal static class LoginEndpoints
+internal static partial class LoginEndpoints
 {
     /// <summary>The largest API body read: 4 KiB, ample for a 254-character email.</summary>
     private const int MaxBodyBytes = 4 * 1024;
@@ -412,6 +414,10 @@ internal static class LoginEndpoints
         endpoints.MapGet(ProtocolContract.ResetPasswordPath, (RequestDelegate)ResetPasswordPageAsync);
         endpoints.MapPost(ProtocolContract.ResetCompletePath, (RequestDelegate)ResetCompleteAsync);
         endpoints.MapPost(ProtocolContract.ResetNewLinkPath, (RequestDelegate)ResetNewLinkAsync);
+
+        // Story 4.13: the logout confirmation's "Log out". The end-session page itself is OpenIddict's endpoint, through its
+        // passthrough (EndSessionPassthrough).
+        endpoints.MapPost(ProtocolContract.LogoutPath, (RequestDelegate)LogoutAsync);
     }
 
     /// <summary>"Forgot password?" at the Password step (Story 4.11): Forgot password, the email carried.</summary>

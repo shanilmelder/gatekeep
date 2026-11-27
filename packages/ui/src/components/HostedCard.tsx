@@ -34,6 +34,11 @@ export interface HostedCardProps {
   children?: ReactNode;
   /** The one primary action, at full width. */
   action?: ReactNode;
+  /**
+   * `pair` (Story 4.13) lays two actions side by side, the secondary first and the primary second, in equal columns,
+   * stacking where the card is too narrow for both. By default the action is one, at full width.
+   */
+  actionLayout?: 'single' | 'pair';
   /** An optional quiet text link under the action. */
   link?: ReactNode;
   className?: string;
@@ -80,6 +85,7 @@ export function HostedCard({
   icon,
   children,
   action,
+  actionLayout = 'single',
   link,
   className,
   'data-testid': testId,
@@ -124,7 +130,7 @@ export function HostedCard({
         {present(subtitle) && <p className={styles.subtitle}>{subtitle}</p>}
       </div>
       {present(children) && <div className={styles.content}>{children}</div>}
-      {present(action) && <div className={styles.action}>{action}</div>}
+      {present(action) && <div className={cx(styles.action, actionLayout === 'pair' && styles.pair)}>{action}</div>}
       {present(link) && <p className={styles.link}>{link}</p>}
     </div>
   );

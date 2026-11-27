@@ -631,7 +631,8 @@ public sealed class UserinfoAndRevocationTests(PostgresFixture postgres, OpenBao
             ["client_secret_basic", "client_secret_post"],
             root.GetProperty("revocation_endpoint_auth_methods_supported").EnumerateArray().Select(e => e.GetString()).Order(StringComparer.Ordinal));
         Assert.False(root.TryGetProperty("introspection_endpoint", out _));
-        Assert.False(root.TryGetProperty("end_session_endpoint", out _));
+        // Story 4.13 adds RP-Initiated Logout.
+        Assert.Equal($"{flow.A.Issuer}connect/endsession", root.GetProperty("end_session_endpoint").GetString());
     }
 
     [Fact]

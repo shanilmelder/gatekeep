@@ -5,7 +5,10 @@ import {
   GenericErrorScreen,
   LinkExpiredScreen,
   LinkSentScreen,
+  LoggedOutScreen,
   LoginScreen,
+  LogoutScreen,
+  StillSignedInScreen,
   PasswordChangedScreen,
   PasswordScreen,
   ResetPasswordScreen,
@@ -34,7 +37,7 @@ const RULE_ERRORS: Readonly<Record<string, keyof Messages>> = {
 };
 
 /** Each step's screen heading, for the page title. A redirect shows no screen, and keeps Login's. */
-function heading(step: Step, messages: Readonly<Messages>): string {
+function heading(step: Step, messages: Readonly<Messages>, stayed = false): string {
   switch (step.step) {
     case 'generic_error':
       return messages.genericErrorTitle;
@@ -59,6 +62,11 @@ function heading(step: Step, messages: Readonly<Messages>): string {
       return messages.resetPasswordTitle;
     case 'password_changed':
       return messages.passwordChangedTitle;
+    case 'logout':
+      if (stayed) return messages.stillSignedInTitle;
+      return formatMessage(messages.logoutTitle, { tenant: step.data.tenant });
+    case 'logged_out':
+      return messages.loggedOutTitle;
   }
 }
 
@@ -100,6 +108,11 @@ export interface StepControls {
   onResend: () => void;
   /** Link expired's "Send a new link". */
   onSendNewLink: () => void;
+  /** Story 4.13: the logout confirmation's "Log out", and its "Stay signed in". */
+  onLogOut: () => void;
+  onStay: () => void;
+  /** "Stay signed in" with no page to go back to: the confirmation becomes "You're still signed in.". */
+  stayed: boolean;
   pending: boolean;
   resending: boolean;
   /** How many times the email was sent again on this page. */
@@ -247,6 +260,12 @@ function screen(step: Step, controls: StepControls, messages: Readonly<Messages>
       return (
         <PasswordChangedScreen tenant={{ name: step.data.tenant }} logInHref={step.data.continueTo === 'login' ? LOGIN_PATH : undefined} />
       );
+    case 'logout':
+      if (controls.stayed) return <StillSignedInScreen tenant={{ name: step.data.tenant }} />;
+      return <LogoutScreen tenant={{ name: step.data.tenant }} onLogOut={controls.onLogOut} onStay={controls.onStay} pending={controls.pending} />;
+    case 'logged_out':
+      // Story 4.13: with a redirect the page is leaving for the Application by a top-level GET: nothing to show meanwhile.
+      return step.data.redirectTo === null ? <LoggedOutScreen tenant={{ name: step.data.tenant }} /> : null;
     case 'redirect':
       // The page is leaving by a top-level GET: nothing to show meanwhile.
       return null;
@@ -289,7 +308,7 @@ export function isFailed(step: Step): boolean {
  */
 export function StepScreen({ step, controls, failed = false, shown = 0 }: { step: Step; controls: StepControls; failed?: boolean; shown?: number }) {
   const messages = useMessages();
-  const title = heading(step, messages);
+  const title = heading(step, messages, controls.stayed);
   const tenant = step.data.tenant.trim();
 
   useLayoutEffect(() => {

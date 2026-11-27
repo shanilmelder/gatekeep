@@ -310,6 +310,8 @@ internal static class CanaryFlows
         new("protocol.sign_in", [], PasswordSignInAsync),
         // Story 4.11: a password reset, its link and the new password, through Hosted Login's own routes.
         new("protocol.password_reset", [], PasswordResetAsync),
+        // Story 4.13: RP-Initiated Logout, its confirmation and "Log out", through the end-session endpoint and Hosted Login.
+        new("protocol.logout", [], LogoutAsync),
     ];
 
     private static readonly DateOnly Reviewed = new(2026, 11, 2);
@@ -2419,6 +2421,85 @@ internal static class CanaryFlows
         run.Capture("Hosted log", captured.Text);
         Assert.Contains("connect/userinfo", captured.Text, StringComparison.Ordinal);
         Assert.Contains("connect/revoke", captured.Text, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Story 4.13: a logout through the end-session endpoint and Hosted Login's confirmation, through the real Protocol
+    /// registration and the hosts' scrubbing logging, with the real Transit. The <c>id_token_hint</c>, the Session cookie and
+    /// the Session-bound logout CSRF token are canaries: the hint is only verified and handed back on the page, the Session is
+    /// stored only as its SHA-256 and the CSRF token is derived, so none may reach a table, an event or a log line. Every page
+    /// sends <c>Referrer-Policy: no-referrer</c>, so neither leaves in a <c>Referer</c> to the Application. Failing, a
+    /// tampered hint and a wrong CSRF token are posted first.
+    /// </summary>
+    private static async Task LogoutAsync(CanaryFlowContext context, FlowRun run, bool failing)
+    {
+        const string hostA = "canary-a.logout.test";
+        const string hostB = "canary-b.logout.test";
+        const string logoutUrl = "https://client.code.test/signed-out";
+
+        var flow = await Protocol.CodeFlowSetup.CreateAsync(context.Postgres, context.Bao, hostA, hostB);
+        run.Database = flow.Database.Name;
+        run.Plant("role-password", PostgresFixture.Password);
+        run.Plant("client-secret", flow.ClientA.Secret);
+        await flow.Database.ExecuteAsync($"UPDATE application SET post_logout_redirect_uris = ARRAY['{logoutUrl}'] WHERE id = '{flow.ClientA.ApplicationId}'");
+
+        var captured = new CapturedConsole();
+        await using (var host = await flow.StartHostAsync(logging: logging =>
+        {
+            logging.AddGatekeepLogging().SetMinimumLevel(LogLevel.Trace);
+            logging.Services.AddSingleton<Microsoft.Extensions.Logging.Console.ConsoleFormatter>(captured);
+            logging.Services.Configure<Microsoft.Extensions.Logging.Console.ConsoleLoggerOptions>(options => options.FormatterName = captured.Name);
+        }))
+        {
+            var signedIn = await Protocol.LogoutFlow.SignInAsync(host, hostA, flow.ClientA.ClientId, flow.ClientA.Secret, flow.UserA);
+            var hint = run.Plant("id-token-hint", signedIn.IdToken);
+            run.Plant("session-cookie", signedIn.Browser.Cookies[Gatekeep.Modules.Protocol.Contracts.ProtocolContract.SessionCookie]);
+            run.Plant("refresh-token", signedIn.Refresh!);
+
+            using var page = await signedIn.Browser.GetAsync(Protocol.LogoutFlow.EndSessionUrl(hint.Value, logoutUrl, "canary-state", flow.ClientA.ClientId));
+            run.Capture("logout page headers", string.Join('\n', page.Headers.Select(h => $"{h.Key}: {string.Join(", ", h.Value)}")));
+            Assert.Equal(["no-referrer"], page.Headers.GetValues("Referrer-Policy"));
+            var confirmation = await Protocol.LogoutFlow.PageStepAsync(page);
+            Assert.Equal(Gatekeep.Modules.Protocol.Contracts.StepNames.Logout, confirmation.Step);
+            run.Plant("logout-csrf", confirmation.Csrf!);
+
+            if (failing)
+            {
+                var wrong = run.Plant("logout-wrong-csrf");
+                using (var refused = await signedIn.Browser.PostAsync(
+                    Gatekeep.Modules.Protocol.Contracts.ProtocolContract.LogoutPath, Protocol.LogoutFlow.Body(confirmation), wrong.Value))
+                {
+                    Assert.Equal(HttpStatusCode.Forbidden, refused.StatusCode);
+                    run.Capture("refused logout response", await ResponseTextAsync(refused));
+                }
+
+                var tampered = run.Plant("id-token-hint-tampered", hint.Value[..^8] + Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(4)));
+                using var tamperedPage = await signedIn.Browser.GetAsync(Protocol.LogoutFlow.EndSessionUrl(tampered.Value, logoutUrl, "canary-state", null));
+                var tamperedConfirmation = await Protocol.LogoutFlow.PageStepAsync(tamperedPage);
+                Assert.Equal(Gatekeep.Modules.Protocol.Contracts.StepNames.Logout, tamperedConfirmation.Step);
+                using var tamperedConfirmed = await Protocol.LogoutFlow.ConfirmAsync(signedIn.Browser, tamperedConfirmation);
+                Assert.Equal(HttpStatusCode.OK, tamperedConfirmed.StatusCode);
+                run.Capture("tampered-hint logout response", await ResponseTextAsync(tamperedConfirmed));
+
+                // That logout ended the Session: sign in again for the one that redirects.
+                signedIn = await Protocol.LogoutFlow.SignInAsync(host, hostA, flow.ClientA.ClientId, flow.ClientA.Secret, flow.UserA, signedIn.Browser);
+                run.Plant("second-session-cookie", signedIn.Browser.Cookies[Gatekeep.Modules.Protocol.Contracts.ProtocolContract.SessionCookie]);
+                run.Plant("second-id-token-hint", signedIn.IdToken);
+                using var again = await signedIn.Browser.GetAsync(Protocol.LogoutFlow.EndSessionUrl(signedIn.IdToken, logoutUrl, "canary-state", flow.ClientA.ClientId));
+                confirmation = await Protocol.LogoutFlow.PageStepAsync(again);
+                run.Plant("second-logout-csrf", confirmation.Csrf!);
+            }
+
+            using var confirmed = await Protocol.LogoutFlow.ConfirmAsync(signedIn.Browser, confirmation);
+            Assert.Equal(HttpStatusCode.OK, confirmed.StatusCode);
+            run.Capture("logout response", await ResponseTextAsync(confirmed));
+            using var step = await Protocol.HostedBrowser.StepAsync(confirmed);
+            Assert.Equal($"{logoutUrl}?state=canary-state", step.RootElement.GetProperty("data").GetProperty("redirectTo").GetString());
+        }
+
+        run.Capture("Hosted log", captured.Text);
+        Assert.Contains("connect/endsession", captured.Text, StringComparison.Ordinal);
+        Assert.Contains("login/api/logout", captured.Text, StringComparison.Ordinal);
     }
 
     /// <summary>A response's status, every header and its body, as one text to scan.</summary>

@@ -82,6 +82,7 @@ describe('Props-only screens', () => {
     const paths = [...code.matchAll(/'(\/[^']*)'/g)].map((match) => match[1]).sort();
     assert.deepEqual(paths, [
       '/login/api/identifier',
+      '/login/api/logout',
       '/login/api/password',
       '/login/api/password/back',
       '/login/api/reset',
